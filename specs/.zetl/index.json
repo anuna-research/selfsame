@@ -1,0 +1,3786 @@
+{
+  "version": 2,
+  "files": {
+    "LifeHash.md": {
+      "path": "LifeHash.md",
+      "page_name": "LifeHash",
+      "links": [
+        {
+          "target_page": "Blockchain Commons",
+          "raw_target": "Blockchain Commons",
+          "heading": null,
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 13,
+          "column": 1,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "Conway's Game of Life",
+          "raw_target": "Conway's Game of Life",
+          "heading": null,
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 23,
+          "column": 36,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-002-visual-key-fingerprint",
+          "raw_target": "SPEC-002-visual-key-fingerprint",
+          "heading": null,
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 53,
+          "column": 1,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-002-visual-key-fingerprint",
+          "raw_target": "SPEC-002-visual-key-fingerprint#ADR-101",
+          "heading": "ADR-101",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 60,
+          "column": 1,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-002-visual-key-fingerprint",
+          "raw_target": "SPEC-002-visual-key-fingerprint#ADR-102",
+          "heading": "ADR-102",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 74,
+          "column": 2,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-002-visual-key-fingerprint",
+          "raw_target": "SPEC-002-visual-key-fingerprint#REQ-103",
+          "heading": "REQ-103",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 76,
+          "column": 2,
+          "predicates": [],
+          "annotation": null
+        }
+      ],
+      "spl_blocks": [],
+      "diagnostics": [],
+      "mtime": 1785241749.0040636,
+      "merkle_leaves": [
+        {
+          "node_type": {
+            "type": "Frontmatter"
+          },
+          "start_line": 1,
+          "end_line": 6,
+          "hash": "0057f1c77d45cee2fd5b27bb7c6e166de4669ef59d21e9fa60cdc9432dce7fa9",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 1
+          },
+          "start_line": 8,
+          "end_line": 8,
+          "hash": "0724a628d22af70fe6ed8d108d18c0c9904441d4a73aba0f359f143ea91e7283",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 10,
+          "end_line": 13,
+          "hash": "08c4b6d968814b661abf1eaed8c4a531a6b282dc6b5bf781471bc42d51b764a6",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 15,
+          "end_line": 18,
+          "hash": "d2d077c3039dd1dae0c9cee153a5db68d72c16d40cca3248a9df19492c91e8a4",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 2
+          },
+          "start_line": 20,
+          "end_line": 20,
+          "hash": "34990831533fa70352932d49f599b81b186d4a28de6f24a0ac7709c8e51e3fc2",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "List",
+            "ordered": true
+          },
+          "start_line": 22,
+          "end_line": 33,
+          "hash": "e24ea1e36f5a5d3d001b651751d2350d3208c592bb557dcc06e7e17e8f51a45b",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 34,
+          "end_line": 38,
+          "hash": "e1f83227c41869ad870cb1f52938ee97547186d4deeba19d0950118c0a9b0454",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 2
+          },
+          "start_line": 40,
+          "end_line": 40,
+          "hash": "4868c355e47135d18944ea29007a546365db88509f9a343b358807a515cf1cea",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Table"
+          },
+          "start_line": 42,
+          "end_line": 48,
+          "hash": "7ddcff3ebf5b5441336a173a3be8441fa4d63f4371629bb1651225a177b4785d",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 50,
+          "end_line": 51,
+          "hash": "c6062d2fab78aec4a5d4e7ced4fb48e5428b0caa09145c89e5bb4d07f55764a5",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 53,
+          "end_line": 53,
+          "hash": "8da9d3413a87fad2b7e05cf0e38604c8191f1fb6759a8c233707dcc049947d55",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 2
+          },
+          "start_line": 55,
+          "end_line": 55,
+          "hash": "6a875d7d216357b017997031760856c2ccab9db158e5d56258ce71b59d379fac",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 57,
+          "end_line": 60,
+          "hash": "338e77746923123bec91655f726c0a0ed2a27a53a145c4c1a150f218066e0bbf",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Table"
+          },
+          "start_line": 62,
+          "end_line": 68,
+          "hash": "ca06b17ef246144f8af031bf4f64a53c2c560fa1043b0eeaeb405f724c9a6a2e",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 2
+          },
+          "start_line": 70,
+          "end_line": 70,
+          "hash": "1ab7f9d4aa3f32cba52ac2d2e35e4192d903dc73f2b0f47544ad9bf6d648ef9f",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 72,
+          "end_line": 76,
+          "hash": "d722f27e63fd87a30943a319792d8f0bbe7205c25c88c696d7692efca7747e51",
+          "spl_hashes": null
+        }
+      ],
+      "file_merkle": {
+        "root_hash": "0d4405446d0e73119de7ddacdd30b5380e60df79f4e753c49a2d7ac0d1fcd33b",
+        "sections": [],
+        "spl_leaves": []
+      }
+    },
+    "Conway's Game of Life.md": {
+      "path": "Conway's Game of Life.md",
+      "page_name": "Conway's Game of Life",
+      "links": [
+        {
+          "target_page": "LifeHash",
+          "raw_target": "LifeHash",
+          "heading": null,
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 23,
+          "column": 1,
+          "predicates": [],
+          "annotation": null
+        }
+      ],
+      "spl_blocks": [],
+      "diagnostics": [],
+      "mtime": 1785241761.1760802,
+      "merkle_leaves": [
+        {
+          "node_type": {
+            "type": "Frontmatter"
+          },
+          "start_line": 1,
+          "end_line": 6,
+          "hash": "f94077c28b4e79165bfa9140a1c528c7b0ffc59f0c3f29066899326a2a2be4e8",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 1
+          },
+          "start_line": 8,
+          "end_line": 8,
+          "hash": "1e2cae0166a9b56c189d89fb300037b2b519796a6555ea2946b421b4be7b0c5e",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 10,
+          "end_line": 12,
+          "hash": "3a09bab0cdcc5488bb9a5383c32865da6f9ce9edc949a5d089fe7cc3c91a0168",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "List",
+            "ordered": false
+          },
+          "start_line": 14,
+          "end_line": 16,
+          "hash": "b6ca835b07da44bbb0f101214d1e71d218cae065784b78f836440d78bb5059ef",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 17,
+          "end_line": 19,
+          "hash": "f51f122042ab5333fd77696607ea3aa9845a559d47b8612db4ff2b976e6985ed",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 2
+          },
+          "start_line": 21,
+          "end_line": 21,
+          "hash": "95d974ca9619fe1201931d5031da564f741d4ac6e864e87f27ead675231822d7",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 23,
+          "end_line": 24,
+          "hash": "7e03e198b439e928bccef8736a121a4ae93fc59484dcb53b4e1aceb68ddf1e7c",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 26,
+          "end_line": 31,
+          "hash": "58a7b5cf7004ad2572b8f490655b70b9283e427e2f78ee4f64b0e81a028388bc",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 33,
+          "end_line": 35,
+          "hash": "a1c67c695d2e24e5233a9a19b157a9b3297d04af778cb0759cb54d95a091380c",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 2
+          },
+          "start_line": 37,
+          "end_line": 37,
+          "hash": "3ced849f68877ea132cc75ae628ff5a3b8db2c6ff3f98b78c408c26a49eb1027",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "List",
+            "ordered": false
+          },
+          "start_line": 39,
+          "end_line": 41,
+          "hash": "5499df4c9a8f80391f432ce4543dd783ed2f1b5dc2f6e0e42bcb1806688567ef",
+          "spl_hashes": null
+        }
+      ],
+      "file_merkle": {
+        "root_hash": "e5073ed2b4fc1d8a4aabe5d3581dfb4ea8e08dad9cad667fb2bc802fad2e6494",
+        "sections": [],
+        "spl_leaves": []
+      }
+    },
+    "SPEC-002-visual-key-fingerprint.md": {
+      "path": "SPEC-002-visual-key-fingerprint.md",
+      "page_name": "SPEC-002-visual-key-fingerprint",
+      "links": [
+        {
+          "target_page": "Selfsame",
+          "raw_target": "Selfsame",
+          "heading": null,
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 14,
+          "column": 23,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "LifeHash",
+          "raw_target": "LifeHash",
+          "heading": null,
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 17,
+          "column": 1,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-002-visual-key-fingerprint",
+          "raw_target": "SPEC-002-visual-key-fingerprint#ADR-101",
+          "heading": "ADR-101",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 50,
+          "column": 1,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-002-visual-key-fingerprint",
+          "raw_target": "SPEC-002-visual-key-fingerprint#ADR-102",
+          "heading": "ADR-102",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 52,
+          "column": 1,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-002-visual-key-fingerprint",
+          "raw_target": "SPEC-002-visual-key-fingerprint#ADR-103",
+          "heading": "ADR-103",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 54,
+          "column": 1,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-002-visual-key-fingerprint",
+          "raw_target": "SPEC-002-visual-key-fingerprint#ADR-104",
+          "heading": "ADR-104",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 56,
+          "column": 1,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-002-visual-key-fingerprint",
+          "raw_target": "SPEC-002-visual-key-fingerprint#ADR-105",
+          "heading": "ADR-105",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 58,
+          "column": 1,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-002-visual-key-fingerprint",
+          "raw_target": "SPEC-002-visual-key-fingerprint#ADR-106",
+          "heading": "ADR-106",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 59,
+          "column": 1,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-002-visual-key-fingerprint",
+          "raw_target": "SPEC-002-visual-key-fingerprint#REQ-101",
+          "heading": "REQ-101",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 62,
+          "column": 1,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-002-visual-key-fingerprint",
+          "raw_target": "SPEC-002-visual-key-fingerprint#REQ-103",
+          "heading": "REQ-103",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 64,
+          "column": 1,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-002-visual-key-fingerprint",
+          "raw_target": "SPEC-002-visual-key-fingerprint#NFR-101",
+          "heading": "NFR-101",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 66,
+          "column": 1,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-002-visual-key-fingerprint",
+          "raw_target": "SPEC-002-visual-key-fingerprint#NFR-103",
+          "heading": "NFR-103",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 68,
+          "column": 1,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-001-device-key-provisioning",
+          "raw_target": "SPEC-001-device-key-provisioning",
+          "heading": null,
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 74,
+          "column": 3,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-002-visual-key-fingerprint",
+          "raw_target": "SPEC-002-visual-key-fingerprint#ADR-107",
+          "heading": "ADR-107",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 75,
+          "column": 3,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-002-visual-key-fingerprint",
+          "raw_target": "SPEC-002-visual-key-fingerprint#ADR-101",
+          "heading": "ADR-101",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 77,
+          "column": 4,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-002-visual-key-fingerprint",
+          "raw_target": "SPEC-002-visual-key-fingerprint#REQ-101",
+          "heading": "REQ-101",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 80,
+          "column": 25,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-001-device-key-provisioning",
+          "raw_target": "SPEC-001-device-key-provisioning",
+          "heading": null,
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 83,
+          "column": 3,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-001-device-key-provisioning",
+          "raw_target": "SPEC-001-device-key-provisioning",
+          "heading": null,
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 86,
+          "column": 13,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "PROTO-001",
+          "raw_target": "PROTO-001",
+          "heading": null,
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 86,
+          "column": 53,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SCREEN-001-authorise-a-device",
+          "raw_target": "SCREEN-001-authorise-a-device",
+          "heading": null,
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 87,
+          "column": 1,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SCREEN-002-device-client",
+          "raw_target": "SCREEN-002-device-client",
+          "heading": null,
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 87,
+          "column": 38,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-001-device-key-provisioning",
+          "raw_target": "SPEC-001-device-key-provisioning",
+          "heading": null,
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 100,
+          "column": 1,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "zetl",
+          "raw_target": "zetl",
+          "heading": null,
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 103,
+          "column": 42,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "LifeHash",
+          "raw_target": "LifeHash",
+          "heading": null,
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 113,
+          "column": 1,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "Conway's Game of Life",
+          "raw_target": "Conway's Game of Life",
+          "heading": null,
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 113,
+          "column": 18,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-001-device-key-provisioning",
+          "raw_target": "SPEC-001-device-key-provisioning",
+          "heading": null,
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 118,
+          "column": 3,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SCREEN-001-authorise-a-device",
+          "raw_target": "SCREEN-001-authorise-a-device",
+          "heading": null,
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 118,
+          "column": 41,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SCREEN-002-device-client",
+          "raw_target": "SCREEN-002-device-client",
+          "heading": null,
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 118,
+          "column": 76,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "PROTO-001",
+          "raw_target": "PROTO-001",
+          "heading": null,
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 118,
+          "column": 106,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "Jakob's Law",
+          "raw_target": "Jakob's Law",
+          "heading": null,
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 119,
+          "column": 3,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "Von Restorff Effect",
+          "raw_target": "Von Restorff Effect",
+          "heading": null,
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 119,
+          "column": 20,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "Law of Similarity",
+          "raw_target": "Law of Similarity",
+          "heading": null,
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 119,
+          "column": 45,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "Miller's Law",
+          "raw_target": "Miller's Law",
+          "heading": null,
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 119,
+          "column": 68,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "Aesthetic-Usability Effect",
+          "raw_target": "Aesthetic-Usability Effect",
+          "heading": null,
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 119,
+          "column": 86,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "Selective Attention",
+          "raw_target": "Selective Attention",
+          "heading": null,
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 119,
+          "column": 118,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "Doherty Threshold",
+          "raw_target": "Doherty Threshold",
+          "heading": null,
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 119,
+          "column": 143,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "Blockchain Commons",
+          "raw_target": "Blockchain Commons",
+          "heading": null,
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 120,
+          "column": 3,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "Selfsame",
+          "raw_target": "Selfsame",
+          "heading": null,
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 120,
+          "column": 27,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "zetl",
+          "raw_target": "zetl",
+          "heading": null,
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 120,
+          "column": 41,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-001-device-key-provisioning",
+          "raw_target": "SPEC-001-device-key-provisioning",
+          "heading": null,
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 131,
+          "column": 1,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SCREEN-001-authorise-a-device",
+          "raw_target": "SCREEN-001-authorise-a-device",
+          "heading": null,
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 139,
+          "column": 31,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "LifeHash",
+          "raw_target": "LifeHash",
+          "heading": null,
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 150,
+          "column": 39,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "Conway's Game of Life",
+          "raw_target": "Conway's Game of Life",
+          "heading": null,
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 151,
+          "column": 1,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "LifeHash",
+          "raw_target": "LifeHash",
+          "heading": null,
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 157,
+          "column": 1,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "Blockchain Commons",
+          "raw_target": "Blockchain Commons",
+          "heading": null,
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 158,
+          "column": 2,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "Conway's Game of Life",
+          "raw_target": "Conway's Game of Life",
+          "heading": null,
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 165,
+          "column": 18,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "LifeHash",
+          "raw_target": "LifeHash",
+          "heading": null,
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 186,
+          "column": 30,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-002-visual-key-fingerprint",
+          "raw_target": "SPEC-002-visual-key-fingerprint#TEST-101",
+          "heading": "TEST-101",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 210,
+          "column": 8,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-002-visual-key-fingerprint",
+          "raw_target": "SPEC-002-visual-key-fingerprint#CON-101",
+          "heading": "CON-101",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 211,
+          "column": 1,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-002-visual-key-fingerprint",
+          "raw_target": "SPEC-002-visual-key-fingerprint#CON-102",
+          "heading": "CON-102",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 212,
+          "column": 1,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-002-visual-key-fingerprint",
+          "raw_target": "SPEC-002-visual-key-fingerprint#CON-103",
+          "heading": "CON-103",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 213,
+          "column": 1,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-002-visual-key-fingerprint",
+          "raw_target": "SPEC-002-visual-key-fingerprint#TEST-102",
+          "heading": "TEST-102",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 221,
+          "column": 8,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-002-visual-key-fingerprint",
+          "raw_target": "SPEC-002-visual-key-fingerprint#CON-101",
+          "heading": "CON-101",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 222,
+          "column": 1,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-001-device-key-provisioning",
+          "raw_target": "SPEC-001-device-key-provisioning",
+          "heading": null,
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 231,
+          "column": 1,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-002-visual-key-fingerprint",
+          "raw_target": "SPEC-002-visual-key-fingerprint#ADR-107",
+          "heading": "ADR-107",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 233,
+          "column": 1,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-002-visual-key-fingerprint",
+          "raw_target": "SPEC-002-visual-key-fingerprint#TEST-103",
+          "heading": "TEST-103",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 235,
+          "column": 8,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-002-visual-key-fingerprint",
+          "raw_target": "SPEC-002-visual-key-fingerprint#TEST-104",
+          "heading": "TEST-104",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 244,
+          "column": 8,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-002-visual-key-fingerprint",
+          "raw_target": "SPEC-002-visual-key-fingerprint#TEST-105",
+          "heading": "TEST-105",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 253,
+          "column": 8,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-002-visual-key-fingerprint",
+          "raw_target": "SPEC-002-visual-key-fingerprint#NFR-103",
+          "heading": "NFR-103",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 254,
+          "column": 1,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-002-visual-key-fingerprint",
+          "raw_target": "SPEC-002-visual-key-fingerprint#NFR-102",
+          "heading": "NFR-102",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 269,
+          "column": 1,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-002-visual-key-fingerprint",
+          "raw_target": "SPEC-002-visual-key-fingerprint#TEST-102",
+          "heading": "TEST-102",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 272,
+          "column": 8,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-002-visual-key-fingerprint",
+          "raw_target": "SPEC-002-visual-key-fingerprint#TEST-106",
+          "heading": "TEST-106",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 285,
+          "column": 8,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-001-device-key-provisioning",
+          "raw_target": "SPEC-001-device-key-provisioning",
+          "heading": null,
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 291,
+          "column": 1,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SCREEN-001-authorise-a-device",
+          "raw_target": "SCREEN-001-authorise-a-device",
+          "heading": null,
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 292,
+          "column": 1,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-002-visual-key-fingerprint",
+          "raw_target": "SPEC-002-visual-key-fingerprint#TEST-105",
+          "heading": "TEST-105",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 298,
+          "column": 8,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "Doherty Threshold",
+          "raw_target": "Doherty Threshold",
+          "heading": null,
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 305,
+          "column": 15,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-002-visual-key-fingerprint",
+          "raw_target": "SPEC-002-visual-key-fingerprint#TEST-107",
+          "heading": "TEST-107",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 309,
+          "column": 8,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-001-device-key-provisioning",
+          "raw_target": "SPEC-001-device-key-provisioning",
+          "heading": null,
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 315,
+          "column": 1,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "LifeHash",
+          "raw_target": "LifeHash",
+          "heading": null,
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 329,
+          "column": 14,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "Blockchain Commons",
+          "raw_target": "Blockchain Commons",
+          "heading": null,
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 336,
+          "column": 24,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "PROTO-001",
+          "raw_target": "PROTO-001",
+          "heading": null,
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 344,
+          "column": 9,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-002-visual-key-fingerprint",
+          "raw_target": "SPEC-002-visual-key-fingerprint#NFR-105",
+          "heading": "NFR-105",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 351,
+          "column": 1,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-002-visual-key-fingerprint",
+          "raw_target": "SPEC-002-visual-key-fingerprint#REQ-103",
+          "heading": "REQ-103",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 359,
+          "column": 3,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-001-device-key-provisioning",
+          "raw_target": "SPEC-001-device-key-provisioning",
+          "heading": null,
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 385,
+          "column": 1,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-002-visual-key-fingerprint",
+          "raw_target": "SPEC-002-visual-key-fingerprint#REQ-104",
+          "heading": "REQ-104",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 391,
+          "column": 17,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "PROTO-001",
+          "raw_target": "PROTO-001",
+          "heading": null,
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 404,
+          "column": 16,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "PROTO-001",
+          "raw_target": "PROTO-001",
+          "heading": null,
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 453,
+          "column": 39,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-002-visual-key-fingerprint",
+          "raw_target": "SPEC-002-visual-key-fingerprint#ADR-101",
+          "heading": "ADR-101",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 477,
+          "column": 1,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-002-visual-key-fingerprint",
+          "raw_target": "SPEC-002-visual-key-fingerprint#ADR-102",
+          "heading": "ADR-102",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 483,
+          "column": 22,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-001-device-key-provisioning",
+          "raw_target": "SPEC-001-device-key-provisioning",
+          "heading": null,
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 485,
+          "column": 1,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-002-visual-key-fingerprint",
+          "raw_target": "SPEC-002-visual-key-fingerprint#REQ-103",
+          "heading": "REQ-103",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 490,
+          "column": 2,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-001-device-key-provisioning",
+          "raw_target": "SPEC-001-device-key-provisioning",
+          "heading": null,
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 496,
+          "column": 1,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "PROTO-001",
+          "raw_target": "PROTO-001",
+          "heading": null,
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 529,
+          "column": 1,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-002-visual-key-fingerprint",
+          "raw_target": "SPEC-002-visual-key-fingerprint#CON-102",
+          "heading": "CON-102",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 530,
+          "column": 43,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-002-visual-key-fingerprint",
+          "raw_target": "SPEC-002-visual-key-fingerprint#REQ-101",
+          "heading": "REQ-101",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 543,
+          "column": 13,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-002-visual-key-fingerprint",
+          "raw_target": "SPEC-002-visual-key-fingerprint#REQ-102",
+          "heading": "REQ-102",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 544,
+          "column": 1,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-002-visual-key-fingerprint",
+          "raw_target": "SPEC-002-visual-key-fingerprint#REQ-104",
+          "heading": "REQ-104",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 545,
+          "column": 1,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-002-visual-key-fingerprint",
+          "raw_target": "SPEC-002-visual-key-fingerprint#TEST-102",
+          "heading": "TEST-102",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 546,
+          "column": 14,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-002-visual-key-fingerprint",
+          "raw_target": "SPEC-002-visual-key-fingerprint#TEST-104",
+          "heading": "TEST-104",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 547,
+          "column": 1,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-002-visual-key-fingerprint",
+          "raw_target": "SPEC-002-visual-key-fingerprint#TEST-106",
+          "heading": "TEST-106",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 548,
+          "column": 1,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "PROTO-001",
+          "raw_target": "PROTO-001",
+          "heading": null,
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 576,
+          "column": 1,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-002-visual-key-fingerprint",
+          "raw_target": "SPEC-002-visual-key-fingerprint#REQ-105",
+          "heading": "REQ-105",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 584,
+          "column": 1,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-002-visual-key-fingerprint",
+          "raw_target": "SPEC-002-visual-key-fingerprint#REQ-101",
+          "heading": "REQ-101",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 593,
+          "column": 13,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-002-visual-key-fingerprint",
+          "raw_target": "SPEC-002-visual-key-fingerprint#REQ-105",
+          "heading": "REQ-105",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 594,
+          "column": 1,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-002-visual-key-fingerprint",
+          "raw_target": "SPEC-002-visual-key-fingerprint#TEST-105",
+          "heading": "TEST-105",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 595,
+          "column": 14,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-002-visual-key-fingerprint",
+          "raw_target": "SPEC-002-visual-key-fingerprint#TEST-108",
+          "heading": "TEST-108",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 596,
+          "column": 1,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-002-visual-key-fingerprint",
+          "raw_target": "SPEC-002-visual-key-fingerprint#REQ-101",
+          "heading": "REQ-101",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 614,
+          "column": 13,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-002-visual-key-fingerprint",
+          "raw_target": "SPEC-002-visual-key-fingerprint#TEST-109",
+          "heading": "TEST-109",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 615,
+          "column": 14,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "PROTO-001",
+          "raw_target": "PROTO-001",
+          "heading": null,
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 622,
+          "column": 35,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-002-visual-key-fingerprint",
+          "raw_target": "SPEC-002-visual-key-fingerprint#REQ-101",
+          "heading": "REQ-101",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 625,
+          "column": 16,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-002-visual-key-fingerprint",
+          "raw_target": "SPEC-002-visual-key-fingerprint#REQ-102",
+          "heading": "REQ-102",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 631,
+          "column": 16,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-002-visual-key-fingerprint",
+          "raw_target": "SPEC-002-visual-key-fingerprint#NFR-101",
+          "heading": "NFR-101",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 631,
+          "column": 61,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-002-visual-key-fingerprint",
+          "raw_target": "SPEC-002-visual-key-fingerprint#REQ-103",
+          "heading": "REQ-103",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 640,
+          "column": 16,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-002-visual-key-fingerprint",
+          "raw_target": "SPEC-002-visual-key-fingerprint#REQ-104",
+          "heading": "REQ-104",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 646,
+          "column": 16,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-002-visual-key-fingerprint",
+          "raw_target": "SPEC-002-visual-key-fingerprint#REQ-105",
+          "heading": "REQ-105",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 651,
+          "column": 16,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-002-visual-key-fingerprint",
+          "raw_target": "SPEC-002-visual-key-fingerprint#NFR-103",
+          "heading": "NFR-103",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 651,
+          "column": 61,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-002-visual-key-fingerprint",
+          "raw_target": "SPEC-002-visual-key-fingerprint#NFR-102",
+          "heading": "NFR-102",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 658,
+          "column": 16,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-002-visual-key-fingerprint",
+          "raw_target": "SPEC-002-visual-key-fingerprint#NFR-104",
+          "heading": "NFR-104",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 665,
+          "column": 16,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-002-visual-key-fingerprint",
+          "raw_target": "SPEC-002-visual-key-fingerprint#CON-102",
+          "heading": "CON-102",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 670,
+          "column": 16,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-002-visual-key-fingerprint",
+          "raw_target": "SPEC-002-visual-key-fingerprint#CON-103",
+          "heading": "CON-103",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 676,
+          "column": 16,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-002-visual-key-fingerprint",
+          "raw_target": "SPEC-002-visual-key-fingerprint#ADR-101",
+          "heading": "ADR-101",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 683,
+          "column": 16,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "Blockchain Commons",
+          "raw_target": "Blockchain Commons",
+          "heading": null,
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 684,
+          "column": 55,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "Jakob's Law",
+          "raw_target": "Jakob's Law",
+          "heading": null,
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 717,
+          "column": 3,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "Von Restorff Effect",
+          "raw_target": "Von Restorff Effect",
+          "heading": null,
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 718,
+          "column": 3,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "Law of Similarity",
+          "raw_target": "Law of Similarity",
+          "heading": null,
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 719,
+          "column": 3,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "Miller's Law",
+          "raw_target": "Miller's Law",
+          "heading": null,
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 720,
+          "column": 3,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "Doherty Threshold",
+          "raw_target": "Doherty Threshold",
+          "heading": null,
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 721,
+          "column": 3,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-002-visual-key-fingerprint",
+          "raw_target": "SPEC-002-visual-key-fingerprint#NFR-104",
+          "heading": "NFR-104",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 721,
+          "column": 27,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "Aesthetic-Usability Effect",
+          "raw_target": "Aesthetic-Usability Effect",
+          "heading": null,
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 722,
+          "column": 3,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-002-visual-key-fingerprint",
+          "raw_target": "SPEC-002-visual-key-fingerprint#REQ-103",
+          "heading": "REQ-103",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 722,
+          "column": 177,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "Selective Attention",
+          "raw_target": "Selective Attention",
+          "heading": null,
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 723,
+          "column": 3,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-002-visual-key-fingerprint",
+          "raw_target": "SPEC-002-visual-key-fingerprint#REQ-101",
+          "heading": "REQ-101",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 734,
+          "column": 5,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-002-visual-key-fingerprint",
+          "raw_target": "SPEC-002-visual-key-fingerprint#CON-102",
+          "heading": "CON-102",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 737,
+          "column": 5,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SCREEN-001-authorise-a-device",
+          "raw_target": "SCREEN-001-authorise-a-device",
+          "heading": null,
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 743,
+          "column": 5,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SCREEN-001-authorise-a-device",
+          "raw_target": "SCREEN-001-authorise-a-device",
+          "heading": null,
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 745,
+          "column": 3,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "LifeHash",
+          "raw_target": "LifeHash",
+          "heading": null,
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 745,
+          "column": 42,
+          "predicates": [],
+          "annotation": null
+        }
+      ],
+      "spl_blocks": [],
+      "diagnostics": [],
+      "mtime": 1785243133.9782732,
+      "merkle_leaves": [
+        {
+          "node_type": {
+            "type": "Frontmatter"
+          },
+          "start_line": 1,
+          "end_line": 8,
+          "hash": "5df3ae726b56a809af846f39af63b1e7f87e6e80062a08076eca8abbc90e3032",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 1
+          },
+          "start_line": 10,
+          "end_line": 10,
+          "hash": "eeb8c42fa365545da4b915cd728d10676d0ab66d9bc483b9389b1f24df6a64a3",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 2
+          },
+          "start_line": 12,
+          "end_line": 12,
+          "hash": "8f756149881b0d33818ce760e8d1ff88d830d7405640543dfcdf104afc273229",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 14,
+          "end_line": 17,
+          "hash": "5d73f017634e01e564a3f876e495a7b6b262a0bd349655efddb7ea7c1567ee36",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 19,
+          "end_line": 22,
+          "hash": "4c5ee7a73b5e32d5f7bf8120d39805533f35762e10b84b2419af3b9b6eecb302",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 24,
+          "end_line": 24,
+          "hash": "90cbbfa321061a727d79fc79c7b3658c009db38d046526c4c866bb2787146508",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "CodeBlock",
+            "language": null
+          },
+          "start_line": 26,
+          "end_line": 47,
+          "hash": "fed027068bfa1cee0aaea97a76c95356d4f5b48b05939030a320c605645a4e18",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 49,
+          "end_line": 59,
+          "hash": "ff252134466012db310897ce2b36093e6983429a5afe8b004af502d2ec9a79de",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 61,
+          "end_line": 69,
+          "hash": "874bd3aaeda9c6c9b24a8ad66bf0a3dc9e857f7c4d4892472e6371f4bb17c28d",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 71,
+          "end_line": 71,
+          "hash": "015d9665c680596da78f25eeaad2ad92c94b4ff505fc8289b891e67c0be3fffe",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "List",
+            "ordered": false
+          },
+          "start_line": 72,
+          "end_line": 85,
+          "hash": "d7809cef33f69fc6c59223a530317c42fb49e7d271c28a412332b752d99d3382",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 86,
+          "end_line": 87,
+          "hash": "7204b0779dea0b8ed9185ce63d1cadda393ca6e3a50384b7313469d4d021d1e7",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "ThematicBreak"
+          },
+          "start_line": 89,
+          "end_line": 89,
+          "hash": "3f9ec27a2886a2a620c93f2978d57229f3d4b7add6e3f004e4e74df0d6baf900",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 2
+          },
+          "start_line": 91,
+          "end_line": 91,
+          "hash": "791fe21acc0dce460dde1951122620f833613e977d6d38be83603aa3dfe6ca83",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 93,
+          "end_line": 96,
+          "hash": "3b3415ba7e9e8ecee1daf2cbbb893783eaba4f5be8e9025620ce5f6eaa171f53",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 2
+          },
+          "start_line": 98,
+          "end_line": 98,
+          "hash": "3531029cd6fb5ac23950749a684cb8c3aacbcea624e9220fb9f527275e6e965a",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 100,
+          "end_line": 106,
+          "hash": "d95a4b6b2bf92272153899b7a53af970b45d7c865cf0a86a66c5785bf6a5b4cd",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 2
+          },
+          "start_line": 108,
+          "end_line": 108,
+          "hash": "b264b2a885cd45fe8fa077a8eb76eb88c67bd676cf94e179c1300d3f1d601e1c",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 110,
+          "end_line": 114,
+          "hash": "584e2987f79633a22a753312c56527b6f93af913c9dbc93d8a20d31f5245e3ed",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Table"
+          },
+          "start_line": 116,
+          "end_line": 120,
+          "hash": "0ac2ef9b93a73d3ede3a212ae477d21ea3b0f2521fc798f837d8e34c3924a40f",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 122,
+          "end_line": 125,
+          "hash": "4fdbde38f1b248bdbf460bdd727e97b934b6f9eabd9fd23f54d11583ab7b1848",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "ThematicBreak"
+          },
+          "start_line": 127,
+          "end_line": 127,
+          "hash": "3f9ec27a2886a2a620c93f2978d57229f3d4b7add6e3f004e4e74df0d6baf900",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 2
+          },
+          "start_line": 129,
+          "end_line": 129,
+          "hash": "7a55e4d3dc7fb309a077960b7efb0efe273f430e6869f3681177a1f82b2d18c2",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 131,
+          "end_line": 137,
+          "hash": "072c2e8ba030b8cac1edbe24aa4ec628112ecdde394036f5154b00b2a6d271bf",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 139,
+          "end_line": 143,
+          "hash": "1bb78e69b0e2a62688a7cd4ac76dd018e8973f0c17d865c3aad0d441020317de",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 145,
+          "end_line": 148,
+          "hash": "062005dcdd67c86ad2e23110e1ac9cc7690b45e5166eba2bb99d4b394be0aca6",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 150,
+          "end_line": 153,
+          "hash": "3f3fc83fb18a5dc7672448b2711d7bbe2893b3e03a13f8ec43cf96d3a5e1a111",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 3
+          },
+          "start_line": 155,
+          "end_line": 155,
+          "hash": "aa0fb4a7857658d235ecfe831623f7211a69a20e671466b3e9f8c128a9ac2842",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 157,
+          "end_line": 160,
+          "hash": "5c1b3c9efdd76fbee313e1eb20ae31c59c589d80ee9129e5394042ac74844e8c",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 162,
+          "end_line": 162,
+          "hash": "77f40deca5dd822f29011b05d00945508ca969d547ff42eb5e626231f001c356",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "List",
+            "ordered": true
+          },
+          "start_line": 164,
+          "end_line": 173,
+          "hash": "82aef055e24df498ea3e42c22cba82ce2c88e250726b9ad86121dc4ed0a1694b",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 174,
+          "end_line": 174,
+          "hash": "d83d1154b0b95a2ca0c0f8c9b76e9505821ebb30300b307da500e62018fab740",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 176,
+          "end_line": 178,
+          "hash": "8842ab51b0a955ea2443ae2db5706404cbe16a8e014575c7c218ef01d0dd3f8c",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "ThematicBreak"
+          },
+          "start_line": 180,
+          "end_line": 180,
+          "hash": "3f9ec27a2886a2a620c93f2978d57229f3d4b7add6e3f004e4e74df0d6baf900",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 2
+          },
+          "start_line": 182,
+          "end_line": 182,
+          "hash": "37a46e57bc22f375665d5dc9eb13ebd23b12e96d487f1185b767a946eb01a627",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 3
+          },
+          "start_line": 184,
+          "end_line": 184,
+          "hash": "2a71669abf6627f5a6467632814bb98a5313f3eb1a591c80b2ee1e840fa7e34b",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 186,
+          "end_line": 188,
+          "hash": "f649940f45669cd683adba2afe413e2ba736328c1eef27a6b7e65fae91ee2319",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 190,
+          "end_line": 190,
+          "hash": "85dc66eedc85ecda303f2e427b66c36083af63816317f4d6d29ca9925e6e311b",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Table"
+          },
+          "start_line": 192,
+          "end_line": 202,
+          "hash": "be49222e66d88a6a9fd74da2c69cefaabaee95f8392792012a29f132f856754d",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 204,
+          "end_line": 208,
+          "hash": "128aab920b7a436f721d65d399992c967eda9e7a1162e6d50c80dde2f2a27817",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 210,
+          "end_line": 213,
+          "hash": "eb9d78845a47b062b8d2661ab4346d9663979e20fcbdea4d66c945737c440064",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 3
+          },
+          "start_line": 215,
+          "end_line": 215,
+          "hash": "097fc2d8ba3079d3cb13c1edb849b332867e2bf02736068825044f50b8b69f5f",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 217,
+          "end_line": 219,
+          "hash": "6b4b11a7518a54a850ff8febada04900cb8ef0d53b31ce238e48b0dd0e4cad3e",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 221,
+          "end_line": 222,
+          "hash": "78460c72f3dcf69de426d066c45d1405cbcdbd0d8cf31dfebca8fd6b787cc497",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 3
+          },
+          "start_line": 224,
+          "end_line": 224,
+          "hash": "4b92938c3f847d903a566cb8f7bc22c57b7a53362437c192a6f891b4bff90062",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 226,
+          "end_line": 228,
+          "hash": "d1d98be45c6b03fb0bcb8d498de6648d9015594a8118a5165c47340907e51d2e",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 230,
+          "end_line": 233,
+          "hash": "da2991cde631ad89f6ab11970023b5ab7764adb668a26c9bb942e7a6e82ad713",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 235,
+          "end_line": 235,
+          "hash": "0942cb3190f764b02668f5adde4321a218fb1cc5ace75cbaaa7b61e220825ab6",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 3
+          },
+          "start_line": 237,
+          "end_line": 237,
+          "hash": "1e1df0585f018e65b85ca37a3b04e5770ef357f1a1cb451b3dbc16a341ead986",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 239,
+          "end_line": 242,
+          "hash": "e242d1808b7840c48212d35480168527cac1c3647631ffc107f44b29fa52463d",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 244,
+          "end_line": 244,
+          "hash": "90430fbd5463f985b6a2701a3f33f5c722318bfa8b21bc0de0e6488cf5f10f46",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 3
+          },
+          "start_line": 246,
+          "end_line": 246,
+          "hash": "434454d2cb72019dbd8ee7bf924d1654f1c5347ee44814ffa63eb232caaa31aa",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 248,
+          "end_line": 251,
+          "hash": "3b25adcf6b8c561b0de058d146c228c54c8e0f83d9739859d86d984373534301",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 253,
+          "end_line": 254,
+          "hash": "debea845a6864e0c2222705ebf944c9ea0d433029f18697aab09ca7cab24bf60",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "ThematicBreak"
+          },
+          "start_line": 256,
+          "end_line": 256,
+          "hash": "3f9ec27a2886a2a620c93f2978d57229f3d4b7add6e3f004e4e74df0d6baf900",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 2
+          },
+          "start_line": 258,
+          "end_line": 258,
+          "hash": "855fef22c68f62dfcc59d15f7a6d5594bb1eb66ee8e8d6dbc68b394c5f6bf8ff",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 3
+          },
+          "start_line": 260,
+          "end_line": 260,
+          "hash": "0f6c8466100e56c60794bc89db7f12f54b2f9e68f549f37aa0b199d4519df7f0",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 262,
+          "end_line": 264,
+          "hash": "11ee7094e62dbbb8a81cb58ddd05b46f8b76e3bc79c977422c51a995dd4a17a2",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 266,
+          "end_line": 270,
+          "hash": "e684af41004e70f5715b73a5c70bfa237226df140365ee2fed53dbb08d0d28d8",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 272,
+          "end_line": 272,
+          "hash": "8bc90af60ce856abb13da9993ab384e6451d7539902de7759de4c98130801a94",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 3
+          },
+          "start_line": 274,
+          "end_line": 274,
+          "hash": "a8bdc8ce8aa9d6009e24db1a6c11e262bf861d66deae88190c1b69d5298d9540",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 276,
+          "end_line": 277,
+          "hash": "f3b3a7c97cd8d8816f41f0cfec2c3d1476a7d481adc5ec1154dd98a50892cf82",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 279,
+          "end_line": 283,
+          "hash": "fb8f88e1175adbe3d052532793aa3b8d9368e16da88a1f29544db17f4448a895",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 285,
+          "end_line": 285,
+          "hash": "e3f64d25f86f507de82c521d0c775407cbe7a6b974297611226479f55d49edc5",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 3
+          },
+          "start_line": 287,
+          "end_line": 287,
+          "hash": "47e2f3f296f8c96c4954cf9770d983c54a5a21a68ee90892c97a533609179b02",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 289,
+          "end_line": 292,
+          "hash": "faedda21a98507c835f65f3f710d96c2e1e905d5a73a963f5769d0050e38a04a",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 294,
+          "end_line": 296,
+          "hash": "ece45e639ff119976ce79b9eb7964dd4504e6e8cc25f2b7fd9e0b8134ec81517",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 298,
+          "end_line": 298,
+          "hash": "be9b72012723e29fccfe97d39fd505da21c600a7eb895ab0cca8250627114834",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 3
+          },
+          "start_line": 300,
+          "end_line": 300,
+          "hash": "5d2bfdda58b92350dd70c9d07f5f2ac6b83b00c5b87008b2854ac9815041daba",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 302,
+          "end_line": 303,
+          "hash": "5057d21d18d9a79cf2bec4a5cdb320f8627a845a320e25602253815a266d4984",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 305,
+          "end_line": 307,
+          "hash": "e782949822e2c8809abe9b1aa67bb617da071181884e2737cfc7db5450eee3e2",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 309,
+          "end_line": 309,
+          "hash": "076f702afc16a1fb5e89c8ef9e41606b81b554db15a686f10d15c5d3b48a376e",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 3
+          },
+          "start_line": 311,
+          "end_line": 311,
+          "hash": "d0d72260bab71cd7ad31ca0ea83499673e07ddc4383012e66e6cef6e58f28cc4",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 313,
+          "end_line": 315,
+          "hash": "ecdb37712fba68846400b731482cc22ca75acb22ad65976aac13a583713b00fb",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 317,
+          "end_line": 317,
+          "hash": "d2c2433abd91ea6342d1fcdd8ea7cd520014b53c3d9d9d3f59e140c247f432db",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 319,
+          "end_line": 319,
+          "hash": "15880698911c40c248bd29f246efab26938b2758305624072f35595b1cb2db4a",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "ThematicBreak"
+          },
+          "start_line": 321,
+          "end_line": 321,
+          "hash": "3f9ec27a2886a2a620c93f2978d57229f3d4b7add6e3f004e4e74df0d6baf900",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 2
+          },
+          "start_line": 323,
+          "end_line": 323,
+          "hash": "c17ced88e7774f23c620e4535fec3173f7b9f7e063bf4fc5d27689449d71c8e5",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 3
+          },
+          "start_line": 325,
+          "end_line": 325,
+          "hash": "d303742a792d20cb42e306b1c78ba091512431a1914a466e50b33e718de664c0",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 327,
+          "end_line": 327,
+          "hash": "cb710a223ef4d142d54b1f31338fd871e44009880c2cbd626fbc2118829ff242",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 329,
+          "end_line": 333,
+          "hash": "599383e8914d8339ab61d75543bd5e7c956c260960bf16d309eeb11fb998335d",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 335,
+          "end_line": 337,
+          "hash": "2e663dc38ae6e1007410418ce2e059c8759bd50ce380df8f8c538cf001d7b0d5",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 339,
+          "end_line": 344,
+          "hash": "ab72dd4723417fe6e4773595fdfe23d9796e35a90334330126dfdc4e4eabb4d5",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 346,
+          "end_line": 351,
+          "hash": "d4e3f77ed8d0fd2fe2a81bd8916d34c9d64a10618bc09e4d83484d825c6a4ac6",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 353,
+          "end_line": 353,
+          "hash": "bb7526fa80cf3f3f921d82f61b5d167795d5cad9c180e5bf8cd8428f4742f6eb",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "List",
+            "ordered": false
+          },
+          "start_line": 354,
+          "end_line": 366,
+          "hash": "e39cdfb7c6bf9202b1210260240f3b085d30d919a91caf9abe4babb41fb8a662",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 3
+          },
+          "start_line": 367,
+          "end_line": 367,
+          "hash": "f12387ddbb174761aeb7933c579a515627593be81f24ddcad8aca740fa0c1f8f",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 369,
+          "end_line": 369,
+          "hash": "cb710a223ef4d142d54b1f31338fd871e44009880c2cbd626fbc2118829ff242",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 371,
+          "end_line": 372,
+          "hash": "d449a5b780c84a757e7e055dfc34716818e5e91cf9401143c8749a703f415df5",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 374,
+          "end_line": 375,
+          "hash": "06d13e797c50978da4ce85b535ce7e307a176e86a5400691eef8b79cdf289f05",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 377,
+          "end_line": 382,
+          "hash": "c94ca6dc41e818a9a25f88cace2860b362fd759671d1ec5d76380f9478579c2b",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 384,
+          "end_line": 387,
+          "hash": "2b72dfe9d3f4552a5af8cc3cd6bdbd2cd9a4d6b675c96bdc83b26711ef208d34",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 389,
+          "end_line": 391,
+          "hash": "11e2321ee3d640a13006c90c1714ccb829db50ff32c7640a21286141804cef22",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 3
+          },
+          "start_line": 393,
+          "end_line": 393,
+          "hash": "4dc90252bf5ee8e0d9e7bb38bee57fa9ad01a7e814b217002079714d10cdbb78",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 395,
+          "end_line": 395,
+          "hash": "cb710a223ef4d142d54b1f31338fd871e44009880c2cbd626fbc2118829ff242",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 397,
+          "end_line": 399,
+          "hash": "6060da62689ebf09a21eff9cd249128c3ebda503ab6eb11efa41f306f497a9c9",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 401,
+          "end_line": 402,
+          "hash": "c8022ce284abe4d226ba5c47959a0713f22b2196058f3462d3d055255bafdc50",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 404,
+          "end_line": 408,
+          "hash": "4f74f4845ebd83fd849af2d4a0cf9ff90c4ae7e01522a0c35812cdf1a83c6a5d",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 410,
+          "end_line": 411,
+          "hash": "4fa7336c399c27b7c5cee6a1acbc889d8b847fd4c5298813ceef4e60be36c39b",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 413,
+          "end_line": 418,
+          "hash": "5673ede0e9062a1e4230e294cebbe03a388e87d0f24e742ec6beb419aff57685",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 3
+          },
+          "start_line": 420,
+          "end_line": 420,
+          "hash": "cb1790e419c2a28d1ae9fd7ad0a1d7883e68efeb6735c8481b344fdd5fa05956",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 422,
+          "end_line": 422,
+          "hash": "cb710a223ef4d142d54b1f31338fd871e44009880c2cbd626fbc2118829ff242",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 424,
+          "end_line": 425,
+          "hash": "7a6c7178e1cb87a996f4c5c186a1a7a81c0c22185cffe97e28750aa627867a6c",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 427,
+          "end_line": 429,
+          "hash": "b48d443d109f726cc07fd0b46bfe25633da3494336578559a9d42021250f35b0",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 431,
+          "end_line": 435,
+          "hash": "37aafce956c9c74d5ddaa458368dc85dbf41382ae51b454f3808749216098268",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 437,
+          "end_line": 440,
+          "hash": "743333f23ba1f8c7caefc76f9e8c5b28f95b383e76dc23ff38e393b96de653af",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 3
+          },
+          "start_line": 442,
+          "end_line": 442,
+          "hash": "8d38af31975a4fe89c16a54aa891394d86ee804b712c79d2508854364596357b",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 444,
+          "end_line": 444,
+          "hash": "cb710a223ef4d142d54b1f31338fd871e44009880c2cbd626fbc2118829ff242",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 446,
+          "end_line": 446,
+          "hash": "84976e1dbcf7a4aab7f5c37451d5820be460b7142e19bcce800b24243a176f87",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 448,
+          "end_line": 450,
+          "hash": "960bd340579496d3f80fe1a8d8809a98a197d838bd2cd53b88cf37bf53771371",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 452,
+          "end_line": 457,
+          "hash": "c1b57e39a8f5d23c3f7003230d10273f21993d60bc3a2e81e2725a2a7fec3ba1",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 459,
+          "end_line": 461,
+          "hash": "be9f7d113e8755f40728d138a155eeff0e14550da4960c0ad27f0f07ea408ac7",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 3
+          },
+          "start_line": 463,
+          "end_line": 463,
+          "hash": "eff3f6ab77b4c24087eff2ad945dfc75509b84c5c1e305f88f313d3809a2160a",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 465,
+          "end_line": 465,
+          "hash": "cb710a223ef4d142d54b1f31338fd871e44009880c2cbd626fbc2118829ff242",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 467,
+          "end_line": 468,
+          "hash": "469683eeb39fa37f2ec77cda3dbfcad9708aa98e2f9494cdbde8cd3b3107e9c5",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 470,
+          "end_line": 470,
+          "hash": "28895f78a841646d89588abeb5cc8c32e8096ee67671419965a125e3791c9def",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 472,
+          "end_line": 477,
+          "hash": "75ab19cb56fafd5ec0bc12b1110ec95231c3e947f8c447be6bd26ed9669751f2",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 3
+          },
+          "start_line": 479,
+          "end_line": 479,
+          "hash": "3fea2e1eb393859cf3d87b935cd082f47d6cdd43774ebbb2ae3f4c3dd41f162d",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 481,
+          "end_line": 481,
+          "hash": "aed74f282418fa4c20f08615e512f30d9522998b4b7f097ddaabe7784a5724dd",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 483,
+          "end_line": 487,
+          "hash": "7149fc196494d6a79e54afcb8626b4303f8cc42995550b33e756642bbf254a59",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 489,
+          "end_line": 490,
+          "hash": "397ff6e574aae95d3a93f688951c9facb6f5fb0fdf44e385e0317285a2fcaa4c",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 492,
+          "end_line": 499,
+          "hash": "d52d8ecbb0281865d5b5840ab107aaef41107043a332d7ddc2be53ee54e1d985",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 501,
+          "end_line": 502,
+          "hash": "f8625521999654ed008cc08d8eef5f0fc6aa847fa74a1ff6ee644a1ea83bbcf8",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "ThematicBreak"
+          },
+          "start_line": 504,
+          "end_line": 504,
+          "hash": "3f9ec27a2886a2a620c93f2978d57229f3d4b7add6e3f004e4e74df0d6baf900",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 2
+          },
+          "start_line": 506,
+          "end_line": 506,
+          "hash": "73e85090a5f35b58986e50c58274ede1c78e1026a37250992b9ab82545a63cf7",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 3
+          },
+          "start_line": 508,
+          "end_line": 508,
+          "hash": "1f91c4e0957d13656150ab4d10bd46145639174b4f6eb3cca8ae1a38ca43c34d",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "CodeBlock",
+            "language": "rust"
+          },
+          "start_line": 510,
+          "end_line": 525,
+          "hash": "017c6321b20b316fd353e6818a9c04069eda5adc9de9aab1583e8a6752c4df8c",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 527,
+          "end_line": 530,
+          "hash": "8f6e3067d4990e4d20361f35967b26054dce4c21d19edcabab8011e92948124f",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 532,
+          "end_line": 533,
+          "hash": "7bc882f01edb25753519b5f8360cd2f0f7631af3672ceea7eb6d9f47e6e2edd1",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 535,
+          "end_line": 535,
+          "hash": "42a87cb08cf129f8041e13b09d8d7dec8010b6e5a6c4d55059b7092908afa2b3",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "List",
+            "ordered": false
+          },
+          "start_line": 536,
+          "end_line": 540,
+          "hash": "ffb77d61c486d2e9910292b4b499c6e43f40d0c230b6dac769e7b8081495d7a5",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 541,
+          "end_line": 541,
+          "hash": "f0508b1930ac02804b7dbf2009ed6eb7f544c6cd697d6abd7a9e6a3d47a905f1",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 543,
+          "end_line": 548,
+          "hash": "05325a70861c2fb85c092fce1c34793396ad18a4cca971bf2539894b400a84b2",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 3
+          },
+          "start_line": 550,
+          "end_line": 550,
+          "hash": "5eec51e1e36392a51316058302c5a41180eec307528486c7632b085f5f0de739",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 552,
+          "end_line": 552,
+          "hash": "0db512ab048a3afea91d945e854aeb3660a53caea40584c6578ee80ee4f8c602",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "CodeBlock",
+            "language": "rust"
+          },
+          "start_line": 554,
+          "end_line": 561,
+          "hash": "f3643a094724887fe93f0a45c8e85473cb09a95df624a96af46dc178e6e5b5ce",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 563,
+          "end_line": 567,
+          "hash": "82f933bbda90b61bebe784d0fcefd3ea68d463524488c0a66f59df3357bae230",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "CodeBlock",
+            "language": "abnf"
+          },
+          "start_line": 569,
+          "end_line": 572,
+          "hash": "ae52efd9241de415ba668426ad6149267375dde990940ec3edc232ca7fb7a7de",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 574,
+          "end_line": 578,
+          "hash": "5a5f913bc444f1d2808d6a1a586ba66baef71a6f867abfac6b77bda115a8f2d2",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 580,
+          "end_line": 586,
+          "hash": "3f10ee0185b9484daac47d28f9bed62becc86e79f696b03365abb2e251209480",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 588,
+          "end_line": 591,
+          "hash": "b1c7cc330e76ac4ceb47b7e1046c32f91875372e3df978ebade700d01672a5fc",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 593,
+          "end_line": 596,
+          "hash": "5bef75a034f95059a79bb28350fe543e81d81c10d2400687612040c26ae159e0",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 3
+          },
+          "start_line": 598,
+          "end_line": 598,
+          "hash": "0c4d9cc834d49ecefc9ac532a7f3cddaaf8ffe39631bf47b8ea60f5403189c66",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "CodeBlock",
+            "language": "rust"
+          },
+          "start_line": 600,
+          "end_line": 603,
+          "hash": "435ca94f155336b57f4dfb5bd16f728235bb4f1b9d2adb41db121156c658a813",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 605,
+          "end_line": 609,
+          "hash": "95d41e28d547cd9bc51b28ac23cf71fe3391fa42e924571c98fcca00cf4fb102",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 611,
+          "end_line": 612,
+          "hash": "2e9b38cb31c9ce518aeb5c14596aec86288daa0fb391beea3241043347c401d1",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 614,
+          "end_line": 615,
+          "hash": "c7aee7d4125187d2253485a741ed554f81a453a52a188cb6aa5e8eec23b03501",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "ThematicBreak"
+          },
+          "start_line": 617,
+          "end_line": 617,
+          "hash": "3f9ec27a2886a2a620c93f2978d57229f3d4b7add6e3f004e4e74df0d6baf900",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 2
+          },
+          "start_line": 619,
+          "end_line": 619,
+          "hash": "29d7859ee278fafd600e87892cf8f459e106ddba4d43b0c89c760f960e1a8524",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 621,
+          "end_line": 622,
+          "hash": "ca756ec49192f10100e7b47a30c63db1bada0d2c04463e55130785e4bf9a420c",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 3
+          },
+          "start_line": 624,
+          "end_line": 624,
+          "hash": "e1b7bdf18a505219c9d21ab0476930555fc534ac0a6862d7a41ccadf21104420",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 625,
+          "end_line": 625,
+          "hash": "b54ccc3d87ea7713d974ec523f3fe6d5f72be58777720b6327d22a1978b52e60",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "List",
+            "ordered": false
+          },
+          "start_line": 626,
+          "end_line": 629,
+          "hash": "49c54d15deba3d2bb81420020ab27ea848890c2341c9887d5fec4eb325a93e16",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 3
+          },
+          "start_line": 630,
+          "end_line": 630,
+          "hash": "b5bb92e143df31524ff895256700b2775d55ef2b9096169c9ed2e84285ba2274",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 631,
+          "end_line": 631,
+          "hash": "c67bbd0c725830b4ae9819803cb514cecb0897c3781cebb80d2967c70d35c2a4",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "List",
+            "ordered": false
+          },
+          "start_line": 632,
+          "end_line": 638,
+          "hash": "6a00872f0ec88e4399908720ba71168156605b65ffdf0641f1353c1fbc618fd6",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 3
+          },
+          "start_line": 639,
+          "end_line": 639,
+          "hash": "52ddd5fa8c12ee19dd82e13b4c87e87fe7012c3756906acc3b477e8cfd2dbd1c",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 640,
+          "end_line": 640,
+          "hash": "a65ec39041aeb5ccddc26052596da7d56e9b4349aa54886bda9b0cd77d54666b",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "List",
+            "ordered": false
+          },
+          "start_line": 641,
+          "end_line": 644,
+          "hash": "698b1116f03a138b98aea0bb6ff64e29ea9b4358b2d68c373fc0d46978f5295f",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 3
+          },
+          "start_line": 645,
+          "end_line": 645,
+          "hash": "5034bbca107cbff7dc791e546d45bd2778b943851b5200e61387c67a5726d7f7",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 646,
+          "end_line": 646,
+          "hash": "b8cf00de8a8b346d6c023f8fd694ecf788b1e6e80b7956f2743d47b7a5731045",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "List",
+            "ordered": false
+          },
+          "start_line": 647,
+          "end_line": 649,
+          "hash": "fd3653675e14009dff7e666c187aca53436de1f47b47f76de186fdb2d1b65fb1",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 3
+          },
+          "start_line": 650,
+          "end_line": 650,
+          "hash": "70166e941fc71833fcb0fa3105545b58fd2a5516c053b5d2795bb7aa4c1a776a",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 651,
+          "end_line": 651,
+          "hash": "945cde48ebcf20084c2deae42d64504815a355085ace5fb5fd8b4befa7172905",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "List",
+            "ordered": false
+          },
+          "start_line": 652,
+          "end_line": 656,
+          "hash": "3bf4205f954a4581c03524176cbb634c1ec8b8760f0363f14061f238bdefc106",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 3
+          },
+          "start_line": 657,
+          "end_line": 657,
+          "hash": "8129ff1528b1e120831fde239c601f1470be9ab61631572282aa3fc0d5a4db46",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 658,
+          "end_line": 658,
+          "hash": "935a8f2ff47ce83d1a118309cd471c30502a015338f57a33e0bc2747c19b01a5",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "List",
+            "ordered": false
+          },
+          "start_line": 659,
+          "end_line": 663,
+          "hash": "3cdaea5fec1336637883a1b8b643fab168b302eb5f3113e544cd97ef4268a5c1",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 3
+          },
+          "start_line": 664,
+          "end_line": 664,
+          "hash": "e9c13ddc09106de8b4db70ac881112874131879fa6680f7730e017ffc75b2ead",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 665,
+          "end_line": 665,
+          "hash": "d4e34bac1018b6891a7eb03fefe7cf6d0e36f294ef4422be8c4e80f8cc8cb764",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "List",
+            "ordered": false
+          },
+          "start_line": 666,
+          "end_line": 668,
+          "hash": "6950cfb9d89c20802b20d824b7aeee39f2b70f0cb7bdbfa6f5299cdcdd1e7294",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 3
+          },
+          "start_line": 669,
+          "end_line": 669,
+          "hash": "a8864ce6dd8714b6bd327efa5b8f61fff90b0b6583b12943335e64d7e6e9a0e5",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 670,
+          "end_line": 670,
+          "hash": "23d98b44803a7beedca2eddc79f251212c2256122a38efe81beb14a8b9550d9c",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "List",
+            "ordered": false
+          },
+          "start_line": 671,
+          "end_line": 674,
+          "hash": "3c9e558a45edec2c5f3b7374e7789e5d57e37fa5f23017c379222228c4bb2807",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 3
+          },
+          "start_line": 675,
+          "end_line": 675,
+          "hash": "adc74dd7b3325a8164171fb70f6a02e482b0ac8a9e04814b2db1823fb7c4bca9",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 676,
+          "end_line": 676,
+          "hash": "d709e74b6afa9b902e1e2358a20719f1b09cc70db48b8dd5b0a0e859bac43f66",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "List",
+            "ordered": false
+          },
+          "start_line": 677,
+          "end_line": 681,
+          "hash": "76510b7b7553d62ae6d0a3202b2ad8b23162247a15fcfcca0dcb3070e8c1d6fb",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 3
+          },
+          "start_line": 682,
+          "end_line": 682,
+          "hash": "86d46e6bb7151fb4f422cb28a5c09c94bf3ad79319d1d4960ff6c4517dc12f5c",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 683,
+          "end_line": 683,
+          "hash": "ac51077aae5ac05dd0e224449a8225705ff97c49ad2751e1046845ba30db025f",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "List",
+            "ordered": false
+          },
+          "start_line": 684,
+          "end_line": 687,
+          "hash": "7482a425c56ebd9d1132e28bb85f14774dd2455ebd640c673c3aec27f819f952",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "ThematicBreak"
+          },
+          "start_line": 688,
+          "end_line": 688,
+          "hash": "3f9ec27a2886a2a620c93f2978d57229f3d4b7add6e3f004e4e74df0d6baf900",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 2
+          },
+          "start_line": 690,
+          "end_line": 690,
+          "hash": "bb988c17a2265fa128fd0c3638e58b2d2e6c9af2ca7678f119f5df8f2ceccdb5",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 3
+          },
+          "start_line": 692,
+          "end_line": 692,
+          "hash": "e79c673e478794b90f6bb27617bee3459985eb2f08a3e95b8a660397651dc8f3",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "List",
+            "ordered": false
+          },
+          "start_line": 693,
+          "end_line": 695,
+          "hash": "f527843de987a038502140b6eacce854f0c347149f8636261233bfa6e6e8f2d0",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 3
+          },
+          "start_line": 696,
+          "end_line": 696,
+          "hash": "8103c5fdcc890b9d61e26262527b25338a09a2155987676cf7d7292572a33bde",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "List",
+            "ordered": false
+          },
+          "start_line": 697,
+          "end_line": 700,
+          "hash": "8774503ff9753b37b7a1ef23824334c7c58831425ca959cfbcb8446263ede486",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 3
+          },
+          "start_line": 701,
+          "end_line": 701,
+          "hash": "2da084f353497e61894e6729c3e554da3eb05f4bce367aa6ebdbe59a366c7b22",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "List",
+            "ordered": false
+          },
+          "start_line": 702,
+          "end_line": 703,
+          "hash": "193d134254fa1ff2142136a07a681f328a5695fd689db614d72069ea9a528a44",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 3
+          },
+          "start_line": 704,
+          "end_line": 704,
+          "hash": "d1e643ef4a7d712f5a1c766d3e040d6e54710574e3121f740cd853b3f05f3418",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 705,
+          "end_line": 705,
+          "hash": "0461ac130b7dad78dff50df1a8f12ea9bbc5fbccacce0f31f340a3653092133b",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 3
+          },
+          "start_line": 707,
+          "end_line": 707,
+          "hash": "18e6cdd43249ecaba7cc518ceb064204504cab93959b1215f84616a1d78fbe25",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 708,
+          "end_line": 709,
+          "hash": "cade98abf763907d43af3c8cf778c5552f23f4369bdbdcdb18eabcd33cd66961",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "ThematicBreak"
+          },
+          "start_line": 711,
+          "end_line": 711,
+          "hash": "3f9ec27a2886a2a620c93f2978d57229f3d4b7add6e3f004e4e74df0d6baf900",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 2
+          },
+          "start_line": 713,
+          "end_line": 713,
+          "hash": "b07bb42162bad423b62e0e558ce0a79c76d8f6bf8f02663632e0ae5445be6102",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Table"
+          },
+          "start_line": 715,
+          "end_line": 723,
+          "hash": "63e549f058850a44c1a488386949b9adab2bfcfe18a02e77be64deec14e11db6",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "ThematicBreak"
+          },
+          "start_line": 725,
+          "end_line": 725,
+          "hash": "3f9ec27a2886a2a620c93f2978d57229f3d4b7add6e3f004e4e74df0d6baf900",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 2
+          },
+          "start_line": 727,
+          "end_line": 727,
+          "hash": "5e436ec141a2dc307ad6bae226782298bad4349ef1d34286b715bf39e34cab9e",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "HtmlBlock"
+          },
+          "start_line": 729,
+          "end_line": 729,
+          "hash": "57e8f0799d11d6e26acb97b7f8ae0b913975882dac99c1e7414ccba430263baa",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "HtmlBlock"
+          },
+          "start_line": 730,
+          "end_line": 730,
+          "hash": "b6e8f086acf97cc00214488a87ab991e8d225e02428d9af81618683729f6897d",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "List",
+            "ordered": false
+          },
+          "start_line": 732,
+          "end_line": 746,
+          "hash": "bef389979abaa385228f5725c7e9a273a60c7aca05a04f35bf5c6beb5541d303",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "HtmlBlock"
+          },
+          "start_line": 747,
+          "end_line": 747,
+          "hash": "016a15098463131a1d35ed23031bc7a8f5b9a577775e31ffb2b54d7e51ae0408",
+          "spl_hashes": null
+        }
+      ],
+      "file_merkle": {
+        "root_hash": "46d442f5e29eee622f44234a9d70d6cd7b47c072834a6d38901dbdcbcf3c6880",
+        "sections": [],
+        "spl_leaves": []
+      }
+    }
+  },
+  "vault_root_hash": "031f5942ec5087ea7834fbe945f201fdfe42f4713fee499c727dd67ec74f539c"
+}

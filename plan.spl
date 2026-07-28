@@ -1,0 +1,239 @@
+(meta plan
+  (title "SPEC-002 — Visual Key Fingerprint (LifeHash v2)")
+  (description "Replace SCREEN-001's three colour bars with LifeHash v2, and give every surface that displays a key its own visual fingerprint — phone and CLI alike."))
+
+;; ── the agent working this plan ─────────────────────────────────────────────
+(given agent-claude-available)
+
+;; ─────────────────────────────────────────────────────────────────────────────
+;; task-dep — adopt the dependency (ADR-101, ADR-106)
+;; ─────────────────────────────────────────────────────────────────────────────
+(meta task-dep
+  (description "Pin bc-lifehash =0.1.0 in the workspace and add it to selfsame-core; raise workspace rust-version to 1.85.0; keep the debug profile fast enough to test with.")
+  (acceptance "cargo build --workspace succeeds; crates/selfsame-core/tests/purity.rs passes unchanged (NFR-105); the bc-lifehash version requirement is exact."))
+(meta r-ready-dep (source "SPEC-002-visual-key-fingerprint#ADR-101"))
+
+(given task-dep)
+(given no-deps-dep)
+(normally r-ready-dep (and task-dep no-deps-dep) ready-dep)
+(normally r-assign-dep (and ready-dep agent-claude-available) assign-to-dep-claude)
+
+;; ─────────────────────────────────────────────────────────────────────────────
+;; task-core — CON-101, the one implementation
+;; ─────────────────────────────────────────────────────────────────────────────
+(meta task-core
+  (description "Implement CON-101 in crates/selfsame-core/src/fingerprint.rs: the LifeHash type (32x32 RGB, rgb/pixel/base64) and Fingerprint::lifehash, computed from the six fingerprint bytes per ADR-102.")
+  (acceptance "TEST-102 (determinism, shape, full 48-bit preimage, one-bit sensitivity), TEST-104 (domain separation survives), TEST-106 (no image collision over 1e5 keys) and TEST-110 (reference vectors reproduce) all pass."))
+(meta r-ready-core (source "SPEC-002-visual-key-fingerprint#CON-101"))
+
+(given task-core)
+(normally r-ready-core (and task-core completed-dep) ready-core)
+(normally r-assign-core (and ready-core agent-claude-available) assign-to-core-claude)
+
+;; ─────────────────────────────────────────────────────────────────────────────
+;; task-tauri — CON-102, the Rust half of the boundary
+;; ─────────────────────────────────────────────────────────────────────────────
+(meta task-tauri
+  (description "Add the lifehash field to Fp in src-tauri/src/commands.rs, and carry a device-key LifeHash on DeviceRow in src-tauri/src/session.rs so every device row can show one (REQ-101).")
+  (acceptance "cargo test -p selfsame passes; every Fp crossing the IPC boundary carries a 4096-character lifehash; DeviceRow exposes one per device."))
+(meta r-ready-tauri (source "SPEC-002-visual-key-fingerprint#CON-102"))
+
+(given task-tauri)
+(normally r-ready-tauri (and task-tauri completed-core) ready-tauri)
+(normally r-assign-tauri (and ready-tauri agent-claude-available) assign-to-tauri-claude)
+
+;; ─────────────────────────────────────────────────────────────────────────────
+;; task-cli — CON-103, the terminal rendering
+;; ─────────────────────────────────────────────────────────────────────────────
+(meta task-cli
+  (description "Render the LifeHash as ANSI half-blocks in selfsame-cli: lifehash_lines per CON-103, printed by `selfsame status` and by the link report, following the existing qr_lines precedent (ADR-105).")
+  (acceptance "TEST-109 passes: 16 lines of 32 glyphs, each reset-terminated, foreground row 2y and background row 2y+1."))
+(meta r-ready-cli (source "SPEC-002-visual-key-fingerprint#CON-103"))
+
+(given task-cli)
+(normally r-ready-cli (and task-cli completed-core) ready-cli)
+(normally r-assign-cli (and ready-cli agent-claude-available) assign-to-cli-claude)
+
+;; ─────────────────────────────────────────────────────────────────────────────
+;; task-ui — CON-102 front end; this is where the bars actually die
+;; ─────────────────────────────────────────────────────────────────────────────
+(meta task-ui
+  (description "Replace renderBars with a recognise-then-paint canvas renderer in src/app.js; add the picture to every surface in REQ-101's table; replace .fp__bars/.fp__bar in src/styles.css; update src/index.html.")
+  (acceptance "TEST-101 (every surface paints), TEST-103 (hex still the compared value and still largest), TEST-105 (aria-hidden, text always present, device state keeps its shape), TEST-108 (malformed lifehash rejected before painting) all hold; no reference to fp__bar remains."))
+(meta r-ready-ui (source "SPEC-002-visual-key-fingerprint#REQ-101"))
+
+(given task-ui)
+(normally r-ready-ui (and task-ui completed-tauri) ready-ui)
+(normally r-assign-ui (and ready-ui agent-claude-available) assign-to-ui-claude)
+
+;; ─────────────────────────────────────────────────────────────────────────────
+;; task-screens — what Rust cannot see
+;; ─────────────────────────────────────────────────────────────────────────────
+(meta task-screens
+  (description "Extend tests/screens.mjs: stub lifehash in the bridge, assert a painted non-blank canvas on every REQ-101 surface, and measure paint latency against NFR-104.")
+  (acceptance "TEST-101 and TEST-107 pass; node tests/screens.mjs completes with every screen asserted."))
+(meta r-ready-screens (source "SPEC-002-visual-key-fingerprint#TEST-101"))
+
+(given task-screens)
+(normally r-ready-screens (and task-screens completed-ui) ready-screens)
+(normally r-assign-screens (and ready-screens agent-claude-available) assign-to-screens-claude)
+
+;; ─────────────────────────────────────────────────────────────────────────────
+;; task-docs — Phase 3 is not done until the documentation is
+;; ─────────────────────────────────────────────────────────────────────────────
+(meta task-docs
+  (description "Update README.md and docs/using-selfsame.md for the visual fingerprint; move SPEC-002 status to implemented; verify the vault with zetl check.")
+  (acceptance "README and user docs describe the picture and say plainly that the hex is still the value to compare (REQ-103); SPEC-002 status is implemented; zetl check reports no NEW dead links beyond the recorded SPEC-001/UX-law backlog."))
+(meta r-ready-docs (source "SPEC-002-visual-key-fingerprint#REQ-103"))
+
+(given task-docs)
+(normally r-ready-docs (and task-docs completed-screens completed-cli) ready-docs)
+(normally r-assign-docs (and ready-docs agent-claude-available) assign-to-docs-claude)
+
+;; ─────────────────────────────────────────────────────────────────────────────
+;; Gates
+;; ─────────────────────────────────────────────────────────────────────────────
+;; Both gate literals are *discovery* facts: they are asserted at runtime with
+;; `hence task assert` if the condition is ever observed, and are declared here
+;; so the plan validates and so a reader can see what would stop the work.
+(meta failed-purity-gate
+  (description "crates/selfsame-core/tests/purity.rs failed — an effectful crate reached the pure core."))
+(meta discovered-picture-promoted-to-comparison
+  (description "A screen asks the user to compare pictures instead of hex, changing SPEC-001's human backstop."))
+
+;; The purity boundary is not negotiable: if the dependency drags an effectful
+;; crate into the core, the whole plan stops rather than routing around it.
+(meta d-purity (source "SPEC-002-visual-key-fingerprint#NFR-105"))
+(except d-purity failed-purity-gate (not ready-core))
+
+;; REQ-103 is the one that keeps this a recognition aid rather than a change to
+;; SPEC-001's human backstop. If the UI ever promotes the picture to the
+;; compared value, that is out of scope here and blocks the documentation task.
+(meta d-normative-hex (source "SPEC-002-visual-key-fingerprint#REQ-103"))
+(except d-normative-hex discovered-picture-promoted-to-comparison (not ready-docs))
+
+(claims agent:claude
+  :at "2026-07-28T12:30:52Z"
+  (given claim-v1-dep)
+  (normally r-cl-state-v1-dep claim-v1-dep state-claimed-v1-dep)
+  (normally r-cl-chain-v1-dep state-claimed-v1-dep claimed-dep)
+)
+
+;; Propagation rules: failures in 'dep' block downstream tasks
+(normally r-propagate-core-from-dep-failed failed-dep upstream-blocked-core)
+(normally r-propagate-core-from-dep-permanently-failed permanently-failed-dep upstream-blocked-core)
+(normally r-propagate-core-from-dep-stale-v1 stale-v1-dep upstream-blocked-core)
+(normally r-propagate-core-from-dep-timeout-v1 timeout-v1-dep upstream-blocked-core)
+(normally r-propagate-core-from-dep-blocked upstream-blocked-dep upstream-blocked-core)
+
+;; Transitive propagation: upstream-blocked cascades through dependency chain
+(normally r-propagate-cli-from-core-blocked upstream-blocked-core upstream-blocked-cli)
+(normally r-propagate-tauri-from-core-blocked upstream-blocked-core upstream-blocked-tauri)
+(normally r-propagate-docs-from-cli-blocked upstream-blocked-cli upstream-blocked-docs)
+(normally r-propagate-ui-from-tauri-blocked upstream-blocked-tauri upstream-blocked-ui)
+(normally r-propagate-screens-from-ui-blocked upstream-blocked-ui upstream-blocked-screens)
+(normally r-propagate-docs-from-screens-blocked upstream-blocked-screens upstream-blocked-docs)
+
+(claims agent:claude
+  :at "2026-07-28T12:32:03Z"
+  (given completed-dep))
+
+(claims agent:claude
+  :at "2026-07-28T12:32:03Z"
+  (given claim-v1-core)
+  (normally r-cl-state-v1-core claim-v1-core state-claimed-v1-core)
+  (normally r-cl-chain-v1-core state-claimed-v1-core claimed-core)
+)
+
+;; Propagation rules: failures in 'core' block downstream tasks
+(normally r-propagate-cli-from-core-failed failed-core upstream-blocked-cli)
+(normally r-propagate-cli-from-core-permanently-failed permanently-failed-core upstream-blocked-cli)
+(normally r-propagate-cli-from-core-stale-v1 stale-v1-core upstream-blocked-cli)
+(normally r-propagate-cli-from-core-timeout-v1 timeout-v1-core upstream-blocked-cli)
+(normally r-propagate-tauri-from-core-failed failed-core upstream-blocked-tauri)
+(normally r-propagate-tauri-from-core-permanently-failed permanently-failed-core upstream-blocked-tauri)
+(normally r-propagate-tauri-from-core-stale-v1 stale-v1-core upstream-blocked-tauri)
+(normally r-propagate-tauri-from-core-timeout-v1 timeout-v1-core upstream-blocked-tauri)
+
+(claims agent:claude
+  :at "2026-07-28T12:35:41Z"
+  (given completed-core))
+
+(claims agent:claude
+  :at "2026-07-28T12:35:41Z"
+  (given claim-v1-tauri)
+  (normally r-cl-state-v1-tauri claim-v1-tauri state-claimed-v1-tauri)
+  (normally r-cl-chain-v1-tauri state-claimed-v1-tauri claimed-tauri)
+)
+
+;; Propagation rules: failures in 'tauri' block downstream tasks
+(normally r-propagate-ui-from-tauri-failed failed-tauri upstream-blocked-ui)
+(normally r-propagate-ui-from-tauri-permanently-failed permanently-failed-tauri upstream-blocked-ui)
+(normally r-propagate-ui-from-tauri-stale-v1 stale-v1-tauri upstream-blocked-ui)
+(normally r-propagate-ui-from-tauri-timeout-v1 timeout-v1-tauri upstream-blocked-ui)
+
+(claims agent:claude
+  :at "2026-07-28T12:37:57Z"
+  (given completed-tauri))
+
+(claims agent:claude
+  :at "2026-07-28T12:37:57Z"
+  (given claim-v1-cli)
+  (normally r-cl-state-v1-cli claim-v1-cli state-claimed-v1-cli)
+  (normally r-cl-chain-v1-cli state-claimed-v1-cli claimed-cli)
+)
+
+;; Propagation rules: failures in 'cli' block downstream tasks
+(normally r-propagate-docs-from-cli-failed failed-cli upstream-blocked-docs)
+(normally r-propagate-docs-from-cli-permanently-failed permanently-failed-cli upstream-blocked-docs)
+(normally r-propagate-docs-from-cli-stale-v1 stale-v1-cli upstream-blocked-docs)
+(normally r-propagate-docs-from-cli-timeout-v1 timeout-v1-cli upstream-blocked-docs)
+
+(claims agent:claude
+  :at "2026-07-28T12:39:47Z"
+  (given completed-cli))
+
+(claims agent:claude
+  :at "2026-07-28T12:39:47Z"
+  (given claim-v1-ui)
+  (normally r-cl-state-v1-ui claim-v1-ui state-claimed-v1-ui)
+  (normally r-cl-chain-v1-ui state-claimed-v1-ui claimed-ui)
+)
+
+;; Propagation rules: failures in 'ui' block downstream tasks
+(normally r-propagate-screens-from-ui-failed failed-ui upstream-blocked-screens)
+(normally r-propagate-screens-from-ui-permanently-failed permanently-failed-ui upstream-blocked-screens)
+(normally r-propagate-screens-from-ui-stale-v1 stale-v1-ui upstream-blocked-screens)
+(normally r-propagate-screens-from-ui-timeout-v1 timeout-v1-ui upstream-blocked-screens)
+
+(claims agent:claude
+  :at "2026-07-28T12:48:05Z"
+  (given completed-ui))
+
+(claims agent:claude
+  :at "2026-07-28T12:48:05Z"
+  (given claim-v1-screens)
+  (normally r-cl-state-v1-screens claim-v1-screens state-claimed-v1-screens)
+  (normally r-cl-chain-v1-screens state-claimed-v1-screens claimed-screens)
+)
+
+;; Propagation rules: failures in 'screens' block downstream tasks
+(normally r-propagate-docs-from-screens-failed failed-screens upstream-blocked-docs)
+(normally r-propagate-docs-from-screens-permanently-failed permanently-failed-screens upstream-blocked-docs)
+(normally r-propagate-docs-from-screens-stale-v1 stale-v1-screens upstream-blocked-docs)
+(normally r-propagate-docs-from-screens-timeout-v1 timeout-v1-screens upstream-blocked-docs)
+
+(claims agent:claude
+  :at "2026-07-28T12:48:05Z"
+  (given completed-screens))
+
+(claims agent:claude
+  :at "2026-07-28T12:49:37Z"
+  (given claim-v1-docs)
+  (normally r-cl-state-v1-docs claim-v1-docs state-claimed-v1-docs)
+  (normally r-cl-chain-v1-docs state-claimed-v1-docs claimed-docs)
+)
+
+(claims agent:claude
+  :at "2026-07-28T12:52:19Z"
+  (given completed-docs))
