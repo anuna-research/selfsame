@@ -1,0 +1,706 @@
+/*
+ * Selfsame — the visual system from docs/mockup/Selfsame.html.
+ *
+ * Palette (mockup, "Palette" section):
+ *   Shell   #0B0F0D  page
+ *   Surface #121815  screen
+ *   Cards   #1A231E
+ *   Bone    #EDE8DF  text
+ *   Lichen  #98A39B  secondary
+ *   Green   #63C08A  verified, act
+ *   Amber   #D9903B  in flight, unproven
+ *   Rust    #D9553F  refused, revoked
+ *
+ * Type: the mockup uses IBM Plex Sans and IBM Plex Mono. The app ships no
+ * webfonts — Selfsame must work with no network and its CSP forbids remote
+ * origins — so the stacks below name Plex first and fall through to the
+ * platform UI and monospace faces. Metrics differ slightly from the mockup;
+ * the hierarchy does not.
+ *
+ * Colour is never the only carrier of meaning (WCAG 2.2 AA, SCREEN-001): the
+ * untrusted region is marked by a dashed border *and* a different type
+ * treatment *and* the lead-in phrase, and every state that uses colour also
+ * carries a word.
+ */
+
+:root {
+  --shell: #0b0f0d;
+  --surface: #121815;
+  --card: #1a231e;
+  --bone: #ede8df;
+  --lichen: #98a39b;
+  --dim: #7c877f;
+  --green: #63c08a;
+  --green-soft: #8fd9ac;
+  --amber: #d9903b;
+  --rust: #d9553f;
+  --hairline: rgba(237, 232, 223, 0.1);
+  --hairline-strong: rgba(237, 232, 223, 0.18);
+
+  --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  --tap: 44px; /* Fitts's Law floor for a primary control */
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background: var(--shell);
+  color: var(--bone);
+  font-family: var(--sans);
+  font-size: 16px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+#app {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── screens ─────────────────────────────────────────────────────────── */
+
+.screen {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 34px 26px calc(30px + env(safe-area-inset-bottom));
+  overflow: hidden;
+}
+
+.screen--scroll {
+  overflow-y: auto;
+}
+
+.screen[hidden] {
+  display: none;
+}
+
+.spacer {
+  flex: 1;
+  min-height: 12px;
+}
+
+/* ── the boundary mark ───────────────────────────────────────────────── */
+/*
+ * One closed ring holding one solid centre. Ratios from the mockup:
+ * centre:outer = 1:3, ring weight = 1/12 of the outer. It is the only drawn
+ * form in the product, so it serves as logo, app icon, loading state, and
+ * identity avatar without being redrawn.
+ */
+
+.mark {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 2px solid var(--green);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+
+.mark::after {
+  content: "";
+  width: 33%;
+  height: 33%;
+  border-radius: 50%;
+  background: var(--green);
+}
+
+.mark--lg {
+  width: 72px;
+  height: 72px;
+  border-width: 6px;
+  margin: 8px 0 4px;
+}
+
+/* Hollow centre — signed here, not yet published. */
+.mark--pending::after {
+  background: transparent;
+  border: 2px solid var(--amber);
+}
+.mark--pending {
+  border-color: var(--amber);
+}
+
+/* Broken ring — not verified, nothing claimed. */
+.mark--broken {
+  border-color: var(--rust);
+  border-style: dashed;
+}
+.mark--broken::after {
+  background: var(--rust);
+}
+
+.mark--ok {
+  border-color: var(--green);
+}
+
+/* Opened, turning — working. */
+.mark--spin {
+  width: 40px;
+  height: 40px;
+  border-width: 4px;
+  border-top-color: transparent;
+  animation: anunaSpin 900ms linear infinite;
+}
+.mark--spin::after {
+  display: none;
+}
+
+@keyframes anunaSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mark--spin {
+    animation: none;
+    border-top-color: var(--green);
+  }
+  .scanner__line {
+    animation: none;
+  }
+}
+
+/* ── type ────────────────────────────────────────────────────────────── */
+
+h1 {
+  font-size: 30px;
+  line-height: 1.12;
+  letter-spacing: -0.025em;
+  font-weight: 500;
+  text-wrap: pretty;
+}
+
+h2 {
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+
+.lede {
+  color: var(--lichen);
+  font-size: 15px;
+  text-wrap: pretty;
+}
+
+.label {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+.label--centre,
+.caution--centre,
+.fingerprint--centre {
+  text-align: center;
+}
+
+.value {
+  font-size: 15px;
+}
+
+.step {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--green);
+}
+
+.brand {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--lichen);
+}
+
+.caution {
+  color: var(--dim);
+  font-size: 13px;
+  line-height: 1.5;
+  text-wrap: pretty;
+}
+
+.footnote {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--dim);
+  word-break: break-all;
+}
+
+.error {
+  color: var(--rust);
+  font-size: 13.5px;
+}
+
+.empty {
+  color: var(--dim);
+  font-size: 14px;
+}
+
+code {
+  font-family: var(--mono);
+  color: var(--bone);
+}
+
+/* Machine-produced values are always mono — the mockup's rule: "anything a
+   machine produced". */
+.fingerprint {
+  font-family: var(--mono);
+  font-size: 21px;
+  letter-spacing: 0.14em;
+  color: var(--bone);
+  word-spacing: 0.1em;
+}
+
+.fingerprint--inline {
+  font-size: inherit;
+  color: var(--green);
+  letter-spacing: 0.1em;
+}
+
+.did {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--lichen);
+  word-break: break-all;
+}
+
+.did--wrap {
+  line-height: 1.5;
+}
+
+/* ── cards ───────────────────────────────────────────────────────────── */
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--hairline);
+  border-radius: 16px;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.card--root {
+  background: var(--surface);
+}
+
+.card--verified {
+  border-color: var(--hairline-strong);
+}
+
+/*
+ * The trust boundary, drawn. Law of Common Region: three regions with distinct
+ * treatment — verified facts (solid card), the untrusted device claim (dashed
+ * border, different type), and the fingerprint (unboxed, centred).
+ */
+.card--untrusted {
+  background: transparent;
+  border: 1px dashed var(--amber);
+}
+
+.label--untrusted {
+  color: var(--amber);
+}
+
+.untrusted-text {
+  font-family: var(--mono);
+  font-size: 15px;
+  color: var(--bone);
+  white-space: pre-wrap;
+  word-break: break-word;
+  /* No formatting is honoured: the value is inserted as text, never markup. */
+}
+
+.grant {
+  border-top: 1px solid var(--hairline);
+  padding-top: 14px;
+  font-size: 14.5px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.grant__limit {
+  color: var(--lichen);
+}
+
+/* ── controls ────────────────────────────────────────────────────────── */
+
+.btn {
+  min-height: var(--tap);
+  border-radius: 12px;
+  border: 1px solid transparent;
+  font-family: var(--sans);
+  font-size: 15.5px;
+  font-weight: 500;
+  cursor: pointer;
+  padding: 12px 18px;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.btn + .btn {
+  margin-top: 8px; /* ≥ 8pt clearance — Fitts's Law */
+}
+
+/*
+ * Von Restorff: exactly one filled control per screen, and its weight matches
+ * its consequence. On the consent screen that control grants authority
+ * permanently, so nothing else on the screen may compete with it.
+ */
+.btn--primary {
+  background: var(--green);
+  color: #08120c;
+}
+.btn--primary:hover:not(:disabled) {
+  background: var(--green-soft);
+}
+.btn--primary:disabled {
+  background: rgba(99, 192, 138, 0.25);
+  color: rgba(8, 18, 12, 0.5);
+  cursor: not-allowed;
+}
+
+.btn--quiet {
+  background: transparent;
+  color: var(--lichen);
+}
+.btn--quiet:hover {
+  color: var(--bone);
+}
+
+.btn--danger {
+  background: transparent;
+  border-color: var(--rust);
+  color: var(--rust);
+}
+.btn--danger:hover {
+  background: rgba(217, 85, 63, 0.12);
+}
+
+.btn--small {
+  min-height: 36px;
+  padding: 7px 14px;
+  font-size: 13.5px;
+  background: transparent;
+  border-color: var(--hairline-strong);
+  color: var(--bone);
+}
+
+.back {
+  align-self: flex-start;
+  background: none;
+  border: none;
+  color: var(--lichen);
+  font-family: var(--sans);
+  font-size: 14.5px;
+  cursor: pointer;
+  padding: 6px 0;
+  min-height: 32px;
+}
+.back:hover {
+  color: var(--bone);
+}
+
+:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: 2px;
+}
+
+/*
+ * The router moves focus to each screen's heading so a screen reader announces
+ * the new context. The heading is not interactive, so it takes no focus ring —
+ * a ring there would read as "this is a control" to a sighted user and compete
+ * with the one control that actually is.
+ */
+h1:focus,
+h1:focus-visible {
+  outline: none;
+}
+
+/* ── fields ──────────────────────────────────────────────────────────── */
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.field__label {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+input[type="password"],
+input[type="text"],
+textarea {
+  background: var(--card);
+  border: 1px solid var(--hairline-strong);
+  border-radius: 12px;
+  padding: 13px 14px;
+  color: var(--bone);
+  font-family: var(--mono);
+  font-size: 15px;
+  min-height: var(--tap);
+  resize: none;
+  width: 100%;
+}
+
+input:focus,
+textarea:focus {
+  border-color: var(--green);
+  outline: none;
+}
+
+/* ── recovery phrase ─────────────────────────────────────────────────── */
+
+.words {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px 12px;
+  list-style: none;
+  counter-reset: word;
+}
+
+.words li {
+  counter-increment: word;
+  background: var(--card);
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-family: var(--mono);
+  font-size: 15px;
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+}
+
+.words li::before {
+  content: counter(word);
+  color: var(--dim);
+  font-size: 11px;
+  min-width: 14px;
+  text-align: right;
+}
+
+.challenge {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* ── devices ─────────────────────────────────────────────────────────── */
+
+.home-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+
+.section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 6px;
+}
+
+.devices {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.device {
+  background: var(--card);
+  border: 1px solid var(--hairline);
+  border-radius: 14px;
+  padding: 14px 16px;
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  cursor: pointer;
+  width: 100%;
+  text-align: left;
+  color: inherit;
+  font-family: inherit;
+  font-size: inherit;
+  min-height: var(--tap);
+}
+
+.device:hover {
+  border-color: var(--hairline-strong);
+}
+
+.device__body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.device__name {
+  font-size: 15px;
+}
+
+.device__meta {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--dim);
+  word-break: break-all;
+}
+
+.device--revoked .device__name {
+  color: var(--lichen);
+  text-decoration: line-through;
+}
+
+.device--revoked .device__meta {
+  color: var(--rust);
+}
+
+.device--pending .device__meta {
+  color: var(--amber);
+}
+
+.pending {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--amber);
+}
+
+/* ── scanner ─────────────────────────────────────────────────────────── */
+
+.scanner {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  align-items: center;
+}
+
+.scanner__frame {
+  width: 100%;
+  max-width: 260px;
+  aspect-ratio: 1;
+  border-radius: 20px;
+  border: 1px solid var(--hairline-strong);
+  background: var(--surface);
+  position: relative;
+  overflow: hidden;
+}
+
+.scanner__line {
+  position: absolute;
+  left: 8%;
+  right: 8%;
+  height: 2px;
+  background: var(--green);
+  box-shadow: 0 0 18px rgba(99, 192, 138, 0.6);
+  animation: anunaScan 2.6s ease-in-out infinite;
+}
+
+@keyframes anunaScan {
+  0% {
+    transform: translateY(0);
+    opacity: 0;
+  }
+  12% {
+    opacity: 1;
+  }
+  88% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(248px);
+    opacity: 0;
+  }
+}
+
+.scanner__note {
+  color: var(--dim);
+  font-size: 13px;
+  text-align: center;
+  text-wrap: pretty;
+}
+
+/* ── consent ─────────────────────────────────────────────────────────── */
+
+.consent-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+/*
+ * Goal-Gradient: a bounded, visible finish line. It also says plainly that
+ * stalling is a failure mode, which a static screen does not.
+ */
+.countdown {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--lichen);
+}
+
+.countdown--urgent {
+  color: var(--amber);
+}
+
+.code-state {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--dim);
+}
+
+.code-state--ok {
+  color: var(--green);
+}
+
+/* ── busy ────────────────────────────────────────────────────────────── */
+
+.busy {
+  position: fixed;
+  inset: 0;
+  background: rgba(11, 15, 13, 0.86);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  z-index: 20;
+}
+
+.busy[hidden] {
+  display: none;
+}
+
+.busy p {
+  color: var(--lichen);
+  font-size: 14px;
+}

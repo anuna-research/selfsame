@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Selfsame</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <!--
+      One screen is visible at a time. The router in app.js toggles [hidden];
+      every screen is present in the DOM so a reader can see the whole flow in
+      one file, in the order a user meets it.
+    -->
+    <main id="app" aria-live="polite">
+      <!-- ══ HP-1 · 01 Welcome ══════════════════════════════════════════ -->
+      <section class="screen" data-screen="welcome" hidden>
+        <div class="mark mark--lg" aria-hidden="true"></div>
+        <h1>Your home key lives on this phone.</h1>
+        <p class="lede">
+          It proves your other devices are yours. Nobody else holds a copy —
+          not us, not the people you talk to.
+        </p>
+        <div class="spacer"></div>
+        <button class="btn btn--primary" data-action="begin-create">Create my home key</button>
+        <button class="btn btn--quiet" data-action="begin-restore">I already have a home key</button>
+      </section>
+
+      <!-- ══ HP-1 · passcode (REQ-024 user presence) ════════════════════ -->
+      <section class="screen" data-screen="passcode" hidden>
+        <button class="back" data-action="to-welcome">Back</button>
+        <p class="step">Step 1 of 3</p>
+        <h1>Choose a passcode.</h1>
+        <p class="lede">
+          You will be asked for it every time your home key signs something —
+          adding a device, or removing one. It never leaves this device.
+        </p>
+        <label class="field">
+          <span class="field__label">Passcode</span>
+          <input type="password" id="passcode-1" autocomplete="new-password" inputmode="text" />
+        </label>
+        <label class="field">
+          <span class="field__label">Again</span>
+          <input type="password" id="passcode-2" autocomplete="new-password" />
+        </label>
+        <p class="error" data-error="passcode" hidden></p>
+        <div class="spacer"></div>
+        <button class="btn btn--primary" data-action="create-identity">Continue</button>
+      </section>
+
+      <!-- ══ HP-1 · 02 Recovery phrase ══════════════════════════════════ -->
+      <section class="screen" data-screen="phrase" hidden>
+        <p class="step">Step 2 of 3</p>
+        <h1>Write these twelve words down.</h1>
+        <p class="lede">
+          They are the only way back if this phone is lost. Paper, not a photo
+          and not a password manager on the same device.
+        </p>
+        <ol class="words" data-words></ol>
+        <p class="caution" data-screenshot-note></p>
+        <div class="spacer"></div>
+        <button class="btn btn--primary" data-action="to-confirm">I've written them down</button>
+      </section>
+
+      <!-- ══ HP-1 · 03 Confirm (REQ-002) ════════════════════════════════ -->
+      <section class="screen" data-screen="confirm" hidden>
+        <button class="back" data-action="to-phrase">Back to the words</button>
+        <p class="step">Step 3 of 3</p>
+        <h1>Check you have them.</h1>
+        <p class="lede">Three of the twelve, at random.</p>
+        <div class="challenge" data-challenge></div>
+        <p class="error" data-error="confirm" hidden></p>
+        <p class="caution">You can't link a device until this is done.</p>
+        <div class="spacer"></div>
+        <button class="btn btn--primary" data-action="check-backup">Finish</button>
+      </section>
+
+      <!-- ══ HP-1 · 04 Created ══════════════════════════════════════════ -->
+      <section class="screen" data-screen="created" hidden>
+        <div class="mark mark--lg" aria-hidden="true"></div>
+        <h1>This is you now.</h1>
+        <p class="label">Your home key fingerprint</p>
+        <p class="fingerprint" data-created-fingerprint></p>
+        <p class="lede">
+          You will see this again when you link a device. If the two ever
+          disagree, stop and start over.
+        </p>
+        <p class="label">Full identifier</p>
+        <p class="did" data-created-did></p>
+        <div class="spacer"></div>
+        <button class="btn btn--primary" data-action="to-home">Link my first device</button>
+      </section>
+
+      <!-- ══ Restore ════════════════════════════════════════════════════ -->
+      <section class="screen" data-screen="restore" hidden>
+        <button class="back" data-action="to-welcome">Back</button>
+        <h1>Type your twelve words.</h1>
+        <p class="lede">In order, separated by spaces.</p>
+        <label class="field">
+          <span class="field__label">Recovery phrase</span>
+          <textarea id="restore-phrase" rows="4" autocomplete="off" spellcheck="false"></textarea>
+        </label>
+        <label class="field">
+          <span class="field__label">Choose a passcode for this device</span>
+          <input type="password" id="restore-passcode" autocomplete="new-password" />
+        </label>
+        <p class="error" data-error="restore" hidden></p>
+        <div class="spacer"></div>
+        <button class="btn btn--primary" data-action="restore">Restore</button>
+      </section>
+
+      <!-- ══ SCREEN-002 · Home ══════════════════════════════════════════ -->
+      <section class="screen screen--scroll" data-screen="home" hidden>
+        <header class="home-head">
+          <div class="mark" aria-hidden="true"></div>
+          <span class="brand">Selfsame</span>
+        </header>
+
+        <div class="card card--root">
+          <p class="label">Your home key</p>
+          <p class="fingerprint" data-home-fingerprint></p>
+          <p class="did did--wrap" data-home-did></p>
+          <p class="pending" data-pending hidden></p>
+        </div>
+
+        <div class="section-head">
+          <h2>Devices</h2>
+          <button class="btn btn--small" data-action="to-link">Link a device</button>
+        </div>
+        <ul class="devices" data-devices></ul>
+        <p class="empty" data-devices-empty hidden>
+          No devices yet. Open cbcl-chat on your computer and choose
+          <em>This is my device</em>.
+        </p>
+        <div class="spacer"></div>
+        <p class="footnote" data-endpoint></p>
+      </section>
+
+      <!-- ══ Link · scan or type ════════════════════════════════════════ -->
+      <section class="screen" data-screen="link" hidden>
+        <button class="back" data-action="to-home">Cancel</button>
+        <h1>Link a device</h1>
+        <p class="lede">Scan the code on the device you want to link.</p>
+        <div class="scanner" data-scanner>
+          <div class="scanner__frame"><span class="scanner__line"></span></div>
+          <p class="scanner__note" data-scanner-note></p>
+        </div>
+        <div class="spacer"></div>
+        <button class="btn btn--quiet" data-action="to-type">Enter the code by hand</button>
+      </section>
+
+      <!-- ══ Link · typed (REQ-011) ═════════════════════════════════════ -->
+      <section class="screen" data-screen="type" hidden>
+        <button class="back" data-action="to-link">Back</button>
+        <h1>Type the code.</h1>
+        <p class="lede">It starts with <code>anuna1</code> and is 41 characters long.</p>
+        <label class="field">
+          <span class="field__label">Link code</span>
+          <textarea id="code-input" rows="3" autocomplete="off" spellcheck="false"
+                    autocapitalize="none" inputmode="text"></textarea>
+        </label>
+        <p class="code-state" data-code-state></p>
+        <p class="error" data-error="code" hidden></p>
+        <div class="spacer"></div>
+        <button class="btn btn--primary" data-action="read-code" disabled>Continue</button>
+      </section>
+
+      <!-- ══ SCREEN-001 · Authorise ═════════════════════════════════════ -->
+      <section class="screen screen--scroll" data-screen="consent" hidden>
+        <div class="consent-head">
+          <button class="back" data-action="cancel-offer">Cancel</button>
+          <span class="countdown" data-countdown></span>
+        </div>
+        <h1>Copy your home key to this device?</h1>
+
+        <!-- Verified region: from the compiled table, never from the code. -->
+        <div class="card card--verified">
+          <p class="label">Application</p>
+          <p class="value" data-offer-app></p>
+          <p class="label">Purpose</p>
+          <p class="value" data-offer-purpose></p>
+        </div>
+
+        <!-- Untrusted region: dashed border, different type, lead-in phrase. -->
+        <div class="card card--untrusted">
+          <p class="label label--untrusted">The device says it is</p>
+          <p class="untrusted-text" data-offer-desc></p>
+          <p class="caution">
+            Its own words. Anuna can't check them — judge the fingerprint below
+            instead.
+          </p>
+        </div>
+
+        <p class="label label--centre">Key fingerprint</p>
+        <p class="fingerprint fingerprint--centre" data-offer-fingerprint></p>
+        <p class="caution caution--centre">
+          This must match what the other device is showing. If it doesn't, stop.
+        </p>
+
+        <div class="grant">
+          <p>It can prove this key is yours.</p>
+          <p class="grant__limit">
+            It can't add or remove devices, and it gets no new access to your
+            messages.
+          </p>
+        </div>
+
+        <div class="spacer"></div>
+        <button class="btn btn--primary" data-action="to-presence">Authorise</button>
+        <button class="btn btn--quiet" data-action="reject">This isn't me — reject</button>
+      </section>
+
+      <!-- ══ REQ-024 · user presence ════════════════════════════════════ -->
+      <section class="screen" data-screen="presence" hidden>
+        <button class="back" data-action="back-to-consent">Back</button>
+        <div class="mark mark--lg" aria-hidden="true"></div>
+        <h1>Confirm it's you</h1>
+        <p class="lede">
+          Your home key is used once, here, to sign this device in.
+        </p>
+        <label class="field">
+          <span class="field__label">Passcode</span>
+          <input type="password" id="presence-passcode" autocomplete="current-password" />
+        </label>
+        <p class="error" data-error="presence" hidden></p>
+        <div class="spacer"></div>
+        <button class="btn btn--primary" data-action="authorise">Authorise</button>
+      </section>
+
+      <!-- ══ Link · done ════════════════════════════════════════════════ -->
+      <section class="screen" data-screen="linked" hidden>
+        <div class="mark mark--lg mark--ok" aria-hidden="true"></div>
+        <h1 data-linked-title></h1>
+        <p class="lede">
+          Check it now shows
+          <span class="fingerprint fingerprint--inline" data-linked-fingerprint></span>
+          — the same identity fingerprint this phone shows.
+        </p>
+        <p class="label">Added as</p>
+        <p class="did" data-linked-method></p>
+        <p class="label">Telling your contacts</p>
+        <p class="value" data-linked-publishing></p>
+        <div class="spacer"></div>
+        <button class="btn btn--primary" data-action="to-home">Done</button>
+      </section>
+
+      <!-- ══ Link · rejected ════════════════════════════════════════════ -->
+      <section class="screen" data-screen="rejected" hidden>
+        <div class="mark mark--lg mark--broken" aria-hidden="true"></div>
+        <h1>Nothing was authorised.</h1>
+        <p class="lede">
+          That device did not get a copy of your home key, and nothing was
+          published.
+        </p>
+        <p class="caution">
+          If you didn't start this, someone showed you a code that wasn't yours.
+          Nothing has changed.
+        </p>
+        <div class="spacer"></div>
+        <button class="btn btn--primary" data-action="to-home">Back to devices</button>
+      </section>
+
+      <!-- ══ SCREEN-002 · device detail ═════════════════════════════════ -->
+      <section class="screen screen--scroll" data-screen="device" hidden>
+        <button class="back" data-action="to-home">Devices</button>
+        <h1 data-device-title></h1>
+        <div class="card">
+          <p class="label">Method id</p>
+          <p class="did did--wrap" data-device-method></p>
+          <p class="label">Last seen</p>
+          <p class="value" data-device-seen></p>
+          <p class="label">Status</p>
+          <p class="value" data-device-status></p>
+        </div>
+        <p class="caution">
+          The name is stored in your signed home key, so a replacement phone can
+          still name this device.
+        </p>
+        <div class="spacer"></div>
+        <button class="btn btn--danger" data-action="to-unlink">Unlink this device</button>
+      </section>
+
+      <!-- ══ HP-5 · unlink confirm ══════════════════════════════════════ -->
+      <section class="screen" data-screen="unlink" hidden>
+        <button class="back" data-action="back-to-device">Back</button>
+        <h1 data-unlink-title></h1>
+        <p class="lede">
+          Other people will stop treating that device as yours, usually within a
+          day.
+        </p>
+        <p class="caution">
+          It can still connect to the chat as an unknown member — unlinking
+          removes the claim that it is you, not its access. Works whether or not
+          the device is switched on.
+        </p>
+        <label class="field">
+          <span class="field__label">Passcode</span>
+          <input type="password" id="unlink-passcode" autocomplete="current-password" />
+        </label>
+        <p class="error" data-error="unlink" hidden></p>
+        <div class="spacer"></div>
+        <button class="btn btn--danger" data-action="unlink">Unlink</button>
+        <button class="btn btn--quiet" data-action="back-to-device">Keep it</button>
+      </section>
+
+      <!-- ══ busy ═══════════════════════════════════════════════════════ -->
+      <div class="busy" data-busy hidden>
+        <div class="mark mark--spin" aria-hidden="true"></div>
+        <p data-busy-note></p>
+      </div>
+    </main>
+
+    <script type="module" src="app.js"></script>
+  </body>
+</html>

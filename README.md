@@ -1,0 +1,169 @@
+# Selfsame
+
+**Your browser, your CLI, and your phone are the selfsame person — and this
+makes that checkable.**
+
+Selfsame is a root-key custodian. You create one identity on your phone; every
+other client you use gets authorised from it, and other people can verify that
+those clients really are you rather than taking your word for it. Lose a laptop
+and you revoke it from the phone, without needing the laptop back.
+
+*The phone is the home key; every other client gets a copy cut from it, and the
+phone can change the lock.*
+
+> ## Not cleared for production
+>
+> This implements [SPEC-001][spec] as written. That specification is `draft`
+> behind a **Tier-1 gate that has not been passed** — round-2 cross-model
+> adversarial review and human security sign-off are outstanding, and three
+> open questions are gate-blocking (key reuse across four contexts, verifiable
+> resolver freshness, and frame authorship in plaintext channels).
+>
+> Mutation testing of the acceptance predicate — which the specification
+> requires at a 100 % kill rate — **has not been run**. Do not put an identity
+> you rely on into this.
+
+## Before you build
+
+Selfsame depends on two sibling repositories by path. Clone them next to this
+one or nothing compiles:
+
+```
+Code/
+├── selfsame/     ← you are here
+├── did-crdt/     git clone https://github.com/anuna-research/did-crdt
+└── cbcl-rs/      git clone https://codeberg.org/anuna/cbcl-rs
+```
+
+`did-crdt` is pinned at `adb5c7ac1423173f00201cddffa60fe672fb2a53` — its DID
+derivation is adopted verbatim and a change to it is a breaking change to the
+protocol. `crates/selfsame-core/tests/pinned_derivation.rs` fails if it drifts.
+
+## Quick start
+
+```bash
+cargo test --workspace                  # 150 tests
+
+# terminal 1 — the rendezvous and resolver
+cargo run -p selfsame-rendezvous
+
+# terminal 2 — the phone
+SELFSAME_ENDPOINT=http://127.0.0.1:8787 cargo run -p selfsame
+
+# terminal 3 — a device asking to be linked
+SELFSAME_ENDPOINT=http://127.0.0.1:8787 cargo run -p selfsame-cli -- link
+```
+
+Create a home key in the app, write down the twelve words, confirm three of
+them, then paste the code the CLI prints into *Link a device → Enter the code by
+hand*. Full walkthrough: [docs/using-selfsame.md](docs/using-selfsame.md).
+
+## What's here
+
+| Path | What it is |
+|---|---|
+| `crates/selfsame-core` | the pure core — **every security decision in the system, written once** |
+| `src-tauri`, `src` | the phone app: custody, consent, signing, revocation |
+| `crates/selfsame-rendezvous` | the blind mailbox and resolver routes, destined for `did-crdt` |
+| `crates/selfsame-cli` | the device client — the reference for `hark link` |
+
+## How it works
+
+`did:crdt` derives a DID from a BLAKE3 hash committing to your root key, so an
+identity document is **self-certifying**: anyone holding the signed deltas can
+check *"is this really this identity's document?"* with a hash and a signature —
+no blockchain, no key-transparency log, no trusted registry.
+
+Your phone holds that root key. A client shows a 41-character code carrying a
+128-bit secret and leaves a *signed* offer — proving it holds the key it wants
+authorised — in a mailbox addressed by `H(secret)`. The phone reads the code,
+verifies the offer, shows you what it is about to authorise, and puts back a
+credential bundle sealed to that exact offer.
+
+```
+   phone ──reads code (out of band)──▶ derives K=HKDF(s), verifies signed offer
+     │                                              │
+     │  writes bundle sealed with AEAD(K, ad=H(offer))
+     ▼                                              ▼
+   blind mailbox: sees only H(s) and ciphertext ──▶ browser / CLI
+                                                     └ checks: our transcript,
+                                                       DID↔genesis, one signer,
+                                                       our own key
+```
+
+The mailbox operator sees `H(s)` and ciphertext and nothing else. It can
+withhold; it cannot substitute. `crates/selfsame-core/tests/hostile_rendezvous.rs`
+gives it every power that concession allows and asserts what still holds.
+
+## Architecture
+
+Dependencies point inward. The pure core makes every decision; the shells do
+I/O and presentation and nothing else.
+
+```
+  app (Tauri) · rendezvous · cli        ← effectful shell
+              │
+              ▼
+   mb  code  record  seal               ← recognisers and codecs
+   profile  accept  fingerprint         ← the predicate
+   derive  identity                     ← key and delta construction
+              │
+              ▼
+  cbcl-core · cbcl-parser · did_crdt::core
+```
+
+`crates/selfsame-core/tests/purity.rs` enforces that boundary: it fails if
+`tokio`, `reqwest`, `hyper`, `axum`, or a TLS stack enters the core's dependency
+graph, or if any core module reaches for a clock, a socket, or a disk. The core
+compiles to `wasm32-unknown-unknown`.
+
+The webview holds **no security logic**. It cannot reach the root key; it can
+only ask the Rust side to use it, and every such call carries a user-presence
+check.
+
+### The name is the brand; `anuna-ssi/v1` is the protocol
+
+You will see `anuna-ssi/v1/...` throughout the code — in HKDF info strings, AEAD
+associated data, slot derivation, and the CBCL dialect name. **Those are wire
+format**, fixed by SPEC-001 and pinned by `test-vectors/spec-001-v1.json`.
+Renaming them would change every signature, every mailbox address, and every
+DID. They are deliberately untouched by the rename to Selfsame.
+
+## Development
+
+```bash
+cargo test --workspace
+cargo clippy --workspace --all-targets
+cargo build -p selfsame-core --target wasm32-unknown-unknown
+
+npm install && npm run screens      # render all 14 screens headlessly
+```
+
+`tests/screens.mjs` walks every screen with a stubbed Tauri bridge and asserts
+what Rust cannot see: one screen visible at a time, no horizontal overflow at
+phone width, no console errors, and — after a bug that shipped a black
+rectangle — that a *missing* bridge renders an explanation.
+
+### Test vectors
+
+`test-vectors/spec-001-v1.json` fixes the root-key derivation, the DID
+derivation, link codes, slot addresses, and fingerprints, so a second runtime
+can be checked against the same file. Regenerating it after anything ships
+**re-derives every existing identity**, which is why it is a separate, ignored,
+explicitly-named command:
+
+```bash
+cargo test -p selfsame-core --test vectors -- --ignored regenerate
+```
+
+## Specification
+
+The governing documents live in the [`anuna-ssi`][spec] vault: SPEC-001 for the
+design, IMPL-001 for what was built and the five places the implementation had
+to diverge from the spec, and SCREEN-001/002 for the two screens that matter.
+
+[spec]: ../anuna-ssi/specs/SPEC-001-device-key-provisioning.md
+
+## Licence
+
+Copyright 2026 Anuna Research Pty Ltd. Apache-2.0.

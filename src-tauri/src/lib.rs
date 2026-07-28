@@ -1,0 +1,76 @@
+//! **Selfsame** — the root-key custodian.
+//!
+//! *The phone is the home key; every other client gets a copy cut from it, and
+//! the phone can change the lock.*
+//!
+//! This is the one component in [SPEC-001] that holds a [Root Key]. Everything
+//! else in the system reads identity state; only this signs it. It exists as a
+//! separate application because it depends on a keychain with a user-presence
+//! policy and a camera — available nowhere else in the system (SPEC-001 §6.12).
+//!
+//! ```text
+//!   ┌──────────── Selfsame ────────────┐
+//!   │  custody   keychain + presence     │  REQ-024, REQ-002
+//!   │  session   signed closure + queue  │  REQ-020, REQ-021
+//!   │  net       rendezvous + resolver   │  CON-002, CON-005, CON-006
+//!   │  commands  one per user action     │  REQ-018, REQ-019, REQ-010
+//!   └───────────────┬───────────────────┘
+//!                   ▼  every decision
+//!            selfsame-core (pure)
+//! ```
+//!
+//! # Tier-1 status
+//!
+//! SPEC-001 is `draft` behind a **Tier-1 gate that has not been passed**: round
+//! 2 of the cross-model adversarial review and human security sign-off are
+//! outstanding, and three open questions ([OQ-003] key reuse, [OQ-005]
+//! freshness evidence, [OQ-007] plaintext-channel authorship) are gate-blocking.
+//! This code implements the specification as written; it is not cleared for
+//! production use, and the README says so in the same words.
+//!
+//! [SPEC-001]: ../../../../anuna-ssi/specs/SPEC-001-device-key-provisioning.md
+//! [Root Key]: ../../../../anuna-ssi/specs/concepts/Root-Key.md
+//! [OQ-003]: ../../../../anuna-ssi/specs/SPEC-001-device-key-provisioning.md
+//! [OQ-005]: ../../../../anuna-ssi/specs/SPEC-001-device-key-provisioning.md
+//! [OQ-007]: ../../../../anuna-ssi/specs/SPEC-001-device-key-provisioning.md
+
+pub mod commands;
+pub mod custody;
+pub mod net;
+pub mod session;
+
+/// Build and run the application.
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    let builder = tauri::Builder::default();
+
+    // The camera and the biometric presence check are mobile-only. On desktop
+    // their places are taken by the typed code of REQ-011 and the device
+    // passcode of REQ-024 — both of which the specification makes first-class
+    // routes rather than fallbacks, so nothing is missing, only different.
+    #[cfg(mobile)]
+    let builder = builder
+        .plugin(tauri_plugin_barcode_scanner::init())
+        .plugin(tauri_plugin_biometric::init());
+
+    builder
+        .setup(|app| {
+            commands::init(app)?;
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            commands::get_state,
+            commands::create_identity,
+            commands::confirm_backup,
+            commands::restore_identity,
+            commands::read_link_code,
+            commands::reject_offer,
+            commands::authorise,
+            commands::unlink_device,
+            commands::flush_publications,
+            commands::forget_identity,
+            commands::service_endpoint,
+        ])
+        .run(tauri::generate_context!())
+        .expect("Selfsame failed to start");
+}

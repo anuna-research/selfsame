@@ -1,0 +1,242 @@
+{
+  "spec": "SPEC-001 v0.3.0",
+  "did_crdt_revision": "adb5c7ac1423173f00201cddffa60fe672fb2a53",
+  "con_007_root_derivation": [
+    {
+      "entropy_hex": "00000000000000000000000000000000",
+      "mnemonic": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+      "persona": 0,
+      "root_seed_hex": "9dd0eeaee18d88a358ecd94847b5ed99cddd16dad4948aeb4262d3e3c2df6f9d",
+      "root_public_key_multibase": "uke3d3xsSMOk1g9j-kZz4XFVQfvBjmjr5kYtgTQk6w2Q"
+    },
+    {
+      "entropy_hex": "00000000000000000000000000000000",
+      "mnemonic": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+      "persona": 1,
+      "root_seed_hex": "48fdcec55e1b3091f5c873475db2c96909e5e08317b3cacaaeb1777536e52e36",
+      "root_public_key_multibase": "u_3vJQsVhAjE6H-k8Stc4DaXD7_pKa2VHXfT_O-s6Q1k"
+    },
+    {
+      "entropy_hex": "00000000000000000000000000000000",
+      "mnemonic": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+      "persona": 2,
+      "root_seed_hex": "962e06c23e1c40f5950fa07045cf61772c85d15d5660ee391caa54cf9dd75693",
+      "root_public_key_multibase": "u7F70myNzzm9xUP_bBDz4CXGZKwN05LyiMwZj1_K9xQk"
+    },
+    {
+      "entropy_hex": "ffffffffffffffffffffffffffffffff",
+      "mnemonic": "zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo wrong",
+      "persona": 0,
+      "root_seed_hex": "2f31b73640fe93c55a5f1abc7fccd21221cdcf87fc5f8f521d350df5c77b1742",
+      "root_public_key_multibase": "u6zRrvDLw0quEwrzyi1EovmKfPP2MoinPEN2v8I_hB6E"
+    },
+    {
+      "entropy_hex": "ffffffffffffffffffffffffffffffff",
+      "mnemonic": "zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo wrong",
+      "persona": 1,
+      "root_seed_hex": "5781be65b26a6f2f79043e47211367a6825426c993e8b4838efefcbc00ce0167",
+      "root_public_key_multibase": "uabpDNNxuTpyxncZ0-h4_-ZA1CBXHmZL4mWMBaOlZylU"
+    },
+    {
+      "entropy_hex": "ffffffffffffffffffffffffffffffff",
+      "mnemonic": "zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo wrong",
+      "persona": 2,
+      "root_seed_hex": "8d33bc6b214f8118f7738093c3ab68577fe27bab7de06238fe70217c1ab3b894",
+      "root_public_key_multibase": "u5BYuoq6WXFqK2poNW2moC1fhQcmSXtrz7XJThyZUQZw"
+    },
+    {
+      "entropy_hex": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "mnemonic": "primary fetch primary fetch primary fetch primary fetch primary fetch primary fever",
+      "persona": 0,
+      "root_seed_hex": "bd6256d2eef159ef0dd355ef052da67c0de38cf6ac558667cf13bc0611be3e4c",
+      "root_public_key_multibase": "uEBqVp6_X_qTy5k5NG8DVS2x6rLfEyukqKxlTnDhmq7E"
+    },
+    {
+      "entropy_hex": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "mnemonic": "primary fetch primary fetch primary fetch primary fetch primary fetch primary fever",
+      "persona": 1,
+      "root_seed_hex": "6dc4e120bfe7b0bbd377aee10e34583222e1f81f10662f78e4f340bb0e87fefb",
+      "root_public_key_multibase": "ucTe1q3heQtDQ2Lm0EsWyP0TedeGGWVP_hghjUbDyHJA"
+    },
+    {
+      "entropy_hex": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "mnemonic": "primary fetch primary fetch primary fetch primary fetch primary fetch primary fever",
+      "persona": 2,
+      "root_seed_hex": "f9953bd07e4f52270ea638c0803d15bdb24d56193883f397790425adcb82e741",
+      "root_public_key_multibase": "uKKwIzqNWZfqFIs3fkh1_uaBYRI7cKxrR7R0ngjesY38"
+    },
+    {
+      "entropy_hex": "9f3a11c2e70b4d8a5c6f9012ab34cd56",
+      "mnemonic": "palace spatial idle sock regular share immune velvet bargain fluid crew pulp",
+      "persona": 0,
+      "root_seed_hex": "588865c17f3261a88e4c635f80bf2021cd6b65a9f819bac935227014eb47e2cf",
+      "root_public_key_multibase": "u9yX_frZ1u1S5pG9S2I3jYbvUa7cPLwspMiHEgFM3wSg"
+    },
+    {
+      "entropy_hex": "9f3a11c2e70b4d8a5c6f9012ab34cd56",
+      "mnemonic": "palace spatial idle sock regular share immune velvet bargain fluid crew pulp",
+      "persona": 1,
+      "root_seed_hex": "7a791b3f5704eec4fdf1762f697ac2faac9ff5a47afb6a77f681a87837103324",
+      "root_public_key_multibase": "u1oBLQwLdfTtLCa9n0hq8d0T7gFvBAkgeFJNZFfcmQXs"
+    },
+    {
+      "entropy_hex": "9f3a11c2e70b4d8a5c6f9012ab34cd56",
+      "mnemonic": "palace spatial idle sock regular share immune velvet bargain fluid crew pulp",
+      "persona": 2,
+      "root_seed_hex": "896dd08aa795483cb560433ff49b5705c69080dd421977710bdf4bd95475f082",
+      "root_public_key_multibase": "uhW3gAJqZJtkrxxtF2YHExNCrtjQ9e7qrGWynN1Jqdgc"
+    }
+  ],
+  "adr_010_did_derivation": [
+    {
+      "root_public_key_multibase": "uke3d3xsSMOk1g9j-kZz4XFVQfvBjmjr5kYtgTQk6w2Q",
+      "did": "did:crdt:ad1122465ae14b76a526a07cf0b1cc8cf42af7a4281a73061e99394e64196caf",
+      "root_method_id": "did:crdt:ad1122465ae14b76a526a07cf0b1cc8cf42af7a4281a73061e99394e64196caf#key-0"
+    },
+    {
+      "root_public_key_multibase": "u_3vJQsVhAjE6H-k8Stc4DaXD7_pKa2VHXfT_O-s6Q1k",
+      "did": "did:crdt:891d6cfb8b971907ef5b2c5250375079acfdf7d7139cab10278e163e16441699",
+      "root_method_id": "did:crdt:891d6cfb8b971907ef5b2c5250375079acfdf7d7139cab10278e163e16441699#key-0"
+    },
+    {
+      "root_public_key_multibase": "u7F70myNzzm9xUP_bBDz4CXGZKwN05LyiMwZj1_K9xQk",
+      "did": "did:crdt:d4db04d58ca3c6d87eba3ca21f33f03874c13f6626d36e3c4ffe64821bcb18ea",
+      "root_method_id": "did:crdt:d4db04d58ca3c6d87eba3ca21f33f03874c13f6626d36e3c4ffe64821bcb18ea#key-0"
+    },
+    {
+      "root_public_key_multibase": "u6zRrvDLw0quEwrzyi1EovmKfPP2MoinPEN2v8I_hB6E",
+      "did": "did:crdt:ffd300117b50a81c08fe3411015da5bdc7b48291c0c249a97dd57cec1804519e",
+      "root_method_id": "did:crdt:ffd300117b50a81c08fe3411015da5bdc7b48291c0c249a97dd57cec1804519e#key-0"
+    },
+    {
+      "root_public_key_multibase": "uabpDNNxuTpyxncZ0-h4_-ZA1CBXHmZL4mWMBaOlZylU",
+      "did": "did:crdt:615724af8939c61dbb4f4b272bce56e148cd910828df64e87329cea1d05255c4",
+      "root_method_id": "did:crdt:615724af8939c61dbb4f4b272bce56e148cd910828df64e87329cea1d05255c4#key-0"
+    },
+    {
+      "root_public_key_multibase": "u5BYuoq6WXFqK2poNW2moC1fhQcmSXtrz7XJThyZUQZw",
+      "did": "did:crdt:59318656afd0fa85a38a0202dd46840284eb3ac3aff4ddd71f12b2515f24a14a",
+      "root_method_id": "did:crdt:59318656afd0fa85a38a0202dd46840284eb3ac3aff4ddd71f12b2515f24a14a#key-0"
+    },
+    {
+      "root_public_key_multibase": "uEBqVp6_X_qTy5k5NG8DVS2x6rLfEyukqKxlTnDhmq7E",
+      "did": "did:crdt:b92dd4bbf937a8398322d8cde368261aa7174c9ab77fd8adb525d43ec9f0ce8f",
+      "root_method_id": "did:crdt:b92dd4bbf937a8398322d8cde368261aa7174c9ab77fd8adb525d43ec9f0ce8f#key-0"
+    },
+    {
+      "root_public_key_multibase": "ucTe1q3heQtDQ2Lm0EsWyP0TedeGGWVP_hghjUbDyHJA",
+      "did": "did:crdt:b498294289b3a85e510d9768169c4d1afff6ab7c8730ff4ca95c38122bd746fb",
+      "root_method_id": "did:crdt:b498294289b3a85e510d9768169c4d1afff6ab7c8730ff4ca95c38122bd746fb#key-0"
+    },
+    {
+      "root_public_key_multibase": "uKKwIzqNWZfqFIs3fkh1_uaBYRI7cKxrR7R0ngjesY38",
+      "did": "did:crdt:a8f176a4d5c8aa0d524e514e82edaa488aab693df1831228cfdee0995a6f603a",
+      "root_method_id": "did:crdt:a8f176a4d5c8aa0d524e514e82edaa488aab693df1831228cfdee0995a6f603a#key-0"
+    },
+    {
+      "root_public_key_multibase": "u9yX_frZ1u1S5pG9S2I3jYbvUa7cPLwspMiHEgFM3wSg",
+      "did": "did:crdt:b0fd3d9b198e6544ce84c1ccd86c7aa375457be54543815c22b4a8af84ebd4c6",
+      "root_method_id": "did:crdt:b0fd3d9b198e6544ce84c1ccd86c7aa375457be54543815c22b4a8af84ebd4c6#key-0"
+    },
+    {
+      "root_public_key_multibase": "u1oBLQwLdfTtLCa9n0hq8d0T7gFvBAkgeFJNZFfcmQXs",
+      "did": "did:crdt:c57f4475f1dd60fcdafe8ea52dd2f79c79059ec6e095b26a5e0dedfdd66a925d",
+      "root_method_id": "did:crdt:c57f4475f1dd60fcdafe8ea52dd2f79c79059ec6e095b26a5e0dedfdd66a925d#key-0"
+    },
+    {
+      "root_public_key_multibase": "uhW3gAJqZJtkrxxtF2YHExNCrtjQ9e7qrGWynN1Jqdgc",
+      "did": "did:crdt:c3b0590828e07249b62c5694df9e9768bd9af6e5b0f3e5ac5b737d1c258ee2e0",
+      "root_method_id": "did:crdt:c3b0590828e07249b62c5694df9e9768bd9af6e5b0f3e5ac5b737d1c258ee2e0#key-0"
+    }
+  ],
+  "con_001_link_code": [
+    {
+      "application": "cbcl-chat",
+      "secret_hex": "00000000000000000000000000000000",
+      "code": "anuna1qyqsqqqqqqqqqqqqqqqqqqqqqqqqqjdgkrf",
+      "length": 41
+    },
+    {
+      "application": "cbcl-chat",
+      "secret_hex": "ffffffffffffffffffffffffffffffff",
+      "code": "anuna1qyqlllllllllllllllllllllllll7zss4ps",
+      "length": 41
+    },
+    {
+      "application": "cbcl-chat",
+      "secret_hex": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "code": "anuna1qyq64242424242424242424242425e5445f",
+      "length": 41
+    },
+    {
+      "application": "cbcl-chat",
+      "secret_hex": "9f3a11c2e70b4d8a5c6f9012ab34cd56",
+      "code": "anuna1qyqe7ws3ctnsknv2t3heqy4txnx4v6lshct",
+      "length": 41
+    }
+  ],
+  "con_002_rendezvous": [
+    {
+      "secret_hex": "00000000000000000000000000000000",
+      "channel_key_hex": "67af47a23c2c639107a7ed79a527c8df064a8455301cdda1705b7d605d71e23b",
+      "offer_slot": "yzwhu56twapydav2ly2gx4wbku",
+      "bundle_slot": "woddqaky4t52djpvlkafg767q4"
+    },
+    {
+      "secret_hex": "ffffffffffffffffffffffffffffffff",
+      "channel_key_hex": "c9f30a6e0cbc88b7c933bcc45271800eff2c7baf0df39d9d5625a99765c8e8ea",
+      "offer_slot": "fy2ilmfxjroafpahbpppnx7u4e",
+      "bundle_slot": "3e6exm6fu64mmm6mys6yzmxlk4"
+    },
+    {
+      "secret_hex": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "channel_key_hex": "bf03434aeb9b81eb32e0e2e887cfd353f934e98d311707671fdb53d8963c64e8",
+      "offer_slot": "rsgikwizn2ahqtlv36v5i4ytlq",
+      "bundle_slot": "avdhdaffvq34i4pckzqrvt57v4"
+    },
+    {
+      "secret_hex": "9f3a11c2e70b4d8a5c6f9012ab34cd56",
+      "channel_key_hex": "df59af829a6243e32a401e6d1df0817421374fd29115713f645b0f8b52b2c285",
+      "offer_slot": "dc4q5nfke4wfagfd2na7lv36p4",
+      "bundle_slot": "b5vk2fbqviratt2kkbckz2xppa"
+    }
+  ],
+  "req_007_fingerprints": [
+    {
+      "input": "uO2onvM62pC1io6jQKm8Nc2UyFXcd4kOmOsBIoYtZ2ik",
+      "kind": "key",
+      "hex": "01 D0 EB 68 35 2F",
+      "label": "slate-heron-91"
+    },
+    {
+      "input": "did:crdt:5e46c3220053c874fb3ba31b039695a5be67d03a232033358654ad75a90f9fb2",
+      "kind": "did",
+      "hex": "02 D8 64 D9 A7 08",
+      "label": "cedar-marten-10"
+    },
+    {
+      "input": "uIVL40Zt5HSRFMkLhXy6rbLfP-ntqXtMAl5YOBpiB2xI",
+      "kind": "key",
+      "hex": "DC B2 C6 76 0C 80",
+      "label": "amber-skylark-44"
+    },
+    {
+      "input": "did:crdt:46f26740b921505908705104f7f3a9fd66e0719f08bf9e40d2a53e9394ee5e3b",
+      "kind": "did",
+      "hex": "18 F0 59 4F 02 F0",
+      "label": "smoky-dunlin-92"
+    },
+    {
+      "input": "udqFZIESm5PURJlvKc6YE2QsFKdHfYCvjChmpJXZg0fU",
+      "kind": "key",
+      "hex": "58 F6 42 6A 91 FC",
+      "label": "wheaten-chough-65"
+    },
+    {
+      "input": "did:crdt:314da37c55347cd60c0dbbaa7a2f9d8d840b10545a2534153d9d3204dcf49e77",
+      "kind": "did",
+      "hex": "A4 77 55 AA E0 96",
+      "label": "granite-badger-22"
+    }
+  ]
+}

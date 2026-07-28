@@ -1,0 +1,24 @@
+[package]
+name = "selfsame-cli"
+description = "The device-client half of SPEC-001 linking: mints the link code, writes the signed offer, and applies the acceptance predicate. The reference for `hark link` and for SCREEN-002's terminal form."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "selfsame"
+path = "src/main.rs"
+
+[dependencies]
+selfsame-core = { workspace = true }
+did-crdt = { workspace = true }
+
+ed25519-dalek = { workspace = true, features = ["std", "rand_core"] }
+rand = "0.8"
+reqwest = { version = "0.12", features = ["json", "blocking"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+qrcode = { version = "0.14", default-features = false }

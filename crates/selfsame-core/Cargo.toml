@@ -1,0 +1,37 @@
+[package]
+name = "selfsame-core"
+description = "SPEC-001 pure core: link code, CBCL offer/grant records, sealed rendezvous envelope, acceptance predicate, fingerprints, single-controller profile, and root-key derivation"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# ── Purity gate (SPEC-001 §13) ───────────────────────────────────────────────
+#
+# This crate is the pure core. It MUST NOT acquire `tokio`, `reqwest`,
+# `std::fs`, or `std::time` anywhere in its dependency graph. The gate is
+# enforced by `tests/purity.rs`, which shells out to `cargo tree` — the
+# `cargo-deny` half of the SPEC-001 §13 enforcement lives in CI.
+[dependencies]
+cbcl-core = { workspace = true, default-features = false }
+cbcl-parser = { workspace = true, default-features = false }
+did-crdt = { workspace = true }
+
+bech32 = { version = "0.11", default-features = false, features = ["alloc"] }
+blake3 = { workspace = true, features = ["std"] }
+ed25519-dalek = { workspace = true, features = ["std"] }
+base64ct = { workspace = true }
+chacha20poly1305 = { version = "0.10", default-features = false, features = ["alloc"] }
+hkdf = { version = "0.12", default-features = false }
+sha2 = { version = "0.10", default-features = false }
+bip39 = { version = "2", default-features = false, features = ["std"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+zeroize = { version = "1", default-features = false, features = ["alloc"] }
+
+[dev-dependencies]
+proptest = "1"
+hex = "0.4"
+rand = "0.8"

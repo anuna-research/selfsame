@@ -1,0 +1,11 @@
+{
+  "name": "selfsame",
+  "private": true,
+  "description": "Screen-render checks for the Selfsame frontend",
+  "scripts": {
+    "screens": "node tests/screens.mjs screens-out"
+  },
+  "devDependencies": {
+    "puppeteer": "^23.0.0"
+  }
+}

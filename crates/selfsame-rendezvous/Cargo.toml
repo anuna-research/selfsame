@@ -1,0 +1,23 @@
+[package]
+name = "selfsame-rendezvous"
+description = "Reference implementation of the three SPEC-001 routes the did-crdt service must grow: the blind rendezvous (CON-002), signed-closure resolution (CON-005), and state publication (CON-006)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+selfsame-core = { workspace = true }
+did-crdt = { workspace = true }
+
+axum = "0.7"
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+ed25519-dalek = { workspace = true, features = ["std"] }
+reqwest = { version = "0.12", features = ["json"] }

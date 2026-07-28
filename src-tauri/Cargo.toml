@@ -1,0 +1,49 @@
+[package]
+name = "selfsame"
+description = "Selfsame — the root-key custodian. Creates an identity, authorises a device, and revokes one that is gone."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "selfsame_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+selfsame-core = { workspace = true }
+did-crdt = { workspace = true }
+
+tauri = { version = "2", features = [] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+ed25519-dalek = { workspace = true, features = ["std"] }
+argon2 = "0.5"
+keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
+rand = "0.8"
+zeroize = { version = "1", features = ["alloc"] }
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+tokio = { workspace = true }
+
+# ── mobile ──────────────────────────────────────────────────────────────────
+#
+# Selfsame is a phone application (ADR-002). The camera and the biometric
+# presence check are mobile-only Tauri plugins; on desktop the typed code of
+# REQ-011 and the device passcode of REQ-024 take their place, both of which
+# the specification makes first-class rather than fallbacks.
+[target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
+tauri-plugin-barcode-scanner = "2"
+tauri-plugin-biometric = "2"
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { workspace = true }
+serde_json = { workspace = true }
+ed25519-dalek = { workspace = true, features = ["std"] }
+blake3 = { workspace = true, features = ["std"] }
