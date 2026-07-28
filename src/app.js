@@ -119,7 +119,8 @@ async function refresh() {
     return;
   }
 
-  $("[data-home-fingerprint]").textContent = s.root_fingerprint ?? "";
+  $("[data-home-fingerprint]").textContent = s.root_fingerprint?.hex ?? "";
+  $("[data-home-label]").textContent = s.root_fingerprint?.label ?? "";
   $("[data-home-did]").textContent = s.did ?? "";
 
   const pending = $("[data-pending]");
@@ -172,13 +173,16 @@ function renderDevices(devices) {
     name.textContent = d.label || "Unnamed device";
     const meta = document.createElement("span");
     meta.className = "device__meta";
-    meta.textContent = d.revoked
+    // The nickname names the row; the state follows it. Both are recognition,
+    // not comparison — nothing on this screen asks the user to check a value.
+    const state = d.revoked
       ? "Unlinked"
       : d.pending
         ? "publishing — others can't see it yet"
         : d.last_seen
           ? `seen ${since(d.last_seen)}`
           : d.method_id.split("#")[1];
+    meta.textContent = d.nickname && !d.revoked ? `${d.nickname} · ${state}` : state;
 
     body.append(name, meta);
     btn.append(mark, body);
@@ -285,7 +289,8 @@ async function checkBackup() {
       // ceremony into a guessing game.
       return fail("confirm", "That isn't right. Go back and check the words.");
     }
-    $("[data-created-fingerprint]").textContent = ui.created.fingerprint;
+    $("[data-created-fingerprint]").textContent = ui.created.fingerprint.hex;
+    $("[data-created-label]").textContent = ui.created.fingerprint.label;
     $("[data-created-did]").textContent = ui.created.did;
     // The words leave memory the moment they have done their job.
     ui.mnemonic = null;
@@ -305,11 +310,36 @@ async function restore() {
     await invoke("restore_identity", { phrase, passcode });
     $("#restore-phrase").value = "";
     $("#restore-passcode").value = "";
-    await refresh();
+
+    // REQ-021: the device list is rebuilt from signed state, so a phone that
+    // holds no local file still knows what it is responsible for. Showing it
+    // here is the evidence for that claim, not decoration.
+    ui.state = await invoke("get_state");
+    $("[data-restored-fingerprint]").textContent = ui.state.root_fingerprint?.hex ?? "";
+    $("[data-restored-label]").textContent = ui.state.root_fingerprint?.label ?? "";
+    renderRestored(ui.state.devices);
+    show("restored");
   } catch (e) {
     fail("restore", message(e));
   } finally {
     idle();
+  }
+}
+
+function renderRestored(devices) {
+  const list = $("[data-restored-devices]");
+  list.textContent = "";
+  for (const d of devices) {
+    if (d.revoked) continue;
+    const li = document.createElement("li");
+    const name = document.createElement("span");
+    name.className = "device__name";
+    name.textContent = d.label || "Unnamed device";
+    const meta = document.createElement("span");
+    meta.className = "device__meta";
+    meta.textContent = d.nickname ?? d.method_id.split("#")[1];
+    li.append(name, meta);
+    list.append(li);
   }
 }
 
@@ -378,23 +408,72 @@ async function readCode(code) {
     renderConsent(offer);
     show("consent");
   } catch (e) {
-    fail("code", message(e));
-    show("type");
+    refuseCode(code, message(e));
   } finally {
     idle();
   }
 }
 
+/**
+ * Render a refusal. **Never says which check failed.**
+ *
+ * The two branches below are the only two messages `read_link_code` produces,
+ * and both are already distinguishable today — expiry is a fact about the
+ * *code's age*, not about which conjunct of the predicate refused it. Every
+ * other failure, the REQ-018 signature check included, arrives as the same
+ * single line and is rendered as the same single line.
+ */
+function refuseCode(code, note) {
+  const expired = note.includes("expired");
+  $("[data-refused-code]").textContent = code;
+  $("[data-refused-title]").textContent = expired
+    ? "This code has expired"
+    : "That code isn't valid";
+  $("[data-refused-body]").textContent = expired
+    ? "Codes last five minutes. Ask the device to show a new one — the old one can't be used, even by you."
+    : "Check it against the device again, or scan it instead.";
+  show("refused-code");
+}
+
 function renderConsent(offer) {
-  // REQ-019's four required facts, in the order the screen states them.
-  $("[data-offer-app]").textContent = offer.application;
-  $("[data-offer-purpose]").textContent = offer.purpose;
+  // REQ-019's four required facts. The application and purpose come from the
+  // compiled table (REQ-026), so they can be stated as one sentence without
+  // implying either was taken from the code.
+  $("[data-offer-asked]").textContent =
+    `${offer.application}, to add a ${offer.purpose.replace(/-/g, " ")}`;
   // Untrusted: text, never markup, and already length-capped by the recogniser.
   $("[data-offer-desc]").textContent = offer.device_description || "(it said nothing)";
-  $("[data-offer-fingerprint]").textContent = offer.key_fingerprint;
+
+  // The compared value. `label` sits beneath it and is never the answer to the
+  // question this screen asks — see the note in index.html.
+  $("[data-offer-fingerprint]").textContent = offer.key_fingerprint.hex;
+  $("[data-offer-label]").textContent = offer.key_fingerprint.label;
+  renderBars($("[data-offer-bars]"), offer.key_fingerprint.hex);
 
   ui.offerExpiresAt = Math.floor(Date.now() / 1000) + offer.expires_in;
   startCountdown();
+}
+
+/**
+ * Three muted bars derived from the fingerprint bytes.
+ *
+ * Recognition only, and `aria-hidden` because of it. Three hues carry a few
+ * bits at most — far under NFR-008's floor — so this exists to make a row of
+ * hex *memorable between two glances*, never to be compared. That is also why
+ * it is rendered here rather than in the core: it decides nothing.
+ */
+function renderBars(host, hex) {
+  const bytes = hex.split(" ").map((pair) => parseInt(pair, 16));
+  host.textContent = "";
+  for (const index of [0, 2, 4]) {
+    const bar = document.createElement("div");
+    bar.className = "fp__bar";
+    // Muted deliberately: the mockup's swatches sit inside the Ink/Bone/Lichen
+    // system rather than shouting over it. Full hue circle, because telling two
+    // bars apart at a glance is the entire job.
+    bar.style.background = `hsl(${Math.round((bytes[index] / 256) * 360)} 30% 47%)`;
+    host.append(bar);
+  }
 }
 
 function startCountdown() {
@@ -403,8 +482,11 @@ function startCountdown() {
     const left = ui.offerExpiresAt - Math.floor(Date.now() / 1000);
     const el = $("[data-countdown]");
     if (left <= 0) {
+      // REQ-016: at zero the offer is gone. The user is told so on a screen
+      // with a route out of it, not by a toast behind the home screen.
       stopCountdown();
-      cancelOffer("That code has expired — generate a new one.");
+      invoke("reject_offer").catch(() => {});
+      refuseCode("", "That code has expired — generate a new one.");
       return;
     }
     el.textContent = `expires ${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}`;
@@ -417,13 +499,6 @@ function startCountdown() {
 function stopCountdown() {
   if (ui.countdownTimer) clearInterval(ui.countdownTimer);
   ui.countdownTimer = null;
-}
-
-async function cancelOffer(note) {
-  stopCountdown();
-  await invoke("reject_offer");
-  if (note) fail("code", note);
-  await refresh();
 }
 
 async function reject() {
@@ -442,7 +517,9 @@ async function authorise() {
 
     const label = $("[data-offer-desc]").textContent;
     $("[data-linked-title]").textContent = `${label} is yours.`;
-    $("[data-linked-fingerprint]").textContent = result.fingerprint;
+    // A comparison prompt — "check it now shows this" — so it carries the hex,
+    // for the same reason SCREEN-001's question does.
+    $("[data-linked-fingerprint]").textContent = result.fingerprint.hex;
     $("[data-linked-method]").textContent = result.method_id;
     $("[data-linked-publishing]").textContent =
       result.publishing > 0 ? "publishing…" : "done";
@@ -464,6 +541,8 @@ async function authorise() {
 function openDevice(device) {
   ui.device = device;
   $("[data-device-title]").textContent = device.label || "Unnamed device";
+  $("[data-device-nickname]").textContent = device.nickname ?? "—";
+  $("[data-device-name]").textContent = device.label || "Unnamed device";
   $("[data-device-method]").textContent = device.method_id;
   $("[data-device-seen]").textContent = device.last_seen
     ? since(device.last_seen)
@@ -484,11 +563,24 @@ function toUnlink() {
 
 async function unlink() {
   const passcode = $("#unlink-passcode").value;
+  const name = ui.device.label || "That device";
   busy("Signing…");
   try {
     await invoke("unlink_device", { methodId: ui.device.method_id, passcode });
     $("#unlink-passcode").value = "";
-    await refresh();
+
+    // OBS-003: the revocation is signed here and then has to travel. The screen
+    // says how far it has actually got rather than implying a kill switch.
+    ui.state = await invoke("get_state");
+    $("[data-unlinked-title]").textContent = `${name} is no longer you.`;
+    $("[data-unlinked-publishing]").textContent =
+      ui.state.pending_publications > 0
+        ? "Retrying — will keep trying in the background"
+        : "Done, just now";
+    show("unlinked");
+    if (ui.state.pending_publications > 0) {
+      setTimeout(() => invoke("flush_publications").catch(() => {}), 3000);
+    }
   } catch (e) {
     fail("unlink", message(e));
   } finally {
@@ -511,7 +603,6 @@ const actions = {
   "to-link": startLink,
   "to-type": () => show("type"),
   "read-code": () => readCode($("#code-input").value.trim()),
-  "cancel-offer": () => cancelOffer(),
   reject,
   "to-presence": () => show("presence"),
   "back-to-consent": () => show("consent"),

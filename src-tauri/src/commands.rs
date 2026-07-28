@@ -95,6 +95,37 @@ async fn with_root<T: Send + 'static>(
         .map_err(UiError::from)
 }
 
+// ── fingerprint rendering ───────────────────────────────────────────────────
+
+/// Both renderings of one fingerprint, so the shell never has to derive either.
+///
+/// **`hex` is the comparison value and `label` is not.** `selfsame-core`'s
+/// [`fingerprint`] module is explicit: `hex` carries 48 bits against NFR-008's
+/// floor of 32, while `label` carries ≈ 18.6 bits and *"is a nickname, not a
+/// comparison value"*. Both travel because SCREEN-001 asks the user to compare a
+/// fingerprint across two devices and a word pair is what makes a row of hex
+/// recognisable at a glance — but the screen ranks `hex` first and every
+/// question the user answers is a question about `hex`.
+///
+/// Shipping the pair from one place is what keeps that true: a shell that
+/// received only `label` could not show the compared value even if it wanted to,
+/// and a shell that derived its own words would be a second rendering of a
+/// security-relevant value outside the core.
+#[derive(Serialize)]
+pub struct Fp {
+    /// Six uppercase hex pairs, spaced — `C0 7A 1E 42 9B 33`. The normative
+    /// comparison rendering.
+    pub hex: String,
+    /// The nickname — `copper-lynx-42`. Recognition aid, never compared.
+    pub label: String,
+}
+
+impl From<fingerprint::Fingerprint> for Fp {
+    fn from(f: fingerprint::Fingerprint) -> Self {
+        Self { hex: f.hex(), label: f.label() }
+    }
+}
+
 // ── home ────────────────────────────────────────────────────────────────────
 
 /// Everything SCREEN-002's home needs, in one round trip.
@@ -106,9 +137,9 @@ pub struct AppState {
     pub backup_confirmed: bool,
     pub did: Option<String>,
     /// `fingerprint_did` — what the user compares against a linking client.
-    pub fingerprint: Option<String>,
+    pub fingerprint: Option<Fp>,
     /// The root key's own fingerprint, shown on the home-key card.
-    pub root_fingerprint: Option<String>,
+    pub root_fingerprint: Option<Fp>,
     pub devices: Vec<DeviceRow>,
     /// OBS-005 — deltas signed but not yet acknowledged. Non-zero means the
     /// user believes they are linked while peers cannot see it, so the UI says
@@ -137,8 +168,8 @@ pub async fn get_state(session: State<'_, AppSession>) -> Result<AppState> {
     Ok(AppState {
         has_identity: true,
         backup_confirmed: Custody::backup_confirmed()?,
-        fingerprint: Some(fingerprint::fingerprint_did(&did).hex()),
-        root_fingerprint: Some(fingerprint::fingerprint_key(&root_pk).hex()),
+        fingerprint: Some(fingerprint::fingerprint_did(&did).into()),
+        root_fingerprint: Some(fingerprint::fingerprint_key(&root_pk).into()),
         devices: session.devices(&root_pk).unwrap_or_default(),
         pending_publications: session.pending_count(),
         did: Some(did),
@@ -154,7 +185,7 @@ pub struct CreatedIdentity {
     /// never written to storage or a clipboard.
     pub words: Vec<String>,
     pub did: String,
-    pub fingerprint: String,
+    pub fingerprint: Fp,
 }
 
 /// HP-1 steps 01–02 — create the identity and show the recovery phrase.
@@ -197,7 +228,7 @@ pub async fn create_identity(
 
     Ok(CreatedIdentity {
         words: phrase.split_whitespace().map(str::to_owned).collect(),
-        fingerprint: fingerprint::fingerprint_did(did.as_str()).hex(),
+        fingerprint: fingerprint::fingerprint_did(did.as_str()).into(),
         did: did.to_string(),
     })
 }
@@ -247,8 +278,9 @@ pub struct OfferView {
     /// renders this in the dashed region with no formatting interpreted.
     pub device_description: String,
     /// `fingerprint_key` of the key about to be authorised — the value the
-    /// user compares against what the other screen is showing.
-    pub key_fingerprint: String,
+    /// user compares against what the other screen is showing. SCREEN-001 puts
+    /// [`Fp::hex`] in that comparison and [`Fp::label`] beneath it.
+    pub key_fingerprint: Fp,
     /// Seconds remaining, for the countdown.
     pub expires_in: u64,
 }
@@ -294,7 +326,7 @@ pub async fn read_link_code(code: String, session: State<'_, AppSession>) -> Res
         application: offer.application.slug().to_owned(),
         purpose: offer.purpose.to_owned(),
         device_description: offer.device_description.clone(),
-        key_fingerprint: fingerprint::fingerprint_key(&offer.device_key).hex(),
+        key_fingerprint: fingerprint::fingerprint_key(&offer.device_key).into(),
         expires_in: offer.expiry - now,
     };
 
@@ -317,7 +349,7 @@ pub struct Authorised {
     pub did: String,
     /// `fingerprint_did` — what the *client* will show, so the user knows what
     /// to expect on the other screen.
-    pub fingerprint: String,
+    pub fingerprint: Fp,
     pub publishing: usize,
 }
 
@@ -419,7 +451,7 @@ pub async fn authorise(passcode: String, session: State<'_, AppSession>) -> Resu
 
     Ok(Authorised {
         method_id,
-        fingerprint: fingerprint::fingerprint_did(did.as_str()).hex(),
+        fingerprint: fingerprint::fingerprint_did(did.as_str()).into(),
         did: did.to_string(),
         publishing,
     })

@@ -96,70 +96,68 @@ body {
 
 /* ── the boundary mark ───────────────────────────────────────────────── */
 /*
- * One closed ring holding one solid centre. Ratios from the mockup:
- * centre:outer = 1:3, ring weight = 1/12 of the outer. It is the only drawn
- * form in the product, so it serves as logo, app icon, loading state, and
- * identity avatar without being redrawn.
+ * Impression A3 — a solid half, a hollow half drawn as a stroke, and one bore
+ * punched concentrically through both. The seal and the wax it left: the key
+ * and the copy cut from it, in one form. The mockup's brand section retires the
+ * earlier ring-and-dot for saying "secure app" and little else.
+ *
+ * Construction, from the mockup: bore is 56% of the *inner* diameter, stroke is
+ * 1/9.5 of the outer. It is the only drawn form in the product, so it serves as
+ * logo, app icon, loading state, and identity avatar without being redrawn.
+ *
+ * Drawn as a mask rather than an inline <svg> because `renderDevices` builds
+ * marks dynamically: one class, and the colour follows `background` so every
+ * state below is a one-line override rather than a second copy of the geometry.
  */
 
 .mark {
+  --mark-ink: var(--green);
   width: 26px;
   height: 26px;
-  border-radius: 50%;
-  border: 2px solid var(--green);
-  display: flex;
-  align-items: center;
-  justify-content: center;
   flex: none;
-}
-
-.mark::after {
-  content: "";
-  width: 33%;
-  height: 33%;
-  border-radius: 50%;
-  background: var(--green);
+  background: var(--mark-ink);
+  /* Solid half with the bore punched out (even-odd), plus the stroked half. */
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='15 5 100 100'%3E%3Cpath fill='%23fff' fill-rule='evenodd' d='M65 12 A43 43 0 0 1 65 98 Z M43 55 A22 22 0 1 0 87 55 A22 22 0 1 0 43 55 Z'/%3E%3Cpath fill='none' stroke='%23fff' stroke-width='11' d='M65 12 A43 43 0 0 0 65 98'/%3E%3C/svg%3E");
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='15 5 100 100'%3E%3Cpath fill='%23fff' fill-rule='evenodd' d='M65 12 A43 43 0 0 1 65 98 Z M43 55 A22 22 0 1 0 87 55 A22 22 0 1 0 43 55 Z'/%3E%3Cpath fill='none' stroke='%23fff' stroke-width='11' d='M65 12 A43 43 0 0 0 65 98'/%3E%3C/svg%3E");
+  mask-size: contain;
+  -webkit-mask-size: contain;
+  mask-repeat: no-repeat;
+  -webkit-mask-repeat: no-repeat;
+  mask-position: center;
+  -webkit-mask-position: center;
 }
 
 .mark--lg {
   width: 72px;
   height: 72px;
-  border-width: 6px;
   margin: 8px 0 4px;
 }
 
-/* Hollow centre — signed here, not yet published. */
-.mark--pending::after {
-  background: transparent;
-  border: 2px solid var(--amber);
-}
+/* Amber — signed here, not yet published. */
 .mark--pending {
-  border-color: var(--amber);
+  --mark-ink: var(--amber);
 }
 
-/* Broken ring — not verified, nothing claimed. */
+/*
+ * Nothing claimed yet: the outlined half only, with no solid crescent. A
+ * different *shape*, not merely a different colour — the state has to survive
+ * monochrome and colour-vision deficiency (WCAG 2.2 AA, SCREEN-001).
+ */
 .mark--broken {
-  border-color: var(--rust);
-  border-style: dashed;
-}
-.mark--broken::after {
-  background: var(--rust);
+  --mark-ink: var(--rust);
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='15 5 100 100'%3E%3Cpath fill='none' stroke='%23fff' stroke-width='11' stroke-dasharray='14 9' d='M65 12 A43 43 0 0 0 65 98 A43 43 0 0 0 65 12 Z'/%3E%3C/svg%3E");
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='15 5 100 100'%3E%3Cpath fill='none' stroke='%23fff' stroke-width='11' stroke-dasharray='14 9' d='M65 12 A43 43 0 0 0 65 98 A43 43 0 0 0 65 12 Z'/%3E%3C/svg%3E");
 }
 
 .mark--ok {
-  border-color: var(--green);
+  --mark-ink: var(--green);
 }
 
-/* Opened, turning — working. */
+/* Turning — the impression being taken. */
 .mark--spin {
   width: 40px;
   height: 40px;
-  border-width: 4px;
-  border-top-color: transparent;
   animation: anunaSpin 900ms linear infinite;
-}
-.mark--spin::after {
-  display: none;
 }
 
 @keyframes anunaSpin {
@@ -171,7 +169,6 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .mark--spin {
     animation: none;
-    border-top-color: var(--green);
   }
   .scanner__line {
     animation: none;
@@ -180,8 +177,14 @@ body {
 
 /* ── type ────────────────────────────────────────────────────────────── */
 
+/*
+ * The mockup's scale: display 34/1.12/−0.025em, body 16/1.6, and a hard floor —
+ * "nothing in the product is smaller than thirteen". The floor is the reason
+ * `.label`, `.did`, and `.footnote` below sit at 13px rather than the 10–11px
+ * they used to: they are read by someone comparing two screens at arm's length.
+ */
 h1 {
-  font-size: 30px;
+  font-size: 34px;
   line-height: 1.12;
   letter-spacing: -0.025em;
   font-weight: 500;
@@ -202,16 +205,10 @@ h2 {
 
 .label {
   font-family: var(--mono);
-  font-size: 10.5px;
+  font-size: 13px;
   letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--dim);
-}
-
-.label--centre,
-.caution--centre,
-.fingerprint--centre {
-  text-align: center;
 }
 
 .value {
@@ -220,15 +217,22 @@ h2 {
 
 .step {
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: 12px;
   letter-spacing: 0.18em;
   text-transform: uppercase;
   color: var(--green);
 }
 
+/* Where the screen is, said quietly — sentence case, never competing with the
+   question below it. */
+.screen-title {
+  font-size: 15px;
+  color: var(--lichen);
+}
+
 .brand {
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: 12px;
   letter-spacing: 0.22em;
   text-transform: uppercase;
   color: var(--lichen);
@@ -243,7 +247,7 @@ h2 {
 
 .footnote {
   font-family: var(--mono);
-  font-size: 10px;
+  font-size: 13px;
   color: var(--dim);
   word-break: break-all;
 }
@@ -281,7 +285,7 @@ code {
 
 .did {
   font-family: var(--mono);
-  font-size: 11.5px;
+  font-size: 13px;
   color: var(--lichen);
   word-break: break-all;
 }
@@ -306,44 +310,121 @@ code {
   background: var(--surface);
 }
 
-.card--verified {
-  border-color: var(--hairline-strong);
+
+/* ── the fingerprint block (SCREEN-001) ──────────────────────────────── */
+/*
+ * The mockup's revision makes the fingerprint *the screen* rather than one box
+ * among five, and that is adopted. What is NOT adopted is its ranking.
+ *
+ * The mockup drew `copper-lynx-42` at 30px with the hex at 13px beneath it.
+ * `selfsame-core`'s fingerprint module is explicit that the label carries
+ * ≈ 18.6 bits and "is a nickname, not a comparison value", while the hex carries
+ * 48 against NFR-008's floor of 32 — and it rejects a colour rendering in the
+ * same breath, because a low-bit rendering is forgeable by an attacker willing
+ * to grind keys. Whatever is largest under the question "does your other screen
+ * show this?" is what the user actually compares, so the hex is largest.
+ *
+ * The label and the bars stay, below, doing the job they are good at: making a
+ * row of hex recognisable at a glance and giving the eye somewhere to land.
+ * They are recognition aids. They are never the answer.
+ */
+
+.fp {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 0 2px;
+}
+
+.fp__bars {
+  display: flex;
+  gap: 6px;
+  width: 100%;
+  max-width: 260px;
+}
+
+.fp__bar {
+  flex: 1;
+  height: 16px;
+  border-radius: 4px;
+  background: var(--dim);
+}
+
+/* The compared value. Largest thing on the screen after the question. */
+.fp__hex {
+  font-family: var(--mono);
+  font-size: 28px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  color: var(--bone);
+  text-align: center;
+  text-wrap: balance;
+}
+
+.fp__label {
+  font-family: var(--mono);
+  font-size: 14px;
+  letter-spacing: 0.04em;
+  color: var(--lichen);
+}
+
+/* ── evidence rows ───────────────────────────────────────────────────── */
+/*
+ * Everything REQ-019 requires, kept on the screen but demoted to evidence under
+ * the question rather than a form to read before reaching it.
+ */
+
+.evidence {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  border-top: 1px solid var(--hairline);
+  padding-top: 16px;
+}
+
+.evidence__row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.evidence__key {
+  font-size: 13px;
+  color: var(--dim);
+}
+
+.evidence__val {
+  font-size: 15px;
+  color: var(--bone);
+  text-wrap: pretty;
+}
+
+.evidence__note {
+  font-size: 13px;
+  color: var(--dim);
 }
 
 /*
- * The trust boundary, drawn. Law of Common Region: three regions with distinct
- * treatment — verified facts (solid card), the untrusted device claim (dashed
- * border, different type), and the fingerprint (unboxed, centred).
+ * The trust boundary, drawn. SCREEN-001 requires the untrusted claim be marked
+ * by border style *and* type treatment *and* the lead-in phrase — never by
+ * colour alone, so it survives monochrome and colour-vision deficiency.
  */
-.card--untrusted {
-  background: transparent;
-  border: 1px dashed var(--amber);
+.evidence__row--untrusted {
+  border-left: 1px dashed var(--amber);
+  padding-left: 12px;
 }
 
-.label--untrusted {
+.evidence__row--untrusted .evidence__key {
   color: var(--amber);
 }
 
-.untrusted-text {
+.evidence__row--untrusted .evidence__val {
   font-family: var(--mono);
-  font-size: 15px;
-  color: var(--bone);
+  font-size: 14.5px;
   white-space: pre-wrap;
   word-break: break-word;
-  /* No formatting is honoured: the value is inserted as text, never markup. */
-}
-
-.grant {
-  border-top: 1px solid var(--hairline);
-  padding-top: 14px;
-  font-size: 14.5px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.grant__limit {
-  color: var(--lichen);
+  /* No formatting is honoured: inserted as text, never as markup. */
 }
 
 /* ── controls ────────────────────────────────────────────────────────── */
@@ -449,7 +530,7 @@ h1:focus-visible {
 
 .field__label {
   font-family: var(--mono);
-  font-size: 10.5px;
+  font-size: 13px;
   letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--dim);
@@ -502,7 +583,7 @@ textarea:focus {
 .words li::before {
   content: counter(word);
   color: var(--dim);
-  font-size: 11px;
+  font-size: 13px;
   min-width: 14px;
   text-align: right;
 }
@@ -571,9 +652,12 @@ textarea:focus {
 
 .device__meta {
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: 13px;
   color: var(--dim);
-  word-break: break-all;
+  /* `anywhere`, not `break-all`: the row now carries a nickname and a sentence
+     as well as a method id, and break-all cut those mid-word. This breaks only
+     a token that genuinely cannot fit. */
+  overflow-wrap: anywhere;
 }
 
 .device--revoked .device__name {
@@ -591,7 +675,7 @@ textarea:focus {
 
 .pending {
   font-family: var(--mono);
-  font-size: 11.5px;
+  font-size: 13px;
   color: var(--amber);
 }
 
@@ -703,4 +787,99 @@ textarea:focus {
 .busy p {
   color: var(--lichen);
   font-size: 14px;
+}
+
+/* ── propagation & refusal (mockup: "Unlinked · propagation",
+      "When it goes wrong") ─────────────────────────────────────────── */
+/*
+ * Revocation is honest about its limits. The phone can drop a device from the
+ * home key immediately; it cannot reach into other people's clients. The three
+ * steps below are OBS-003 made visible — signed here, publishing, and the part
+ * that is genuinely out of our hands — so the user is never told there is a
+ * kill switch.
+ */
+
+.steps {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  list-style: none;
+}
+
+.steps li {
+  display: flex;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--hairline);
+  align-items: flex-start;
+}
+
+.steps li:last-child {
+  border-bottom: 0;
+}
+
+.steps__body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.steps__what {
+  font-size: 15px;
+  color: var(--bone);
+}
+
+.steps__when {
+  font-size: 13px;
+  color: var(--dim);
+  text-wrap: pretty;
+}
+
+/*
+ * A refusal states what the user can do, never which byte failed. The one place
+ * a reason is given is the signature failure, because "it couldn't prove it
+ * owns the key" is a fact about the *other device* that changes what the user
+ * should do next — it is not a parse detail.
+ */
+.refusal {
+  border: 1px solid var(--hairline-strong);
+  border-radius: 16px;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.refusal + .refusal {
+  margin-top: 12px;
+}
+
+.refusal__title {
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--rust);
+}
+
+.refusal__body {
+  font-size: 14px;
+  color: var(--lichen);
+  text-wrap: pretty;
+}
+
+/* The restored device list — recognition, not comparison. */
+.restored-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  list-style: none;
+}
+
+.restored-list li {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.restored-list .device__name {
+  font-size: 15px;
 }
