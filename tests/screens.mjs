@@ -37,17 +37,22 @@ const SRC = `http://127.0.0.1:${server.address().port}/index.html`;
 const OUT = process.argv[2] ?? 'screens-out';
 mkdirSync(OUT, { recursive: true });
 
+// Fingerprints cross the bridge as both renderings — `hex` is the value the
+// user is ever asked to compare, `label` names a row. See `commands.rs::Fp`.
+const ROOT_FP = { hex: '5F 9A C9 07 2E 11', label: 'slate-heron-07' };
+const KEY_FP = { hex: 'C0 7A 1E 42 9B 33', label: 'copper-lynx-42' };
+
 const STATE_LINKED = {
   has_identity: true,
   backup_confirmed: true,
   did: 'did:crdt:9f3a11c2e70b4d8a5c6f9012ab34cd56ef78901234abcd56ef7890123456abcd',
-  fingerprint: '5F 9A C9 07 2E 11',
-  root_fingerprint: '5F 9A C9 07 2E 11',
+  fingerprint: ROOT_FP,
+  root_fingerprint: ROOT_FP,
   pending_publications: 1,
   devices: [
-    { method_id: 'did:crdt:9f3a…#dev-1', label: 'Chrome on macOS', revoked: false, last_seen: Math.floor(Date.now()/1000) - 120, pending: false },
-    { method_id: 'did:crdt:9f3a…#dev-2', label: 'hark on workstation-01', revoked: false, last_seen: null, pending: true },
-    { method_id: 'did:crdt:9f3a…#dev-3', label: 'Firefox on the old laptop', revoked: true, last_seen: null, pending: false },
+    { method_id: 'did:crdt:9f3a…#dev-1', label: 'Chrome on macOS', nickname: 'copper-lynx-42', revoked: false, last_seen: Math.floor(Date.now()/1000) - 120, pending: false },
+    { method_id: 'did:crdt:9f3a…#dev-2', label: 'hark on workstation-01', nickname: 'amber-quoll-88', revoked: false, last_seen: null, pending: true },
+    { method_id: 'did:crdt:9f3a…#dev-3', label: 'Firefox on the old laptop', nickname: 'walnut-stoat-19', revoked: true, last_seen: null, pending: false },
   ],
 };
 
@@ -61,22 +66,28 @@ const bridge = (state) => `
           case 'create_identity': return {
             words: ['harbour','lichen','quarry','saddle','verbena','tundra','gravel','mussel','plover','basalt','ferment','willow'],
             did: ${JSON.stringify(STATE_LINKED.did)},
-            fingerprint: '5F 9A C9 07 2E 11',
+            fingerprint: ${JSON.stringify(ROOT_FP)},
           };
           case 'confirm_backup': return true;
-          case 'read_link_code': return {
+          case 'restore_identity': return null;
+          // The refusal path. The shell must render a refusal without learning
+          // which check failed, so the stub throws the same opaque line the
+          // real command produces.
+          case 'read_link_code': if (args.code.endsWith('z')) throw "That code isn't valid.";
+          return {
             application: 'cbcl-chat',
             purpose: 'chat-device',
             device_description: 'Chrome on macOS',
-            key_fingerprint: 'C0 7A 1E 42 9B 33',
+            key_fingerprint: ${JSON.stringify(KEY_FP)},
             expires_in: 252,
           };
           case 'authorise': return {
             method_id: 'did:crdt:9f3a…#dev-1',
             did: ${JSON.stringify(STATE_LINKED.did)},
-            fingerprint: '5F 9A C9 07 2E 11',
+            fingerprint: ${JSON.stringify(ROOT_FP)},
             publishing: 1,
           };
+          case 'unlink_device': return null;
           case 'reject_offer': return null;
           case 'flush_publications': return 0;
           default: return null;
@@ -101,12 +112,25 @@ const shots = [
   { name: '12-device', state: STATE_LINKED, steps: ['open-device'] },
   { name: '13-unlink', state: STATE_LINKED, steps: ['open-device', 'to-unlink'] },
   { name: '14-restore', state: { has_identity: false, backup_confirmed: false, devices: [], pending_publications: 0 }, steps: ['begin-restore'] },
+  { name: '15-restored', state: STATE_LINKED, steps: ['begin-restore', 'fill-restore', 'restore'] },
+  { name: '16-unlinked', state: STATE_LINKED, steps: ['open-device', 'to-unlink', 'fill-unlink-passcode', 'unlink'] },
+  { name: '17-refused-code', state: STATE_LINKED, steps: ['to-link', 'fill-bad-code', 'read-code'] },
 ];
 
 // `protocolTimeout` is raised because a screenshot on a loaded machine can take
 // longer than the 30 s default, and a flaky presentation check is worse than a
 // slow one.
-const browser = await puppeteer.launch({ headless: 'new', protocolTimeout: 120_000 });
+// CI container runners execute as root, and Chrome's setuid sandbox refuses to
+// start as root — the browser dies before the first page loads, which looks
+// identical to a broken build. `--no-sandbox` is the standard answer and is
+// scoped to CI so a developer's local run keeps the sandbox. `/dev/shm` is
+// commonly 64 MB in a container, which Chrome exhausts on the first screenshot.
+const CI = !!process.env.CI;
+const browser = await puppeteer.launch({
+  headless: 'new',
+  protocolTimeout: 120_000,
+  args: CI ? ['--no-sandbox', '--disable-dev-shm-usage'] : [],
+});
 const errors = [];
 
 for (const shot of shots) {
@@ -134,6 +158,22 @@ for (const shot of shots) {
         const el = document.querySelector('#code-input');
         el.value = 'anuna1qyqsqqqqqqqqqqqqqqqqqqqqqqqqqjdgkrf';
         el.dispatchEvent(new Event('input'));
+      });
+    } else if (step === 'fill-bad-code') {
+      await page.evaluate(() => {
+        const el = document.querySelector('#code-input');
+        el.value = 'anuna1qyqsqqqqqqqqqqqqqqqqqqqqqqqqqjdgkrz';
+        el.dispatchEvent(new Event('input'));
+      });
+    } else if (step === 'fill-restore') {
+      await page.evaluate(() => {
+        document.querySelector('#restore-phrase').value =
+          'harbour lichen quarry saddle verbena tundra gravel mussel plover basalt ferment willow';
+        document.querySelector('#restore-passcode').value = 'correct horse';
+      });
+    } else if (step === 'fill-unlink-passcode') {
+      await page.evaluate(() => {
+        document.querySelector('#unlink-passcode').value = 'correct horse';
       });
     } else if (step === 'open-device') {
       await page.evaluate(() => document.querySelector('.device')?.click());

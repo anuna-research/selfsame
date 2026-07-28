@@ -1,0 +1,265 @@
+name: selfsame-ci
+
+# The four checks README.md tells a contributor to run, made non-optional.
+#
+#   cargo clippy --workspace --all-targets
+#   cargo test --workspace
+#   cargo build -p selfsame-core --target wasm32-unknown-unknown
+#   npm run screens
+#
+# Three of those are load-bearing beyond "the code compiles", and it is worth
+# saying which, because a green tick here is the only thing standing between a
+# refactor and a silently different identity:
+#
+#   - `tests/purity.rs` fails if `tokio`, `reqwest`, `hyper`, `axum`, or a TLS
+#     stack enters `selfsame-core`'s dependency graph, or if any core module
+#     reaches for a clock, a socket, or a disk. The wasm build is the same
+#     boundary checked from the other side — the core is compiled for a target
+#     that simply has none of those things.
+#   - `tests/pinned_derivation.rs` and `tests/vectors.rs` fail if `did-crdt`'s
+#     DID derivation drifts. ADR-010 adopts that derivation verbatim, so a drift
+#     is a breaking change to the protocol and re-derives every existing
+#     identity. This is why the sibling checkouts below are pinned.
+#   - `tests/screens.mjs` asserts what Rust cannot see: one screen visible at a
+#     time, no horizontal overflow at phone width, no console errors, and — after
+#     a bug that shipped a black rectangle — that a *missing* Tauri bridge
+#     renders an explanation rather than nothing.
+#
+# Runner notes, learned from hark's working pipeline rather than assumed: the
+# Forgejo runner image ships node, git, and curl, but NOT rustup, NOT a C
+# toolchain, and NOT necessarily `sudo`. Every step below that needs one of
+# those installs it and guards the privilege escalation.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  # ── Rust: the core, the shells, and both boundary gates ─────────────────
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # The workspace has path dependencies on two siblings, cloned next to the
+      # checkout — the layout README.md's "Before you build" section describes.
+      # `--locked` cannot pin path-dependency *contents*, so the revisions are
+      # pinned explicitly here or CI is not building what a release would.
+      #
+      # did-crdt's revision is read out of vectors.rs rather than written here a
+      # second time: that file records the revision the test vectors were
+      # generated against, so it is the source of truth, and a copy in this file
+      # would be a second place for it to be wrong.
+      - name: Clone and pin the sibling path dependencies
+        run: |
+          set -euo pipefail
+          did_sha="$(grep -oE '[0-9a-f]{40}' crates/selfsame-core/tests/vectors.rs | head -1)"
+          cbcl_sha="$(tr -d '[:space:]' < cbcl-rs.sha)"
+          echo "did-crdt @ ${did_sha}"
+          echo "cbcl-rs  @ ${cbcl_sha}"
+
+          [ -d ../did-crdt ] || git clone https://git.anuna.io/anuna-research/did-crdt.git ../did-crdt
+          git -C ../did-crdt checkout --detach "${did_sha}"
+          test "$(git -C ../did-crdt rev-parse HEAD)" = "${did_sha}"
+
+          [ -d ../cbcl-rs ] || git clone https://git.anuna.io/anuna-research/cbcl-rs.git ../cbcl-rs
+          git -C ../cbcl-rs checkout --detach "${cbcl_sha}"
+          test "$(git -C ../cbcl-rs rev-parse HEAD)" = "${cbcl_sha}"
+
+      # src-tauri links against the system webview. Without these the workspace
+      # does not build on Linux at all — the -sys crates' build scripts look for
+      # them through pkg-config and fail at `cargo check`, long before any test
+      # runs. This is the cost of keeping the Tauri shell in `--workspace`, and
+      # it is worth paying: the shell is where the commands the UI calls live.
+      - name: Install the C toolchain and the Tauri system dependencies
+        run: |
+          set -euo pipefail
+          if ! command -v apt-get >/dev/null 2>&1; then
+            echo "This job needs apt-get to install the system webview headers" >&2
+            echo "src-tauri links against. Runner image has no apt-get." >&2
+            exit 1
+          fi
+          SUDO=""; command -v sudo >/dev/null 2>&1 && SUDO="sudo"
+          $SUDO apt-get update
+          cat /etc/os-release 2>/dev/null | head -2 || true
+
+          # Tauri v2 wants webkit2gtk 4.1, which only exists from Ubuntu 23.04.
+          # On 22.04 the package is 4.0. Pick whichever the runner's index
+          # actually has rather than assuming the image version.
+          webkit="libwebkit2gtk-4.1-dev"
+          if ! apt-cache show "$webkit" >/dev/null 2>&1; then
+            webkit="libwebkit2gtk-4.0-dev"
+          fi
+          echo "webview headers: ${webkit}"
+
+          $SUDO apt-get install -y --no-install-recommends \
+            build-essential pkg-config curl file \
+            "$webkit" libssl-dev libxdo-dev \
+            libayatana-appindicator3-dev librsvg2-dev
+
+      - name: Ensure the Rust toolchain
+        run: |
+          set -euo pipefail
+          if ! command -v rustup >/dev/null 2>&1; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+              | sh -s -- -y --default-toolchain stable --profile minimal
+            echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+            export PATH="$HOME/.cargo/bin:$PATH"
+          fi
+          rustup show active-toolchain || rustup toolchain install stable --profile minimal
+          rustup component add clippy
+          rustup target add wasm32-unknown-unknown
+          rustc --version
+          cargo --version
+          cargo clippy --version
+
+      # Keyed on both lockfiles: a sibling bump changes what is compiled without
+      # changing ours, and a stale cache would hide that.
+      - name: Cache cargo registry and target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-selfsame-${{ hashFiles('Cargo.lock', 'cbcl-rs.sha') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-selfsame-
+
+      - name: Clippy (deny warnings)
+        run: |
+          set -o pipefail
+          cargo clippy --workspace --all-targets --locked -- -D warnings 2>&1 \
+            | tee -a /tmp/rust-ci.log
+
+      # Covers purity.rs, pinned_derivation.rs, vectors.rs, properties.rs, and
+      # hostile_rendezvous.rs, plus the rendezvous end-to-end suite which stands
+      # up the real server on a loopback port.
+      - name: Test
+        run: |
+          set -o pipefail
+          cargo test --workspace --locked 2>&1 | tee -a /tmp/rust-ci.log
+
+      # The purity boundary, checked from the other side: a target with no
+      # clock, no socket, and no disk simply will not link a core that reached
+      # for one.
+      - name: Build the core for wasm32
+        run: |
+          set -o pipefail
+          cargo build -p selfsame-core --target wasm32-unknown-unknown --locked 2>&1 \
+            | tee -a /tmp/rust-ci.log
+
+      # This Forgejo exposes no log endpoint and no artifacts API — its swagger
+      # has 33 action paths and none of them serve either — so a failure here is
+      # visible only as "Failing after 3m17s", which is not enough to fix
+      # anything. Commit statuses ARE readable through the API, so the first
+      # error line is posted into one.
+      #
+      # Delete this step the day the instance grows a log endpoint; until then
+      # it is the difference between fixing CI and guessing at it.
+      - name: Report the first error into a commit status
+        if: failure()
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          line=$(grep -m1 -E '^(error|warning: unused|thread .* panicked|E:)' /tmp/rust-ci.log 2>/dev/null \
+                 || tail -n 3 /tmp/rust-ci.log 2>/dev/null \
+                 || echo "no output captured — failed before the first cargo step")
+          line=$(printf '%s' "$line" | tr '\n' ' ' | cut -c1-240)
+          echo "reporting: ${line}"
+          curl -sS -X POST \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            "${GITHUB_SERVER_URL}/api/v1/repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" \
+            -d "$(printf '{"context":"ci-diagnostic","state":"failure","description":%s}' \
+                  "$(printf '%s' "$line" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')")" \
+            >/dev/null || true
+
+  # ── Screens: what Rust cannot see ───────────────────────────────────────
+  # Deliberately independent of the Rust job: screens.mjs drives the webview
+  # with a stubbed bridge and needs no Rust at all, so a CSS regression is
+  # reported in about a minute instead of behind a Tauri build.
+  screens:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Puppeteer ships its own Chrome but not the shared libraries it links
+      # against; on a bare runner the browser launches and immediately dies
+      # without them.
+      #
+      # Ubuntu 24.04 renamed several with a `t64` suffix (the 64-bit `time_t`
+      # transition) and 22.04 did not, so each name is resolved against the
+      # runner's own package index rather than guessed from the image label.
+      #
+      # Best-effort on purpose: many runner images already carry these, and an
+      # image without apt-get at all is a setup failure masquerading as a test
+      # failure. If the libraries really are missing, Chrome fails to launch and
+      # `npm run screens` says so — which is the signal we actually want.
+      - name: Install the libraries headless Chrome links against
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          if ! command -v apt-get >/dev/null 2>&1; then
+            echo "no apt-get on this image; assuming Chrome's libraries are present"
+            exit 0
+          fi
+          SUDO=""; command -v sudo >/dev/null 2>&1 && SUDO="sudo"
+          $SUDO apt-get update || true
+          pkgs=""
+          for p in libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libcups2 \
+                   libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 \
+                   libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 libcairo2 \
+                   libasound2; do
+            if apt-cache show "${p}t64" >/dev/null 2>&1; then
+              pkgs="${pkgs} ${p}t64"
+            else
+              pkgs="${pkgs} ${p}"
+            fi
+          done
+          echo "installing:${pkgs}"
+          # shellcheck disable=SC2086
+          $SUDO apt-get install -y --no-install-recommends ${pkgs} || true
+
+      # The image ships a node, but not necessarily one new enough for
+      # puppeteer 23. Pinning it here removes that variable; `actions/cache@v4`
+      # and `actions/checkout@v4` are already proven on this runner, so
+      # marketplace actions resolve.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Show node
+        run: |
+          node --version
+          npm --version
+
+      # `npm ci` rather than `npm install`: the lockfile is tracked so the
+      # browser build under test is the same one a contributor rendered against.
+      - name: npm ci
+        run: npm ci
+
+      - name: Render every screen
+        env:
+          CI: "true" # selects the no-sandbox launch flags in screens.mjs
+        run: npm run screens
+
+      # Kept on failure too — when an assertion trips, the picture of the screen
+      # that tripped it is the fastest way to see why.
+      #
+      # Non-fatal, and `warn` rather than `error` on an empty directory: this
+      # instance exposes no artifacts API, so artifact storage may not be
+      # configured at all. A missing convenience must not turn a passing render
+      # into a red build — the assertions in screens.mjs are the gate, and the
+      # pictures are a bonus.
+      - name: Upload the rendered screens
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: screens
+          path: screens-out/
+          if-no-files-found: warn

@@ -213,7 +213,7 @@ mod tests {
     #[test]
     fn rejects_mixed_case() {
         let s = sample().render();
-        let mixed = format!("{}{}", &s[..10].to_uppercase(), &s[10..]);
+        let mixed = format!("{}{}", s[..10].to_uppercase(), &s[10..]);
         assert_eq!(LinkCode::parse(&mixed), Err(LinkCodeError::Malformed));
     }
 

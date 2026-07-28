@@ -81,9 +81,10 @@
         <h1>This is you now.</h1>
         <p class="label">Your home key fingerprint</p>
         <p class="fingerprint" data-created-fingerprint></p>
+        <p class="fp__label" data-created-label></p>
         <p class="lede">
-          You will see this again when you link a device. If the two ever
-          disagree, stop and start over.
+          Every device you link will show this same fingerprint. If one ever
+          shows something else, it isn't part of your home key.
         </p>
         <p class="label">Full identifier</p>
         <p class="did" data-created-did></p>
@@ -119,6 +120,7 @@
         <div class="card card--root">
           <p class="label">Your home key</p>
           <p class="fingerprint" data-home-fingerprint></p>
+          <p class="fp__label" data-home-label></p>
           <p class="did did--wrap" data-home-did></p>
           <p class="pending" data-pending hidden></p>
         </div>
@@ -166,48 +168,57 @@
       </section>
 
       <!-- ══ SCREEN-001 · Authorise ═════════════════════════════════════ -->
+      <!--
+        One question, evidence underneath. The fingerprint IS the screen rather
+        than one box among five.
+
+        The compared value is the hex. The label and the bars below it are
+        recognition aids and are deliberately smaller: selfsame-core rates the
+        label at ≈18.6 bits against NFR-008's floor of 32, so whatever sits
+        largest under the question is what must carry 48.
+
+        Two options, ever (Hick's Law, SCREEN-001). "It shows something else" is
+        the one-tap exit — there is no third control to click past the decision.
+      -->
       <section class="screen screen--scroll" data-screen="consent" hidden>
         <div class="consent-head">
-          <button class="back" data-action="cancel-offer">Cancel</button>
+          <span class="screen-title">Authorise a device</span>
           <span class="countdown" data-countdown></span>
         </div>
-        <h1>Copy your home key to this device?</h1>
+        <h1>Does your other screen show this?</h1>
 
-        <!-- Verified region: from the compiled table, never from the code. -->
-        <div class="card card--verified">
-          <p class="label">Application</p>
-          <p class="value" data-offer-app></p>
-          <p class="label">Purpose</p>
-          <p class="value" data-offer-purpose></p>
+        <div class="fp">
+          <div class="fp__bars" data-offer-bars aria-hidden="true"></div>
+          <p class="fp__hex" data-offer-fingerprint></p>
+          <p class="fp__label" data-offer-label></p>
         </div>
 
-        <!-- Untrusted region: dashed border, different type, lead-in phrase. -->
-        <div class="card card--untrusted">
-          <p class="label label--untrusted">The device says it is</p>
-          <p class="untrusted-text" data-offer-desc></p>
-          <p class="caution">
-            Its own words. Anuna can't check them — judge the fingerprint below
-            instead.
-          </p>
-        </div>
+        <div class="evidence">
+          <!-- Verified: from the compiled table, never from the code. -->
+          <div class="evidence__row">
+            <p class="evidence__key">Asked by</p>
+            <p class="evidence__val" data-offer-asked></p>
+          </div>
 
-        <p class="label label--centre">Key fingerprint</p>
-        <p class="fingerprint fingerprint--centre" data-offer-fingerprint></p>
-        <p class="caution caution--centre">
-          This must match what the other device is showing. If it doesn't, stop.
-        </p>
+          <!-- Untrusted: border style + type treatment + lead-in phrase. -->
+          <div class="evidence__row evidence__row--untrusted">
+            <p class="evidence__key">Calls itself</p>
+            <p class="evidence__val" data-offer-desc></p>
+            <p class="evidence__note">its own words, unchecked</p>
+          </div>
 
-        <div class="grant">
-          <p>It can prove this key is yours.</p>
-          <p class="grant__limit">
-            It can't add or remove devices, and it gets no new access to your
-            messages.
-          </p>
+          <div class="evidence__row">
+            <p class="evidence__key">Gains</p>
+            <p class="evidence__val">
+              the ability to prove it's you — nothing else, and no power over
+              your other devices
+            </p>
+          </div>
         </div>
 
         <div class="spacer"></div>
-        <button class="btn btn--primary" data-action="to-presence">Authorise</button>
-        <button class="btn btn--quiet" data-action="reject">This isn't me — reject</button>
+        <button class="btn btn--primary" data-action="to-presence">Yes, that's what I see</button>
+        <button class="btn btn--quiet" data-action="reject">It shows something else</button>
       </section>
 
       <!-- ══ REQ-024 · user presence ════════════════════════════════════ -->
@@ -240,6 +251,10 @@
         <p class="did" data-linked-method></p>
         <p class="label">Telling your contacts</p>
         <p class="value" data-linked-publishing></p>
+        <p class="caution">
+          The device works right now. Until publishing finishes, other people
+          just won't see it as verified yet.
+        </p>
         <div class="spacer"></div>
         <button class="btn btn--primary" data-action="to-home">Done</button>
       </section>
@@ -249,12 +264,13 @@
         <div class="mark mark--lg mark--broken" aria-hidden="true"></div>
         <h1>Nothing was authorised.</h1>
         <p class="lede">
-          That device did not get a copy of your home key, and nothing was
-          published.
+          Your home key is untouched and nothing was signed. The code is now
+          dead — it can't be used again.
         </p>
+        <p class="label">If you didn't start this</p>
         <p class="caution">
-          If you didn't start this, someone showed you a code that wasn't yours.
-          Nothing has changed.
+          Someone showed you that code hoping you'd scan it. Nothing has been
+          taken. Check your devices list if you want to be sure.
         </p>
         <div class="spacer"></div>
         <button class="btn btn--primary" data-action="to-home">Back to devices</button>
@@ -265,19 +281,24 @@
         <button class="back" data-action="to-home">Devices</button>
         <h1 data-device-title></h1>
         <div class="card">
+          <p class="label">Key fingerprint</p>
+          <p class="value" data-device-nickname></p>
           <p class="label">Method id</p>
           <p class="did did--wrap" data-device-method></p>
           <p class="label">Last seen</p>
           <p class="value" data-device-seen></p>
           <p class="label">Status</p>
           <p class="value" data-device-status></p>
+          <p class="label">Name</p>
+          <p class="value" data-device-name></p>
         </div>
         <p class="caution">
-          The name is stored in your signed home key, so a replacement phone can
-          still name this device.
+          Stored in your signed home key, so a replacement phone can still name
+          this device.
         </p>
         <div class="spacer"></div>
         <button class="btn btn--danger" data-action="to-unlink">Unlink this device</button>
+        <p class="caution">Works whether or not the device is switched on.</p>
       </section>
 
       <!-- ══ HP-5 · unlink confirm ══════════════════════════════════════ -->
@@ -285,13 +306,12 @@
         <button class="back" data-action="back-to-device">Back</button>
         <h1 data-unlink-title></h1>
         <p class="lede">
-          Other people will stop treating that device as yours, usually within a
-          day.
+          It stops being able to prove it's you. People who know you will stop
+          seeing it as verified once they next check — within a day.
         </p>
         <p class="caution">
-          It can still connect to the chat as an unknown member — unlinking
-          removes the claim that it is you, not its access. Works whether or not
-          the device is switched on.
+          This doesn't kick the laptop off the network. It removes its claim to
+          be you, not its connection.
         </p>
         <label class="field">
           <span class="field__label">Passcode</span>
@@ -301,6 +321,101 @@
         <div class="spacer"></div>
         <button class="btn btn--danger" data-action="unlink">Unlink</button>
         <button class="btn btn--quiet" data-action="back-to-device">Keep it</button>
+      </section>
+
+      <!-- ══ HP-5 · unlinked, propagating ═══════════════════════════════ -->
+      <!--
+        OBS-003 made visible. Revocation is honest about its limits: the phone
+        drops the device from the home key immediately, but it cannot reach into
+        anyone else's client. Three steps, and the last one is explicitly not
+        ours to finish — which is why there is no "done" state here.
+      -->
+      <section class="screen screen--scroll" data-screen="unlinked" hidden>
+        <div class="mark mark--lg mark--broken" aria-hidden="true"></div>
+        <h1 data-unlinked-title></h1>
+        <ol class="steps">
+          <li>
+            <div class="mark mark--ok" aria-hidden="true"></div>
+            <div class="steps__body">
+              <span class="steps__what">Removed from your home key</span>
+              <span class="steps__when">Signed on this phone, just now</span>
+            </div>
+          </li>
+          <li>
+            <div class="mark mark--pending" aria-hidden="true"></div>
+            <div class="steps__body">
+              <span class="steps__what">Publishing the change</span>
+              <span class="steps__when" data-unlinked-publishing></span>
+            </div>
+          </li>
+          <li>
+            <div class="mark mark--pending" aria-hidden="true"></div>
+            <div class="steps__body">
+              <span class="steps__what">Contacts stop trusting it</span>
+              <span class="steps__when">
+                As each of them next checks, up to 24 hours
+              </span>
+            </div>
+          </li>
+        </ol>
+        <div class="spacer"></div>
+        <button class="btn btn--primary" data-action="to-home">Back to devices</button>
+      </section>
+
+      <!-- ══ Refused · bad code or expiry ═══════════════════════════════ -->
+      <!--
+        No parse detail, ever — CON-001's error model. Every failure inside
+        `read_link_code` collapses to one line, so this screen cannot and must
+        not say *which* check refused the code.
+
+        The mockup's separate "unproven key" screen is deliberately not built:
+        reaching it would mean surfacing that the REQ-018 signature check
+        specifically failed, which is the parse detail the error model exists to
+        withhold. Its guidance survives here instead, under "Where did this code
+        come from?" — that advice is true of any refused code and needs no
+        knowledge of which conjunct failed.
+      -->
+      <section class="screen screen--scroll" data-screen="refused-code" hidden>
+        <button class="back" data-action="to-home">Cancel</button>
+        <h1>Type the code.</h1>
+        <p class="did did--wrap" data-refused-code></p>
+        <div class="refusal">
+          <p class="refusal__title" data-refused-title></p>
+          <p class="refusal__body" data-refused-body></p>
+        </div>
+        <p class="label">Where did this code come from?</p>
+        <p class="caution">
+          If it was on a page, a message, or someone else's screen, treat it as
+          an attempt to become you. Codes only ever come from a device you are
+          holding.
+        </p>
+        <div class="spacer"></div>
+        <button class="btn btn--primary" data-action="to-link">Scan a new code</button>
+        <button class="btn btn--quiet" data-action="to-type">Type it again</button>
+      </section>
+
+      <!-- ══ Restore · welcome back ═════════════════════════════════════ -->
+      <!--
+        REQ-021: the device list is rebuilt from signed state, not from a local
+        file, which is why a restored phone can still name what it is revoking.
+        Last-seen is local-only and explicitly does not come back.
+      -->
+      <section class="screen screen--scroll" data-screen="restored" hidden>
+        <div class="mark mark--lg mark--ok" aria-hidden="true"></div>
+        <h1>Welcome back.</h1>
+        <p class="fingerprint" data-restored-fingerprint></p>
+        <p class="fp__label" data-restored-label></p>
+        <p class="lede">
+          Your twelve words rebuilt the same home key. Your devices come back
+          with it — they were recorded in the home key itself.
+        </p>
+        <ul class="restored-list" data-restored-devices></ul>
+        <p class="caution">
+          Last-seen times start again from today — only the home key is
+          recoverable, not its history.
+        </p>
+        <div class="spacer"></div>
+        <button class="btn btn--primary" data-action="to-home">Continue</button>
       </section>
 
       <!-- ══ busy ═══════════════════════════════════════════════════════ -->

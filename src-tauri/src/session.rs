@@ -228,13 +228,26 @@ impl Session {
         // linked, marked as unlinked, not a gap where a device used to be.
         let mut rows: Vec<DeviceRow> = Vec::new();
         for delta in self.all_deltas()? {
-            if let did_crdt::core::delta::DeltaOp::AddVerificationMethod { id, .. } = &delta.op {
+            if let did_crdt::core::delta::DeltaOp::AddVerificationMethod {
+                id,
+                public_key_multibase,
+                ..
+            } = &delta.op
+            {
                 if *id == root_id {
                     continue;
                 }
+                // The row's nickname. SCREEN-002 names a device by its label —
+                // a recognition aid, exactly the job `Fingerprint::label` is
+                // for. Nothing here is compared, so the ≈18.6 bits it carries
+                // are the right size rather than a shortfall.
+                let nickname = selfsame_core::mb::decode_exact::<32>(public_key_multibase)
+                    .ok()
+                    .map(|pk| selfsame_core::fingerprint::fingerprint_key(&pk).label());
                 rows.push(DeviceRow {
                     method_id: id.clone(),
                     label: identity::device_label(&document, id),
+                    nickname,
                     revoked: document.is_vm_revoked(id),
                     last_seen: self.last_seen(id),
                     pending: self.is_pending(&delta),
@@ -257,6 +270,10 @@ impl Session {
 pub struct DeviceRow {
     pub method_id: String,
     pub label: Option<String>,
+    /// `Fingerprint::label` of this device's key — `copper-lynx-42`. Names the
+    /// row; never compared. `None` if the stored key is unreadable, which the
+    /// UI renders by simply omitting it rather than showing a placeholder.
+    pub nickname: Option<String>,
     pub revoked: bool,
     pub last_seen: Option<u64>,
     /// True while this device's `AddVerificationMethod` is still unpublished —

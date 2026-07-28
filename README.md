@@ -31,13 +31,18 @@ one or nothing compiles:
 ```
 Code/
 ├── selfsame/     ← you are here
-├── did-crdt/     git clone https://github.com/anuna-research/did-crdt
-└── cbcl-rs/      git clone https://codeberg.org/anuna/cbcl-rs
+├── did-crdt/     git clone https://git.anuna.io/anuna-research/did-crdt
+└── cbcl-rs/      git clone https://git.anuna.io/anuna-research/cbcl-rs
 ```
 
 `did-crdt` is pinned at `adb5c7ac1423173f00201cddffa60fe672fb2a53` — its DID
 derivation is adopted verbatim and a change to it is a breaking change to the
-protocol. `crates/selfsame-core/tests/pinned_derivation.rs` fails if it drifts.
+protocol. `crates/selfsame-core/tests/pinned_derivation.rs` fails if it drifts,
+and `tests/vectors.rs` records the revision the test vectors were generated
+against, which is the copy CI clones.
+
+`cbcl-rs` is pinned by `cbcl-rs.sha` at the repository root — the same
+convention `cbcl-bus` uses for the `cbcl-erl` NIF.
 
 ## Quick start
 
@@ -136,8 +141,10 @@ cargo test --workspace
 cargo clippy --workspace --all-targets
 cargo build -p selfsame-core --target wasm32-unknown-unknown
 
-npm install && npm run screens      # render all 14 screens headlessly
+npm install && npm run screens      # render all 17 screens headlessly
 ```
+
+All four run on every push and pull request — `.forgejo/workflows/ci.yml`.
 
 `tests/screens.mjs` walks every screen with a stubbed Tauri bridge and asserts
 what Rust cannot see: one screen visible at a time, no horizontal overflow at
