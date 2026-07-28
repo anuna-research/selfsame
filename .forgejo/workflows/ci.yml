@@ -76,6 +76,11 @@ jobs:
       - name: Install the C toolchain and the Tauri system dependencies
         run: |
           set -euo pipefail
+          if ! command -v apt-get >/dev/null 2>&1; then
+            echo "This job needs apt-get to install the system webview headers" >&2
+            echo "src-tauri links against. Runner image has no apt-get." >&2
+            exit 1
+          fi
           SUDO=""; command -v sudo >/dev/null 2>&1 && SUDO="sudo"
           $SUDO apt-get update
           $SUDO apt-get install -y --no-install-recommends \
@@ -144,11 +149,21 @@ jobs:
       # Ubuntu 24.04 renamed several with a `t64` suffix (the 64-bit `time_t`
       # transition) and 22.04 did not, so each name is resolved against the
       # runner's own package index rather than guessed from the image label.
+      #
+      # Best-effort on purpose: many runner images already carry these, and an
+      # image without apt-get at all is a setup failure masquerading as a test
+      # failure. If the libraries really are missing, Chrome fails to launch and
+      # `npm run screens` says so — which is the signal we actually want.
       - name: Install the libraries headless Chrome links against
+        continue-on-error: true
         run: |
-          set -euo pipefail
+          set -uo pipefail
+          if ! command -v apt-get >/dev/null 2>&1; then
+            echo "no apt-get on this image; assuming Chrome's libraries are present"
+            exit 0
+          fi
           SUDO=""; command -v sudo >/dev/null 2>&1 && SUDO="sudo"
-          $SUDO apt-get update
+          $SUDO apt-get update || true
           pkgs=""
           for p in libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libcups2 \
                    libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 \
@@ -162,7 +177,7 @@ jobs:
           done
           echo "installing:${pkgs}"
           # shellcheck disable=SC2086
-          $SUDO apt-get install -y --no-install-recommends ${pkgs}
+          $SUDO apt-get install -y --no-install-recommends ${pkgs} || true
 
       # The image ships a node, but not necessarily one new enough for
       # puppeteer 23. Pinning it here removes that variable; `actions/cache@v4`
@@ -183,6 +198,8 @@ jobs:
         run: npm ci
 
       - name: Render every screen
+        env:
+          CI: "true" # selects the no-sandbox launch flags in screens.mjs
         run: npm run screens
 
       # Kept on failure too — when an assertion trips, the picture of the screen

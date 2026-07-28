@@ -120,7 +120,17 @@ const shots = [
 // `protocolTimeout` is raised because a screenshot on a loaded machine can take
 // longer than the 30 s default, and a flaky presentation check is worse than a
 // slow one.
-const browser = await puppeteer.launch({ headless: 'new', protocolTimeout: 120_000 });
+// CI container runners execute as root, and Chrome's setuid sandbox refuses to
+// start as root — the browser dies before the first page loads, which looks
+// identical to a broken build. `--no-sandbox` is the standard answer and is
+// scoped to CI so a developer's local run keeps the sandbox. `/dev/shm` is
+// commonly 64 MB in a container, which Chrome exhausts on the first screenshot.
+const CI = !!process.env.CI;
+const browser = await puppeteer.launch({
+  headless: 'new',
+  protocolTimeout: 120_000,
+  args: CI ? ['--no-sandbox', '--disable-dev-shm-usage'] : [],
+});
 const errors = [];
 
 for (const shot of shots) {
