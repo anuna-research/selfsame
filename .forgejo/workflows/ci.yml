@@ -129,19 +129,53 @@ jobs:
             ${{ runner.os }}-cargo-selfsame-
 
       - name: Clippy (deny warnings)
-        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+        run: |
+          set -o pipefail
+          cargo clippy --workspace --all-targets --locked -- -D warnings 2>&1 \
+            | tee -a /tmp/rust-ci.log
 
       # Covers purity.rs, pinned_derivation.rs, vectors.rs, properties.rs, and
       # hostile_rendezvous.rs, plus the rendezvous end-to-end suite which stands
       # up the real server on a loopback port.
       - name: Test
-        run: cargo test --workspace --locked
+        run: |
+          set -o pipefail
+          cargo test --workspace --locked 2>&1 | tee -a /tmp/rust-ci.log
 
       # The purity boundary, checked from the other side: a target with no
       # clock, no socket, and no disk simply will not link a core that reached
       # for one.
       - name: Build the core for wasm32
-        run: cargo build -p selfsame-core --target wasm32-unknown-unknown --locked
+        run: |
+          set -o pipefail
+          cargo build -p selfsame-core --target wasm32-unknown-unknown --locked 2>&1 \
+            | tee -a /tmp/rust-ci.log
+
+      # This Forgejo exposes no log endpoint and no artifacts API — its swagger
+      # has 33 action paths and none of them serve either — so a failure here is
+      # visible only as "Failing after 3m17s", which is not enough to fix
+      # anything. Commit statuses ARE readable through the API, so the first
+      # error line is posted into one.
+      #
+      # Delete this step the day the instance grows a log endpoint; until then
+      # it is the difference between fixing CI and guessing at it.
+      - name: Report the first error into a commit status
+        if: failure()
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          line=$(grep -m1 -E '^(error|warning: unused|thread .* panicked|E:)' /tmp/rust-ci.log 2>/dev/null \
+                 || tail -n 3 /tmp/rust-ci.log 2>/dev/null \
+                 || echo "no output captured — failed before the first cargo step")
+          line=$(printf '%s' "$line" | tr '\n' ' ' | cut -c1-240)
+          echo "reporting: ${line}"
+          curl -sS -X POST \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            "${GITHUB_SERVER_URL}/api/v1/repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" \
+            -d "$(printf '{"context":"ci-diagnostic","state":"failure","description":%s}' \
+                  "$(printf '%s' "$line" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')")" \
+            >/dev/null || true
 
   # ── Screens: what Rust cannot see ───────────────────────────────────────
   # Deliberately independent of the Rust job: screens.mjs drives the webview
