@@ -83,9 +83,20 @@ jobs:
           fi
           SUDO=""; command -v sudo >/dev/null 2>&1 && SUDO="sudo"
           $SUDO apt-get update
+          cat /etc/os-release 2>/dev/null | head -2 || true
+
+          # Tauri v2 wants webkit2gtk 4.1, which only exists from Ubuntu 23.04.
+          # On 22.04 the package is 4.0. Pick whichever the runner's index
+          # actually has rather than assuming the image version.
+          webkit="libwebkit2gtk-4.1-dev"
+          if ! apt-cache show "$webkit" >/dev/null 2>&1; then
+            webkit="libwebkit2gtk-4.0-dev"
+          fi
+          echo "webview headers: ${webkit}"
+
           $SUDO apt-get install -y --no-install-recommends \
             build-essential pkg-config curl file \
-            libwebkit2gtk-4.1-dev libssl-dev libxdo-dev \
+            "$webkit" libssl-dev libxdo-dev \
             libayatana-appindicator3-dev librsvg2-dev
 
       - name: Ensure the Rust toolchain
