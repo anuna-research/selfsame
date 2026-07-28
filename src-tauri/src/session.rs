@@ -237,17 +237,25 @@ impl Session {
                 if *id == root_id {
                     continue;
                 }
-                // The row's nickname. SCREEN-002 names a device by its label —
-                // a recognition aid, exactly the job `Fingerprint::label` is
-                // for. Nothing here is compared, so the ≈18.6 bits it carries
-                // are the right size rather than a shortfall.
-                let nickname = selfsame_core::mb::decode_exact::<32>(public_key_multibase)
+                // The row's nickname and its picture. SCREEN-002 names a device
+                // by its label — a recognition aid, exactly the job
+                // `Fingerprint::label` is for. Nothing here is compared, so the
+                // ≈18.6 bits it carries are the right size rather than a
+                // shortfall.
+                //
+                // The picture rides along for SPEC-002 REQ-101: a recognition
+                // aid the user meets only on the authorise screen has had no
+                // chance to become recognisable. The device list is where they
+                // see these most often, and therefore where the recognition is
+                // actually built.
+                let fingerprint = selfsame_core::mb::decode_exact::<32>(public_key_multibase)
                     .ok()
-                    .map(|pk| selfsame_core::fingerprint::fingerprint_key(&pk).label());
+                    .map(|pk| selfsame_core::fingerprint::fingerprint_key(&pk));
                 rows.push(DeviceRow {
                     method_id: id.clone(),
                     label: identity::device_label(&document, id),
-                    nickname,
+                    nickname: fingerprint.map(|f| f.label()),
+                    lifehash: fingerprint.map(|f| f.lifehash().base64()),
                     revoked: document.is_vm_revoked(id),
                     last_seen: self.last_seen(id),
                     pending: self.is_pending(&delta),
@@ -274,6 +282,10 @@ pub struct DeviceRow {
     /// row; never compared. `None` if the stored key is unreadable, which the
     /// UI renders by simply omitting it rather than showing a placeholder.
     pub nickname: Option<String>,
+    /// The LifeHash of this device's key, Base64 (SPEC-002 CON-102). `None` on
+    /// the same unreadable-key path as `nickname`, and omitted the same way:
+    /// the row still has its name and its state, which is what the list is for.
+    pub lifehash: Option<String>,
     pub revoked: bool,
     pub last_seen: Option<u64>,
     /// True while this device's `AddVerificationMethod` is still unpublished —

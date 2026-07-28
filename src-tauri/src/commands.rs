@@ -97,7 +97,8 @@ async fn with_root<T: Send + 'static>(
 
 // ── fingerprint rendering ───────────────────────────────────────────────────
 
-/// Both renderings of one fingerprint, so the shell never has to derive either.
+/// All three renderings of one fingerprint, so the shell never has to derive any
+/// of them.
 ///
 /// **`hex` is the comparison value and `label` is not.** `selfsame-core`'s
 /// [`fingerprint`] module is explicit: `hex` carries 48 bits against NFR-008's
@@ -107,10 +108,12 @@ async fn with_root<T: Send + 'static>(
 /// recognisable at a glance — but the screen ranks `hex` first and every
 /// question the user answers is a question about `hex`.
 ///
-/// Shipping the pair from one place is what keeps that true: a shell that
+/// Shipping the set from one place is what keeps that true: a shell that
 /// received only `label` could not show the compared value even if it wanted to,
-/// and a shell that derived its own words would be a second rendering of a
-/// security-relevant value outside the core.
+/// and a shell that derived its own words — or its own picture — would be a
+/// second rendering of a security-relevant value outside the core. That is
+/// exactly what the three colour bars in `app.js` were, and why they are gone
+/// (SPEC-002 ADR-103).
 #[derive(Serialize)]
 pub struct Fp {
     /// Six uppercase hex pairs, spaced — `C0 7A 1E 42 9B 33`. The normative
@@ -118,11 +121,15 @@ pub struct Fp {
     pub hex: String,
     /// The nickname — `copper-lynx-42`. Recognition aid, never compared.
     pub label: String,
+    /// The picture — LifeHash v2, 32×32 RGB, Base64, exactly 4096 characters
+    /// (SPEC-002 CON-102). Recognition aid, never compared: REQ-103 keeps `hex`
+    /// the answer to every question a screen asks.
+    pub lifehash: String,
 }
 
 impl From<fingerprint::Fingerprint> for Fp {
     fn from(f: fingerprint::Fingerprint) -> Self {
-        Self { hex: f.hex(), label: f.label() }
+        Self { hex: f.hex(), label: f.label(), lifehash: f.lifehash().base64() }
     }
 }
 
@@ -136,10 +143,18 @@ pub struct AppState {
     /// REQ-002: until this is true, linking and revoking are refused.
     pub backup_confirmed: bool,
     pub did: Option<String>,
-    /// `fingerprint_did` — what the user compares against a linking client.
+    /// `fingerprint_did` — what the user compares against a linking client,
+    /// and what the home card, the created screen and the restored screen all
+    /// headline.
+    ///
+    /// There is deliberately no second fingerprint here. This struct used to
+    /// also carry `root_fingerprint` (`fingerprint_key` of the root key), and
+    /// the home card showed *that* — a different 48-bit value, displayed
+    /// nowhere else in the system, on the screen the user opens to ask "is this
+    /// still me?". Nothing consumed it once the card was corrected, and it is
+    /// gone rather than left available: a spare fingerprint on the state object
+    /// is an invitation to headline the wrong one again.
     pub fingerprint: Option<Fp>,
-    /// The root key's own fingerprint, shown on the home-key card.
-    pub root_fingerprint: Option<Fp>,
     pub devices: Vec<DeviceRow>,
     /// OBS-005 — deltas signed but not yet acknowledged. Non-zero means the
     /// user believes they are linked while peers cannot see it, so the UI says
@@ -155,7 +170,6 @@ pub async fn get_state(session: State<'_, AppSession>) -> Result<AppState> {
             backup_confirmed: false,
             did: None,
             fingerprint: None,
-            root_fingerprint: None,
             devices: Vec::new(),
             pending_publications: 0,
         });
@@ -169,7 +183,6 @@ pub async fn get_state(session: State<'_, AppSession>) -> Result<AppState> {
         has_identity: true,
         backup_confirmed: Custody::backup_confirmed()?,
         fingerprint: Some(fingerprint::fingerprint_did(&did).into()),
-        root_fingerprint: Some(fingerprint::fingerprint_key(&root_pk).into()),
         devices: session.devices(&root_pk).unwrap_or_default(),
         pending_publications: session.pending_count(),
         did: Some(did),

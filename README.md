@@ -100,6 +100,31 @@ The mailbox operator sees `H(s)` and ciphertext and nothing else. It can
 withhold; it cannot substitute. `crates/selfsame-core/tests/hostile_rendezvous.rs`
 gives it every power that concession allows and asserts what still holds.
 
+### The human backstop
+
+The last check is a person, comparing a 48-bit fingerprint across two screens.
+Every key Selfsame shows you — on the phone and in the CLI — is rendered three
+ways from one digest:
+
+| Rendering | Carries | Job |
+|---|---|---|
+| `C0 7A 1E 42 9B 33` | 48 bits | **the value you compare.** Every question a screen asks is about this |
+| a [LifeHash] picture | the same 48 bits | recognition — you notice a change before you can read one |
+| `copper-lynx-42` | ≈18.6 bits | names a row in a list; never compared |
+
+The picture is [LifeHash] v2 — Conway's Game of Life seeded from the digest,
+then coloured and mirrored. It is computed from the *fingerprint*, not from the
+key, so the picture and the hex cannot disagree: same hex, same picture,
+necessarily. It replaced three colour bars that consumed half the digest and
+lived only on one screen of the phone app.
+
+It is a recognition aid, not the comparison. Promoting it would move SPEC-001's
+human backstop, which is gated behind that specification's outstanding Tier-1
+review — see [SPEC-002] ADR-107.
+
+[LifeHash]: https://lifehash.info/
+[SPEC-002]: specs/SPEC-002-visual-key-fingerprint.md
+
 ## Architecture
 
 Dependencies point inward. The pure core makes every decision; the shells do

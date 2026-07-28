@@ -205,7 +205,11 @@ fn report(accepted: &AcceptedIdentity) {
     println!("\n  Linked.\n");
     println!("  {}", accepted.did);
     println!("\n  Identity fingerprint\n");
-    println!("      {}", accepted.fingerprint.hex());
+    // The picture first, then the value. The question below asks about the
+    // *fingerprint*, so the hex sits closest to it (Serial Position Effect);
+    // the picture is the thing the eye lands on from across the desk.
+    print_lifehash(&accepted.fingerprint, "      ");
+    println!("\n      {}   {}", accepted.fingerprint.hex(), accepted.fingerprint.label());
     println!("\n  Does this match what your phone showed when you created your home key?");
     println!("  If it doesn't, run `selfsame unlink` and start again.\n");
 }
@@ -227,17 +231,26 @@ fn status() -> Result<()> {
     let device = store.load_or_create_device_key()?;
     let device_pk = device.verifying_key().to_bytes();
 
-    println!("\n  Device key   {}", fingerprint::fingerprint_key(&device_pk).hex());
+    // SPEC-002 REQ-101: both keys this command names get their picture. The
+    // device key is the one the *phone* shows while authorising, and the
+    // identity is the one the phone showed at creation — two different
+    // comparisons, so two different pictures, each beside its own hex.
+    let device_fp = fingerprint::fingerprint_key(&device_pk);
+    println!("\n  Device key   {}   {}", device_fp.hex(), device_fp.label());
+    println!();
+    print_lifehash(&device_fp, "  ");
     match store.load_identity()? {
         None => {
-            println!("  Status       not linked\n");
+            println!("\n  Status       not linked\n");
             println!("  Run `selfsame link` to link this device to the identity on your phone.\n");
         }
         Some(identity) => {
-            println!("  Status       linked");
+            println!("\n  Status       linked");
             println!("  Identity     {}", identity.did);
-            println!("  Fingerprint  {}", identity.fingerprint.hex());
+            println!("  Fingerprint  {}   {}", identity.fingerprint.hex(), identity.fingerprint.label());
             println!("  This device  {}\n", identity.own_method_id);
+            print_lifehash(&identity.fingerprint, "  ");
+            println!();
         }
     }
     Ok(())
@@ -426,10 +439,108 @@ fn qr_lines(text: &str) -> Option<Vec<String>> {
     Some(lines)
 }
 
+// ── the visual fingerprint (SPEC-002 CON-103) ───────────────────────────────
+
+/// The LifeHash as terminal rows — SPEC-002 CON-103.
+///
+/// Two pixel rows per terminal row, via a half-block whose *foreground* is the
+/// upper pixel and whose *background* is the lower one: the same trick
+/// [`qr_lines`] uses, so a 32×32 image occupies 16 rows and stays square-ish
+/// under a typical cell aspect ratio.
+///
+/// Split out from the printing for the same reason `qr_lines` was — the
+/// geometry is then testable without capturing stdout, which is how the
+/// off-by-one in the QR renderer was eventually caught.
+///
+/// The escapes are emitted unconditionally, not gated on `isatty`: PROTO-001
+/// requires behaviour be invariant across calling context, and this is the
+/// convention the QR renderer above already set (SPEC-002 ADR-105).
+fn lifehash_lines(lh: &fingerprint::LifeHash, indent: &str) -> Vec<String> {
+    const RESET: &str = "\x1b[0m";
+    let side = fingerprint::LifeHash::SIDE;
+
+    (0..side / 2)
+        .map(|row| {
+            let mut line = String::from(indent);
+            for x in 0..side {
+                let (ur, ug, ub) = lh.pixel(x, row * 2);
+                let (lr, lg, lb) = lh.pixel(x, row * 2 + 1);
+                // 24-bit SGR. Terminals without truecolour degrade to their
+                // nearest palette entry, which keeps the picture recognisable
+                // even where it is not exact — and nothing is compared, so
+                // approximate is the correct failure mode here.
+                line.push_str(&format!("\x1b[38;2;{ur};{ug};{ub}m\x1b[48;2;{lr};{lg};{lb}m▀"));
+            }
+            line.push_str(RESET);
+            line
+        })
+        .collect()
+}
+
+/// Print the picture that belongs to `fp`, indented to match its hex.
+fn print_lifehash(fp: &fingerprint::Fingerprint, indent: &str) {
+    for line in lifehash_lines(&fp.lifehash(), indent) {
+        println!("{line}");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use selfsame_core::code::{LinkCode, LinkSecret};
+
+    // ── SPEC-002 TEST-109: terminal geometry ────────────────────────────────
+
+    /// TEST-109 positive: 16 lines of 32 glyphs, each reset-terminated.
+    #[test]
+    fn the_picture_is_sixteen_rows_of_thirty_two_half_blocks() {
+        let fp = fingerprint::fingerprint_key(&[0x42u8; 32]);
+        let lines = lifehash_lines(&fp.lifehash(), "  ");
+
+        assert_eq!(lines.len(), 16, "32 pixel rows, two to a terminal row");
+        for (i, line) in lines.iter().enumerate() {
+            assert_eq!(
+                line.matches('▀').count(),
+                32,
+                "row {i} should be 32 cells wide: {line:?}"
+            );
+            assert!(line.starts_with("  "), "row {i} keeps its indent");
+            assert!(
+                line.ends_with("\x1b[0m"),
+                "row {i} must reset, or the next thing printed inherits its colours"
+            );
+        }
+    }
+
+    /// TEST-109 positive: row `y` is pixel rows `2y` (foreground) and `2y+1`
+    /// (background) — the half-block convention, checked rather than assumed.
+    #[test]
+    fn each_row_carries_the_two_pixel_rows_it_should() {
+        let lh = fingerprint::fingerprint_key(&[7u8; 32]).lifehash();
+        let lines = lifehash_lines(&lh, "");
+
+        for row in 0..16 {
+            let (ur, ug, ub) = lh.pixel(0, row * 2);
+            let (lr, lg, lb) = lh.pixel(0, row * 2 + 1);
+            let expected = format!("\x1b[38;2;{ur};{ug};{ub}m\x1b[48;2;{lr};{lg};{lb}m▀");
+            assert!(
+                lines[row].starts_with(&expected),
+                "row {row} should open with pixel rows {} and {}",
+                row * 2,
+                row * 2 + 1
+            );
+        }
+    }
+
+    /// TEST-109 negative-output: a different key must paint a different block.
+    /// Without this the test above would pass on a renderer that ignored its
+    /// argument entirely.
+    #[test]
+    fn different_keys_paint_different_blocks() {
+        let a = lifehash_lines(&fingerprint::fingerprint_key(&[0u8; 32]).lifehash(), "");
+        let b = lifehash_lines(&fingerprint::fingerprint_key(&[1u8; 32]).lifehash(), "");
+        assert_ne!(a, b);
+    }
 
     /// Regression: the renderer indexed past the end of a row for every cell in
     /// the right-hand quiet zone, so the *first* real link code it was given

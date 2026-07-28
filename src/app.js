@@ -119,8 +119,16 @@ async function refresh() {
     return;
   }
 
-  $("[data-home-fingerprint]").textContent = s.root_fingerprint?.hex ?? "";
-  $("[data-home-label]").textContent = s.root_fingerprint?.label ?? "";
+  // The *identity* fingerprint — `fingerprint_did` — not the root key's own.
+  //
+  // This is the value every linked client and the CLI compute and display, and
+  // the one the created screen introduced with "every device you link will show
+  // this same fingerprint". The home card used to show `fingerprint_key` of the
+  // root key instead: a different 48-bit value, shown nowhere else in the
+  // system, on the screen the user opens to ask "is this still me?".
+  $("[data-home-fingerprint]").textContent = s.fingerprint?.hex ?? "";
+  $("[data-home-label]").textContent = s.fingerprint?.label ?? "";
+  renderLifehash($("[data-home-lifehash]"), s.fingerprint?.lifehash);
   $("[data-home-did]").textContent = s.did ?? "";
 
   const pending = $("[data-pending]");
@@ -159,11 +167,20 @@ function renderDevices(devices) {
     if (d.revoked) btn.classList.add("device--revoked");
     else if (d.pending) btn.classList.add("device--pending");
 
+    // The state mark and the picture are two different jobs and both stay.
+    // The mark carries `revoked`/`pending` as a distinct *shape*, so the state
+    // survives monochrome and colour-vision deficiency (NFR-103); the picture
+    // says which key this row is about and carries no state at all. Collapsing
+    // them into one element would put state on a decorative canvas.
     const mark = document.createElement("div");
     mark.className = "mark";
     if (d.revoked) mark.classList.add("mark--broken");
     else if (d.pending) mark.classList.add("mark--pending");
     mark.setAttribute("aria-hidden", "true");
+
+    // REQ-101: the device list is where the user sees these most often, and so
+    // where recognition is actually built.
+    const picture = d.lifehash ? lifehashElement(d.lifehash, "fp__lifehash fp__lifehash--row") : null;
 
     const body = document.createElement("div");
     body.className = "device__body";
@@ -182,9 +199,14 @@ function renderDevices(devices) {
         : d.last_seen
           ? `seen ${since(d.last_seen)}`
           : d.method_id.split("#")[1];
-    meta.textContent = d.nickname && !d.revoked ? `${d.nickname} · ${state}` : state;
+    // The nickname stays on a revoked row now that the row carries a picture.
+    // REQ-105 forbids a picture standing alone, and a revoked row is precisely
+    // where "which key was that?" is worth answering — the state follows it
+    // rather than displacing it.
+    meta.textContent = d.nickname ? `${d.nickname} · ${state}` : state;
 
     body.append(name, meta);
+    if (picture) btn.append(picture);
     btn.append(mark, body);
     btn.addEventListener("click", () => openDevice(d));
     li.append(btn);
@@ -291,6 +313,9 @@ async function checkBackup() {
     }
     $("[data-created-fingerprint]").textContent = ui.created.fingerprint.hex;
     $("[data-created-label]").textContent = ui.created.fingerprint.label;
+    // The first time the user ever meets their picture. REQ-101 puts it here
+    // precisely so that the authorise screen is not the first time.
+    renderLifehash($("[data-created-lifehash]"), ui.created.fingerprint.lifehash);
     $("[data-created-did]").textContent = ui.created.did;
     // The words leave memory the moment they have done their job.
     ui.mnemonic = null;
@@ -315,8 +340,12 @@ async function restore() {
     // holds no local file still knows what it is responsible for. Showing it
     // here is the evidence for that claim, not decoration.
     ui.state = await invoke("get_state");
-    $("[data-restored-fingerprint]").textContent = ui.state.root_fingerprint?.hex ?? "";
-    $("[data-restored-label]").textContent = ui.state.root_fingerprint?.label ?? "";
+    // Same value as the home card and the created screen — "your twelve words
+    // rebuilt the same home key" is a claim the user can only check if the
+    // fingerprint they are shown is the one they were asked to memorise.
+    $("[data-restored-fingerprint]").textContent = ui.state.fingerprint?.hex ?? "";
+    $("[data-restored-label]").textContent = ui.state.fingerprint?.label ?? "";
+    renderLifehash($("[data-restored-lifehash]"), ui.state.fingerprint?.lifehash);
     renderRestored(ui.state.devices);
     show("restored");
   } catch (e) {
@@ -338,7 +367,15 @@ function renderRestored(devices) {
     const meta = document.createElement("span");
     meta.className = "device__meta";
     meta.textContent = d.nickname ?? d.method_id.split("#")[1];
-    li.append(name, meta);
+    // Same treatment as the home list, and the same structure — picture, then
+    // a name/meta column — so the recognition transfers between the two (Law of
+    // Similarity: a differently-styled picture per screen would defeat the
+    // point of REQ-101).
+    const body = document.createElement("div");
+    body.className = "device__body";
+    body.append(name, meta);
+    if (d.lifehash) li.append(lifehashElement(d.lifehash, "fp__lifehash fp__lifehash--row"));
+    li.append(body);
     list.append(li);
   }
 }
@@ -448,32 +485,97 @@ function renderConsent(offer) {
   // question this screen asks — see the note in index.html.
   $("[data-offer-fingerprint]").textContent = offer.key_fingerprint.hex;
   $("[data-offer-label]").textContent = offer.key_fingerprint.label;
-  renderBars($("[data-offer-bars]"), offer.key_fingerprint.hex);
+  renderLifehash($("[data-offer-lifehash]"), offer.key_fingerprint.lifehash);
 
   ui.offerExpiresAt = Math.floor(Date.now() / 1000) + offer.expires_in;
   startCountdown();
 }
 
+// ── the visual fingerprint (SPEC-002) ──────────────────────────────────────
+
+/** LifeHash v2 geometry, fixed by SPEC-002 CON-101. */
+const LIFEHASH_SIDE = 32;
+const LIFEHASH_RGB_LEN = LIFEHASH_SIDE * LIFEHASH_SIDE * 3;
+
 /**
- * Three muted bars derived from the fingerprint bytes.
+ * CON-102's grammar, as a recogniser.
  *
- * Recognition only, and `aria-hidden` because of it. Three hues carry a few
- * bits at most — far under NFR-008's floor — so this exists to make a row of
- * hex *memorable between two glances*, never to be compared. That is also why
- * it is rendered here rather than in the core: it decides nothing.
+ * Exactly 4096 characters, no padding: 3072 is divisible by three, so a
+ * correctly encoded image never carries an `=`. Admitting one would be
+ * repairing malformed input rather than recognising valid input, which
+ * PROTO-001 Principle 14 rules out at a boundary.
  */
-function renderBars(host, hex) {
-  const bytes = hex.split(" ").map((pair) => parseInt(pair, 16));
-  host.textContent = "";
-  for (const index of [0, 2, 4]) {
-    const bar = document.createElement("div");
-    bar.className = "fp__bar";
-    // Muted deliberately: the mockup's swatches sit inside the Ink/Bone/Lichen
-    // system rather than shouting over it. Full hue circle, because telling two
-    // bars apart at a glance is the entire job.
-    bar.style.background = `hsl(${Math.round((bytes[index] / 256) * 360)} 30% 47%)`;
-    host.append(bar);
+const LIFEHASH_B64 = /^[A-Za-z0-9+/]{4096}$/;
+
+/**
+ * Recognise a `lifehash` field, or return `null`.
+ *
+ * The producer is this application's own Rust half, but this is still the
+ * boundary at which a malformed value becomes a fault inside the paint path,
+ * so it is recognised *in full* before any of it is drawn (CON-102). There is
+ * no partial paint and no repair: either the whole value is well-formed, or the
+ * picture is dropped and the text rendering stands alone. REQ-105 guarantees
+ * that text is always there, which is what makes dropping safe.
+ */
+function decodeLifehash(value) {
+  if (typeof value !== "string" || !LIFEHASH_B64.test(value)) return null;
+  let bytes;
+  try {
+    bytes = atob(value);
+  } catch {
+    return null;
   }
+  return bytes.length === LIFEHASH_RGB_LEN ? bytes : null;
+}
+
+/**
+ * Paint a fingerprint's LifeHash into a canvas — SPEC-002 REQ-101.
+ *
+ * This replaced three colour bars derived from bytes 0, 2 and 4 of the digest.
+ * The picture is computed in `selfsame-core` from all six, so the front end no
+ * longer derives any rendering of a security-relevant value for itself — it
+ * only draws what the core sends (ADR-103).
+ *
+ * `aria-hidden` on the canvas, and the text beside it is what a screen reader
+ * gets: a picture nobody is asked to compare has nothing to say to assistive
+ * technology that its hex does not say better (REQ-105).
+ *
+ * The canvas is its natural 32×32 and is scaled by CSS with
+ * `image-rendering: pixelated`, so there is no image codec on either side of
+ * the boundary — `ImageData` takes exactly the buffer we already have
+ * (ADR-104).
+ */
+function renderLifehash(canvas, value) {
+  if (!canvas) return;
+  const rgb = decodeLifehash(value);
+  if (rgb === null) {
+    // Degrade to the pre-existing display rather than to a broken screen.
+    canvas.hidden = true;
+    console.warn("lifehash failed CON-102's grammar; showing the text alone");
+    return;
+  }
+
+  canvas.width = LIFEHASH_SIDE;
+  canvas.height = LIFEHASH_SIDE;
+  const ctx = canvas.getContext("2d");
+  const image = ctx.createImageData(LIFEHASH_SIDE, LIFEHASH_SIDE);
+  for (let src = 0, dst = 0; src < LIFEHASH_RGB_LEN; src += 3, dst += 4) {
+    image.data[dst] = rgb.charCodeAt(src);
+    image.data[dst + 1] = rgb.charCodeAt(src + 1);
+    image.data[dst + 2] = rgb.charCodeAt(src + 2);
+    image.data[dst + 3] = 255;
+  }
+  ctx.putImageData(image, 0, 0);
+  canvas.hidden = false;
+}
+
+/** A device row's picture, built in JS because the row itself is. */
+function lifehashElement(value, className) {
+  const canvas = document.createElement("canvas");
+  canvas.className = className;
+  canvas.setAttribute("aria-hidden", "true");
+  renderLifehash(canvas, value);
+  return canvas;
 }
 
 function startCountdown() {
@@ -520,6 +622,7 @@ async function authorise() {
     // A comparison prompt — "check it now shows this" — so it carries the hex,
     // for the same reason SCREEN-001's question does.
     $("[data-linked-fingerprint]").textContent = result.fingerprint.hex;
+    renderLifehash($("[data-linked-lifehash]"), result.fingerprint.lifehash);
     $("[data-linked-method]").textContent = result.method_id;
     $("[data-linked-publishing]").textContent =
       result.publishing > 0 ? "publishing…" : "done";
@@ -541,6 +644,11 @@ async function authorise() {
 function openDevice(device) {
   ui.device = device;
   $("[data-device-title]").textContent = device.label || "Unnamed device";
+  // This screen's "Key fingerprint" row is a key display like any other, so it
+  // carries the picture too (REQ-101). It is also the screen the user reaches
+  // just before unlinking, which is the moment being sure which device this is
+  // matters most.
+  renderLifehash($("[data-device-lifehash]"), device.lifehash);
   $("[data-device-nickname]").textContent = device.nickname ?? "—";
   $("[data-device-name]").textContent = device.label || "Unnamed device";
   $("[data-device-method]").textContent = device.method_id;
@@ -602,6 +710,15 @@ const actions = {
   "to-home": refresh,
   "to-link": startLink,
   "to-type": () => show("type"),
+  // Back out of the typed-code screen.
+  //
+  // It cannot be `to-link`: on desktop `startLink` forwards straight to `type`
+  // because there is no camera, so Back would re-enter the screen it was
+  // leaving and the user would be stuck with no way out. Mirror the same branch
+  // `startLink` makes — scanner on mobile, home on desktop — so Back always
+  // lands where the user actually came from.
+  "back-from-type": () =>
+    window.__TAURI__?.barcodeScanner !== undefined ? startLink() : refresh(),
   "read-code": () => readCode($("#code-input").value.trim()),
   reject,
   "to-presence": () => show("presence"),

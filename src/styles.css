@@ -324,8 +324,8 @@ code {
  * to grind keys. Whatever is largest under the question "does your other screen
  * show this?" is what the user actually compares, so the hex is largest.
  *
- * The label and the bars stay, below, doing the job they are good at: making a
- * row of hex recognisable at a glance and giving the eye somewhere to land.
+ * The label and the picture stay, doing the job they are good at: making a row
+ * of hex recognisable at a glance and giving the eye somewhere to land.
  * They are recognition aids. They are never the answer.
  */
 
@@ -337,18 +337,62 @@ code {
   padding: 4px 0 2px;
 }
 
-.fp__bars {
-  display: flex;
-  gap: 6px;
-  width: 100%;
-  max-width: 260px;
+/* ── the visual fingerprint (SPEC-002) ───────────────────────────────── */
+/*
+ * A LifeHash: 32×32 pixels of Conway's Game of Life, seeded from the same
+ * digest the hex renders. It replaced three colour bars that consumed bytes
+ * 0, 2 and 4 and dropped the rest.
+ *
+ * The canvas is its natural 32×32 and is scaled here rather than in JS, so
+ * there is one buffer, no image codec, and no resampling: `pixelated` keeps
+ * the modules square-edged at any size, which is what makes two of these
+ * distinguishable at a glance (SPEC-002 ADR-104).
+ *
+ * Sized deliberately *below* the hex on the authorise screen. The picture is
+ * the prettiest thing on that screen and the hex is the load-bearing one, which
+ * is exactly the Aesthetic-Usability trap SPEC-002 REQ-103 exists to avoid.
+ */
+.fp__lifehash {
+  width: 88px;
+  height: 88px;
+  border-radius: 10px;
+  image-rendering: pixelated;
+  /* Keeps a pale picture from bleeding into the Ink background. */
+  box-shadow: inset 0 0 0 1px var(--hairline);
+  flex: none;
 }
 
-.fp__bar {
-  flex: 1;
-  height: 16px;
-  border-radius: 4px;
-  background: var(--dim);
+/*
+ * The headline size, for the screens whose whole job is one key: created,
+ * restored, and authorise.
+ *
+ * 136px is as large as this can go while the hex still wins. The picture is
+ * the prettiest thing on the authorise screen and the hex is the load-bearing
+ * one; past roughly this size the eye stops travelling down to the characters
+ * at all, which is the Aesthetic-Usability trap SPEC-002 REQ-103 exists to
+ * avoid. If it ever needs to be bigger than the thing it is an aid to, that is
+ * a decision to promote it — ADR-107 — not a stylesheet change.
+ */
+.fp__lifehash--lg {
+  width: 136px;
+  height: 136px;
+  border-radius: 16px;
+}
+
+/* The device-list chip. Sits beside the state mark, never replacing it: the
+ * mark carries revoked/pending as a shape, and colour is never the only
+ * carrier of meaning (WCAG 2.2 AA, SPEC-002 NFR-103). */
+.fp__lifehash--row {
+  width: 40px;
+  height: 40px;
+  border-radius: 7px;
+}
+
+/* A picture that failed CON-102's grammar is hidden outright — the hex and the
+ * label beside it are always present, so the block degrades to what it showed
+ * before this existed rather than to a gap. */
+.fp__lifehash[hidden] {
+  display: none;
 }
 
 /* The compared value. Largest thing on the screen after the question. */
@@ -874,10 +918,12 @@ textarea:focus {
   list-style: none;
 }
 
+/* Picture, then a name/meta column — the same shape as a home device row, so
+ * the two lists read as the same thing (SPEC-002 REQ-101). */
 .restored-list li {
   display: flex;
-  flex-direction: column;
-  gap: 1px;
+  align-items: center;
+  gap: 10px;
 }
 
 .restored-list .device__name {

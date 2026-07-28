@@ -59,15 +59,30 @@ lock exists so the backup is real before it matters.
 
 ### 4. Meet your fingerprint
 
-The last screen shows something like:
+The last screen shows a small coloured picture, and beneath it something like:
 
 ```
 5F 9A C9 07 2E 11
 ```
 
-That is your **identity fingerprint**. You will see it again every time you link
-a device. It is the thing you compare, so it is worth a moment's attention now:
-it is introduced here precisely so it is familiar later.
+Those are two views of the same thing: your **identity fingerprint**. You will
+see both again every time you link a device, which is why they are introduced
+here — so they are familiar later.
+
+They do different jobs, and it is worth knowing which is which.
+
+The **picture** is for your eyes. It is generated from the fingerprint, so it
+cannot drift away from it, and it is there because people are far better at
+recognising a shape than at reading twelve characters. Use it the way you use a
+face: to notice, instantly, when something is not the same as last time.
+
+The **six pairs** are the value you actually check. When a screen asks you
+whether two devices agree, it is asking about these characters, and it is worth
+reading them one pair at a time. The picture tells you when to look harder. The
+characters are the answer.
+
+If the picture ever changes when you expected it to stay the same, that alone is
+reason enough to stop and read the fingerprint carefully.
 
 ## How to
 
@@ -95,15 +110,17 @@ other device in front of you.
      description of itself. Selfsame cannot check it, and says so. A hostile
      device can put anything here, including something that looks official.
      Ignore it and read the next thing instead.
-   - **Key fingerprint** — six pairs like `C0 7A 1E 42 9B 33`. **This must match
-     what the other device is showing.** If it does not, stop and tap *This isn't
-     me — reject*.
+   - **Key fingerprint** — a picture, and six pairs like `C0 7A 1E 42 9B 33`
+     beneath it. **The six pairs must match what the other device is showing.**
+     The picture is there to make a mismatch obvious at a glance; the characters
+     are what settles it. If they do not match, stop and tap *This isn't me —
+     reject*.
 
 4. Tap **Authorise** and enter your passcode.
 
 **What you should see:** the other device now shows your identity fingerprint —
-the same `5F 9A C9 07 2E 11` from step 4 above. Check that too. Your phone says
-*Telling your contacts… publishing*, and then it is done.
+the same picture and the same `5F 9A C9 07 2E 11` from step 4 above. Check that
+too. Your phone says *Telling your contacts… publishing*, and then it is done.
 
 **How long it should take:** under thirty seconds, four taps.
 
@@ -184,6 +201,24 @@ Codes last five minutes. Start again on the other device.
 Stop. Tap *This isn't me — reject*. Nothing has been signed and nothing has been
 published. A mismatch means the reply did not come from the device in front of
 you, which is exactly the case the comparison exists to catch.
+
+**The two pictures don't match.**
+Treat it exactly as above and reject. The picture is generated from the
+fingerprint, so two devices showing different pictures are showing different
+fingerprints — there is no case where the pictures differ and the characters
+still agree.
+
+**The pictures look the same but the characters don't.**
+Believe the characters and reject. The characters are the comparison; the
+picture only tells you where to look. Two fingerprints that differ will
+essentially always produce different pictures, but "essentially always" is not
+"always", and it is the six pairs that Selfsame's guarantee rests on.
+
+**No picture appeared, only the characters.**
+The comparison still works — it has always been the characters that matter.
+Selfsame hides the picture outright rather than drawing a partial one, so a
+missing picture means it declined to draw something it could not fully verify,
+not that anything about the fingerprint is in doubt.
 
 **"1 change still publishing."**
 Your phone has signed something but has not yet been able to tell the network.

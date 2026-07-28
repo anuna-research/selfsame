@@ -18,6 +18,7 @@ cbcl-core = { workspace = true, default-features = false }
 cbcl-parser = { workspace = true, default-features = false }
 did-crdt = { workspace = true }
 
+bc-lifehash = { workspace = true }
 bech32 = { version = "0.11", default-features = false, features = ["alloc"] }
 blake3 = { workspace = true, features = ["std"] }
 ed25519-dalek = { workspace = true, features = ["std"] }
