@@ -2,8 +2,8 @@ name: selfsame-ci
 
 # The four checks README.md tells a contributor to run, made non-optional.
 #
-#   cargo test --workspace
 #   cargo clippy --workspace --all-targets
+#   cargo test --workspace
 #   cargo build -p selfsame-core --target wasm32-unknown-unknown
 #   npm run screens
 #
@@ -19,16 +19,16 @@ name: selfsame-ci
 #   - `tests/pinned_derivation.rs` and `tests/vectors.rs` fail if `did-crdt`'s
 #     DID derivation drifts. ADR-010 adopts that derivation verbatim, so a drift
 #     is a breaking change to the protocol and re-derives every existing
-#     identity. This is why the sibling checkouts below are pinned rather than
-#     tracking a branch.
+#     identity. This is why the sibling checkouts below are pinned.
 #   - `tests/screens.mjs` asserts what Rust cannot see: one screen visible at a
 #     time, no horizontal overflow at phone width, no console errors, and — after
 #     a bug that shipped a black rectangle — that a *missing* Tauri bridge
 #     renders an explanation rather than nothing.
 #
-# The two jobs are deliberately independent. `screens` drives the webview with a
-# stubbed bridge and needs no Rust at all, so a CSS regression is reported in
-# under a minute instead of waiting on a Tauri build.
+# Runner notes, learned from hark's working pipeline rather than assumed: the
+# Forgejo runner image ships node, git, and curl, but NOT rustup, NOT a C
+# toolchain, and NOT necessarily `sudo`. Every step below that needs one of
+# those installs it and guards the privilege escalation.
 
 on:
   push:
@@ -40,97 +40,115 @@ jobs:
   rust:
     runs-on: ubuntu-latest
     steps:
-      # The workspace has path dependencies on two siblings, so this repo is
-      # checked out into a subdirectory and they are cloned next to it —
-      # reproducing the layout README.md's "Before you build" section describes.
-      #
-      #   Code/
-      #   ├── selfsame/     ← here
-      #   ├── did-crdt/
-      #   └── cbcl-rs/
-      - name: Check out selfsame
+      - name: Checkout
         uses: actions/checkout@v4
-        with:
-          path: selfsame
 
-      # The pinned revision is read out of `vectors.rs` rather than written here
-      # a second time. That file is the artefact the test vectors were generated
-      # against, so it is the source of truth; duplicating the SHA into this
-      # workflow would create a second place for it to be wrong.
-      - name: Clone did-crdt at the revision the vectors were generated against
+      # The workspace has path dependencies on two siblings, cloned next to the
+      # checkout — the layout README.md's "Before you build" section describes.
+      # `--locked` cannot pin path-dependency *contents*, so the revisions are
+      # pinned explicitly here or CI is not building what a release would.
+      #
+      # did-crdt's revision is read out of vectors.rs rather than written here a
+      # second time: that file records the revision the test vectors were
+      # generated against, so it is the source of truth, and a copy in this file
+      # would be a second place for it to be wrong.
+      - name: Clone and pin the sibling path dependencies
         run: |
           set -euo pipefail
-          sha="$(grep -oE '[0-9a-f]{40}' selfsame/crates/selfsame-core/tests/vectors.rs | head -1)"
-          echo "did-crdt pinned at ${sha}"
-          git clone --filter=blob:none https://git.anuna.io/anuna-research/did-crdt.git did-crdt
-          git -C did-crdt checkout --quiet "${sha}"
-          test "$(git -C did-crdt rev-parse HEAD)" = "${sha}"
+          did_sha="$(grep -oE '[0-9a-f]{40}' crates/selfsame-core/tests/vectors.rs | head -1)"
+          cbcl_sha="$(tr -d '[:space:]' < cbcl-rs.sha)"
+          echo "did-crdt @ ${did_sha}"
+          echo "cbcl-rs  @ ${cbcl_sha}"
 
-      - name: Clone cbcl-rs at the pinned revision
+          [ -d ../did-crdt ] || git clone https://git.anuna.io/anuna-research/did-crdt.git ../did-crdt
+          git -C ../did-crdt checkout --detach "${did_sha}"
+          test "$(git -C ../did-crdt rev-parse HEAD)" = "${did_sha}"
+
+          [ -d ../cbcl-rs ] || git clone https://git.anuna.io/anuna-research/cbcl-rs.git ../cbcl-rs
+          git -C ../cbcl-rs checkout --detach "${cbcl_sha}"
+          test "$(git -C ../cbcl-rs rev-parse HEAD)" = "${cbcl_sha}"
+
+      # src-tauri links against the system webview. Without these the workspace
+      # does not build on Linux at all — the -sys crates' build scripts look for
+      # them through pkg-config and fail at `cargo check`, long before any test
+      # runs. This is the cost of keeping the Tauri shell in `--workspace`, and
+      # it is worth paying: the shell is where the commands the UI calls live.
+      - name: Install the C toolchain and the Tauri system dependencies
         run: |
           set -euo pipefail
-          sha="$(tr -d '[:space:]' < selfsame/cbcl-rs.sha)"
-          echo "cbcl-rs pinned at ${sha}"
-          git clone --filter=blob:none https://git.anuna.io/anuna-research/cbcl-rs.git cbcl-rs
-          git -C cbcl-rs checkout --quiet "${sha}"
-          test "$(git -C cbcl-rs rev-parse HEAD)" = "${sha}"
+          SUDO=""; command -v sudo >/dev/null 2>&1 && SUDO="sudo"
+          $SUDO apt-get update
+          $SUDO apt-get install -y --no-install-recommends \
+            build-essential pkg-config curl file \
+            libwebkit2gtk-4.1-dev libssl-dev libxdo-dev \
+            libayatana-appindicator3-dev librsvg2-dev
 
-      # Installed with rustup rather than a marketplace action so this workflow
-      # depends on nothing that has to be mirrored onto the runner.
-      - name: Install the Rust toolchain
+      - name: Ensure the Rust toolchain
         run: |
           set -euo pipefail
-          curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs \
-            | sh -s -- -y --default-toolchain stable --component clippy
-          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-
-      - name: Show toolchain
-        working-directory: selfsame
-        run: |
+          if ! command -v rustup >/dev/null 2>&1; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+              | sh -s -- -y --default-toolchain stable --profile minimal
+            echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+            export PATH="$HOME/.cargo/bin:$PATH"
+          fi
+          rustup show active-toolchain || rustup toolchain install stable --profile minimal
+          rustup component add clippy
+          rustup target add wasm32-unknown-unknown
           rustc --version
           cargo --version
           cargo clippy --version
 
-      - name: cargo clippy
-        working-directory: selfsame
-        run: cargo clippy --workspace --all-targets -- -D warnings
+      # Keyed on both lockfiles: a sibling bump changes what is compiled without
+      # changing ours, and a stale cache would hide that.
+      - name: Cache cargo registry and target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-selfsame-${{ hashFiles('Cargo.lock', 'cbcl-rs.sha') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-selfsame-
+
+      - name: Clippy (deny warnings)
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
       # Covers purity.rs, pinned_derivation.rs, vectors.rs, properties.rs, and
       # hostile_rendezvous.rs, plus the rendezvous end-to-end suite which stands
       # up the real server on a loopback port.
-      - name: cargo test
-        working-directory: selfsame
-        run: cargo test --workspace
+      - name: Test
+        run: cargo test --workspace --locked
 
       # The purity boundary, checked from the other side: a target with no
       # clock, no socket, and no disk simply will not link a core that reached
       # for one.
       - name: Build the core for wasm32
-        working-directory: selfsame
-        run: |
-          rustup target add wasm32-unknown-unknown
-          cargo build -p selfsame-core --target wasm32-unknown-unknown
+        run: cargo build -p selfsame-core --target wasm32-unknown-unknown --locked
 
   # ── Screens: what Rust cannot see ───────────────────────────────────────
+  # Deliberately independent of the Rust job: screens.mjs drives the webview
+  # with a stubbed bridge and needs no Rust at all, so a CSS regression is
+  # reported in about a minute instead of behind a Tauri build.
   screens:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
+      - name: Checkout
+        uses: actions/checkout@v4
 
       # Puppeteer ships its own Chrome but not the shared libraries it links
       # against; on a bare runner the browser launches and immediately dies
       # without them.
-      # Ubuntu 24.04 renamed several of these with a `t64` suffix (the 64-bit
-      # `time_t` transition) and 22.04 did not, so each name is resolved against
-      # the runner's own package index rather than guessed from the image label.
+      #
+      # Ubuntu 24.04 renamed several with a `t64` suffix (the 64-bit `time_t`
+      # transition) and 22.04 did not, so each name is resolved against the
+      # runner's own package index rather than guessed from the image label.
       - name: Install the libraries headless Chrome links against
         run: |
           set -euo pipefail
-          sudo apt-get update
+          SUDO=""; command -v sudo >/dev/null 2>&1 && SUDO="sudo"
+          $SUDO apt-get update
           pkgs=""
           for p in libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libcups2 \
                    libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 \
@@ -144,7 +162,20 @@ jobs:
           done
           echo "installing:${pkgs}"
           # shellcheck disable=SC2086
-          sudo apt-get install -y --no-install-recommends ${pkgs}
+          $SUDO apt-get install -y --no-install-recommends ${pkgs}
+
+      # The image ships a node, but not necessarily one new enough for
+      # puppeteer 23. Pinning it here removes that variable; `actions/cache@v4`
+      # and `actions/checkout@v4` are already proven on this runner, so
+      # marketplace actions resolve.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Show node
+        run: |
+          node --version
+          npm --version
 
       # `npm ci` rather than `npm install`: the lockfile is tracked so the
       # browser build under test is the same one a contributor rendered against.
