@@ -519,12 +519,12 @@ mod tests {
         let lh = fingerprint::fingerprint_key(&[7u8; 32]).lifehash();
         let lines = lifehash_lines(&lh, "");
 
-        for row in 0..16 {
+        for (row, line) in lines.iter().enumerate() {
             let (ur, ug, ub) = lh.pixel(0, row * 2);
             let (lr, lg, lb) = lh.pixel(0, row * 2 + 1);
             let expected = format!("\x1b[38;2;{ur};{ug};{ub}m\x1b[48;2;{lr};{lg};{lb}m▀");
             assert!(
-                lines[row].starts_with(&expected),
+                line.starts_with(&expected),
                 "row {row} should open with pixel rows {} and {}",
                 row * 2,
                 row * 2 + 1
