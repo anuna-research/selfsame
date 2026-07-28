@@ -204,10 +204,17 @@ jobs:
 
       # Kept on failure too — when an assertion trips, the picture of the screen
       # that tripped it is the fastest way to see why.
+      #
+      # Non-fatal, and `warn` rather than `error` on an empty directory: this
+      # instance exposes no artifacts API, so artifact storage may not be
+      # configured at all. A missing convenience must not turn a passing render
+      # into a red build — the assertions in screens.mjs are the gate, and the
+      # pictures are a bonus.
       - name: Upload the rendered screens
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: screens
           path: screens-out/
-          if-no-files-found: error
+          if-no-files-found: warn
