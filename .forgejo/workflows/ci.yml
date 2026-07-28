@@ -62,7 +62,7 @@ jobs:
           set -euo pipefail
           sha="$(grep -oE '[0-9a-f]{40}' selfsame/crates/selfsame-core/tests/vectors.rs | head -1)"
           echo "did-crdt pinned at ${sha}"
-          git clone --filter=blob:none https://codeberg.org/anuna/did-crdt.git did-crdt
+          git clone --filter=blob:none https://git.anuna.io/anuna-research/did-crdt.git did-crdt
           git -C did-crdt checkout --quiet "${sha}"
           test "$(git -C did-crdt rev-parse HEAD)" = "${sha}"
 

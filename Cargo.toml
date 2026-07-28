@@ -12,7 +12,7 @@ version = "0.1.0"
 edition = "2021"
 rust-version = "1.75.0"
 license = "Apache-2.0"
-repository = "https://codeberg.org/anuna/selfsame"
+repository = "https://git.anuna.io/anuna-research/selfsame"
 
 [workspace.dependencies]
 selfsame-core = { path = "crates/selfsame-core", default-features = false }
@@ -21,8 +21,12 @@ selfsame-core = { path = "crates/selfsame-core", default-features = false }
 #
 # Both are sibling checkouts. Clone them alongside this repository:
 #
-#   git clone https://github.com/anuna-research/did-crdt ../did-crdt
-#   git clone https://codeberg.org/anuna/cbcl-rs        ../cbcl-rs
+#   git clone https://git.anuna.io/anuna-research/did-crdt ../did-crdt
+#   git clone https://git.anuna.io/anuna-research/cbcl-rs  ../cbcl-rs
+#
+# `cbcl-rs.sha` at the repository root pins the second of these; the first is
+# pinned by the revision recorded in crates/selfsame-core/tests/vectors.rs.
+# .forgejo/workflows/ci.yml clones both from those pins.
 #
 # did-crdt is pinned at adb5c7ac1423173f00201cddffa60fe672fb2a53 by SPEC-001
 # ADR-010: its DID derivation and `u`-multibase encoding are adopted verbatim,

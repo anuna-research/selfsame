@@ -31,7 +31,7 @@ one or nothing compiles:
 ```
 Code/
 ├── selfsame/     ← you are here
-├── did-crdt/     git clone https://codeberg.org/anuna/did-crdt
+├── did-crdt/     git clone https://git.anuna.io/anuna-research/did-crdt
 └── cbcl-rs/      git clone https://git.anuna.io/anuna-research/cbcl-rs
 ```
 
