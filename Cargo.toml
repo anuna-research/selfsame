@@ -10,7 +10,10 @@ members = [
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.75.0"
+# SPEC-002 ADR-106: `bc-lifehash` is edition 2024, which needs 1.85. CI installs
+# stable so nothing breaks in practice — which is exactly why the declared MSRV
+# has to move with it rather than stay a number the graph cannot honour.
+rust-version = "1.85.0"
 license = "Apache-2.0"
 repository = "https://git.anuna.io/anuna-research/selfsame"
 
@@ -48,6 +51,23 @@ serde_json = "1"
 thiserror = "1"
 anyhow = "1"
 tokio = { version = "1", features = ["full"] }
+
+# LifeHash v2 — the visual fingerprint of SPEC-002 (ADR-101). Blockchain
+# Commons' first-party Rust implementation, byte-identical to the C++ reference
+# across all 35 of its test vectors; `tests/lifehash_vectors.rs` re-checks that
+# here so a bump cannot silently change every user's picture.
+#
+# Pinned exactly. A LifeHash that changes under the user is worse than no
+# LifeHash: it teaches them that the picture changing is normal, which is the
+# one thing it must never mean.
+bc-lifehash = "=0.1.0"
+
+# `bc-lifehash` runs Conway's Game of Life for up to 150 generations per image,
+# which is ~570 µs optimised and ~6.6 ms not. TEST-106 renders 10^5 of them, so
+# unoptimised it would take eleven minutes instead of seven seconds. The
+# override buys that back without touching the profile of anything we wrote.
+[profile.dev.package.bc-lifehash]
+opt-level = 3
 
 [profile.release]
 lto = true

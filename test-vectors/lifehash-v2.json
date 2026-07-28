@@ -1,0 +1,159 @@
+{
+  "note": "LifeHash v2 reference vectors for SPEC-002 TEST-110. Colours are recorded as a SHA-256 of the RGB bytes rather than inline: the test detects any drift in the pinned bc-lifehash crate, which is what TEST-110 is for, at 2% of the size of the full corpus. Regenerate or expand from the source below.",
+  "source": "https://github.com/BlockchainCommons/bc-lifehash test/test-vectors.json",
+  "source_revision": "0444dbed5615fbc9a98163608c6499c025b7873b",
+  "source_date": "2026-02-20",
+  "version": "version2",
+  "vectors": [
+    {
+      "input": "",
+      "input_type": "utf8",
+      "module_size": 1,
+      "has_alpha": false,
+      "width": 32,
+      "height": 32,
+      "colors_sha256": "ca68773e52a9f34f57dab7b5c32e2ef5bee5622c5afb04e2d5c07c7f77d27ae5",
+      "colors_head_hex": "129f84129f84129f84b08e5c"
+    },
+    {
+      "input": "Hello",
+      "input_type": "utf8",
+      "module_size": 1,
+      "has_alpha": false,
+      "width": 32,
+      "height": 32,
+      "colors_sha256": "a58bb5ca1f675a286f562e951d6c6d0436ec6d0375dd8b7975944e80932de584",
+      "colors_head_hex": "927e82b2685cb66557ca5840"
+    },
+    {
+      "input": "0",
+      "input_type": "utf8",
+      "module_size": 1,
+      "has_alpha": false,
+      "width": 32,
+      "height": 32,
+      "colors_sha256": "8720911ff37e66101c206c275bda128fb9ef2464db16c38bc7aeb4ecc8937b5a",
+      "colors_head_hex": "568ba4568ca5568ca57b565e"
+    },
+    {
+      "input": "The quick brown fox jumps over the lazy dog",
+      "input_type": "utf8",
+      "module_size": 1,
+      "has_alpha": false,
+      "width": 32,
+      "height": 32,
+      "colors_sha256": "a8e219dc2f986a58b9d197665117b1884de13d97f2b94d47c5cb8ad1c7f8bff7",
+      "colors_head_hex": "4fa1b98e606a915d6697575f"
+    },
+    {
+      "input": "Blockchain Commons",
+      "input_type": "utf8",
+      "module_size": 1,
+      "has_alpha": false,
+      "width": 32,
+      "height": 32,
+      "colors_sha256": "0e093f3ffcc3cb6e26b96927230187391ec8affa87b919165af62509ea9a93c8",
+      "colors_head_hex": "d78eb7da90b80c3a5d0b3b5d"
+    },
+    {
+      "input": "deadbeef",
+      "input_type": "utf8",
+      "module_size": 1,
+      "has_alpha": false,
+      "width": 32,
+      "height": 32,
+      "colors_sha256": "3cc6016736454569721e1f76313301e321637fa469b6d8b726ea68e9227dc049",
+      "colors_head_hex": "8a5484bb446ed33c63d33c63"
+    },
+    {
+      "input": "🌊",
+      "input_type": "utf8",
+      "module_size": 1,
+      "has_alpha": false,
+      "width": 32,
+      "height": 32,
+      "colors_sha256": "f12f8bae1ba6b766f00d72c89e422329707a18481499351451b656515dd7b409",
+      "colors_head_hex": "80a89a467f6b427d69427d69"
+    },
+    {
+      "input": "café",
+      "input_type": "utf8",
+      "module_size": 1,
+      "has_alpha": false,
+      "width": 32,
+      "height": 32,
+      "colors_sha256": "527f0bc5fef9364a579e0d959af8360533adcdd453283a8a2b421c47dca2fa49",
+      "colors_head_hex": "85516d85516d824e6984506c"
+    },
+    {
+      "input": "Hello",
+      "input_type": "utf8",
+      "module_size": 2,
+      "has_alpha": false,
+      "width": 64,
+      "height": 64,
+      "colors_sha256": "daa24dc750a052e540cef6398f39a69de583b9337a39b3fec584e5fe54971017",
+      "colors_head_hex": "927e82927e82b2685cb2685c"
+    },
+    {
+      "input": "Blockchain Commons",
+      "input_type": "utf8",
+      "module_size": 2,
+      "has_alpha": false,
+      "width": 64,
+      "height": 64,
+      "colors_sha256": "603546d5b9007e0eabbe366c77dee7ffe2da216ad3cd1e6d2afae9332e85fb48",
+      "colors_head_hex": "d78eb7d78eb7da90b8da90b8"
+    },
+    {
+      "input": "Hello",
+      "input_type": "utf8",
+      "module_size": 1,
+      "has_alpha": true,
+      "width": 32,
+      "height": 32,
+      "colors_sha256": "1ed9e0e68cffc71f503a22e54d7ac987cf8833250630fd502d780ab82f8ef0e3",
+      "colors_head_hex": "927e82ffb2685cffb66557ff"
+    },
+    {
+      "input": "Blockchain Commons",
+      "input_type": "utf8",
+      "module_size": 1,
+      "has_alpha": true,
+      "width": 32,
+      "height": 32,
+      "colors_sha256": "e0ce8791f232666672defc029d3c238adee27e4751c68748e256d7829d646d79",
+      "colors_head_hex": "d78eb7ffda90b8ff0c3a5dff"
+    },
+    {
+      "input": "",
+      "input_type": "hex",
+      "module_size": 1,
+      "has_alpha": false,
+      "width": 32,
+      "height": 32,
+      "colors_sha256": "ca68773e52a9f34f57dab7b5c32e2ef5bee5622c5afb04e2d5c07c7f77d27ae5",
+      "colors_head_hex": "129f84129f84129f84b08e5c"
+    },
+    {
+      "input": "00ff80",
+      "input_type": "hex",
+      "module_size": 1,
+      "has_alpha": false,
+      "width": 32,
+      "height": 32,
+      "colors_sha256": "d93068597e777fc6ea6ac2bfce8c3bfcc9f24b3d671a190d75b3e127e1e443c0",
+      "colors_head_hex": "dde9a7dee8a5e2e19bdde9a7"
+    },
+    {
+      "input": "deadbeef",
+      "input_type": "hex",
+      "module_size": 1,
+      "has_alpha": false,
+      "width": 32,
+      "height": 32,
+      "colors_sha256": "cb5c61fdbab952cd54b86824291d14e36255df58c80d25f7463db369e2d1ccf6",
+      "colors_head_hex": "557e91528093557e91ab4750"
+    }
+  ]
+}
