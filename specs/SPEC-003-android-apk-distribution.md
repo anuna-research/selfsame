@@ -151,8 +151,36 @@ and that branch will resolve correctly on device.
 reading system service state, and it arrives from a transitive Gradle
 dependency in a root-key custodian. Nobody chose it. Neither Tauri's own
 `mobile/android` manifest nor any vendored Rust crate declares it, so it comes
-from an AAR. Attribution requires Gradle's manifest-merger report, which names
-the contributing library for every element.
+from an AAR.
+
+**Attribution attempted and not obtained.** Run 4 added extraction of Gradle's
+manifest-merger report, which names the contributing library for every merged
+element. The report was located, but the extraction returned
+`not attributed in report` — the pattern searched for a bare
+`group:artifact:version` coordinate, while the merger writes attributions as:
+
+```
+uses-permission#android.permission.DUMP
+ADDED from [androidx.some:library:1.2.3] /path/AndroidManifest.xml:24:5-79
+```
+
+The coordinate is inside square brackets, on an `ADDED from` line. Matching
+`ADDED from \[([^]]+)\]` in the three lines following the permission would get
+it. This was not re-run: each round-trip is ~25 minutes and the experiment had
+reached its agreed time-box.
+
+**To finish this without a CI run**, once a machine has the Android SDK:
+
+```sh
+cargo tauri android init --ci
+cargo tauri android build --apk --debug -t aarch64      # or just far enough to merge
+grep -A 3 'android.permission.DUMP' \
+  src-tauri/gen/android/app/build/outputs/logs/manifest-merger-*-report.txt
+```
+
+Until then the permission is known to ship and its source is not known. That is
+the honest state, and it is why this is an `OBS` with an owner rather than a
+closed finding.
 
 ---
 
