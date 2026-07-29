@@ -129,6 +129,26 @@ Explicitly *not* the resolution: a prebuilt Android container image. An earlier
 draft of this recommendation said it was, and that was wrong — a different
 image does not change a cgroup memory cap.
 
+#### The alternative, tested and rejected
+
+The first four runs bounded Gradle's heap and workers but left **cargo's**
+parallelism untouched. A Tauri Android build runs `cargo build` inside a Gradle
+task, and cargo defaults to one rustc process per core; the runner reports 8.
+Up to eight rustc processes in a 3 GiB container is a more plausible cause of
+an OOM than Gradle's heap, and declaring an infrastructure blocker without
+having tested it was premature.
+
+Run 5 set `CARGO_BUILD_JOBS=1` and dropped the Gradle heap to 1 GB. It **still
+died the same way**, with no APK.
+
+The evidence that the change took effect is the wall-clock: **55m08s against
+~25–30m for every previous run.** That near-doubling is what serialising rustc
+looks like. So the build was genuinely compiling one crate at a time, in a 1 GB
+JVM, and 3 GiB was still not enough.
+
+This is why the memory ask is stated as a conclusion rather than a guess: the
+cheaper explanation was tested first and did not hold.
+
 ### OBS-202: The shipped manifest declares `DUMP`
 
 Gradle merges each dependency's manifest at build time. The manifest `init`
@@ -164,10 +184,19 @@ uses-permission#android.permission.DUMP
 ADDED from [androidx.some:library:1.2.3] /path/AndroidManifest.xml:24:5-79
 ```
 
-The coordinate is inside square brackets, on an `ADDED from` line. Matching
-`ADDED from \[([^]]+)\]` in the three lines following the permission would get
-it. This was not re-run: each round-trip is ~25 minutes and the experiment had
-reached its agreed time-box.
+The coordinate is inside square brackets, on an `ADDED from` line.
+
+Run 5 tried exactly that — `ADDED from \[([^]]+)\]` across four lines of
+context, with a bare `\[[^]]+\]` fallback — and returned
+`not attributed in report` again.
+
+**Two guesses at this file's format have now failed, so stop guessing.** The
+remaining possibilities are that the located file is not the merger report (the
+`find` matches `*outputs/logs*/manifest-merger-*-report.txt`, which may resolve
+to a different variant), that the permission appears without an `ADDED from`
+attribution, or that the context window is too narrow. Distinguishing them
+requires *looking at the file*, which no amount of pattern-guessing from here
+substitutes for — and each attempt costs a ~30–55 minute CI round-trip.
 
 **To finish this without a CI run**, once a machine has the Android SDK:
 
