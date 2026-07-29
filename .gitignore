@@ -11,3 +11,7 @@ screens-out/
 node_modules/
 .DS_Store
 **/.DS_Store
+
+# zetl builds this index from the vault on every `zetl check`. It is a cache,
+# not source, and it churns by ~2000 lines whenever a spec is touched.
+specs/.zetl/
