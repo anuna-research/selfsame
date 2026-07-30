@@ -1,0 +1,283 @@
+name: selfsame-android
+
+# Builds a sideloadable APK on every push to main and publishes it to the
+# `anuna-files` Cloudflare R2 bucket under `selfsame/`. Implements SPEC-003.
+#
+# ── This job needs two things this repository cannot provide ────────────────
+#
+#   1. RUNNER MEMORY. A Tauri Android build runs `cargo build` inside a Gradle
+#      task, so rustc and a JVM are resident at once. Five spike runs measured
+#      the ceiling: the job container is capped at 3.00 GiB while the host has
+#      16 GB, and the build does not fit — not even with CARGO_BUILD_JOBS=1 and
+#      a 1 GB Gradle heap, which merely made it fail after 55 minutes instead of
+#      25. Needs ~8 GiB: `container.options: "--memory=8g"` in act_runner.
+#
+#   2. R2 CREDENTIALS as repository secrets. The preflight step below names them
+#      and fails immediately if any are absent, because the alternative is a
+#      25-minute build followed by an opaque `aws` error.
+#
+# Deliberately separate from ci.yml. That workflow reports in ~5 minutes and
+# gates merges; this one takes ~25 and gates nothing (SPEC-003 NFR-201). A slow
+# Android build must never be the reason a CSS fix waits.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    env:
+      ANDROID_HOME: /opt/android-sdk
+      ANDROID_PLATFORM: android-34
+      ANDROID_BUILD_TOOLS: 34.0.0
+      ANDROID_NDK_VERSION: 27.2.12479018
+      CMDLINE_TOOLS_ZIP: commandlinetools-linux-11076708_latest.zip
+      R2_BUCKET: anuna-files
+      R2_PREFIX: selfsame
+
+    steps:
+      # Fail in seconds, not after a 25-minute build, and say exactly which
+      # name is missing. Secret *values* are never echoed — only presence.
+      - name: Preflight — are the R2 secrets present?
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: |
+          set -uo pipefail
+          missing=""
+          [ -n "${R2_ACCOUNT_ID:-}" ]        || missing="$missing R2_ACCOUNT_ID"
+          [ -n "${R2_ACCESS_KEY_ID:-}" ]     || missing="$missing R2_ACCESS_KEY_ID"
+          [ -n "${R2_SECRET_ACCESS_KEY:-}" ] || missing="$missing R2_SECRET_ACCESS_KEY"
+          if [ -n "$missing" ]; then
+            echo "Missing repository secrets:$missing" >&2
+            echo "" >&2
+            echo "Set them under Settings → Actions → Secrets. If your R2 keys" >&2
+            echo "already exist under different names, change the three" >&2
+            echo "\${{ secrets.* }} references in this file to match rather than" >&2
+            echo "duplicating the credentials." >&2
+            exit 1
+          fi
+          echo "all three R2 secrets present"
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Clone the pinned siblings
+        run: |
+          set -euo pipefail
+          did_sha=adb5c7ac1423173f00201cddffa60fe672fb2a53
+          cbcl_sha=$(cat cbcl-rs.sha)
+          [ -d ../did-crdt ] || git clone https://git.anuna.io/anuna-research/did-crdt.git ../did-crdt
+          git -C ../did-crdt checkout --detach "${did_sha}"
+          test "$(git -C ../did-crdt rev-parse HEAD)" = "${did_sha}"
+          [ -d ../cbcl-rs ] || git clone https://git.anuna.io/anuna-research/cbcl-rs.git ../cbcl-rs
+          git -C ../cbcl-rs checkout --detach "${cbcl_sha}"
+          test "$(git -C ../cbcl-rs rev-parse HEAD)" = "${cbcl_sha}"
+
+      - name: Install the C toolchain and JDK 17
+        run: |
+          set -euo pipefail
+          if ! command -v apt-get >/dev/null 2>&1; then
+            echo "This job needs apt-get to install a JDK and the C toolchain." >&2
+            exit 1
+          fi
+          SUDO=""; command -v sudo >/dev/null 2>&1 && SUDO="sudo"
+          $SUDO apt-get update
+          # JDK 17, not "whatever is newest". Gradle's Android plugin rejects
+          # newer JDKs, and the runner has no Android Studio to borrow a JBR
+          # from — which is what Tauri's own prerequisites tell a human to point
+          # JAVA_HOME at. Their desktop instructions stop applying here.
+          $SUDO apt-get install -y --no-install-recommends \
+            build-essential pkg-config curl file unzip openjdk-17-jdk-headless
+          echo "JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64" >> "$GITHUB_ENV"
+
+      # ~20 of the ~25 minutes a cold run costs is this download. Keyed on the
+      # pinned versions, so a bump busts it deliberately and nothing else does.
+      - name: Cache the Android SDK and NDK
+        id: sdk-cache
+        uses: actions/cache@v4
+        with:
+          path: /opt/android-sdk
+          key: android-sdk-${{ env.ANDROID_PLATFORM }}-${{ env.ANDROID_BUILD_TOOLS }}-ndk${{ env.ANDROID_NDK_VERSION }}
+
+      - name: Install the Android SDK and NDK
+        if: steps.sdk-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          SUDO=""; command -v sudo >/dev/null 2>&1 && SUDO="sudo"
+          $SUDO mkdir -p "$ANDROID_HOME/cmdline-tools"
+          $SUDO chown -R "$(id -u):$(id -g)" "$ANDROID_HOME"
+          curl -fsSL -o /tmp/cmdline-tools.zip \
+            "https://dl.google.com/android/repository/${CMDLINE_TOOLS_ZIP}"
+          unzip -q /tmp/cmdline-tools.zip -d "$ANDROID_HOME/cmdline-tools"
+          mv "$ANDROID_HOME/cmdline-tools/cmdline-tools" "$ANDROID_HOME/cmdline-tools/latest"
+          export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
+          yes | sdkmanager --licenses >/dev/null 2>&1 || true
+          sdkmanager --install \
+            "platform-tools" \
+            "platforms;${ANDROID_PLATFORM}" \
+            "build-tools;${ANDROID_BUILD_TOOLS}" \
+            "ndk;${ANDROID_NDK_VERSION}" >/dev/null
+
+      - name: Point at the toolchain
+        run: |
+          set -euo pipefail
+          echo "NDK_HOME=${ANDROID_HOME}/ndk/${ANDROID_NDK_VERSION}" >> "$GITHUB_ENV"
+          echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
+          test -d "${ANDROID_HOME}/ndk/${ANDROID_NDK_VERSION}" \
+            || { echo "NDK missing at the pinned version — cache may be stale" >&2; exit 1; }
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/bin
+          key: android-cargo-${{ hashFiles('Cargo.lock', 'cbcl-rs.sha') }}
+          restore-keys: android-cargo-
+
+      - name: Ensure Rust and the aarch64 Android target
+        run: |
+          set -euo pipefail
+          if ! command -v rustup >/dev/null 2>&1; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+              | sh -s -- -y --default-toolchain stable --profile minimal
+            echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+            export PATH="$HOME/.cargo/bin:$PATH"
+          fi
+          # arm64 only (SPEC-003 ADR-202). Four ABIs quadruple the build for a
+          # sideloaded dev artefact and every device worth testing on is arm64.
+          rustup target add aarch64-linux-android
+          command -v cargo-tauri >/dev/null 2>&1 \
+            || cargo install tauri-cli --version '^2' --locked
+          cargo tauri --version
+
+      # gen/android is generated, not committed (ADR-204). ADR-203 recovers the
+      # reviewability that costs us: the permissions are guarded below.
+      - name: Generate the Android project
+        run: CI=1 cargo tauri android init --ci
+
+      - name: Bound Gradle and cargo to the container
+        run: |
+          set -euo pipefail
+          props=src-tauri/gen/android/gradle.properties
+          [ -f "$props" ] || : > "$props"
+          # Written with echo, not a heredoc: a heredoc body must start at
+          # column 0, which escapes this YAML block scalar.
+          {
+            echo ""
+            echo "# Set by selfsame-android — see SPEC-003 OBS-201."
+            echo "org.gradle.daemon=false"
+            echo "org.gradle.parallel=false"
+            echo "org.gradle.caching=false"
+            echo "org.gradle.jvmargs=-Xmx2048m -XX:MaxMetaspaceSize=512m"
+          } >> "$props"
+          # rustc is the dominant memory term, not Gradle: cargo defaults to one
+          # process per core and the runner has eight. Four is a compromise
+          # between the 55-minute serial build and the OOM.
+          echo "CARGO_BUILD_JOBS=4" >> "$GITHUB_ENV"
+
+      - name: Build the APK
+        run: |
+          set -uo pipefail
+          # --debug is load-bearing (ADR-201): the default is release, which
+          # demands a signing config we deliberately do not create.
+          cargo tauri android build --apk --debug -t aarch64 > /tmp/build.log 2>&1
+          rc=$?
+          tail -60 /tmp/build.log
+          exit $rc
+
+      # REQ-203. Reads the MERGED manifest — the post-init one declares only
+      # INTERNET, so checking it would pass on every run and see nothing.
+      - name: Check the shipped permissions against the allowlist
+        run: |
+          set -euo pipefail
+          merged=$(find src-tauri/gen -path '*merged_manifest*' -name 'AndroidManifest.xml' | head -1)
+          [ -n "$merged" ] || { echo "no merged manifest to check" >&2; exit 1; }
+          echo "checking $merged"
+
+          allow=$(grep -vE '^\s*(#|$)' src-tauri/android-permissions.allow | sort -u)
+          have=$(grep -o 'android.permission.[A-Z_]*' "$merged" \
+                 | sed 's/android.permission.//' | sort -u)
+          extra=$(comm -13 <(echo "$allow") <(echo "$have") || true)
+
+          if [ -n "$extra" ]; then
+            echo "" >&2
+            echo "The merged manifest declares permissions that are not on the" >&2
+            echo "allowlist:" >&2
+            echo "$extra" | sed 's/^/    /' >&2
+            echo "" >&2
+            echo "A dependency has widened what this app asks the OS for. Read" >&2
+            echo "src-tauri/android-permissions.allow, decide whether the new" >&2
+            echo "permission is wanted, and add it there with a reason — or" >&2
+            echo "remove the dependency that brought it." >&2
+            exit 1
+          fi
+          echo "shipped permissions are all accounted for:"
+          echo "$have" | sed 's/^/    /'
+
+      - name: Name the artefact
+        id: apk
+        run: |
+          set -euo pipefail
+          built=$(find src-tauri/gen -name '*.apk' | head -1)
+          [ -n "$built" ] || { echo "the build reported success but produced no APK" >&2; exit 1; }
+          # The filename carries the warning the signature does not (ADR-201):
+          # this is debug-signed and cannot be upgraded in place by a release
+          # build. Nobody should mistake it for shippable.
+          name="selfsame-UNSIGNED-DEV-$(git rev-parse --short HEAD).apk"
+          cp "$built" "/tmp/$name"
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          ls -la "/tmp/$name"
+
+      - name: Publish to R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          APK: ${{ steps.apk.outputs.name }}
+        run: |
+          set -euo pipefail
+          command -v aws >/dev/null 2>&1 || {
+            SUDO=""; command -v sudo >/dev/null 2>&1 && SUDO="sudo"
+            $SUDO apt-get install -y --no-install-recommends awscli
+          }
+          endpoint="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+
+          # Immutable, per commit — REQ-202.
+          aws s3 cp "/tmp/${APK}" \
+            "s3://${R2_BUCKET}/${R2_PREFIX}/${APK}" \
+            --endpoint-url "$endpoint" --no-progress
+          # The moving pointer, matching the files.anuna.io/<tool>/latest/ shape.
+          aws s3 cp "/tmp/${APK}" \
+            "s3://${R2_BUCKET}/${R2_PREFIX}/latest/selfsame-UNSIGNED-DEV.apk" \
+            --endpoint-url "$endpoint" --no-progress
+
+          echo "published ${APK}"
+
+      # This Forgejo serves no job logs, so a failure is otherwise visible only
+      # as "Failing after Nm". Same workaround ci.yml uses.
+      - name: Report the first error into a commit status
+        if: failure()
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          line=$(grep -A 4 '^\* What went wrong:' /tmp/build.log 2>/dev/null | tail -n +2 \
+                 || tail -n 3 /tmp/build.log 2>/dev/null \
+                 || echo "failed before the build step")
+          line=$(printf '%s' "$line" | tr '\n' ' ' | cut -c1-240)
+          curl -sS -X POST \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            "${GITHUB_SERVER_URL}/api/v1/repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" \
+            -d "$(printf '{"context":"android-diagnostic","state":"failure","description":%s}' \
+                  "$(printf '%s' "$line" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')")" \
+            >/dev/null || true
