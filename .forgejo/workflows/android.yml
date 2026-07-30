@@ -232,16 +232,57 @@ jobs:
 
       # REQ-203. Reads the MERGED manifest — the post-init one declares only
       # INTERNET, so checking it would pass on every run and see nothing.
+      #
+      # Every exit below records the stage into /tmp/stage.err. Three runs
+      # (#35, #36, #37) failed here or later with the build already green, and
+      # the diagnostic reported the *successful* build's last line because none
+      # of these paths wrote a stage — so the job said "Finished 1 APK" and
+      # failed. `set -x` here and in the two steps after it, so that even a path
+      # nobody anticipated leaves the last command attempted in the log.
       - name: Check the shipped permissions against the allowlist
         run: |
-          set -euo pipefail
-          merged=$(find src-tauri/gen -path '*merged_manifest*' -name 'AndroidManifest.xml' | head -1)
-          [ -n "$merged" ] || { echo "no merged manifest to check" >&2; exit 1; }
+          set -xeuo pipefail
+          fail() { echo "PERMISSIONS $*" > /tmp/stage.err; echo "$*" >&2; exit 1; }
+
+          [ -d src-tauri/gen ] || fail "src-tauri/gen does not exist — android init did not run"
+
+          # Two guards, both learned from simulating this step's exit paths:
+          #   - no `| head -1`, because under pipefail head closing the pipe can
+          #     SIGPIPE find;
+          #   - `|| true` on find, because a find that exits non-zero under
+          #     `set -e` kills the step *before* `fail` can record anything,
+          #     which is the exact defect this step is being changed to remove.
+          manifests=$(find src-tauri/gen -name 'AndroidManifest.xml' -print 2>/dev/null || true)
+          [ -n "$manifests" ] || fail "no AndroidManifest.xml anywhere under src-tauri/gen"
+
+          merged=$(printf '%s\n' "$manifests" | grep 'merged_manifest' | sed -n 1p || true)
+
+          if [ -z "$merged" ]; then
+            # Say what *was* there. If AGP has moved or renamed the directory,
+            # this list is the whole answer and costs one line.
+            candidates=$(printf '%s\n' "$manifests" | sed -n '1,8p' | tr '\n' ' ')
+            fail "no manifest matching 'merged_manifest'; found instead: ${candidates:-none}"
+          fi
           echo "checking $merged"
 
-          allow=$(grep -vE '^\s*(#|$)' src-tauri/android-permissions.allow | sort -u)
+          [ -f src-tauri/android-permissions.allow ] \
+            || fail "src-tauri/android-permissions.allow is missing"
+
+          # `|| true` on both greps: no-match is exit 1, which pipefail would
+          # turn into a silent step failure. An empty result is checked for
+          # explicitly below instead, which is the case actually worth failing on.
+          allow=$(grep -vE '^\s*(#|$)' src-tauri/android-permissions.allow | sort -u || true)
+          [ -n "$allow" ] || fail "the allowlist is empty — nothing to check against"
+
           have=$(grep -o 'android.permission.[A-Z_]*' "$merged" \
-                 | sed 's/android.permission.//' | sort -u)
+                 | sed 's/android.permission.//' | sort -u || true)
+          if [ -z "$have" ]; then
+            # A manifest declaring no permissions at all means this check is
+            # passing vacuously, which is the failure mode the comment above
+            # warns about. Treat it as a defect in the check, not a pass.
+            fail "no permissions found in $merged — this check would pass vacuously"
+          fi
+
           extra=$(comm -13 <(echo "$allow") <(echo "$have") || true)
 
           if [ -n "$extra" ]; then
@@ -263,9 +304,11 @@ jobs:
       - name: Name the artefact
         id: apk
         run: |
-          set -euo pipefail
-          built=$(find src-tauri/gen -name '*.apk' | head -1)
-          [ -n "$built" ] || { echo "the build reported success but produced no APK" >&2; exit 1; }
+          set -xeuo pipefail
+          fail() { echo "ARTEFACT $*" > /tmp/stage.err; echo "$*" >&2; exit 1; }
+
+          built=$(find src-tauri/gen -name '*.apk' -print | sed -n 1p || true)
+          [ -n "$built" ] || fail "the build reported success but produced no APK"
           # The filename carries the warning the signature does not (ADR-201):
           # this is debug-signed and cannot be upgraded in place by a release
           # build. Nobody should mistake it for shippable.
@@ -283,11 +326,17 @@ jobs:
           mb=$(( bytes / 1048576 ))
           echo "APK is ${mb} MiB (${bytes} bytes)"
           echo "size: ${mb} MiB (${bytes} bytes)" > /tmp/size.txt
+
+          # Materialised rather than piped into `head`: `unzip -l | sort -rn |
+          # head -4` under pipefail lets head's exit SIGPIPE sort, which fails
+          # the step at a line that is pure diagnostics.
+          unzip -l "/tmp/$name" | sort -rn > /tmp/entries.txt
           echo "largest entries:"
-          unzip -l "/tmp/$name" | sort -rn | head -4 | sed 's/^/    /'
+          sed -n '1,4p' /tmp/entries.txt | sed 's/^/    /'
+
           if [ "$bytes" -gt 83886080 ]; then
             echo "" >&2
-            echo "SIZE ${mb} MiB over the 80 MiB ceiling; largest: $(unzip -l "/tmp/$name" | sort -rn | sed -n 2p | awk '{print $1" "$4}')" > /tmp/stage.err
+            echo "SIZE ${mb} MiB over the 80 MiB ceiling; largest: $(sed -n 2p /tmp/entries.txt | awk '{print $1" "$4}')" > /tmp/stage.err
             echo "APK is ${mb} MiB, over the 80 MiB ceiling." >&2
             echo "Check whether debug info is back in lib/arm64-v8a/*.so —" >&2
             echo "the entry listing above says what grew. SPEC-003 OBS-203." >&2
@@ -305,10 +354,13 @@ jobs:
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
           APK: ${{ steps.apk.outputs.name }}
         run: |
-          set -euo pipefail
+          set -xeuo pipefail
+          fail() { echo "UPLOAD $*" > /tmp/stage.err; echo "$*" >&2; exit 1; }
+
           if ! command -v aws >/dev/null 2>&1; then
             SUDO=""; command -v sudo >/dev/null 2>&1 && SUDO="sudo"
-            $SUDO apt-get update && $SUDO apt-get install -y awscli
+            $SUDO apt-get update && $SUDO apt-get install -y awscli \
+              || fail "could not install awscli"
           fi
 
           export AWS_DEFAULT_REGION=auto
@@ -322,11 +374,13 @@ jobs:
           # convention.
           aws s3 cp "/tmp/${APK}" \
             "s3://${BUCKET}/${PROJECT}/selfsame-UNSIGNED-DEV.apk" \
-            --endpoint-url "$R2_ENDPOINT"
+            --endpoint-url "$R2_ENDPOINT" \
+            || fail "PutObject failed for the flat 'latest' key"
           # Immutable per-commit archive — REQ-202.
           aws s3 cp "/tmp/${APK}" \
             "s3://${BUCKET}/${PROJECT}/${sha}/${APK}" \
-            --endpoint-url "$R2_ENDPOINT"
+            --endpoint-url "$R2_ENDPOINT" \
+            || fail "PutObject failed for the per-commit key ${sha}/${APK}"
           echo "Uploaded: ${APK}"
 
           # Informational and non-fatal: an "Object Read & Write" R2 token can
@@ -357,6 +411,14 @@ jobs:
                  || grep -A 4 '^\* What went wrong:' /tmp/build.log 2>/dev/null | tail -n +2 \
                  || tail -n 3 /tmp/build.log 2>/dev/null \
                  || echo "failed before the build step")
+
+          # Last guard against the message that wasted three runs. If the build
+          # log says the build finished and no stage recorded itself, then the
+          # failure is somewhere after the build and quoting build.log's tail
+          # reports a *success* as the error. Say that instead of lying quietly.
+          if [ ! -s /tmp/stage.err ] && grep -q 'Finished .* APK' /tmp/build.log 2>/dev/null; then
+            line="build succeeded; failed in an un-instrumented step after it — no stage recorded"
+          fi
           line=$(printf '%s' "$line" | tr '\n' ' ' | cut -c1-240)
           curl -sS -X POST \
             -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
