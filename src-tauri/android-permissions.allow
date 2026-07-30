@@ -1,0 +1,52 @@
+# Permissions the Android build is allowed to declare — SPEC-003 ADR-203, REQ-203.
+#
+# Checked against the **merged** manifest, not the one `tauri android init`
+# writes. That one declares only INTERNET; Gradle merges each dependency's
+# manifest at build time, and the merged result is what ships. A guard reading
+# the post-init file would pass on every run and see none of this.
+#
+# One name per line. Blank lines and `#` comments ignored. A permission in the
+# merged manifest and not on this list fails the build — so widening the app's
+# access is a reviewed edit here, never a silent consequence of a dependency
+# bump.
+#
+# Format: the bare name, without the `android.permission.` prefix.
+
+# ── asked for, and understood ───────────────────────────────────────────────
+
+# The app publishes signed deltas and resolves other people's identities.
+INTERNET
+
+# tauri-plugin-barcode-scanner — SCREEN-002's QR path. app.js branches on
+# window.__TAURI__.barcodeScanner to choose scan-or-type; without this the
+# scanner is absent and every link falls back to the typed code.
+CAMERA
+
+# tauri-plugin-biometric — REQ-024's user-presence check before any root-key
+# use. USE_FINGERPRINT is the pre-API-28 spelling of the same capability.
+USE_BIOMETRIC
+USE_FINGERPRINT
+
+# ── arrived from dependencies, not yet explained ────────────────────────────
+#
+# These are on the list because they are already in the merged manifest and the
+# build must be able to pass. Being listed is NOT an endorsement — each is an
+# open question in SPEC-003 OBS-202. They are written down here rather than
+# excluded so the check can run at all, and grouped separately so nobody
+# mistakes "passes CI" for "reviewed and wanted".
+
+# Signature-level, for reading system service state. Nobody chose this, and the
+# contributing library is still unidentified — two attempts at parsing Gradle's
+# manifest-merger report failed. On a root-key custodian this is the line in
+# this file most worth resolving. SPEC-003 OBS-202.
+DUMP
+
+# Almost certainly an AndroidX/WorkManager service declaration rather than a
+# capability the app exercises. Confirm before treating as intended.
+BIND_JOB_SERVICE
+
+# Probably the biometric prompt's haptic feedback.
+VIBRATE
+
+# Probably a networking library checking connectivity before a request.
+ACCESS_NETWORK_STATE
