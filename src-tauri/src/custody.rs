@@ -47,6 +47,41 @@ use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use zeroize::{Zeroize, Zeroizing};
 
+// ── No silent fallback to a store that forgets — BUG-201 ────────────────────
+//
+// `keyring` 3.6.3 selects its default credential store by target, and its
+// catch-all arm is the **mock** store (lib.rs:300):
+//
+//     #[cfg(not(any(linux, freebsd, openbsd, macos, ios, windows)))]
+//     pub use mock as default;
+//
+// Android is in none of those arms, and the crate ships no `android.rs` at all.
+// Worse, `MockCredential` holds `Mutex<RefCell<MockData>>` constructed fresh per
+// instance, and `entry()` below builds a new `Entry` on every call — so a write
+// and the read that follows it never touch the same map. On Android this module
+// stored the root key nowhere, `Custody::create` was followed three lines later
+// by a `root_public_key()` that returned `NoIdentity`, and an APK shipped.
+//
+// The dependency degraded silently and the build stayed green. This turns that
+// into the compile failure it should always have been: a custody module that
+// cannot persist a key must not compile, let alone publish.
+//
+// Remove this once Keystore-backed storage lands for Android.
+#[cfg(not(any(
+    target_os = "macos",
+    target_os = "ios",
+    target_os = "windows",
+    target_os = "linux",
+    target_os = "freebsd",
+    target_os = "openbsd",
+)))]
+compile_error!(
+    "no keychain backend exists on this target: `keyring` would silently fall \
+     back to its in-memory mock store and the root key would not be persisted \
+     at all. See BUG-201 in specs/SPEC-004-android-secure-storage.md. Android \
+     needs the Keystore-backed store; do not paper over this with a plain file."
+);
+
 /// Keychain service name.
 const SERVICE: &str = "io.anuna.selfsame";
 
