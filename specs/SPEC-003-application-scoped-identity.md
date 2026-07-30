@@ -3,14 +3,14 @@ id: SPEC-003
 title: Application- and Account-Scoped Identity — deterministic home keys, acct aliases, portable device grants, and provider discovery
 status: draft
 tier: 1
-version: 0.3.0
+version: 0.4.0
 audience: agent, human, application developer, infrastructure provider
 author: Anuna Research (drafted with Codex, 2026-07-30)
 last-updated: 2026-07-30
 owner-repo: selfsame
 affects-repos: selfsame, anuna-ssi, did-crdt, adopting applications
 review-gate: not-approved — Tier-1; all ADRs are PROPOSED; cross-model adversarial review, independent KDF vectors, privacy review, and human security sign-off are outstanding
-depends-on: did:crdt Method Specification; W3C VC Data Model 2.0; W3C VC JOSE/COSE; W3C DID Core 1.0; optional W3C Bitstring Status List 1.0 projection; RFC 7565; RFC 7033; RFC 3986; RFC 4648; RFC 5234; RFC 5869; RFC 7515; RFC 8032; RFC 8785
+depends-on: did:crdt Method Specification; PROTO-002 Selfsame Rendezvous Protocol v1; W3C VC Data Model 2.0; W3C VC JOSE/COSE; W3C DID Core 1.0; optional W3C Bitstring Status List 1.0 projection; RFC 7565; RFC 7033; RFC 3986; RFC 4648; RFC 5234; RFC 5869; RFC 7515; RFC 8032; RFC 8785
 ---
 
 # SPEC-003 — Application- and Account-Scoped Identity
@@ -94,7 +94,9 @@ forbid verification-time context fetching ·
 [[SPEC-003-application-scoped-identity#ADR-210]] derive one home DID per
 application account ·
 [[SPEC-003-application-scoped-identity#ADR-211]] keep a user-chosen public
-username separate from the stable opaque account alias.
+username separate from the stable opaque account alias ·
+[[SPEC-003-application-scoped-identity#ADR-212]] make a versioned,
+operator-neutral mailbox protocol the rendezvous compatibility boundary.
 
 **Load-bearing.**
 [[SPEC-003-application-scoped-identity#REQ-201]] one secret produces a different
@@ -111,6 +113,8 @@ remain independent ·
 opaque, and recoverable without user configuration ·
 [[SPEC-003-application-scoped-identity#REQ-218]] a person may set a
 human-readable account alias without changing identity or authorization ·
+[[SPEC-003-application-scoped-identity#REQ-219]] protocol conformance, not
+operator identity, determines rendezvous eligibility ·
 [[SPEC-003-application-scoped-identity#NFR-201]] application identities are
 pairwise unlinkable from their public data ·
 [[SPEC-003-application-scoped-identity#NFR-205]] all authorization checks fail
@@ -141,6 +145,9 @@ the Tier-1 gate in
 - Compact grants are at most 64 KiB and use only the EdDSA profile.
 - Proof nonces are single-use and expire within 120 seconds.
 - Rendezvous probes have a per-endpoint deadline of at most 1500 ms.
+- Only providers passing
+  [[PROTO-002-selfsame-rendezvous-v1#CON-301]] are eligible; all mailbox use
+  then follows that protocol's bounded, blind, immutable contract.
 
 ---
 
@@ -542,15 +549,18 @@ two eligible rendezvous descriptors unless it documents a single-provider
 availability exception.
 
 The initiating client SHALL select a provider using
-[[SPEC-003-application-scoped-identity#CON-208]]. The person SHALL NOT be asked
-to type, paste, scan, or choose an endpoint during the normal path.
+[[SPEC-003-application-scoped-identity#CON-208]]. A descriptor becomes eligible
+only by passing the capability contract in
+[[PROTO-002-selfsame-rendezvous-v1#CON-301]]. The person SHALL NOT be asked to
+type, paste, scan, or choose an endpoint during the normal path.
 
 The UI MAY show the selected operator and privacy policy and MAY expose an
 advanced administrator policy. Such visibility SHALL NOT turn an
 application-supplied interoperability value into a required user setting.
 
 Trace: [[SPEC-003-application-scoped-identity#TEST-214]],
-[[SPEC-003-application-scoped-identity#TEST-215]]
+[[SPEC-003-application-scoped-identity#TEST-215]],
+[[SPEC-003-application-scoped-identity#TEST-226]]
 
 ### REQ-210: There is no undeclared global fallback
 
@@ -565,7 +575,8 @@ operated by Selfsame, Anuna, or a prior application.
 A loopback development profile MAY be supplied by developer tooling, but it
 MUST be rejected by release builds.
 
-Trace: [[SPEC-003-application-scoped-identity#TEST-216]]
+Trace: [[SPEC-003-application-scoped-identity#TEST-216]],
+[[SPEC-003-application-scoped-identity#TEST-226]]
 
 ### REQ-211: The VC remains opaque inside the link transport
 
@@ -588,10 +599,13 @@ digest in the authenticated provider hint defined by
 
 The joining client SHALL follow that choice for the in-progress ceremony. It
 SHALL NOT independently select a different rendezvous. If the selected
-provider becomes unavailable, the initiator SHALL create a new authenticated
-hint before either party moves.
+provider becomes unavailable, the initiator SHALL abandon that ceremony and
+create a fresh secret, slots, offer, ciphertext, and authenticated hint before
+either party moves, as required by
+[[PROTO-002-selfsame-rendezvous-v1#REQ-307]].
 
-Trace: [[SPEC-003-application-scoped-identity#TEST-218]]
+Trace: [[SPEC-003-application-scoped-identity#TEST-218]],
+[[SPEC-003-application-scoped-identity#TEST-226]]
 
 ### REQ-213: Derivation does not depend on an infrastructure provider
 
@@ -616,7 +630,8 @@ needs only:
 1. one immutable application ID and embedded profile;
 2. an account-record integration implementing the scope lifecycle in REQ-217;
 3. an RFC 7565 account authority with the WebFinger binding in CON-204;
-4. one or more protocol-conforming rendezvous providers;
+4. one or more providers conforming to
+   [[PROTO-002-selfsame-rendezvous-v1]];
 5. one or more state resolvers or peer paths that exchange complete,
    causally valid `did:crdt` signed closures and revocation deltas;
 6. application permission URIs and verifier policy; and
@@ -626,10 +641,12 @@ A developer MAY additionally deploy a W3C Bitstring Status List projection
 host. That optional service does not participate in core issuance, linking,
 revocation authority, or Selfsame authorization.
 
-The reference implementation SHALL expose a conformance suite that can be run
-without contacting Anuna infrastructure.
+The reference implementation SHALL expose the black-box PROTO-002 conformance
+suite and the end-to-end profile suite so either can run without contacting
+Anuna infrastructure.
 
-Trace: [[SPEC-003-application-scoped-identity#TEST-220]]
+Trace: [[SPEC-003-application-scoped-identity#TEST-220]],
+[[SPEC-003-application-scoped-identity#TEST-226]]
 
 ### REQ-215: Device keys are application-account-scoped
 
@@ -720,6 +737,26 @@ functionality of Selfsame.
 
 Trace: [[SPEC-003-application-scoped-identity#TEST-225]]
 
+### REQ-219: Protocol conformance determines rendezvous eligibility
+
+A rendezvous descriptor naming `selfsame-rendezvous-v1` SHALL be eligible only
+when its URL is canonical and its bounded capability probe passes
+[[PROTO-002-selfsame-rendezvous-v1#CON-301]]. After selection, both clients and
+the operator SHALL use
+[[PROTO-002-selfsame-rendezvous-v1#CON-302]] through
+[[PROTO-002-selfsame-rendezvous-v1#CON-308]] for every mailbox operation.
+Operator identity, commercial relationship, co-location with a state resolver,
+or an Anuna allowlist SHALL NOT substitute for protocol conformance.
+
+Changing providers after any slot request has been sent or a hint has been
+published SHALL abandon the prior ceremony and create a fresh secret, slots,
+offer, ciphertext, and authenticated hint as required by
+[[PROTO-002-selfsame-rendezvous-v1#REQ-307]]. It SHALL NOT rotate or alter the
+application-account identity.
+
+Trace: [[SPEC-003-application-scoped-identity#TEST-214]],
+[[SPEC-003-application-scoped-identity#TEST-226]]
+
 ## Non-functional requirements
 
 ### NFR-201: Pairwise application-account unlinkability
@@ -746,7 +783,8 @@ no claim about those channels.
 At least two independent implementations SHALL reproduce every normative KDF,
 application ID, account-scope validation, opaque alias, username grammar,
 grant-ID, JWK, JWS, revocation-delta, challenge, and provider-selection test
-vector byte-for-byte before the Tier-1 gate closes.
+vector byte-for-byte before the Tier-1 gate closes. PROTO-002's capability,
+slot, HTTP, expiry, and retry vectors are part of this portability gate.
 
 ### NFR-203: Data minimization
 
@@ -769,8 +807,9 @@ authorization decisions are made.
 ### NFR-205: Fail closed
 
 Malformed profiles, aliases, DID closures, revocation state, JWKs, VCs, JWS
-headers, status projections, permission sets, challenges, or provider hints
-SHALL produce a typed failure and no authenticated session.
+headers, status projections, permission sets, challenges, provider hints,
+rendezvous capabilities, or mailbox responses SHALL produce a typed failure
+and no authenticated session.
 
 There SHALL be no TOFU path for issuer keys, projection issuers, account
 authorities, or provider descriptors.
@@ -1013,6 +1052,30 @@ Usernames are therefore mutable DID document data with conservative
 tombstoning. Setting, renaming, or removing one changes no key, DID, grant, or
 revocation entry.
 
+### ADR-212: Use a versioned, operator-neutral rendezvous protocol
+
+**Status:** PROPOSED.
+
+The profile token `selfsame-rendezvous-v1` names
+[[PROTO-002-selfsame-rendezvous-v1]], not the current reference server or an
+Anuna deployment. The protocol fixes the HTTPS capability response, existing
+role-separated slot derivation, opaque record size and TTL, immutable
+idempotent writes, repeatable reads, errors, CORS, cache behavior, failover,
+and operator data boundary. Eligibility and interoperability are decided by
+black-box behavior.
+
+The mailbox remains independent of `did:crdt` state transport. An operator may
+offer both services, but selection of its rendezvous grants no state authority
+and never implies the state endpoints exist at that origin.
+
+Leaving `selfsame-rendezvous-v1` as an undocumented label is rejected because
+it makes the reference implementation the accidental standard and prevents a
+third party from knowing what to implement. Requiring every adopter to
+configure protocol details is rejected because it breaks the no-configuration
+user promise. Destructive reads are rejected because a dropped response would
+consume the only correct copy; PROTO-002 instead makes replay rejection an
+end-to-end ceremony property.
+
 ## Contracts
 
 ### CON-201: Canonical application profile
@@ -1101,6 +1164,8 @@ Every provider ID MUST match `[a-z0-9][a-z0-9-]{0,62}` and be unique within its
 role. Every provider URL MUST be HTTPS, contain an authority, and contain no
 user information or fragment. A rendezvous `validUntil` value MUST be a UTC
 XML Schema `dateTimeStamp`; an expired descriptor is ineligible.
+Rendezvous URLs have the stricter canonical-origin grammar in
+[[PROTO-002-selfsame-rendezvous-v1#CON-301]] and MUST conform to it.
 
 `revocation.method` MUST equal `did-crdt-revocations-v1` in profile version 1.
 The `projection` member is OPTIONAL. Its absence disables Bitstring projection
@@ -1517,8 +1582,9 @@ For one link attempt, the initiator:
 3. groups remaining descriptors by ascending numeric `priority`;
 4. probes all descriptors in the lowest-priority group concurrently with a
    per-probe deadline of at most 1500 ms;
-5. forms the eligible set from endpoints that return the expected protocol
-   version and a healthy response;
+5. forms the eligible set only from endpoints whose base URL and complete
+   capability response pass
+   [[PROTO-002-selfsame-rendezvous-v1#CON-301]];
 6. selects one eligible descriptor by cryptographically random weighted choice,
    where zero weight means ineligible;
 7. if none are eligible, repeats steps 4–6 with the next priority group; and
@@ -1724,6 +1790,43 @@ No set, rename, removal, reservation, or tombstone operation changes
 `accountScopeId`, the home DID, any key, the stable alias, existing grant IDs,
 VCs, device proofs, revocation G-Set entries, or provider selection.
 
+### CON-213: Rendezvous protocol binding
+
+For profile version 1, a rendezvous descriptor is recognized only when:
+
+1. `protocol` is exactly `selfsame-rendezvous-v1`;
+2. `url` is a canonical base URL under
+   [[PROTO-002-selfsame-rendezvous-v1#CON-301]];
+3. the descriptor passes expiry, local policy, priority, and weight checks in
+   [[SPEC-003-application-scoped-identity#CON-208]]; and
+4. a bounded `GET /healthz` returns a capability object accepted by
+   [[PROTO-002-selfsame-rendezvous-v1#CON-301]].
+
+The selected descriptor's exact base URL is the only rendezvous origin for
+that ceremony. The clients derive fresh offer and bundle slots and perform all
+mailbox requests under
+[[PROTO-002-selfsame-rendezvous-v1#CON-302]] through
+[[PROTO-002-selfsame-rendezvous-v1#CON-308]]. They reject redirects,
+credentials, cookies, content encoding, oversized responses, unrecognized
+statuses, destructive-read semantics, and any attempt by the server to choose
+another endpoint or protocol.
+
+The authenticated hint in
+[[SPEC-003-application-scoped-identity#CON-209]] binds the exact descriptor
+digest, so a joiner never accepts a health response or redirect as a provider
+substitution. If the selected provider fails after any slot request or hint
+publication, both parties abandon its ceremony state. A newly selected provider
+receives a new secret, slots, offer, ciphertext, and hint; no mailbox record is
+copied.
+
+A rendezvous descriptor supplies no DID-state, account-authority, or
+status-projection endpoint. Those roles require their own profile descriptors
+and protocols even when one operator or DNS origin implements several roles.
+
+Implements: REQ-209, REQ-210, REQ-212, REQ-214, REQ-219.
+
+Verified by: TEST-214, TEST-215, TEST-216, TEST-218, TEST-220, TEST-226.
+
 ## Test specifications
 
 ### TEST-201: Application separation
@@ -1815,6 +1918,10 @@ no method operation or merge can make `is_revoked(id)` false.
 
 Exercise priority, weight, bounded parallel probes, incompatible protocol,
 timeouts, unhealthy endpoints, malformed descriptors, and total failure.
+Against the PROTO-002 capability oracle, reject a plain `ok` body, unknown or
+duplicate JSON members, wrong semantics, a 4 KiB maximum, redirects,
+compression, wrong media type, oversized response, and a response arriving
+after 1500 ms. No rejected descriptor may enter the weighted choice.
 
 ### TEST-215: One initiator, one selection
 
@@ -1849,7 +1956,8 @@ node, and home key do not change.
 ### TEST-220: Independent developer conformance
 
 Run a complete issue-link-verify-revoke flow using only third-party account,
-rendezvous, and state services. Exercise two accounts in the same application,
+rendezvous, and state services. The rendezvous first passes the independent
+PROTO-002 black-box suite. Exercise two accounts in the same application,
 disable Bitstring projection, block all Anuna domains, and require both flows
 to pass. Repeat with a third-party projection host and require identical
 Selfsame authorization results.
@@ -1921,6 +2029,29 @@ removal and reject later reassignment. Confirm byte identity of all home keys,
 DIDs, stable aliases, grants, proofs, and revocation entries before and after
 each username operation.
 
+### TEST-226: Rendezvous protocol integration and failover
+
+**Validates:** REQ-209, REQ-210, REQ-212, REQ-214, REQ-219, CON-208,
+CON-209, CON-213.
+
+Run [[PROTO-002-selfsame-rendezvous-v1#TEST-301]] through
+[[PROTO-002-selfsame-rendezvous-v1#TEST-310]] against two independently
+implemented providers, then complete the same application-account ceremony
+through each. Confirm selection uses only a conforming capability response and
+all traffic remains on the descriptor origin.
+
+Make the first provider unavailable once after an unacknowledged initial slot
+request and once after publishing its authenticated provider hint, then select
+the second. In both cases require a new secret, offer slot, bundle slot, offer,
+ciphertext, descriptor digest, and hint. Require no shared slot or ciphertext
+across the two operators and no change to the application-account node, home
+key, DID, stable alias, account scope, grant semantics, or `did:crdt` state.
+
+Deploy a state resolver beside the first rendezvous and at a separate origin in
+turn. Neither arrangement may change mailbox traffic or make the selected
+rendezvous an implicit resolver. Block every Anuna domain throughout and
+require identical results.
+
 ## Trust assumptions
 
 This profile assumes:
@@ -1941,7 +2072,11 @@ This profile assumes:
   account data.
 
 The protocol does not require the rendezvous provider to be trusted with grant
-plaintext, private key material, or authorization decisions.
+plaintext, private key material, delivery, freshness, or authorization
+decisions. It may deny service, retain or replay ciphertext, and observe
+bounded connection metadata, including a direct browser client's web origin;
+clients rely on PROTO-002's storage contract for conforming availability and
+on the ceremony cryptography for security.
 
 ## Threat model
 
@@ -1951,7 +2086,7 @@ plaintext, private key material, or authorization decisions.
 | Account A1 is confused with A2 in one application | The authenticated account context selects the scope and expected `acct:` alias; issuer, grant, proof, status, and state checks reject every cross-account artifact. |
 | Application reuses or replaces an account scope | Atomic uniqueness and immutability checks reject reuse; missing scope fails as `AccountScopeUnavailable` rather than creating a new identity. |
 | Account scope is disclosed | It may correlate that application account's private storage but cannot derive a home key without the recovery secret; rotate only through an explicit identity migration, not silently. |
-| Malicious rendezvous | Sees bounded network metadata and ciphertext; cannot alter an accepted offer, hint, or grant. |
+| Malicious rendezvous | May withhold, replay, retain, or reorder ciphertext and sees bounded network metadata, including direct-browser Origin; end-to-end AEAD, transcript, expiry, and one-ceremony checks prevent it from forging or authorizing an accepted exchange. |
 | Compromised provider directory/profile | Profile authenticity is the application's responsibility; SDK rejects values outside the authenticated embedded profile. |
 | Stolen VC | Cannot pass CON-207 without the device private key. |
 | Stolen device key | Grant remains usable until its ID appears in fresh verified CRDT state or it expires; user initiates unlink from a home controller. |
@@ -2018,7 +2153,7 @@ No implementation task may be marked ready until all boxes are checked:
 - [ ] A second review verifies the revised document and closes every blocking
       finding from the first.
 - [ ] A human cryptography/security reviewer approves CON-202, CON-205,
-      CON-206, CON-207, CON-210, CON-211, and CON-212.
+      CON-206, CON-207, CON-210, CON-211, CON-212, and CON-213.
 - [ ] Two independent implementations reproduce the normative KDF and wire
       vectors required by NFR-202.
 - [ ] The `did:crdt` method explicitly defines the `JsonWebKey` projection and
@@ -2027,13 +2162,16 @@ No implementation task may be marked ready until all boxes are checked:
       published digest, and archival policy.
 - [ ] A privacy review covers `acct:` harvesting, WebFinger, state lookups,
       optional username reuse, CRDT revocation enumeration, projection
-      retrieval, account-scope storage, provider metadata, and
+      retrieval, account-scope storage, provider and browser-Origin metadata,
+      and
       cross-application and cross-account correlation.
 - [ ] OQ-201, OQ-202, and OQ-204 through OQ-207 are either resolved
       normatively or explicitly accepted by the human owner with bounded
       consequences. OQ-203 is resolved by ADR-210.
 - [ ] SPEC-001 is explicitly amended or profiles this document without
       contradictory credential and derivation claims.
+- [ ] PROTO-002 passes its own Tier-1 gate and two independent providers pass
+      both its black-box suite and TEST-226 without Anuna infrastructure.
 - [ ] Human security sign-off records an approval version and commit.
 
 ## Open questions
@@ -2093,6 +2231,10 @@ discovery record is the current candidate. Its public-DHT metadata and
 anti-abuse properties require review before it becomes this profile's mandatory
 carrier.
 
+PROTO-002 does not resolve this bootstrapping question: it begins once a client
+has the authenticated descriptor and ceremony secret, then completely defines
+how that client uses the selected mailbox.
+
 Owner: SPEC-001 maintainer.
 
 ### OQ-206: Migration of the existing SPEC-001 identity — blocking for existing users
@@ -2142,8 +2284,9 @@ Owner: Selfsame wallet + application-profile working group.
 | RFC 7565 stable alias and optional username | REQ-203, REQ-204, REQ-218 | CON-203, CON-204, CON-212 | TEST-204–206, TEST-225 |
 | Portable VC device grant | REQ-205–208, REQ-211 | CON-205–210 | TEST-207–213, TEST-217 |
 | Controller-owned convergent revocation | REQ-207, REQ-208 | CON-205, CON-206, CON-210 | TEST-211–213, TEST-224 |
-| No user endpoint configuration | REQ-209, REQ-212 | CON-208, CON-209 | TEST-214, TEST-215, TEST-218 |
-| No mandatory Anuna infrastructure | REQ-210, REQ-214 | CON-201, CON-208 | TEST-216, TEST-220 |
+| No user endpoint configuration | REQ-209, REQ-212, REQ-219 | CON-208, CON-209, CON-213 | TEST-214, TEST-215, TEST-218, TEST-226 |
+| No mandatory Anuna infrastructure | REQ-210, REQ-214, REQ-219 | CON-201, CON-208, CON-213 | TEST-216, TEST-220, TEST-226 |
+| Replaceable, loss-tolerant blind rendezvous | REQ-209, REQ-212, REQ-219; PROTO-002 REQ-301–308 | CON-208, CON-209, CON-213; PROTO-002 CON-301–308 | TEST-214–216, TEST-218, TEST-220, TEST-226; PROTO-002 TEST-301–310 |
 | Cross-application and cross-account privacy | REQ-201, REQ-203, REQ-213, REQ-215–218 | CON-202–205, CON-211, CON-212 | TEST-201, TEST-204–206, TEST-219, TEST-221–223, TEST-225 |
 | Compatibility with the `did:crdt` method boundary | REQ-201, REQ-203, REQ-205, REQ-208 | CON-202, CON-203, CON-210 | TEST-207, TEST-213, TEST-224 |
 
@@ -2164,10 +2307,16 @@ contract by itself.
 Any change to application-ID or account-scope canonicalization, account-scope
 lifecycle, key derivation, DID construction, JWK representation, accepted
 algorithms, signed bytes, holder proof, closure/projection freshness,
-revocation semantics, or alias comparison is a Tier-1 normative amendment and
-requires new vectors plus renewed security sign-off.
+revocation semantics, alias comparison, rendezvous eligibility, provider-hint
+binding, or the PROTO-002 version is a Tier-1 normative amendment and requires
+new vectors plus renewed security sign-off.
 
 ## Normative and informative sources
+
+Normative internal protocol:
+
+- [[PROTO-002-selfsame-rendezvous-v1]] defines the wire and operator contract
+  named by `selfsame-rendezvous-v1`.
 
 Normative external specifications:
 
@@ -2212,6 +2361,16 @@ combination; that is an engineering conclusion, not a legal novelty claim.
 
 ## Changelog
 
+- **0.4.0 — 2026-07-30 — draft.** Binds every
+  `selfsame-rendezvous-v1` descriptor to the independent PROTO-002 mailbox
+  contract. Makes capability conformance—not operator identity—the eligibility
+  boundary; requires fresh ceremony material on provider failover; separates
+  mailbox and `did:crdt` state roles; adds black-box third-party and failover
+  tests; and records that the current 4 KiB, destructive-read reference server
+  is not yet conforming. Adds REQ-219, ADR-212, CON-213, and TEST-226; affects
+  REQ-209, REQ-210, REQ-212, REQ-214, NFR-202, NFR-205, CON-201, CON-208,
+  CON-209, TEST-214, TEST-220, the trust boundary, Tier-1 gate, traceability,
+  and OQ-205.
 - **0.3.0 — 2026-07-30 — draft.** Makes the existing signed `did:crdt`
   `RevokeCredential` G-Set the authoritative grant-revocation state and moves
   W3C Bitstring Status List to an optional, home-signed projection. Adds random
