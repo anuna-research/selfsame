@@ -24,6 +24,15 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+  # TEMPORARY — remove before merging.
+  #
+  # SPEC-003 REQ-201 is "on push to main", and NFR-201 says this job must not
+  # gate anything: it takes ~25 minutes against ci.yml's five. Running it on
+  # every pull request would do exactly what NFR-201 forbids.
+  #
+  # It is here only so this workflow can be verified on a branch instead of
+  # being merged untested onto main and discovered there.
+  pull_request:
 
 jobs:
   android:
