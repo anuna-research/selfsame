@@ -198,6 +198,29 @@ jobs:
           echo "CARGO_BUILD_JOBS=4" >> "$GITHUB_ENV"
 
       - name: Build the APK
+        env:
+          # Strip DWARF from the native library at link time — SPEC-003 OBS-203.
+          #
+          # The first published APK was 196 MB, and 196,458,888 of its
+          # 216,002,143 uncompressed bytes were a single file:
+          # lib/arm64-v8a/libselfsame_lib.so, carrying .debug_info,
+          # .debug_line, .debug_str, .debug_loc, .debug_abbrev and
+          # .debug_ranges. 91% of the download was DWARF.
+          #
+          # `--debug` uses cargo's `dev` profile, which does not strip;
+          # [profile.release] in Cargo.toml already sets strip = "debuginfo",
+          # which is why this never showed up in a desktop release build.
+          #
+          # `debuginfo` rather than `symbols`: it drops the DWARF bulk but keeps
+          # the symbol table, so a crash on a test device still yields function
+          # names in a backtrace. Stripping symbols too would save a little more
+          # and make the one thing this artefact exists for — being run on a
+          # phone and reporting what broke — considerably harder.
+          #
+          # Set here rather than in Cargo.toml on purpose: adding strip to
+          # [profile.dev] would degrade every local debug build for a problem
+          # that only matters to what CI publishes.
+          RUSTFLAGS: -C strip=debuginfo
         run: |
           set -uo pipefail
           # --debug is load-bearing (ADR-201): the default is release, which
@@ -249,6 +272,24 @@ jobs:
           cp "$built" "/tmp/$name"
           echo "name=$name" >> "$GITHUB_OUTPUT"
           ls -la "/tmp/$name"
+
+          # Size guard — OBS-203 got noticed by a human reading a content-length
+          # header, which is not a control. A stripped arm64 Tauri APK should be
+          # tens of MB; the unstripped one was 196. The ceiling is deliberately
+          # loose so ordinary growth never trips it, and tight enough that a
+          # return to shipping DWARF fails the build instead of the download.
+          bytes=$(wc -c < "/tmp/$name")
+          mb=$(( bytes / 1048576 ))
+          echo "APK is ${mb} MiB (${bytes} bytes)"
+          echo "largest entries:"
+          unzip -l "/tmp/$name" | sort -rn | head -4 | sed 's/^/    /'
+          if [ "$bytes" -gt 83886080 ]; then
+            echo "" >&2
+            echo "APK is ${mb} MiB, over the 80 MiB ceiling." >&2
+            echo "Check whether debug info is back in lib/arm64-v8a/*.so —" >&2
+            echo "the entry listing above says what grew. SPEC-003 OBS-203." >&2
+            exit 1
+          fi
 
       # Follows hark's release pipeline, which already publishes to this bucket:
       # the **flat** prefix is "latest" — not a `latest/` subdirectory, which is
