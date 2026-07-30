@@ -1,9 +1,10 @@
 ---
 id: SPEC-003
 title: Android APK Build and Distribution
-status: draft
-version: 0.1.0
-last-updated: 2026-07-29
+status: implemented
+version: 1.0.0
+last-updated: 2026-07-30
+implemented-date: 2026-07-30
 ---
 
 # SPEC-003 — Android APK Build and Distribution
@@ -14,14 +15,14 @@ last-updated: 2026-07-29
 `anuna-files` [[Cloudflare R2]] bucket under `selfsame/`, so a phone build can
 be sideloaded without anyone running a local Android toolchain.
 
-**Status: blocked, not abandoned.** Everything needed to write this
-specification has been measured rather than assumed — see
-[[SPEC-003-android-apk-distribution#Experiment findings]] — and one
-infrastructure change stands between the findings and a working pipeline.
+**Status: implemented and verified.** The runner's container limit was raised
+from 3 GiB to 8 GiB, and the pipeline produced and published the first Android
+build of this application — 20m02s, retrievable at
+`https://files.anuna.io/selfsame/selfsame-UNSIGNED-DEV.apk`.
 
-**Metaphor:** *a bakery with an oven too small for the tray.* Every ingredient
-is on the bench, the recipe is written, and the tray does not fit. Nothing is
-wrong with the recipe.
+**Metaphor:** *a bakery whose oven was too small for the tray.* Every
+ingredient was on the bench and the recipe was written; only the oven was
+wrong. Enlarging it changed nothing else.
 
 **Structure:**
 
@@ -34,16 +35,17 @@ wrong with the recipe.
   │   JDK 17 + SDK + NDK        ← ~20 min cold│
   │   cargo tauri android init --ci    ← 8 s  │
   │   cargo tauri android build --apk         │
-  │     --debug -t aarch64      ← ✗ OOM TODAY │
+  │     --debug -t aarch64      ← needs 8 GiB │
   │   ▸ merged-manifest permission allowlist  │
   └────────────────────┬──────────────────────┘
                        │ selfsame-UNSIGNED-DEV-<sha>.apk
                        ▼
-        ┌──────────────────────────────┐
-        │ anuna-files (Cloudflare R2)  │
-        │   selfsame/<sha>.apk         │
-        │   selfsame/latest/…apk       │
-        └──────────────────────────────┘
+        ┌──────────────────────────────────────┐
+        │ anuna-files (Cloudflare R2)          │
+        │   selfsame/selfsame-UNSIGNED-DEV.apk │ ← flat = latest
+        │   selfsame/<sha>/…-<sha>.apk         │ ← immutable
+        └──────────────────────────────────────┘
+     flat-is-latest follows hark's release pipeline, not a new convention
 ```
 
 **Decisions:**
@@ -55,9 +57,8 @@ manifest ·
 not committed
 
 **Open:**
-- **Blocking:** the runner caps job containers at 3 GiB
-  ([[SPEC-003-android-apk-distribution#OBS-201]]). Owner: whoever administers
-  the Forgejo runner.
+- **`OBS-203`: the APK is 196 MB** — roughly ten times what an arm64 Tauri app
+  should be. Owner: HOC.
 - `android.permission.DUMP` is in the shipped manifest and nobody asked for it
   ([[SPEC-003-android-apk-distribution#OBS-202]]). Owner: HOC.
 
@@ -85,7 +86,7 @@ ones already tabulated in [[SPEC-002-visual-key-fingerprint]].
 
 ## Experiment findings
 
-Four runs of a throwaway `android-spike` workflow, per [[PROTO-001]]'s
+Five runs of a throwaway `android-spike` workflow, per [[PROTO-001]]'s
 experiment-vs-specify rule: novelty and data-certainty were both High —
 Selfsame had never been built for Android, and Tauri publishes **no Android CI
 recipe** (its example pipeline is desktop-only and `tauri-action` does not build
@@ -101,10 +102,17 @@ its first error into one.
 | 1 | Does an Android toolchain install on this runner? | **Yes.** No `sudo`, `apt-get` or disk problems. ~20 min cold, essentially all SDK + NDK download. |
 | 2 | Does `tauri android init --ci` work headless? | **Yes — 8 seconds.** The `--ci` flag reads the `CI` env var. Requires **both** `ANDROID_HOME` and `NDK_HOME`; fails cleanly and writes nothing without them. |
 | 3 | What does the app actually ask the OS for? | See [[SPEC-003-android-apk-distribution#OBS-202]]. |
-| 4 | Does an APK come out? | **No.** Blocked by [[SPEC-003-android-apk-distribution#OBS-201]] — not by configuration. |
-| 5 | Cold run cost? | ~25–30 min per run, dominated by the NDK. |
+| 4 | Does an APK come out? | **Not at 3 GiB** — see [[SPEC-003-android-apk-distribution#OBS-201]], since resolved. At 8 GiB, yes. |
+| 5 | Cold run cost? | ~20 min, dominated by the NDK download. Cached thereafter. |
 
-### OBS-201: The runner caps job containers at 3 GiB
+### OBS-201: The runner capped job containers at 3 GiB — RESOLVED
+
+**Resolved 2026-07-30** by raising the limit to 8 GiB. The next run built and
+published successfully in 20m02s with Gradle at a 2 GB heap and
+`CARGO_BUILD_JOBS=4`. The record below is kept because the measurement is what
+justified the change, and because it documents an alternative that was tested
+and rejected.
+
 
 ```
 mem:        15Gi total, 14Gi available
@@ -122,8 +130,9 @@ The cause is structural, not incidental: a Tauri Android build runs
 this workspace. Bounding Gradle to a 2 GB heap, 512 MB metaspace, no daemon and
 no parallelism (run 3) did not help, because the sum still exceeds 3 GiB.
 
-**Resolution:** raise the runner's container memory limit — in `act_runner`,
-`container.options: "--memory=8g"` or equivalent. Then one spike run confirms.
+**Resolution, applied:** the runner's container memory limit was raised to
+8 GiB (`container.options: "--memory=8g"` in `act_runner`). The next run built
+and published.
 
 Explicitly *not* the resolution: a prebuilt Android container image. An earlier
 draft of this recommendation said it was, and that was wrong — a different
@@ -336,19 +345,42 @@ as success.
 
 ---
 
-## Status and what unblocks this
+## OBS-203: The APK is 196 MB
 
-This specification is `draft` and **cannot proceed to implementation** until
-[[SPEC-003-android-apk-distribution#OBS-201]] is resolved. That is one
-configuration change on the runner host, which is outside this repository.
+`205,569,441` bytes. An arm64 Tauri application should be somewhere in the
+10-20 MB range, so something is included that should not be.
 
-Everything else is ready: the toolchain steps are known to work, the manifest
-contents are known, the signing and ABI decisions are made, and the upload
-contract is specified but for three secrets.
+`--debug` ([[SPEC-003-android-apk-distribution#ADR-201]]) keeps full symbols,
+and this workspace's debug output is ~4 GiB by the `.gitignore`'s own
+reckoning, which makes an unstripped native library the obvious suspect.
 
-The experiment workflow that produced these findings has been deleted, as an
-experiment should be. Its history is on the `spike/android-apk` branch and in
-pull request #4 should anyone want to re-run it.
+It does not prevent sideloading, and it is not worth handing anyone over mobile
+data. Likely fixes, in increasing order of change: strip the `.so` in the Gradle
+packaging step; or build the release profile and sign it with the debug keystore,
+which keeps ADR-201's "not shippable" property without the debug profile's bulk.
+
+Owner: HOC.
+
+---
+
+## Status
+
+`implemented`. The pipeline runs on every push to `main`
+(`.forgejo/workflows/android.yml`) and publishes to
+`anuna-files/selfsame/`.
+
+Verified end to end on 2026-07-30: build 20m02s, both the flat pointer and the
+per-commit copy return HTTP 200 with matching etags, and the permission
+allowlist matched the merged manifest exactly.
+
+**What is verified is that an APK builds and publishes. Not that the
+application works on a phone.** Nobody has installed it. The merged manifest
+shows `CAMERA` and `USE_BIOMETRIC` reach the app, which means the scanner and
+presence-check plugins are wired — not that they function on a device. Those are
+different claims and only the first has evidence.
+
+The experiment workflow that produced the findings above has been deleted, as
+an experiment should be. Its history is on pull requests #4 and #6.
 
 ---
 
