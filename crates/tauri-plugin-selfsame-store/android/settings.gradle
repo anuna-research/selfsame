@@ -1,0 +1,7 @@
+// `.tauri/tauri-api` is copied here by this crate's build script: on an Android
+// target, `tauri_plugin::Builder::android_path` copies the Tauri Android library
+// out of the `tauri` crate into `<this dir>/.tauri/tauri-api` and then tells
+// `tauri-build` where this project lives. Both paths are generated, which is why
+// `.tauri` is gitignored.
+include ':tauri-android'
+project(':tauri-android').projectDir = new File('./.tauri/tauri-api')

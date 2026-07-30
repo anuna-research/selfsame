@@ -25,11 +25,25 @@ thiserror = { workspace = true }
 
 ed25519-dalek = { workspace = true, features = ["std"] }
 argon2 = "0.5"
-keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
 rand = "0.8"
 zeroize = { version = "1", features = ["alloc"] }
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
 tokio = { workspace = true }
+
+# ── storage, per platform (SPEC-004) ────────────────────────────────────────
+#
+# `keyring` is **not** an Android dependency, and that is the fix for BUG-201
+# rather than a tidy-up. Its store selection is `#[cfg]`-driven and its catch-all
+# arm is an in-memory mock; Android matched no real arm, so the crate compiled,
+# CI stayed green, and the published APK stored the root key nowhere. Excluding
+# it here means the mock store cannot be linked into the APK at all — the
+# `compile_error!` in `custody.rs` is the guard, and this is the belt.
+[target.'cfg(not(target_os = "android"))'.dependencies]
+keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
+
+# Android's box: a Keystore-wrapped app-private blob (CON-301, ADR-303).
+[target.'cfg(target_os = "android")'.dependencies]
+tauri-plugin-selfsame-store = { path = "../crates/tauri-plugin-selfsame-store" }
 
 # ── mobile ──────────────────────────────────────────────────────────────────
 #

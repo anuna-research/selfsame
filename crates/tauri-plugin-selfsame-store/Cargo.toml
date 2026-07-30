@@ -1,0 +1,37 @@
+[package]
+name = "tauri-plugin-selfsame-store"
+description = "Keystore-wrapped storage for the Selfsame root record on Android — SPEC-004 CON-301."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# REQUIRED by `tauri_plugin::Builder::try_build`, and load-bearing beyond that:
+# cargo turns this into `DEP_TAURI_PLUGIN_SELFSAME_STORE_ANDROID_LIBRARY_PATH`,
+# and `tauri-build` turns *that* back into the Gradle project name by lowercasing
+# and mapping `_` to `-`. So this value is what the generated
+# `gen/android/tauri.settings.gradle` will `include`, and it must round-trip to
+# itself — which it does only because the crate name contains no underscores.
+links = "tauri-plugin-selfsame-store"
+
+[package.metadata.platforms.support]
+android = { level = "full", notes = "" }
+ios = { level = "none", notes = "iOS has a real keychain; `keyring` handles it." }
+macos = { level = "none", notes = "" }
+windows = { level = "none", notes = "" }
+linux = { level = "none", notes = "" }
+
+[build-dependencies]
+tauri-plugin = { version = "2", features = ["build"] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+# `tests/wire_contract.rs` runs on the host and needs to parse the JSON the
+# Kotlin side sends, which is the only part of CON-301 verifiable without a
+# device.
+serde_json = { workspace = true }

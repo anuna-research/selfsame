@@ -4,6 +4,10 @@ members = [
     "crates/selfsame-core",
     "crates/selfsame-rendezvous",
     "crates/selfsame-cli",
+    # SPEC-004 ADR-303. Its contents compile to nothing off Android; it is a
+    # workspace member anyway so `cargo check` on any host still runs its build
+    # script and keeps its manifest honest.
+    "crates/tauri-plugin-selfsame-store",
     "src-tauri",
 ]
 

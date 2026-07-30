@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Deliberately empty. This module declares no permissions, no activities and no
+  services: it reads and writes a file in the app's own private storage and talks
+  to the Keystore, neither of which the OS gates behind a permission. SPEC-003
+  REQ-203 checks the *merged* manifest against an allowlist, so anything added
+  here would have to be justified there too.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" />

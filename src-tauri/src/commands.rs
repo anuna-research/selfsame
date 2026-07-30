@@ -562,6 +562,13 @@ pub fn service_endpoint() -> String {
 
 /// Wire the commands into a Tauri builder.
 pub fn init(app: &tauri::App) -> std::result::Result<(), Box<dyn std::error::Error>> {
+    // First, and before anything can read or write an identity: on Android the
+    // keychain *is* a plugin, and `Custody` reaches it through the app handle.
+    // Every `Custody` call before this one fails loudly rather than storing
+    // nothing (SPEC-004 CON-301).
+    #[cfg(target_os = "android")]
+    crate::custody::attach_secure_store(app.handle().clone());
+
     let dir = app.path().app_data_dir()?;
     app.manage(AppSession(Mutex::new(Session::load(dir))));
     Ok(())

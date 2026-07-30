@@ -53,6 +53,13 @@ pub fn run() {
         .plugin(tauri_plugin_barcode_scanner::init())
         .plugin(tauri_plugin_biometric::init());
 
+    // Android's root-record store (SPEC-004 CON-301). Registered before
+    // `setup` runs, because `commands::init` hands it the app handle from
+    // there and every `Custody` call needs it — an identity created before
+    // this plugin exists is an identity stored nowhere, which is BUG-201.
+    #[cfg(target_os = "android")]
+    let builder = builder.plugin(tauri_plugin_selfsame_store::init());
+
     builder
         .setup(|app| {
             commands::init(app)?;

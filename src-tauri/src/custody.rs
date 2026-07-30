@@ -19,6 +19,13 @@
 //! | macOS / iOS | Keychain (`keyring`), enclave-wrapped by the OS | biometric on mobile, device passcode on desktop |
 //! | Windows | Credential Manager | device passcode |
 //! | Linux | Secret Service | device passcode |
+//! | Android | Keystore-wrapped app-private blob (SPEC-004 CON-301) | passcode; platform-enforced presence deferred by ADR-305 |
+//!
+//! **This table is load-bearing, not decorative.** Android was not a row in it,
+//! and that omission is the whole of BUG-201: the table said what was true of
+//! four platforms while the code silently did something else on a fifth. A
+//! target that reaches this module must appear here *and* in [`platform`], or
+//! the `compile_error!` below refuses to build it.
 //!
 //! On desktop there is no biometric API Tauri exposes, so the presence check is
 //! the *device passcode* half of REQ-024, which the requirement admits in as
@@ -55,18 +62,21 @@ use zeroize::{Zeroize, Zeroizing};
 //     #[cfg(not(any(linux, freebsd, openbsd, macos, ios, windows)))]
 //     pub use mock as default;
 //
-// Android is in none of those arms, and the crate ships no `android.rs` at all.
+// Android was in none of those arms, and the crate ships no `android.rs` at all.
 // Worse, `MockCredential` holds `Mutex<RefCell<MockData>>` constructed fresh per
-// instance, and `entry()` below builds a new `Entry` on every call — so a write
-// and the read that follows it never touch the same map. On Android this module
-// stored the root key nowhere, `Custody::create` was followed three lines later
-// by a `root_public_key()` that returned `NoIdentity`, and an APK shipped.
+// instance, and the old `entry()` built a new `Entry` on every call — so a write
+// and the read that followed it never touched the same map. On Android this
+// module stored the root key nowhere, `Custody::create` was followed three lines
+// later by a `root_public_key()` that returned `NoIdentity`, and an APK shipped.
 //
-// The dependency degraded silently and the build stayed green. This turns that
-// into the compile failure it should always have been: a custody module that
-// cannot persist a key must not compile, let alone publish.
+// Android now has a real store: [`platform::android`], the Keystore-backed
+// plugin of SPEC-004 CON-301. `keyring` is no longer even a dependency there
+// (see `Cargo.toml`), so the mock store cannot be linked into the APK.
 //
-// Remove this once Keystore-backed storage lands for Android.
+// The guard stays, for the *next* target. The dependency degrades silently and
+// the build stayed green all the way to a user's phone; a target with no arm in
+// `platform` below must fail to compile rather than fall back to a map that
+// forgets. A custody module that cannot persist a key must not produce a binary.
 #[cfg(not(any(
     target_os = "macos",
     target_os = "ios",
@@ -74,18 +84,24 @@ use zeroize::{Zeroize, Zeroizing};
     target_os = "linux",
     target_os = "freebsd",
     target_os = "openbsd",
+    target_os = "android",
 )))]
 compile_error!(
     "no keychain backend exists on this target: `keyring` would silently fall \
      back to its in-memory mock store and the root key would not be persisted \
-     at all. See BUG-201 in specs/SPEC-004-android-secure-storage.md. Android \
-     needs the Keystore-backed store; do not paper over this with a plain file."
+     at all. See BUG-201 in specs/SPEC-004-android-secure-storage.md. Give this \
+     target a real arm in `custody::platform`; do not paper over this with a \
+     plain file."
 );
 
-/// Keychain service name.
+/// Keychain service name. The Android arm names its box in the plugin's Kotlin
+/// instead — a Keystore alias and a file — so these two are the keychain arm's
+/// alone.
+#[cfg(not(target_os = "android"))]
 const SERVICE: &str = "io.anuna.selfsame";
 
 /// The keychain entry holding the sealed root record.
+#[cfg(not(target_os = "android"))]
 const ENTRY: &str = "root-v1";
 
 /// Argon2id parameters. Deliberately above the RFC 9106 second-recommended
@@ -119,6 +135,133 @@ pub enum CustodyError {
     Corrupt,
 }
 
+/// Give the Android secure store the app handle it needs.
+///
+/// Called from `commands::init` during Tauri's `setup`, which runs after every
+/// plugin has registered. Calling any `Custody` function before this would fail
+/// with `Keychain("the secure store was not initialised")` rather than silently
+/// storing nothing — the failure mode BUG-201 was.
+#[cfg(target_os = "android")]
+pub fn attach_secure_store(app: tauri::AppHandle<tauri::Wry>) {
+    platform::attach(app);
+}
+
+/// Where the sealed record actually lives — one arm per platform.
+///
+/// The boundary is deliberately drawn at an **opaque string**: the JSON of
+/// [`SealedRoot`] crosses it and nothing else, so the Argon2id seal, the
+/// `Corrupt` handling, the `backup_confirmed` gate and every other decision
+/// above are identical on every platform and only the box differs. That is what
+/// keeps a second storage backend from becoming a second set of security
+/// properties (SPEC-004 ADR-303).
+mod platform {
+    #[cfg(not(target_os = "android"))]
+    pub use keychain::{delete, read, write};
+
+    #[cfg(target_os = "android")]
+    pub use android::{attach, delete, read, write};
+
+    /// Every platform with a real OS keychain, reached through `keyring`.
+    #[cfg(not(target_os = "android"))]
+    mod keychain {
+        use crate::custody::{CustodyError, ENTRY, SERVICE};
+
+        fn entry() -> Result<keyring::Entry, CustodyError> {
+            keyring::Entry::new(SERVICE, ENTRY)
+                .map_err(|e| CustodyError::Keychain(e.to_string()))
+        }
+
+        pub fn read() -> Result<Option<String>, CustodyError> {
+            match entry()?.get_password() {
+                Ok(json) => Ok(Some(json)),
+                Err(keyring::Error::NoEntry) => Ok(None),
+                Err(e) => Err(CustodyError::Keychain(e.to_string())),
+            }
+        }
+
+        pub fn write(json: &str) -> Result<(), CustodyError> {
+            entry()?
+                .set_password(json)
+                .map_err(|e| CustodyError::Keychain(e.to_string()))
+        }
+
+        pub fn delete() -> Result<(), CustodyError> {
+            match entry()?.delete_credential() {
+                Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+                Err(e) => Err(CustodyError::Keychain(e.to_string())),
+            }
+        }
+    }
+
+    /// Android: the Keystore-backed plugin of SPEC-004 CON-301.
+    #[cfg(target_os = "android")]
+    mod android {
+        use std::sync::OnceLock;
+
+        use tauri::{AppHandle, Wry};
+        use tauri_plugin_selfsame_store::{SecureStore, SecureStoreExt, StoreError};
+
+        use crate::custody::CustodyError;
+
+        /// The app handle, stashed once at startup.
+        ///
+        /// `Custody`'s functions take no receiver, and that is deliberate: the
+        /// module holds nothing between calls, which is what keeps a derived
+        /// signing key out of a field where a later bug could reach it. The
+        /// plugin, though, is reached *through* the app. Threading an
+        /// `AppHandle` down to it would change every signature in this module
+        /// and every call site in `commands.rs`, on all five platforms, to serve
+        /// one of them.
+        ///
+        /// There is exactly one app per process, so one slot is the whole truth.
+        /// It holds an `AppHandle` and not a `PluginHandle`, so this file names
+        /// no plugin internals.
+        static APP: OnceLock<AppHandle<Wry>> = OnceLock::new();
+
+        pub fn attach(app: AppHandle<Wry>) {
+            // A second call is the same app; ignoring it is correct.
+            let _ = APP.set(app);
+        }
+
+        fn store() -> Result<&'static SecureStore<Wry>, CustodyError> {
+            APP.get().map(|app| app.secure_store()).ok_or_else(|| {
+                CustodyError::Keychain("the secure store was not initialised".into())
+            })
+        }
+
+        /// CON-301's error model, at the one place it can be got wrong.
+        ///
+        /// `Corrupt` MUST NOT become `NoIdentity`. A user whose record is
+        /// damaged and is told they have no identity will create a second one
+        /// over the top of the first — and the first is the one their contacts
+        /// have already accepted, signed by a root key that is now gone.
+        fn lift(e: StoreError) -> CustodyError {
+            match e {
+                StoreError::Corrupt(_) => CustodyError::Corrupt,
+                other => CustodyError::Keychain(other.to_string()),
+            }
+        }
+
+        /// # Threading
+        ///
+        /// These three block on the Android main thread — `run_mobile_plugin`
+        /// posts the call there and waits — so they MUST NOT be called from it.
+        /// Every caller in this crate is either a Tauri command future or a
+        /// `spawn_blocking` closure, and neither runs on the main thread.
+        pub fn read() -> Result<Option<String>, CustodyError> {
+            store()?.load().map_err(lift)
+        }
+
+        pub fn write(json: &str) -> Result<(), CustodyError> {
+            store()?.store(json).map_err(lift)
+        }
+
+        pub fn delete() -> Result<(), CustodyError> {
+            store()?.delete().map_err(lift)
+        }
+    }
+}
+
 /// What the keychain holds. **No plaintext key material.**
 #[derive(Serialize, Deserialize)]
 struct SealedRoot {
@@ -150,23 +293,18 @@ struct SealedRoot {
 pub struct Custody;
 
 impl Custody {
-    fn entry() -> Result<keyring::Entry, CustodyError> {
-        keyring::Entry::new(SERVICE, ENTRY).map_err(|e| CustodyError::Keychain(e.to_string()))
-    }
-
+    /// Absent is `Ok(None)`; present-but-unreadable is `Corrupt`. The two are
+    /// never conflated, on any platform — see [`platform`] and CON-301.
     fn read() -> Result<Option<SealedRoot>, CustodyError> {
-        match Self::entry()?.get_password() {
-            Ok(json) => {
-                serde_json::from_str(&json).map(Some).map_err(|_| CustodyError::Corrupt)
-            }
-            Err(keyring::Error::NoEntry) => Ok(None),
-            Err(e) => Err(CustodyError::Keychain(e.to_string())),
+        match platform::read()? {
+            None => Ok(None),
+            Some(json) => parse_record(&json).map(Some),
         }
     }
 
     fn write(record: &SealedRoot) -> Result<(), CustodyError> {
         let json = serde_json::to_string(record).map_err(|_| CustodyError::Corrupt)?;
-        Self::entry()?.set_password(&json).map_err(|e| CustodyError::Keychain(e.to_string()))
+        platform::write(&json)
     }
 
     /// Is there an identity on this device?
@@ -301,11 +439,19 @@ impl Custody {
     /// path during first run; it does **not** revoke anything, because the
     /// root key is the only thing that can revoke and this destroys it.
     pub fn forget() -> Result<(), CustodyError> {
-        match Self::entry()?.delete_credential() {
-            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-            Err(e) => Err(CustodyError::Keychain(e.to_string())),
-        }
+        platform::delete()
     }
+}
+
+/// Recognise a stored record.
+///
+/// A separate function, and not three lines inside [`Custody::read`], because
+/// this is where "a damaged store is not an empty one" is decided and it is the
+/// one part of that decision testable on every platform. The `Corrupt` arm is
+/// what stops a user with a damaged record being told they have no identity and
+/// invited to create a second one over the top of the first.
+fn parse_record(json: &str) -> Result<SealedRoot, CustodyError> {
+    serde_json::from_str(json).map_err(|_| CustodyError::Corrupt)
 }
 
 fn check_passcode(passcode: &str) -> Result<(), CustodyError> {
@@ -369,6 +515,49 @@ mod tests {
     fn short_passcodes_are_refused() {
         assert!(matches!(check_passcode("12345"), Err(CustodyError::PasscodeTooShort)));
         assert!(check_passcode("123456").is_ok());
+    }
+
+    /// SPEC-004 TEST-304, at the layer that is platform-independent.
+    ///
+    /// Whatever the box, a record that comes back unreadable must be `Corrupt`
+    /// and never `NoIdentity`: the caller distinguishes "nothing stored" from
+    /// "something stored that will not parse" by `Ok(None)` versus this error,
+    /// and only the first should ever offer to create an identity.
+    #[test]
+    fn a_record_that_will_not_parse_is_corrupt_and_not_an_absence() {
+        for damaged in [
+            "",
+            "not json at all",
+            "{}",
+            r#"{"version":1}"#,                       // present but incomplete
+            r#"{"version":1,"salt":[1,2,3]}"#,        // salt of the wrong length
+            r#"{"version":1,"salt":"not-an-array"}"#, // right key, wrong type
+        ] {
+            assert!(
+                matches!(parse_record(damaged), Err(CustodyError::Corrupt)),
+                "{damaged:?} must be Corrupt, not a parse into a usable record"
+            );
+        }
+    }
+
+    #[test]
+    fn a_well_formed_record_round_trips() {
+        let record = SealedRoot {
+            version: 1,
+            salt: [9u8; 16],
+            nonce: [8u8; 12],
+            sealed_seed: vec![1, 2, 3, 4],
+            root_public_key: [7u8; 32],
+            backup_confirmed: true,
+            persona: 0,
+        };
+        let json = serde_json::to_string(&record).unwrap();
+        let parsed = parse_record(&json).expect("what we wrote must read back");
+        assert_eq!(parsed.salt, record.salt);
+        assert_eq!(parsed.nonce, record.nonce);
+        assert_eq!(parsed.sealed_seed, record.sealed_seed);
+        assert_eq!(parsed.root_public_key, record.root_public_key);
+        assert!(parsed.backup_confirmed);
     }
 
     // NFR-002: the sealed record carries no plaintext key material.
