@@ -45,30 +45,38 @@ jobs:
       ANDROID_BUILD_TOOLS: 34.0.0
       ANDROID_NDK_VERSION: 27.2.12479018
       CMDLINE_TOOLS_ZIP: commandlinetools-linux-11076708_latest.zip
-      R2_BUCKET: anuna-files
-      R2_PREFIX: selfsame
+      # BUCKET and PROJECT are exported in the upload step rather than declared
+      # here, matching hark's release workflow — one place they are set, and it
+      # is the place they are used.
 
     steps:
       # Fail in seconds, not after a 25-minute build, and say exactly which
       # name is missing. Secret *values* are never echoed — only presence.
+      # Secret names match hark's release pipeline, which already publishes to
+      # this bucket. Same credentials, same convention — a second set of names
+      # for the same R2 token would be a trap for whoever rotates it.
       - name: Preflight — are the R2 secrets present?
         env:
-          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
-          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          CF_R2_ACCESS_KEY_ID: ${{ secrets.CF_R2_ACCESS_KEY_ID }}
+          CF_R2_SECRET_ACCESS_KEY: ${{ secrets.CF_R2_SECRET_ACCESS_KEY }}
         run: |
           set -uo pipefail
           missing=""
-          [ -n "${R2_ACCOUNT_ID:-}" ]        || missing="$missing R2_ACCOUNT_ID"
-          [ -n "${R2_ACCESS_KEY_ID:-}" ]     || missing="$missing R2_ACCESS_KEY_ID"
-          [ -n "${R2_SECRET_ACCESS_KEY:-}" ] || missing="$missing R2_SECRET_ACCESS_KEY"
+          [ -n "${CF_ACCOUNT_ID:-}" ]           || missing="$missing CF_ACCOUNT_ID"
+          [ -n "${CF_R2_ACCESS_KEY_ID:-}" ]     || missing="$missing CF_R2_ACCESS_KEY_ID"
+          [ -n "${CF_R2_SECRET_ACCESS_KEY:-}" ] || missing="$missing CF_R2_SECRET_ACCESS_KEY"
           if [ -n "$missing" ]; then
             echo "Missing repository secrets:$missing" >&2
             echo "" >&2
-            echo "Set them under Settings → Actions → Secrets. If your R2 keys" >&2
-            echo "already exist under different names, change the three" >&2
-            echo "\${{ secrets.* }} references in this file to match rather than" >&2
-            echo "duplicating the credentials." >&2
+            echo "These are the same three hark's release workflow uses to publish" >&2
+            echo "to this bucket. Add them under Settings -> Actions -> Secrets," >&2
+            echo "or at the organisation level so both repositories inherit one" >&2
+            echo "copy of the credential." >&2
+            # Reported into a commit status too: this instance serves no job
+            # logs, so a bare "Failing after 4s" is all anyone would otherwise
+            # see — which is how the first attempt at this wasted a round-trip.
+            echo "PREFLIGHT missing:$missing" > /tmp/preflight.err
             exit 1
           fi
           echo "all three R2 secrets present"
@@ -246,31 +254,50 @@ jobs:
           echo "name=$name" >> "$GITHUB_OUTPUT"
           ls -la "/tmp/$name"
 
-      - name: Publish to R2
+      # Follows hark's release pipeline, which already publishes to this bucket:
+      # the **flat** prefix is "latest" — not a `latest/` subdirectory, which is
+      # what I had first written — plus an immutable per-version copy beneath it.
+      # hark keys that by tag; this job has no tags, so it keys by commit.
+      - name: Upload to Cloudflare R2
         env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION: auto
-          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.CF_R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.CF_R2_SECRET_ACCESS_KEY }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
           APK: ${{ steps.apk.outputs.name }}
         run: |
           set -euo pipefail
-          command -v aws >/dev/null 2>&1 || {
+          if ! command -v aws >/dev/null 2>&1; then
             SUDO=""; command -v sudo >/dev/null 2>&1 && SUDO="sudo"
-            $SUDO apt-get install -y --no-install-recommends awscli
-          }
-          endpoint="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+            $SUDO apt-get update && $SUDO apt-get install -y awscli
+          fi
 
-          # Immutable, per commit — REQ-202.
-          aws s3 cp "/tmp/${APK}" \
-            "s3://${R2_BUCKET}/${R2_PREFIX}/${APK}" \
-            --endpoint-url "$endpoint" --no-progress
-          # The moving pointer, matching the files.anuna.io/<tool>/latest/ shape.
-          aws s3 cp "/tmp/${APK}" \
-            "s3://${R2_BUCKET}/${R2_PREFIX}/latest/selfsame-UNSIGNED-DEV.apk" \
-            --endpoint-url "$endpoint" --no-progress
+          export AWS_DEFAULT_REGION=auto
+          export R2_ENDPOINT="https://${CF_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          export BUCKET="anuna-files"
+          export PROJECT="selfsame"
+          sha=$(git rev-parse --short HEAD)
 
-          echo "published ${APK}"
+          # Flat prefix = latest. A stable filename so a download link does not
+          # have to change every commit, which is the whole point of hark's flat
+          # convention.
+          aws s3 cp "/tmp/${APK}" \
+            "s3://${BUCKET}/${PROJECT}/selfsame-UNSIGNED-DEV.apk" \
+            --endpoint-url "$R2_ENDPOINT"
+          # Immutable per-commit archive — REQ-202.
+          aws s3 cp "/tmp/${APK}" \
+            "s3://${BUCKET}/${PROJECT}/${sha}/${APK}" \
+            --endpoint-url "$R2_ENDPOINT"
+          echo "Uploaded: ${APK}"
+
+          # Informational and non-fatal: an "Object Read & Write" R2 token can
+          # PutObject but may lack ListBucket. hark's pipeline learned this.
+          aws s3 ls "s3://${BUCKET}/${PROJECT}/" --endpoint-url "$R2_ENDPOINT" \
+            || echo "(list not permitted by this token; the uploads above succeeded)"
+
+          echo ""
+          echo "Available at:"
+          echo "  https://files.anuna.io/${PROJECT}/selfsame-UNSIGNED-DEV.apk"
+          echo "  https://files.anuna.io/${PROJECT}/${sha}/${APK}"
 
       # This Forgejo serves no job logs, so a failure is otherwise visible only
       # as "Failing after Nm". Same workaround ci.yml uses.
@@ -279,7 +306,10 @@ jobs:
         continue-on-error: true
         run: |
           set -uo pipefail
-          line=$(grep -A 4 '^\* What went wrong:' /tmp/build.log 2>/dev/null | tail -n +2 \
+          # Preflight first: a missing secret is the likeliest failure and the
+          # one a bare "Failing after 4s" explains least.
+          line=$(cat /tmp/preflight.err 2>/dev/null \
+                 || grep -A 4 '^\* What went wrong:' /tmp/build.log 2>/dev/null | tail -n +2 \
                  || tail -n 3 /tmp/build.log 2>/dev/null \
                  || echo "failed before the build step")
           line=$(printf '%s' "$line" | tr '\n' ' ' | cut -c1-240)
