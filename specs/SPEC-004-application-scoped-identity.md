@@ -1,9 +1,9 @@
 ---
-id: SPEC-003
+id: SPEC-004
 title: Application- and Account-Scoped Identity — deterministic home keys, acct aliases, portable device grants, and provider discovery
 status: draft
 tier: 1
-version: 0.4.0
+version: 0.4.1
 audience: agent, human, application developer, infrastructure provider
 author: Anuna Research (drafted with Codex, 2026-07-30)
 last-updated: 2026-07-30
@@ -13,7 +13,7 @@ review-gate: not-approved — Tier-1; all ADRs are PROPOSED; cross-model adversa
 depends-on: did:crdt Method Specification; PROTO-002 Selfsame Rendezvous Protocol v1; W3C VC Data Model 2.0; W3C VC JOSE/COSE; W3C DID Core 1.0; optional W3C Bitstring Status List 1.0 projection; RFC 7565; RFC 7033; RFC 3986; RFC 4648; RFC 5234; RFC 5869; RFC 7515; RFC 8032; RFC 8785
 ---
 
-# SPEC-003 — Application- and Account-Scoped Identity
+# SPEC-004 — Application- and Account-Scoped Identity
 
 ## Orientation
 
@@ -72,63 +72,63 @@ own either building.
 ```
 
 **Decisions.**
-[[SPEC-003-application-scoped-identity#ADR-201]] namespace the deterministic
+[[SPEC-004-application-scoped-identity#ADR-201]] namespace the deterministic
 hierarchy by immutable application ID ·
-[[SPEC-003-application-scoped-identity#ADR-202]] make the
+[[SPEC-004-application-scoped-identity#ADR-202]] make the
 application-account home DID, not a global DID, the VC issuer ·
-[[SPEC-003-application-scoped-identity#ADR-203]] use RFC 7565 `acct:` URIs in
+[[SPEC-004-application-scoped-identity#ADR-203]] use RFC 7565 `acct:` URIs in
 `alsoKnownAs` ·
-[[SPEC-003-application-scoped-identity#ADR-204]] secure the grant as
+[[SPEC-004-application-scoped-identity#ADR-204]] secure the grant as
 `application/vc+jwt` with EdDSA ·
-[[SPEC-003-application-scoped-identity#ADR-205]] bind the device with `cnf` and
+[[SPEC-004-application-scoped-identity#ADR-205]] bind the device with `cnf` and
 a fresh challenge ·
-[[SPEC-003-application-scoped-identity#ADR-206]] let the application profile
+[[SPEC-004-application-scoped-identity#ADR-206]] let the application profile
 select providers ·
-[[SPEC-003-application-scoped-identity#ADR-207]] carry the initiator's provider
+[[SPEC-004-application-scoped-identity#ADR-207]] carry the initiator's provider
 choice through the link ceremony ·
-[[SPEC-003-application-scoped-identity#ADR-208]] make the signed, grow-only
+[[SPEC-004-application-scoped-identity#ADR-208]] make the signed, grow-only
 `did:crdt` credential-revocation set authoritative and permit standards-facing
 status projections ·
-[[SPEC-003-application-scoped-identity#ADR-209]] pin the JSON-LD context and
+[[SPEC-004-application-scoped-identity#ADR-209]] pin the JSON-LD context and
 forbid verification-time context fetching ·
-[[SPEC-003-application-scoped-identity#ADR-210]] derive one home DID per
+[[SPEC-004-application-scoped-identity#ADR-210]] derive one home DID per
 application account ·
-[[SPEC-003-application-scoped-identity#ADR-211]] keep a user-chosen public
+[[SPEC-004-application-scoped-identity#ADR-211]] keep a user-chosen public
 username separate from the stable opaque account alias ·
-[[SPEC-003-application-scoped-identity#ADR-212]] make a versioned,
+[[SPEC-004-application-scoped-identity#ADR-212]] make a versioned,
 operator-neutral mailbox protocol the rendezvous compatibility boundary.
 
 **Load-bearing.**
-[[SPEC-003-application-scoped-identity#REQ-201]] one secret produces a different
+[[SPEC-004-application-scoped-identity#REQ-201]] one secret produces a different
 home key per application account ·
-[[SPEC-003-application-scoped-identity#REQ-205]] the device grant is a
+[[SPEC-004-application-scoped-identity#REQ-205]] the device grant is a
 conforming W3C VC ·
-[[SPEC-003-application-scoped-identity#REQ-207]] the VC is interpreted only
+[[SPEC-004-application-scoped-identity#REQ-207]] the VC is interpreted only
 through the Selfsame authorization profile ·
-[[SPEC-003-application-scoped-identity#REQ-209]] provider choice requires no
+[[SPEC-004-application-scoped-identity#REQ-209]] provider choice requires no
 user configuration ·
-[[SPEC-003-application-scoped-identity#REQ-216]] accounts in one application
+[[SPEC-004-application-scoped-identity#REQ-216]] accounts in one application
 remain independent ·
-[[SPEC-003-application-scoped-identity#REQ-217]] account scope is stable,
+[[SPEC-004-application-scoped-identity#REQ-217]] account scope is stable,
 opaque, and recoverable without user configuration ·
-[[SPEC-003-application-scoped-identity#REQ-218]] a person may set a
+[[SPEC-004-application-scoped-identity#REQ-218]] a person may set a
 human-readable account alias without changing identity or authorization ·
-[[SPEC-003-application-scoped-identity#REQ-219]] protocol conformance, not
+[[SPEC-004-application-scoped-identity#REQ-219]] protocol conformance, not
 operator identity, determines rendezvous eligibility ·
-[[SPEC-003-application-scoped-identity#NFR-201]] application identities are
+[[SPEC-004-application-scoped-identity#NFR-201]] application identities are
 pairwise unlinkable from their public data ·
-[[SPEC-003-application-scoped-identity#NFR-205]] all authorization checks fail
+[[SPEC-004-application-scoped-identity#NFR-205]] all authorization checks fail
 closed.
 
 **Blocking before implementation.**
-[[SPEC-003-application-scoped-identity#OQ-201]] authorization-state freshness ·
-[[SPEC-003-application-scoped-identity#OQ-202]] durable vocabulary ownership ·
-[[SPEC-003-application-scoped-identity#OQ-204]] application-ID migration ·
-[[SPEC-003-application-scoped-identity#OQ-206]] legacy identity migration ·
-[[SPEC-003-application-scoped-identity#OQ-207]] requesting-application
+[[SPEC-004-application-scoped-identity#OQ-201]] authorization-state freshness ·
+[[SPEC-004-application-scoped-identity#OQ-202]] durable vocabulary ownership ·
+[[SPEC-004-application-scoped-identity#OQ-204]] application-ID migration ·
+[[SPEC-004-application-scoped-identity#OQ-206]] legacy identity migration ·
+[[SPEC-004-application-scoped-identity#OQ-207]] requesting-application
 authentication ·
 the Tier-1 gate in
-[[SPEC-003-application-scoped-identity#Tier-1 Gate]].
+[[SPEC-004-application-scoped-identity#Tier-1 Gate]].
 
 **Controls digest.**
 
@@ -162,7 +162,7 @@ This is a **Tier-1 draft** because it defines authentication, authorization,
 key derivation, identity correlation boundaries, and revocation. Every
 `ADR-2##` is PROPOSED. This document is suitable for requirements review and
 prototype planning only. It does not authorize implementation or shipment
-until the gate in [[SPEC-003-application-scoped-identity#Tier-1 Gate]] closes.
+until the gate in [[SPEC-004-application-scoped-identity#Tier-1 Gate]] closes.
 
 This specification is the second-application trigger anticipated by
 [[SPEC-001-device-key-provisioning]] ADR-011 and ADR-012. It proposes the
@@ -360,7 +360,7 @@ canonical `applicationId`, a restored Selfsame installation first derives the
 same private application node. To recover a particular account home, it also
 requires that account's exact `accountScopeId`, restored automatically from the
 authenticated application account record or protected Selfsame backup as
-specified by [[SPEC-003-application-scoped-identity#REQ-217]]. Those inputs
+specified by [[SPEC-004-application-scoped-identity#REQ-217]]. Those inputs
 reproduce the same account node, home seed, DID, and `acct:` URI. Provider
 endpoint changes do not change identity.
 
@@ -371,7 +371,7 @@ endpoint changes do not change identity.
 The system SHALL derive an independent private application node FOR each
 canonical `applicationId`, then an independent account node and home signing
 key FOR each `(applicationId, accountScopeId)` pair, using
-[[SPEC-003-application-scoped-identity#CON-202]].
+[[SPEC-004-application-scoped-identity#CON-202]].
 
 Two different canonical application IDs SHALL yield different home signing
 seeds, public keys, and DIDs, even if their account-scope byte strings happen to
@@ -384,13 +384,13 @@ No application SHALL receive the recovery secret, another application's node,
 another account's node or home seed, or a derivation path that permits
 computing any sibling.
 
-Trace: [[SPEC-003-application-scoped-identity#TEST-201]],
-[[SPEC-003-application-scoped-identity#TEST-202]]
+Trace: [[SPEC-004-application-scoped-identity#TEST-201]],
+[[SPEC-004-application-scoped-identity#TEST-202]]
 
 ### REQ-202: The application ID is immutable and canonical
 
 Every adopting application SHALL declare exactly one canonical
-`applicationId` conforming to [[SPEC-003-application-scoped-identity#CON-201]].
+`applicationId` conforming to [[SPEC-004-application-scoped-identity#CON-201]].
 The ID SHALL identify the authorization and correlation boundary, not a
 particular build, endpoint, deployment region, or provider.
 
@@ -402,15 +402,15 @@ guess a different identifier.
 Changing `applicationId` creates a new application identity. Silent migration
 is prohibited.
 
-Trace: [[SPEC-003-application-scoped-identity#TEST-203]]
+Trace: [[SPEC-004-application-scoped-identity#TEST-203]]
 
 ### REQ-203: The home DID uses RFC 7565 `acct:` in `alsoKnownAs`
 
 The resolved application-account home DID Document SHALL contain exactly one
 stable Selfsame authorization alias in `alsoKnownAs`, constructed by
-[[SPEC-003-application-scoped-identity#CON-203]]. It MAY additionally contain
+[[SPEC-004-application-scoped-identity#CON-203]]. It MAY additionally contain
 exactly one human-readable alias governed by
-[[SPEC-003-application-scoped-identity#REQ-218]]:
+[[SPEC-004-application-scoped-identity#REQ-218]]:
 
 ```json
 {
@@ -433,8 +433,8 @@ edit that localpart, authority, or URI. The person MAY choose only the optional
 username localpart through the application workflow in REQ-218; the SDK and
 authority construct and publish the complete URI.
 
-Trace: [[SPEC-003-application-scoped-identity#TEST-204]],
-[[SPEC-003-application-scoped-identity#TEST-205]]
+Trace: [[SPEC-004-application-scoped-identity#TEST-204]],
+[[SPEC-004-application-scoped-identity#TEST-205]]
 
 ### REQ-204: Every `acct:` alias names a real, reciprocally bound account
 
@@ -452,15 +452,15 @@ localpart and SHALL NOT reveal an email address, display name, phone number, or
 cross-application account ID. The optional public username record is the sole
 exception and remains subject to REQ-218 and CON-212.
 
-Trace: [[SPEC-003-application-scoped-identity#TEST-205]],
-[[SPEC-003-application-scoped-identity#TEST-206]]
+Trace: [[SPEC-004-application-scoped-identity#TEST-205]],
+[[SPEC-004-application-scoped-identity#TEST-206]]
 
 ### REQ-205: A device grant is a conforming W3C Verifiable Credential
 
 Every portable Selfsame device grant SHALL be a credential conforming to the
 W3C Verifiable Credentials Data Model 2.0 and SHALL use the
 `SelfsameDeviceGrantCredential` profile in
-[[SPEC-003-application-scoped-identity#CON-205]].
+[[SPEC-004-application-scoped-identity#CON-205]].
 
 The mandatory secured representation SHALL be a compact JWS with media type
 `application/vc+jwt`, produced and verified according to the W3C
@@ -469,8 +469,8 @@ The mandatory secured representation SHALL be a compact JWS with media type
 The grant SHALL NOT be wrapped in a legacy JWT `vc` claim. The unsecured VC
 document itself SHALL be the JWS payload.
 
-Trace: [[SPEC-003-application-scoped-identity#TEST-207]],
-[[SPEC-003-application-scoped-identity#TEST-208]]
+Trace: [[SPEC-004-application-scoped-identity#TEST-207]],
+[[SPEC-004-application-scoped-identity#TEST-208]]
 
 ### REQ-206: The grant is cryptographically bound to one device
 
@@ -481,16 +481,16 @@ the device DID.
 Before accepting the grant for an authenticated session, the verifier SHALL
 require the device to sign a fresh, application-and-account-bound challenge
 according to
-[[SPEC-003-application-scoped-identity#CON-207]]. Possession of the VC without
+[[SPEC-004-application-scoped-identity#CON-207]]. Possession of the VC without
 the corresponding device private key SHALL confer no access.
 
-Trace: [[SPEC-003-application-scoped-identity#TEST-209]],
-[[SPEC-003-application-scoped-identity#TEST-210]]
+Trace: [[SPEC-004-application-scoped-identity#TEST-209]],
+[[SPEC-004-application-scoped-identity#TEST-210]]
 
 ### REQ-207: VC verification is necessary but not sufficient
 
 A verifier SHALL apply the complete acceptance predicate in
-[[SPEC-003-application-scoped-identity#CON-206]]. A valid JWS and a conforming
+[[SPEC-004-application-scoped-identity#CON-206]]. A valid JWS and a conforming
 VC alone SHALL NOT authorize the device.
 
 The authorization decision SHALL additionally bind:
@@ -510,7 +510,7 @@ Rationale: VC Data Model 2.0 explicitly does not define a complete RBAC or ABAC
 authorization system. This contract is the accompanying Selfsame authorization
 framework.
 
-Trace: [[SPEC-003-application-scoped-identity#TEST-211]]
+Trace: [[SPEC-004-application-scoped-identity#TEST-211]]
 
 ### REQ-208: Every grant is bounded and revocable
 
@@ -539,8 +539,8 @@ Selfsame verifier MAY use a set bit for early rejection, but an unset,
 unavailable, or stale projection SHALL never override the CRDT revocation set
 or replace the mandatory CRDT-state check.
 
-Trace: [[SPEC-003-application-scoped-identity#TEST-212]],
-[[SPEC-003-application-scoped-identity#TEST-213]]
+Trace: [[SPEC-004-application-scoped-identity#TEST-212]],
+[[SPEC-004-application-scoped-identity#TEST-213]]
 
 ### REQ-209: Provider selection requires no user configuration
 
@@ -549,7 +549,7 @@ two eligible rendezvous descriptors unless it documents a single-provider
 availability exception.
 
 The initiating client SHALL select a provider using
-[[SPEC-003-application-scoped-identity#CON-208]]. A descriptor becomes eligible
+[[SPEC-004-application-scoped-identity#CON-208]]. A descriptor becomes eligible
 only by passing the capability contract in
 [[PROTO-002-selfsame-rendezvous-v1#CON-301]]. The person SHALL NOT be asked to
 type, paste, scan, or choose an endpoint during the normal path.
@@ -558,9 +558,9 @@ The UI MAY show the selected operator and privacy policy and MAY expose an
 advanced administrator policy. Such visibility SHALL NOT turn an
 application-supplied interoperability value into a required user setting.
 
-Trace: [[SPEC-003-application-scoped-identity#TEST-214]],
-[[SPEC-003-application-scoped-identity#TEST-215]],
-[[SPEC-003-application-scoped-identity#TEST-226]]
+Trace: [[SPEC-004-application-scoped-identity#TEST-214]],
+[[SPEC-004-application-scoped-identity#TEST-215]],
+[[SPEC-004-application-scoped-identity#TEST-226]]
 
 ### REQ-210: There is no undeclared global fallback
 
@@ -575,8 +575,8 @@ operated by Selfsame, Anuna, or a prior application.
 A loopback development profile MAY be supplied by developer tooling, but it
 MUST be rejected by release builds.
 
-Trace: [[SPEC-003-application-scoped-identity#TEST-216]],
-[[SPEC-003-application-scoped-identity#TEST-226]]
+Trace: [[SPEC-004-application-scoped-identity#TEST-216]],
+[[SPEC-004-application-scoped-identity#TEST-226]]
 
 ### REQ-211: The VC remains opaque inside the link transport
 
@@ -589,13 +589,13 @@ properties, reserialize its JWS components, replace its signature, or call an
 outer signature "VC conformance." The same bytes SHALL be independently
 verifiable after extraction by a non-CBCL application.
 
-Trace: [[SPEC-003-application-scoped-identity#TEST-217]]
+Trace: [[SPEC-004-application-scoped-identity#TEST-217]]
 
 ### REQ-212: The provider choice follows the ceremony
 
 The initiating client SHALL place the selected provider ID and descriptor
 digest in the authenticated provider hint defined by
-[[SPEC-003-application-scoped-identity#CON-209]].
+[[SPEC-004-application-scoped-identity#CON-209]].
 
 The joining client SHALL follow that choice for the in-progress ceremony. It
 SHALL NOT independently select a different rendezvous. If the selected
@@ -604,8 +604,8 @@ create a fresh secret, slots, offer, ciphertext, and authenticated hint before
 either party moves, as required by
 [[PROTO-002-selfsame-rendezvous-v1#REQ-307]].
 
-Trace: [[SPEC-003-application-scoped-identity#TEST-218]],
-[[SPEC-003-application-scoped-identity#TEST-226]]
+Trace: [[SPEC-004-application-scoped-identity#TEST-218]],
+[[SPEC-004-application-scoped-identity#TEST-226]]
 
 ### REQ-213: Derivation does not depend on an infrastructure provider
 
@@ -618,9 +618,9 @@ health response.
 Changing providers therefore SHALL NOT rotate the home DID or `acct:`
 localpart. The application is responsible for preserving or republishing the
 account and state records when it changes operators. Restoring the account
-scope itself follows [[SPEC-003-application-scoped-identity#REQ-217]].
+scope itself follows [[SPEC-004-application-scoped-identity#REQ-217]].
 
-Trace: [[SPEC-003-application-scoped-identity#TEST-219]]
+Trace: [[SPEC-004-application-scoped-identity#TEST-219]]
 
 ### REQ-214: Any developer can adopt the profile
 
@@ -645,8 +645,8 @@ The reference implementation SHALL expose the black-box PROTO-002 conformance
 suite and the end-to-end profile suite so either can run without contacting
 Anuna infrastructure.
 
-Trace: [[SPEC-003-application-scoped-identity#TEST-220]],
-[[SPEC-003-application-scoped-identity#TEST-226]]
+Trace: [[SPEC-004-application-scoped-identity#TEST-220]],
+[[SPEC-004-application-scoped-identity#TEST-226]]
 
 ### REQ-215: Device keys are application-account-scoped
 
@@ -662,7 +662,7 @@ home signing seed.
 Rationale: pairwise home DIDs do not provide pairwise privacy if two
 credentials expose the same device DID.
 
-Trace: [[SPEC-003-application-scoped-identity#TEST-221]]
+Trace: [[SPEC-004-application-scoped-identity#TEST-221]]
 
 ### REQ-216: Multiple accounts in one application remain independent
 
@@ -682,14 +682,14 @@ closure. A grant, proof, device key, revocation entry, status projection, or
 home signature belonging to A1 SHALL confer no authority in A2, even though
 both accounts share an `applicationId`.
 
-Trace: [[SPEC-003-application-scoped-identity#TEST-222]]
+Trace: [[SPEC-004-application-scoped-identity#TEST-222]]
 
 ### REQ-217: Account scope is opaque, stable, and recoverable
 
 When Selfsame is first enabled for an authenticated application account, the
 application SHALL allocate 32 bytes from a CSPRNG, encode them as the canonical
 `accountScopeId` in
-[[SPEC-003-application-scoped-identity#CON-211]], and bind that value
+[[SPEC-004-application-scoped-identity#CON-211]], and bind that value
 immutably to the account record. It SHALL return the same value after normal
 authentication and account recovery. A deleted-and-recreated account SHALL
 receive a new value; a value SHALL never be reassigned to another account.
@@ -712,7 +712,7 @@ The raw or encoded scope SHALL NOT appear in a DID, DID Document, `acct:` URI,
 VC, JWS header, WebFinger response, provider hint, status entry, log, analytics
 event, or other public protocol artifact.
 
-Trace: [[SPEC-003-application-scoped-identity#TEST-223]]
+Trace: [[SPEC-004-application-scoped-identity#TEST-223]]
 
 ### REQ-218: A person may choose one human-readable account alias
 
@@ -721,7 +721,7 @@ account MAY request one available human-readable localpart at the same
 `accountAuthority`. The person chooses only the localpart; the application
 constructs and previews the complete RFC 7565 URI. The authority and home DID
 SHALL complete the authenticated, reciprocal lifecycle in
-[[SPEC-003-application-scoped-identity#CON-212]] before the alias is shown as
+[[SPEC-004-application-scoped-identity#CON-212]] before the alias is shown as
 active.
 
 The human-readable alias is public discovery and display metadata. It SHALL
@@ -735,7 +735,7 @@ person across services. A person who declines or cannot obtain a username
 retains the complete linking, authorization, revocation, and recovery
 functionality of Selfsame.
 
-Trace: [[SPEC-003-application-scoped-identity#TEST-225]]
+Trace: [[SPEC-004-application-scoped-identity#TEST-225]]
 
 ### REQ-219: Protocol conformance determines rendezvous eligibility
 
@@ -754,8 +754,8 @@ offer, ciphertext, and authenticated hint as required by
 [[PROTO-002-selfsame-rendezvous-v1#REQ-307]]. It SHALL NOT rotate or alter the
 application-account identity.
 
-Trace: [[SPEC-003-application-scoped-identity#TEST-214]],
-[[SPEC-003-application-scoped-identity#TEST-226]]
+Trace: [[SPEC-004-application-scoped-identity#TEST-214]],
+[[SPEC-004-application-scoped-identity#TEST-226]]
 
 ## Non-functional requirements
 
@@ -1798,7 +1798,7 @@ For profile version 1, a rendezvous descriptor is recognized only when:
 2. `url` is a canonical base URL under
    [[PROTO-002-selfsame-rendezvous-v1#CON-301]];
 3. the descriptor passes expiry, local policy, priority, and weight checks in
-   [[SPEC-003-application-scoped-identity#CON-208]]; and
+   [[SPEC-004-application-scoped-identity#CON-208]]; and
 4. a bounded `GET /healthz` returns a capability object accepted by
    [[PROTO-002-selfsame-rendezvous-v1#CON-301]].
 
@@ -1812,7 +1812,7 @@ statuses, destructive-read semantics, and any attempt by the server to choose
 another endpoint or protocol.
 
 The authenticated hint in
-[[SPEC-003-application-scoped-identity#CON-209]] binds the exact descriptor
+[[SPEC-004-application-scoped-identity#CON-209]] binds the exact descriptor
 digest, so a joiner never accepts a health response or redirect as a provider
 substitution. If the selected provider fails after any slot request or hint
 publication, both parties abandon its ceremony state. A newly selected provider
@@ -2361,6 +2361,10 @@ combination; that is an engineering conclusion, not a legal novelty claim.
 
 ## Changelog
 
+- **0.4.1 — 2026-07-30 — documentation-only.** Renumbers this document as
+  [[SPEC-004-application-scoped-identity]] after
+  [[SPEC-003-android-apk-distribution]] was allocated on `main`, and retargets
+  its inbound and self-links. No normative behavior changed.
 - **0.4.0 — 2026-07-30 — draft.** Binds every
   `selfsame-rendezvous-v1` descriptor to the independent PROTO-002 mailbox
   contract. Makes capability conformance—not operator identity—the eligibility

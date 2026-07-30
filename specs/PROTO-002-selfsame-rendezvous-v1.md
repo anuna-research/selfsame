@@ -3,7 +3,7 @@ id: PROTO-002
 title: Selfsame Rendezvous Protocol v1 — a blind, replaceable link mailbox
 status: draft
 tier: 1
-version: 0.1.0
+version: 0.1.1
 audience: application developer, SDK implementer, infrastructure operator, security reviewer
 author: Anuna Research (drafted with Codex, 2026-07-30)
 last-updated: 2026-07-30
@@ -110,7 +110,7 @@ and carries no trust.
 
 **Open.** Production availability and commercial SLOs are application/operator
 policy, not wire interoperability. The provider-hint carrier remains owned by
-[[SPEC-003-application-scoped-identity#OQ-205]]; once a client has the selected
+[[SPEC-004-application-scoped-identity#OQ-205]]; once a client has the selected
 descriptor and ceremony secret, this protocol completely defines provider use.
 
 ---
@@ -134,7 +134,7 @@ mandatory black-box test in this document. Running the reference
 
 ## Context
 
-[[SPEC-003-application-scoped-identity]] lets each application embed several
+[[SPEC-004-application-scoped-identity]] lets each application embed several
 eligible rendezvous descriptors and lets the initiating client select a healthy
 operator. Its selection and provider-hint contracts deliberately do not define
 the service's wire behavior. Without this protocol, the profile string
@@ -181,9 +181,9 @@ contract.
 ### Out of scope
 
 - selection priority and weighting, owned by
-  [[SPEC-003-application-scoped-identity#CON-208]];
+  [[SPEC-004-application-scoped-identity#CON-208]];
 - the authenticated provider-hint carrier, owned by
-  [[SPEC-003-application-scoped-identity#CON-209]] and OQ-205;
+  [[SPEC-004-application-scoped-identity#CON-209]] and OQ-205;
 - offer, grant, VC, AEAD, transcript, or link-code formats;
 - DID resolution, signed-closure retrieval, or delta publication;
 - status-list projection;
@@ -196,7 +196,7 @@ contract.
 1. The initiator receives an authenticated application profile, selects a
    descriptor, and probes its `GET /healthz` endpoint.
 2. It accepts the provider only if the response passes CON-301 and arrives
-   within SPEC-003's probe deadline.
+   within [[SPEC-004-application-scoped-identity|SPEC-004's]] probe deadline.
 3. The ceremony creates a fresh 16-byte secret, derives the offer and bundle
    slots with CON-302, encrypts the offer end to end, and writes the offer with
    CON-304.
@@ -285,9 +285,10 @@ At or after the expiry boundary, the server SHALL behave as though the slot is
 absent and SHALL remove the record from primary storage, replicas, queues,
 snapshots, and backups within 60 additional seconds.
 
-Rationale: 69,632 bytes is 68 KiB. It admits SPEC-003's 64 KiB compact grant
-plus AEAD and bounded envelope overhead while retaining a hard unauthenticated
-input cap.
+Rationale: 69,632 bytes is 68 KiB. It admits
+[[SPEC-004-application-scoped-identity|SPEC-004's]] 64 KiB compact grant plus
+AEAD and bounded envelope overhead while retaining a hard unauthenticated input
+cap.
 
 Trace:
 [[PROTO-002-selfsame-rendezvous-v1#TEST-304]],
@@ -470,10 +471,11 @@ An operator MAY deploy rendezvous and `did:crdt` state services at one origin,
 but they are different roles, descriptors, and conformance suites. This
 protocol defines only the blind mailbox.
 
-Bundling the roles normatively is rejected because SPEC-003 expressly permits
-different organizations to operate them and because a rendezvous should never
-become an authorization-state trust anchor merely by being selected for one
-link ceremony.
+Bundling the roles normatively is rejected because
+[[SPEC-004-application-scoped-identity|SPEC-004]] expressly permits different
+organizations to operate them and because a rendezvous should never become an
+authorization-state trust anchor merely by being selected for one link
+ceremony.
 
 ## Contracts
 
@@ -896,7 +898,7 @@ each pairing, exchange both directions, inject a lost write response and a lost
 read response, and complete with byte-identical records. Neither implementation
 may contain an Anuna endpoint, account, token, or shared non-standard parser.
 
-### TEST-309: SPEC-003 selection and role separation
+### TEST-309: [[SPEC-004-application-scoped-identity|SPEC-004]] selection and role separation
 
 **Validates:** REQ-302, REQ-306, REQ-307, ADR-305.
 
@@ -924,7 +926,7 @@ This protocol assumes:
 - ceremony secrets contain 128 bits from a CSPRNG and are never reused;
 - BLAKE3 preimage resistance and the ceremony AEAD remain secure;
 - the application profile and provider hint are authenticated as specified by
-  SPEC-003;
+  [[SPEC-004-application-scoped-identity|SPEC-004]];
 - HTTPS authenticates the selected origin to the client; and
 - clients independently enforce expiry, size, transcript, signature, VC, DID,
   permission, revocation, and proof-of-possession checks.
@@ -994,8 +996,9 @@ No production implementation or profile may claim
       and sudden-death behavior.
 - [ ] A human security reviewer approves ADR-301 through ADR-305 and CON-301
       through CON-308.
-- [ ] SPEC-003's provider-hint carrier is resolved without introducing an
-      undeclared global rendezvous or discovery host.
+- [ ] [[SPEC-004-application-scoped-identity|SPEC-004's]] provider-hint carrier
+      is resolved without introducing an undeclared global rendezvous or
+      discovery host.
 - [ ] Human security sign-off records the approved protocol version and commit.
 
 ## Traceability
@@ -1046,8 +1049,13 @@ end-to-end cryptographic verification without a new protocol version.
 ## Changelog
 
 <details>
-<summary>Revision history — 0.1.0</summary>
+<summary>Revision history — 0.1.0 → 0.1.1</summary>
 
+- **0.1.1 — 2026-07-30 — documentation-only.** Retargets the
+  application-identity dependency to
+  [[SPEC-004-application-scoped-identity]] after
+  [[SPEC-003-android-apk-distribution]] landed on `main`. No rendezvous
+  contract changed.
 - **0.1.0 — 2026-07-30 — draft.** First complete
   `selfsame-rendezvous-v1` contract. Defines the capability response, canonical
   origin, existing slot derivation, strict slot/body grammars, 68 KiB bound,
