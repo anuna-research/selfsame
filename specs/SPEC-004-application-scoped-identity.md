@@ -3,7 +3,7 @@ id: SPEC-004
 title: Application- and Account-Scoped Identity — deterministic home keys, acct aliases, portable device grants, and provider discovery
 status: draft
 tier: 1
-version: 0.4.1
+version: 0.5.0
 audience: agent, human, application developer, infrastructure provider
 author: Anuna Research (drafted with Codex, 2026-07-30)
 last-updated: 2026-07-30
@@ -96,7 +96,12 @@ application account ·
 [[SPEC-004-application-scoped-identity#ADR-211]] keep a user-chosen public
 username separate from the stable opaque account alias ·
 [[SPEC-004-application-scoped-identity#ADR-212]] make a versioned,
-operator-neutral mailbox protocol the rendezvous compatibility boundary.
+operator-neutral mailbox protocol the rendezvous compatibility boundary ·
+[[SPEC-004-application-scoped-identity#ADR-213]] make same-device mobile
+authorization reuse the existing ceremony, with OS handoff replacing only the
+scan ·
+[[SPEC-004-application-scoped-identity#ADR-214]] require layered application
+authentication before the wallet uses an application-account branch.
 
 **Load-bearing.**
 [[SPEC-004-application-scoped-identity#REQ-201]] one secret produces a different
@@ -115,6 +120,10 @@ opaque, and recoverable without user configuration ·
 human-readable account alias without changing identity or authorization ·
 [[SPEC-004-application-scoped-identity#REQ-219]] protocol conformance, not
 operator identity, determines rendezvous eligibility ·
+[[SPEC-004-application-scoped-identity#REQ-220]] same-device mobile
+authorization requires no self-scan or typed code ·
+[[SPEC-004-application-scoped-identity#REQ-222]] no caller can use a public
+profile alone to obtain an application-account grant ·
 [[SPEC-004-application-scoped-identity#NFR-201]] application identities are
 pairwise unlinkable from their public data ·
 [[SPEC-004-application-scoped-identity#NFR-205]] all authorization checks fail
@@ -148,6 +157,16 @@ the Tier-1 gate in
 - Only providers passing
   [[PROTO-002-selfsame-rendezvous-v1#CON-301]] are eligible; all mailbox use
   then follows that protocol's bounded, blind, immutable contract.
+- A same-device ceremony secret is delivered only to an installed,
+  platform-verified Selfsame wallet target; no browser or unverified custom
+  scheme receives it.
+- Selfsame does not disclose branch existence, derive an existing branch, sign,
+  publish, or write a grant until application enrollment evidence, the offer
+  transcript, and available platform identity all agree.
+- A mobile completion callback is advisory and contains no grant, DID, account
+  scope, key, link code, provider secret, or verifier acceptance decision.
+- Ambiguous or failed delivery of ceremony material permanently abandons that
+  ceremony; retry starts with a fresh secret, offer, slots, and ciphertext.
 
 ---
 
@@ -178,7 +197,7 @@ with SPEC-002's `1##` band or the identifiers currently observed in SPEC-001.
 
 Selfsame currently proves that a phone-held root authorized a device key. The
 prototype is shaped around one consuming application and one compiled
-rendezvous endpoint. That is sufficient for a vertical slice but creates four
+rendezvous endpoint. That is sufficient for a vertical slice but creates five
 problems as soon as a second developer adopts it or one application supports a
 second signed-in account:
 
@@ -186,7 +205,10 @@ second signed-in account:
 2. a single rendezvous host makes Anuna the default operator for every adopter;
 3. a CBCL-shaped grant is not portable to non-CBCL applications; and
 4. endpoint, application, or account-branch choices leak into Selfsame user
-   configuration.
+   configuration; and
+5. a developer app and Selfsame wallet on one phone cannot safely ask the
+   person to scan the same display, while an unauthenticated deep link lets a
+   malicious local app claim another developer's public profile.
 
 The new boundary is an **application profile**. It is developer-supplied,
 embedded in every release of that application, and passed to the Selfsame SDK.
@@ -233,7 +255,9 @@ There is no global public "Selfsame user DID" in this profile.
 - `did:crdt` credential revocation, expiry, and fail-closed verification;
 - optional W3C Bitstring Status List projection for generic VC consumers;
 - automatic selection among application-approved rendezvous providers;
-- developer and provider conformance responsibilities; and
+- origin-authenticated application enrollment evidence;
+- MITM-resistant same-device mobile handoff without self-scanning;
+- developer and provider conformance responsibilities;
 - coexistence of unrelated Selfsame-enabled applications on one device; and
 - coexistence and ordinary switching of multiple accounts in one application.
 
@@ -305,17 +329,65 @@ person to edit a URI, domain, DID document, or provider configuration.
 ### User links another device
 
 1. The initiating application supplies the active authenticated account scope,
-   then filters and probes the providers in its embedded profile.
-2. It selects a healthy rendezvous endpoint and places that choice in the
-   authenticated link-ceremony provider hint.
+   creates the target device key and offer, then filters and probes the
+   providers in its embedded profile.
+2. It selects a healthy rendezvous endpoint, obtains CON-214 enrollment
+   evidence bound to the exact account, key, permission, provider, and offer,
+   and places that choice in the authenticated link-ceremony provider hint.
 3. The joining device scans the link code and follows the selected provider; it
    does not run its own independent election.
-4. The phone verifies the offer and user consent, creates a random grant ID,
-   and issues the device grant.
+4. The phone verifies the application enrollment evidence and offer, shows
+   authenticated-origin consent, creates a random grant ID, and issues the
+   device grant.
 5. The existing encrypted ceremony carries the VC as opaque
    `application/vc+jwt` bytes.
 6. The joining device proves possession of the `cnf` private key to the
    application verifier.
+
+### User authorizes an application on the same phone
+
+This is the path where the developer application receiving the grant and the
+Selfsame wallet holding the home controller are separate apps on one mobile
+device. It is not selected merely because Selfsame is installed: authorizing a
+laptop or other remote target continues to use the cross-device path above.
+
+1. The developer application authenticates its active account, creates a fresh
+   application-account-scoped device key, selects a conforming rendezvous,
+   constructs the ordinary offer, obtains the application enrollment evidence
+   in CON-214 bound to that provider and offer, writes the encrypted offer, and
+   begins polling the ordinary bundle slot.
+2. Instead of displaying that offer as a QR code, its Selfsame SDK passes the
+   existing one-time link code to the installed Selfsame wallet through the
+   platform adapter in CON-215. The adapter either reaches the verified wallet
+   app or returns `WalletUnavailable`; it never sends ceremony material to a
+   browser, clipboard, generic intent, unverified URL-scheme handler, install
+   page, analytics event, or notification.
+3. Selfsame reads and authenticates the same encrypted offer used by the
+   cross-device flow. Before showing consent, it verifies the application
+   origin and enrollment evidence, the active application/account/device/offer
+   bindings, expiry and one-time nonce, and every platform identity signal the
+   adapter can securely provide.
+4. The consent screen names the authenticated application origin and account
+   operation, the target device, and the exact requested permissions. A label
+   supplied only by the calling app is never presented as verified identity.
+5. On approval, Selfsame derives or selects the application-account home,
+   issues the device VC, publishes signed `did:crdt` state through the
+   separately selected state service, and writes the encrypted grant to the
+   existing rendezvous bundle slot. No DID delta is written to a rendezvous
+   mailbox slot.
+6. The developer application receives and verifies the bundle through its
+   already-running mailbox poll and then proves possession of the device key.
+   An optional OS callback merely foregrounds that pending application
+   session; it carries no credential or authority and cannot make a failed
+   bundle pass.
+7. If secure wallet invocation is unavailable, ambiguous, intercepted, or
+   falls back toward the web, both apps abandon the ceremony. An install/help
+   action contains no ceremony material, and a later retry creates a fresh
+   secret, offer, slots, ciphertext, enrollment nonce, and evidence.
+
+The person taps **Continue in Selfsame**, reviews consent, and returns. They do
+not scan their own screen, type a code, choose a server, or grant a mobile link
+handler authority over the resulting credential.
 
 ### User revokes a device from one account
 
@@ -630,12 +702,16 @@ needs only:
 1. one immutable application ID and embedded profile;
 2. an account-record integration implementing the scope lifecycle in REQ-217;
 3. an RFC 7565 account authority with the WebFinger binding in CON-204;
-4. one or more providers conforming to
+4. for a production wallet-exposed integration, origin-authenticated profile
+   publication and a backend enrollment-signing key conforming to CON-214;
+5. for same-device mobile, the Android and/or Apple application bindings in
+   CON-201 and CON-215;
+6. one or more providers conforming to
    [[PROTO-002-selfsame-rendezvous-v1]];
-5. one or more state resolvers or peer paths that exchange complete,
+7. one or more state resolvers or peer paths that exchange complete,
    causally valid `did:crdt` signed closures and revocation deltas;
-6. application permission URIs and verifier policy; and
-7. the Selfsame issuer/holder SDK or an independent conforming implementation.
+8. application permission URIs and verifier policy; and
+9. the Selfsame issuer/holder SDK or an independent conforming implementation.
 
 A developer MAY additionally deploy a W3C Bitstring Status List projection
 host. That optional service does not participate in core issuance, linking,
@@ -646,7 +722,9 @@ suite and the end-to-end profile suite so either can run without contacting
 Anuna infrastructure.
 
 Trace: [[SPEC-004-application-scoped-identity#TEST-220]],
-[[SPEC-004-application-scoped-identity#TEST-226]]
+[[SPEC-004-application-scoped-identity#TEST-226]],
+[[SPEC-004-application-scoped-identity#TEST-227]],
+[[SPEC-004-application-scoped-identity#TEST-228]]
 
 ### REQ-215: Device keys are application-account-scoped
 
@@ -757,6 +835,91 @@ application-account identity.
 Trace: [[SPEC-004-application-scoped-identity#TEST-214]],
 [[SPEC-004-application-scoped-identity#TEST-226]]
 
+### REQ-220: Same-device mobile initiation requires no self-scan
+
+When the target developer application and a verified Selfsame wallet are
+installed on the same mobile device, the SDK SHALL initiate the same-device
+path in [[SPEC-004-application-scoped-identity#CON-215]] without requiring the
+person to scan their own display or copy, type, or paste ceremony material.
+
+This path is selected for the target app instance, not merely because a wallet
+is installed. A person authorizing a different device continues to receive the
+cross-device QR and typed-code paths.
+
+Trace: [[SPEC-004-application-scoped-identity#TEST-227]]
+
+### REQ-221: Same-device handoff reuses one authorization ceremony
+
+The same-device path SHALL use the same fresh offer, application evidence,
+provider selection, rendezvous slots, encrypted grant bundle, acceptance
+predicate, device proof, and state-publication path as the cross-device
+ceremony; only delivery of the existing one-time link code to Selfsame and an
+optional non-authoritative UI return differ.
+
+This prevents a platform adapter from becoming a second grant protocol with a
+different security state machine.
+
+Trace: [[SPEC-004-application-scoped-identity#TEST-227]],
+[[SPEC-004-application-scoped-identity#TEST-231]]
+
+### REQ-222: The wallet authenticates the requesting application
+
+Selfsame SHALL NOT disclose whether an application branch exists, derive or
+select an existing application-account home, sign or publish an authorization
+delta, issue a device grant, or write a grant bundle unless the enrollment
+evidence in [[SPEC-004-application-scoped-identity#CON-214]] authenticates the
+application origin and binds the exact profile, account scope, device key,
+requested permissions, offer digest, time window, and one-time request ID
+observed in the current ceremony.
+
+A public application profile, display name, icon, bundle/package name, deep
+link, callback URI, or TLS connection is insufficient by itself.
+
+Trace: [[SPEC-004-application-scoped-identity#TEST-228]],
+[[SPEC-004-application-scoped-identity#TEST-229]]
+
+### REQ-223: Ceremony secrets do not cross an unverified mobile channel
+
+The invoking SDK SHALL NOT deliver a link code, ceremony secret, offer
+plaintext, account scope, device private key, grant, or decryption key through
+a generic/implicit intent, unverified custom URL scheme, browser or install-page
+fallback, clipboard, pasteboard, notification payload, analytics event, crash
+report, or application log.
+
+The platform adapter may carry the link code only after it has constrained
+delivery to the installed wallet target as defined by
+[[SPEC-004-application-scoped-identity#CON-215]].
+
+Trace: [[SPEC-004-application-scoped-identity#TEST-229]],
+[[SPEC-004-application-scoped-identity#TEST-230]]
+
+### REQ-224: The completion callback carries no authorization
+
+The target application SHALL determine authorization success only from the
+ordinary, transcript-authenticated grant bundle and
+[[SPEC-004-application-scoped-identity#CON-206]] acceptance predicate, never
+from an OS callback, foreground event, URL parameter, success screen, or wallet
+process exit.
+
+The optional callback is a usability hint with the closed field set in
+[[SPEC-004-application-scoped-identity#CON-215]]. Interception, replay,
+mutation, or loss of that hint cannot disclose a credential or turn rejection
+into acceptance.
+
+Trace: [[SPEC-004-application-scoped-identity#TEST-231]]
+
+### REQ-225: Ambiguous mobile dispatch burns the ceremony
+
+When the platform cannot prove delivery to the intended installed wallet, a
+browser or alternate handler is offered, the wallet reports a caller-binding
+mismatch, or the dispatch result is ambiguous, the SDK SHALL permanently
+abandon that ceremony and retry only with a fresh secret, offer, slots,
+ciphertext, request ID, enrollment evidence, and provider hint.
+
+An install or help link is a separate action containing no ceremony data.
+
+Trace: [[SPEC-004-application-scoped-identity#TEST-230]]
+
 ## Non-functional requirements
 
 ### NFR-201: Pairwise application-account unlinkability
@@ -783,8 +946,9 @@ no claim about those channels.
 At least two independent implementations SHALL reproduce every normative KDF,
 application ID, account-scope validation, opaque alias, username grammar,
 grant-ID, JWK, JWS, revocation-delta, challenge, and provider-selection test
-vector byte-for-byte before the Tier-1 gate closes. PROTO-002's capability,
-slot, HTTP, expiry, and retry vectors are part of this portability gate.
+vector, plus every application-enrollment and mobile-handoff vector,
+byte-for-byte before the Tier-1 gate closes. PROTO-002's capability, slot,
+HTTP, expiry, and retry vectors are part of this portability gate.
 
 ### NFR-203: Data minimization
 
@@ -807,9 +971,10 @@ authorization decisions are made.
 ### NFR-205: Fail closed
 
 Malformed profiles, aliases, DID closures, revocation state, JWKs, VCs, JWS
-headers, status projections, permission sets, challenges, provider hints,
-rendezvous capabilities, or mailbox responses SHALL produce a typed failure
-and no authenticated session.
+headers, enrollment statements, platform bindings, mobile handoffs, callbacks,
+status projections, permission sets, challenges, provider hints, rendezvous
+capabilities, or mailbox responses SHALL produce a typed failure and no
+authenticated session.
 
 There SHALL be no TOFU path for issuer keys, projection issuers, account
 authorities, or provider descriptors.
@@ -831,9 +996,10 @@ SHALL NOT serially block all fallbacks.
 
 ### NFR-208: Algorithm confinement
 
-Version 1 SHALL use Ed25519/EdDSA only for the application-account home JWS and
-device proof. Algorithm agility SHALL occur by a new profile version and
-explicit migration, never by accepting an algorithm named by untrusted input.
+Version 1 SHALL use Ed25519/EdDSA only for the application-account home JWS,
+developer enrollment JWS, and device proof. Algorithm agility SHALL occur by a
+new profile version and explicit migration, never by accepting an algorithm
+named by untrusted input.
 
 ## Architecture decisions
 
@@ -1076,6 +1242,64 @@ user promise. Destructive reads are rejected because a dropped response would
 consume the only correct copy; PROTO-002 instead makes replay rejection an
 end-to-end ceremony property.
 
+### ADR-213: Same-device mobile reuses the rendezvous ceremony
+
+**Status:** PROPOSED.
+
+When the target developer app and Selfsame wallet are on one phone, the
+platform handoff replaces only the physical act of scanning or typing the link
+code. The developer app still writes the offer and polls for the encrypted
+grant under [[PROTO-002-selfsame-rendezvous-v1]], while Selfsame still reads the
+offer, obtains consent, and writes the bundle. Signed `did:crdt` deltas continue
+through the separate state-publication role.
+
+This settles at the composition rung of the Simplicity Ladder: one ceremony,
+one acceptance predicate, one loss/retry model, and one adversarial test corpus
+serve both cross-device and same-device paths. It also keeps a compact,
+security-insensitive completion callback from becoming a second credential
+transport.
+
+Returning a grant directly in a deep link, custom URL scheme, clipboard,
+pasteboard, notification, or application callback is rejected. Those channels
+have inconsistent caller authentication, interception and size behavior across
+mobile platforms, and would expose a second implementation of transcript,
+retry, timeout, and replay semantics. A future origin-authenticated platform
+credential API may define a direct-local transport in a new profile version,
+but it must reproduce the same security properties and cannot silently
+downgrade version 1.
+
+### ADR-214: Authenticate the application in layers before consent
+
+**Status:** PROPOSED.
+
+Selfsame treats the calling app, all link parameters, the public application
+profile, display metadata, and a completion callback as attacker-controlled.
+Before it touches an existing application-account branch, it requires:
+
+1. a short-lived, one-time enrollment statement authenticated by a developer
+   backend key anchored to the HTTPS `applicationId` origin;
+2. an exact binding from that statement to the profile digest, account scope,
+   device key, requested permissions, offer digest, and current time window;
+3. the strongest caller/target identity signal exposed by the conforming
+   platform adapter; and
+4. explicit consent naming only the developer origin and operation established
+   by those verified values.
+
+No one layer substitutes for another. Origin authentication prevents a
+malicious app from replaying another developer's public profile. Platform
+binding reduces local app impersonation and link interception. Transcript
+binding prevents a network, rendezvous, or local relay from swapping the
+account, key, permission, provider, or response between concurrent ceremonies.
+Consent addresses accurately authenticated but surprising requests.
+
+An app-embedded shared secret is rejected because a public native client cannot
+keep one. A custom scheme or package/bundle label alone is rejected because it
+does not establish control of the application origin. Consent based on
+caller-supplied name or icon is rejected because it authenticates presentation,
+not authority. CON-214 fixes the logical statement and acceptance invariants;
+OQ-207 remains blocking for the exact cross-platform key-discovery, wire, and
+platform-evidence profiles.
+
 ## Contracts
 
 ### CON-201: Canonical application profile
@@ -1092,6 +1316,35 @@ shape:
   "allowedPermissions": [
     "https://photos.example/selfsame/application#device"
   ],
+  "enrollment": {
+    "requestSigningKeys": [
+      {
+        "kid":
+          "https://photos.example/selfsame/application#enrollment-2026-01",
+        "publicKeyJwk": {
+          "kty": "OKP",
+          "crv": "Ed25519",
+          "x": "<base64url 32-byte Ed25519 public key>"
+        }
+      }
+    ],
+    "mobileBindings": [
+      {
+        "id": "android:com.example.photos:<cert-sha256>",
+        "platform": "android",
+        "packageName": "com.example.photos",
+        "signingCertificateSha256": ["<base64url SHA-256 digest>"]
+      },
+      {
+        "id": "apple:TEAM123456:com.example.photos:https://photos.example",
+        "platform": "apple",
+        "teamId": "TEAM123456",
+        "bundleId": "com.example.photos",
+        "returnUri":
+          "https://photos.example/.well-known/selfsame/return"
+      }
+    ]
+  },
   "rendezvous": [
     {
       "id": "au-primary",
@@ -1159,6 +1412,19 @@ Clients MUST reject non-canonical input rather than normalize it silently.
 
 `accountAuthority` MUST be a lower-case ASCII IDNA A-label DNS name without
 port or trailing dot.
+
+`enrollment.requestSigningKeys` MUST contain at least one unique key. Each
+`kid` MUST be an absolute HTTPS URI on the `applicationId` origin with a
+non-empty fragment, and each `publicKeyJwk` MUST use exactly `kty: OKP`,
+`crv: Ed25519`, and one canonical 32-byte base64url `x` value. The private keys
+are backend credentials and MUST NOT be embedded in a native application.
+
+Every `enrollment.mobileBindings` entry has a unique `id`. Android package
+names and signing-certificate rotation sets use the platform's canonical
+spellings. Apple entries bind an exact Team ID and bundle ID to a claimed HTTPS
+return URI on the `applicationId` origin. The wallet accepts a binding only
+after the OQ-207 profile-origin mechanism and the platform-specific
+verification in CON-215 authenticate it; field presence is not proof.
 
 Every provider ID MUST match `[a-z0-9][a-z0-9-]{0,62}` and be unique within its
 role. Every provider URL MUST be HTTPS, contain an authority, and contain no
@@ -1827,6 +2093,176 @@ Implements: REQ-209, REQ-210, REQ-212, REQ-214, REQ-219.
 
 Verified by: TEST-214, TEST-215, TEST-216, TEST-218, TEST-220, TEST-226.
 
+### CON-214: Application enrollment evidence
+
+Before either mobile path may use an application-account branch, the
+developer backend authenticates this closed logical statement:
+
+```json
+{
+  "evidenceVersion": 1,
+  "requestId": "<base64url 32 random bytes>",
+  "ceremonyId": "<base64url 32 random bytes>",
+  "applicationId": "https://photos.example/selfsame/application",
+  "profileVersion": 1,
+  "profileDigest": "<base64url SHA-256 of the RFC 8785 profile>",
+  "accountScopeId": "<canonical private account scope>",
+  "deviceKeyDigest": "<base64url SHA-256 of the canonical cnf.jwk>",
+  "requestedPermissions": [
+    "https://photos.example/selfsame/application#device"
+  ],
+  "providerId": "au-primary",
+  "descriptorDigest": "<base64url SHA-256 of the canonical descriptor>",
+  "offerDigest": "<base64url transcript offer digest>",
+  "platformBindingId": "android:com.example.photos:<cert-sha256>",
+  "returnUri": "https://photos.example/.well-known/selfsame/return",
+  "issuedAt": "2026-07-30T10:00:00Z",
+  "expiresAt": "2026-07-30T10:02:00Z"
+}
+```
+
+The physical evidence is a compact JWS over the exact UTF-8 RFC 8785
+serialization of that object. Its protected header has the closed field set
+`alg`, `typ`, and `kid`; `alg` is exactly `EdDSA`, `typ` is exactly
+`selfsame-enrollment+jws`, and `kid` identifies an Ed25519 enrollment-signing
+key in the authenticated application profile. No unprotected header is
+permitted. The developer backend, not the public native app, holds the private
+key.
+
+The JSON recognizer rejects duplicate members, unknown members, non-canonical
+base64url, arrays with duplicates or non-profile permissions, timestamps with
+offsets other than `Z`, and any value outside the inherited CON-201, CON-205,
+CON-209, and CON-211 grammars. `requestedPermissions` is sorted by Unicode code
+point and is an exact subset of `allowedPermissions`. `expiresAt` is later than
+`issuedAt` by at most 120 seconds. Both random identifiers decode to exactly 32
+bytes.
+
+`platformBindingId` selects one binding from the authenticated profile:
+
+- Android uses `android:` followed by the exact package name and a SHA-256
+  signing-certificate digest, including an explicitly declared certificate
+  rotation set.
+- Apple platforms use `apple:` followed by the Team ID, bundle ID, and the
+  origin of an associated HTTPS return URI.
+
+The exact profile-discovery and platform-evidence encodings remain the blocking
+part of OQ-207. This contract fixes the values they must authenticate. A
+production wallet cannot treat a profile and key delivered only by the caller
+as authenticated.
+
+The compact JWS appears only inside the encrypted ceremony offer. The
+`accountScopeId`, evidence JWS, and its private claims never appear in the OS
+handoff, rendezvous plaintext, callback, URL, log, analytics, or consent label.
+
+Before showing consent, Selfsame:
+
+1. obtains the application profile through the authenticated
+   `applicationId`-origin mechanism selected by OQ-207 and verifies the profile
+   digest;
+2. verifies the compact JWS and resolves `kid` only from that authenticated
+   profile;
+3. compares every statement field to the active offer, provider descriptor,
+   device JWK, requested permission set, and OS-observed platform binding;
+4. checks the 120-second window against its local clock;
+5. atomically records `requestId` as consumed before any home-key signature,
+   delta publication, or grant-bundle write, whether the request is approved or
+   rejected; and
+6. renders consent from the authenticated origin and bound operation rather
+   than caller-supplied presentation metadata.
+
+Any mismatch returns one closed error:
+`UnverifiedApplication`, `EnrollmentMalformed`, `EnrollmentBadSignature`,
+`EnrollmentExpired`, `EnrollmentReplay`, `ProfileMismatch`,
+`AccountBindingMismatch`, `DeviceBindingMismatch`, `PermissionMismatch`,
+`ProviderMismatch`, `OfferMismatch`, or `PlatformBindingMismatch`.
+
+Every error leaves home state, grant state, DID state, provider state, active
+sessions, and the bundle slot unchanged. The consumed-ID record is the sole
+permitted mutation after syntactically valid evidence reaches step 5.
+
+Implements: REQ-205, REQ-206, REQ-207, REQ-208, REQ-215, REQ-216, REQ-217,
+REQ-222, REQ-223.
+
+Verified by: TEST-207, TEST-209, TEST-211, TEST-221, TEST-222, TEST-228,
+TEST-229.
+
+### CON-215: Same-device mobile handoff
+
+The developer app creates the ordinary ceremony through CON-208, CON-209,
+CON-213, and CON-214 before invoking Selfsame. The closed logical handoff is:
+
+```json
+{
+  "handoffVersion": 1,
+  "mode": "same-device",
+  "ceremonyId": "<same 32-byte identifier as CON-214>",
+  "applicationId": "https://photos.example/selfsame/application",
+  "profileDigest": "<same digest as CON-214>",
+  "offerDigest": "<same digest as CON-214>",
+  "linkCode": "<existing one-time Selfsame link code>",
+  "returnUri": "https://photos.example/.well-known/selfsame/return"
+}
+```
+
+The recognizer accepts exactly the first six members and the optional seventh
+`returnUri` member, in the shown order, after the platform adapter has
+delivered a typed value. It does not extract fields with regular expressions
+or act on a partial parse. The inherited application ID, base64url,
+offer-digest, link-code, and HTTPS URI grammars apply. When present,
+`returnUri` is exact-string equal to the URI in CON-214, has no user
+information or fragment, and is declared by the authenticated platform
+binding.
+
+The SDK chooses the same-device path only after the adapter positively
+identifies an installed wallet conformance target:
+
+- An Android adapter uses an explicit package/component dispatch, verifies the
+  installed wallet signing identity, requests caller-identity sharing where the
+  platform supports it, and uses an immutable one-shot result capability. It
+  never uses a generic implicit intent for ceremony material.
+- An Apple adapter opens a Selfsame HTTPS Universal Link only with the
+  platform's `universalLinksOnly` requirement. Failure to reach an associated
+  installed app is failure, not permission to open Safari, an embedded web
+  view, an install page, or a custom URL scheme.
+- A future adapter must provide equivalent installed-target authentication,
+  no-network-fallback behavior, one-shot delivery, and a caller-binding signal
+  for CON-214. Declaring itself equivalent is insufficient; its conformance
+  suite and threat analysis must land in a new spec revision.
+
+After dispatch, the developer app keeps polling the existing bundle slot.
+Selfsame uses `linkCode` to enter the ordinary offer/grant ceremony, applies
+CON-214 before consent, and returns the grant only through the encrypted
+rendezvous bundle. State deltas are submitted through the profile's state
+resolver role, never through a `/rendezvous/{slot}` record.
+
+An optional platform return contains exactly:
+
+```json
+{
+  "handoffVersion": 1,
+  "ceremonyId": "<same identifier>",
+  "outcome": "completed"
+}
+```
+
+`outcome` is one of `completed`, `cancelled`, or `failed`. This object contains
+no link code, secret, provider, profile digest, offer digest, account scope,
+DID, alias, key, credential, ciphertext, permission, or error detail. It is
+accepted only to foreground a locally pending ceremony with the same
+`ceremonyId`; it does not stop polling, supply grant data, or alter the
+acceptance result.
+
+Dispatch returns one of `WalletUnavailable`, `UnverifiedWalletTarget`,
+`HandoffMalformed`, `HandoffAmbiguous`, `PlatformBindingMismatch`,
+`UserDenied`, or `Dispatched`. Every result except `Dispatched`, and every
+ambiguous post-dispatch condition, abandons the ceremony under REQ-225.
+Installation/help UI is then offered separately with no ceremony value.
+
+Implements: REQ-209, REQ-211, REQ-212, REQ-220, REQ-221, REQ-222, REQ-223,
+REQ-224, REQ-225.
+
+Verified by: TEST-218, TEST-227, TEST-228, TEST-229, TEST-230, TEST-231.
+
 ## Test specifications
 
 ### TEST-201: Application separation
@@ -2052,54 +2488,300 @@ turn. Neither arrangement may change mailbox traffic or make the selected
 rendezvous an implicit resolver. Block every Anuna domain throughout and
 require identical results.
 
-## Trust assumptions
+### TEST-227: Same-device mobile ceremony
 
-This profile assumes:
+**Validates:** REQ-220, REQ-221, ADR-213, CON-214, CON-215.
 
-- the recovery mnemonic and phone platform storage remain confidential;
-- BIP-39, HKDF-SHA-512, SHA-256, Ed25519, JWS, and the selected AEAD remain
-  secure for their stated uses;
-- an application's embedded profile is authentic application input;
-- the application authenticates its active account and preserves that
+Install the developer app and a conforming Selfsame wallet in the Android and
+Apple integration harnesses. Authorize the developer app's current device
+through a tap-to-Selfsame handoff, with the target app holding the device
+private key and polling the selected rendezvous throughout.
+
+The positive test requires no QR render, camera permission, typed/pasted code,
+endpoint chooser, or credential-sized OS callback. The wallet reads the
+ordinary offer, shows the authenticated application/account/device/permission
+consent, writes the ordinary encrypted bundle, and publishes signed DID state
+only to the separately selected state service. The app accepts through CON-206
+and proves the device key through CON-207.
+
+Repeat as a cross-device ceremony with fresh randomness. The platform traces
+differ only at link-code delivery and optional foreground return; provider
+selection, mailbox routes, accepted grant semantics, device proof, state
+publication, and failure decisions are otherwise equivalent.
+
+### TEST-228: Enrollment evidence acceptance and replay
+
+**Validates:** REQ-222, ADR-214, CON-201, CON-214.
+
+Verify a positive compact-JWS vector independently. Exercise both timestamp
+boundaries, every permitted enrollment-key rotation entry, the exact
+application/account/device/permission/provider/offer bindings, and a valid
+platform binding. Approval consumes `requestId` before the first home-key side
+effect.
+
+Retry the byte-identical evidence before and after expiry, after approval,
+after denial, and after a post-consumption process crash. Every retry returns
+`EnrollmentReplay`. The prohibited-action assertion requires no second
+signature, grant ID, delta, mailbox write, session, or consent decision. The
+scope-invariant assertion permits only one consumed-ID record and leaves every
+other application and account unchanged.
+
+### TEST-229: MITM, local-app substitution, and ceremony mix-up
+
+**Validates:** REQ-205, REQ-206, REQ-207, REQ-222, REQ-223, CON-206, CON-209,
+CON-214, CON-215.
+
+Place an adversary on every network path and give it control of the rendezvous,
+one state resolver, a second installed mobile app, all callback/link parameters,
+and caller-supplied name/icon metadata. It does not control the OS, recovery
+secret, developer enrollment-signing key, or target device private key.
+
+Mutate application ID, profile digest, account scope, device key digest,
+permission set, provider ID, descriptor digest, offer digest, request ID,
+ceremony ID, platform binding, return URI, issue/expiry time, JWS protected
+header, offer ciphertext, provider hint, grant ciphertext, VC audience, and
+device proof one at a time. Then splice each valid value from application A,
+account A1, and ceremony C1 into B, A2, and C2 in every pairwise direction.
+
+Every mutation or splice is rejected before a home-key signature, delta
+publication, grant-bundle write, branch-existence disclosure, or verified
+consent label. Copying the complete public profile, package/bundle label,
+display metadata, handoff, or callback into the malicious app never grants it
+the developer backend signature or target device proof. Exact-count assertions
+require zero new grants, deltas, sessions, bundle records, aliases, or provider
+requests outside the single accepted control ceremony.
+
+### TEST-230: Verified wallet dispatch and fail-closed fallback
+
+**Validates:** REQ-220, REQ-223, REQ-225, CON-215.
+
+On Android, install a competing implicit-intent handler, an app using the
+expected package name under the wrong signing certificate, and a mutable or
+replayable result capability. On Apple platforms, remove or corrupt the
+associated-domain binding, offer Safari and a custom-scheme handler, and make
+the Universal Link open result ambiguous. Also test the wallet-absent case on
+both platforms.
+
+The adapter never supplies ceremony material to any alternate target, web
+request, clipboard/pasteboard, notification, log, crash report, or analytics
+sink. It returns the closed CON-215 error, abandons the offer and both slots,
+and displays only a ceremony-free install/help action. A successful later
+attempt uses a different secret, request ID, ceremony ID, offer, slots,
+ciphertext, enrollment evidence, and hint. No abandoned value is reused.
+
+### TEST-231: Completion callback is non-authoritative
+
+**Validates:** REQ-221, REQ-224, CON-215.
+
+Capture, drop, delay, replay, reorder, and mutate all three callback outcomes
+and ceremony IDs. Send `completed` before consent, after denial, for a different
+application/account/ceremony, and with no pending local session. The app may
+foreground only the exactly matching pending session and otherwise ignores the
+object.
+
+In every case, authorization follows only the independently retrieved bundle,
+CON-206, and CON-207. A valid callback with a missing or rejected bundle never
+authorizes; a lost callback with a valid bundle does not invalidate the grant.
+The serialized callback has exactly three fields and contains none of the
+secret or identity values prohibited by CON-215.
+
+## Security and threat model
+
+The threat model is normative. A happy path that succeeds outside these
+boundaries is a specification defect even if its signatures verify.
+
+### Protected assets
+
+1. the recovery mnemonic, recovery-derived secret, application/account child
+   keys, and application-account home controller;
+2. the privacy boundary between applications and between accounts in one
+   application, including the private `accountScopeId`;
+3. the binding between the authenticated developer origin, active application
+   account, target device key, requested permissions, and resulting grant;
+4. the ceremony secret, offer/grant plaintexts, enrollment evidence, provider
+   hint, transcript, and one-time identifiers;
+5. device private keys and the authorization value of issued VCs;
+6. the completeness and freshness of signed `did:crdt` authorization and
+   revocation state; and
+7. the integrity of consent—what authenticated application/account/device
+   operation the person believes they approved.
+
+### Trust boundaries and anchors
+
+This profile relies on:
+
+- platform-protected storage keeping the recovery secret and device private
+  keys confidential;
+- BIP-39, HKDF-SHA-512, SHA-256, Ed25519, JWS, the selected AEAD, and their
+  domain separation remaining secure for their stated uses;
+- the HTTPS `applicationId` origin and a backend enrollment-signing key
+  authenticated through the mechanism that will close OQ-207;
+- the mobile OS correctly enforcing application sandboxing, installed-app
+  signing identity, explicit/verified dispatch, associated-domain routing, and
+  one-shot result capabilities used by CON-215;
+- the application authenticating its active account and preserving that
   account's immutable scope across normal account recovery;
-- TLS authenticates the RFC 7565 account authority and provider endpoints;
-- the account authority truthfully reports the account↔DID mapping it hosts;
-- state resolvers and peers make valid deltas available within the application's
-  operational bound, although no single resolver is trusted to define state;
-- a verifier has a freshness policy for DID closures and any optional status
-  projection; and
-- the application does not deliberately correlate the person through unrelated
-  account data.
+- TLS authenticating the account authority and selected service endpoint, while
+  end-to-end signatures and AEAD—not TLS—establish grant and DID-state truth;
+- the account authority truthfully reporting the account↔DID mapping in its own
+  namespace; and
+- verifiers enforcing closure freshness and the complete CON-206 and CON-207
+  predicates.
 
-The protocol does not require the rendezvous provider to be trusted with grant
-plaintext, private key material, delivery, freshness, or authorization
-decisions. It may deny service, retain or replay ciphertext, and observe
-bounded connection metadata, including a direct browser client's web origin;
-clients rely on PROTO-002's storage contract for conforming availability and
-on the ceremony cryptography for security.
+A production wallet does **not** trust a public profile merely because a caller
+supplied it. Until OQ-207 authenticates profile discovery and platform evidence,
+the embedded-profile assumption is limited to an in-process prototype and this
+specification's Tier-1 gate remains closed.
 
-## Threat model
+The following are explicitly untrusted:
+
+- the rendezvous operator, any state resolver, status-projection host, network
+  path, browser, URL handler, and completion-callback recipient;
+- every caller-supplied application name, icon, package/bundle string, link
+  parameter, profile, callback value, and error description; and
+- other applications and application accounts, including ones colluding with
+  each other or with an infrastructure operator.
+
+### Adversary capabilities
+
+The adversary may:
+
+- intercept, delay, drop, replay, reorder, duplicate, redirect, and mutate
+  network messages, and may operate a selected rendezvous or state service;
+- install a malicious app on the same device, register competing custom
+  schemes and implicit intents, launch Selfsame with arbitrary bytes, replay a
+  copied public profile, and intercept any callback the OS does not bind;
+- start concurrent ceremonies and splice otherwise valid application, account,
+  key, permission, provider, offer, evidence, callback, VC, proof, status, and
+  DID-state values between them;
+- read all public DIDs, VCs disclosed to verifiers, `acct:`/WebFinger records,
+  status projections, and bounded service metadata;
+- steal a VC without its device key, or steal a device key without controlling
+  the home controller; and
+- collude across applications, accounts, providers, and observers.
+
+The model does not grant the adversary the ability to break the accepted
+cryptography, defeat TLS endpoint authentication without a compromised trust
+anchor, read another app's correctly enforced sandbox, or subvert the mobile OS
+dispatch decision. Those conditions are covered as exclusions below.
+
+### Authorization chain and MITM invariant
+
+An accepted authorization has one unbroken, locally verified chain:
+
+```text
+authenticated application origin
+          |
+          | signs CON-214: app + account + device key + permission
+          |                + provider + offer + nonce + expiry
+          v
+encrypted, transcript-bound offer
+          |
+          | OS handoff transports only the one-time link capability
+          | rendezvous transports only opaque immutable ciphertext
+          v
+application-account home controller
+          |
+          | signs VC and did:crdt deltas
+          v
+encrypted, transcript-bound grant bundle
+          |
+          | target proves the bound device private key
+          v
+verifier applies CON-206 + CON-207 + fresh signed closure
+
+completion callback ───── usability only; outside the authorization chain
+```
+
+The application ID, profile digest, account scope, device key, requested
+permissions, provider descriptor, offer digest, request/ceremony IDs, expiry,
+VC issuer/subject/audience/account/permissions/grant ID, DID closure, and device
+challenge are each signed, encrypted-and-authenticated, or checked against a
+signed value before acceptance. A man in the middle can deny service or replay
+already observed bytes, but cannot change one of those values, move a result to
+another application/account/device/ceremony, or make a callback authorize
+without causing a named verification failure.
+
+The invariant is two-sided: rejection occurs before the first unauthorized home
+signature, delta publication, bundle write, branch-existence disclosure, or
+session creation. TEST-229's exact-count scope assertions are the enforcement
+mechanism.
+
+### Security goals
+
+- **Application/account authenticity:** a grant is issued only for the
+  developer origin and active account authenticated by CON-214.
+- **Device and holder binding:** only the target device key named by the
+  request and VC can satisfy CON-207.
+- **Ceremony integrity and anti-replay:** every request is fresh, one-time,
+  transcript-bound, and unusable across application, account, provider, offer,
+  or callback contexts.
+- **Confidentiality:** the rendezvous, URL handlers, callbacks, and unrelated
+  apps learn no offer/grant plaintext, account scope, or private key.
+- **Authorization-state integrity:** only causally valid controller-signed
+  deltas affect state; revocation is grow-only and stale/incomplete closure
+  fails closed.
+- **Pairwise privacy:** public protocol artifacts contain no default equality
+  test across application accounts.
+- **Consent integrity:** verified origin/account/device/permission values, not
+  caller presentation metadata, determine what the person sees.
+- **Fail-closed scope:** a failed check grants no authority and changes only
+  the explicitly permitted replay/hold record.
+
+### Explicit exclusions and residual risks
+
+- A rooted/jailbroken or malicious OS, broken application sandbox, compromised
+  secure storage, screen-overlay attack outside platform protections, or
+  extracted recovery/home/device key is outside the v1 remote-attacker claim.
+- Compromise of the developer backend, enrollment-signing key, or application
+  account-authentication system lets the attacker mint apparently legitimate
+  enrollment evidence for that application. The home key is still not
+  derivable, and visible consent still applies, but backend recovery and key
+  rotation require a separate incident specification.
+- Compromise of the recovery secret compromises every derived application
+  branch. Recovery-secret rotation is outside v1 and must be specified before
+  production.
+- A ceremony secret is a short-lived bearer capability. Disclosure may reveal
+  offer/grant plaintext and enable delivery interference even though the VC
+  still requires the target device key. Suspected disclosure always burns the
+  ceremony under REQ-225.
+- A malicious rendezvous, resolver, account authority, or network can deny
+  service. This profile bounds and detects withholding; it cannot guarantee
+  availability against every selected operator colluding.
+- Pairwise derivation cannot prevent correlation through email, payment, IP
+  address, device fingerprinting, a deliberately reused public username,
+  application telemetry, or global traffic analysis.
+- A malicious account authority can lie about or suppress mappings in its own
+  RFC 7565 namespace, but cannot sign as the home DID or device.
+- Correctly authenticated but misleading application content and a person's
+  decision to approve an accurately identified request remain social/UX risks;
+  the consent requirements reduce but do not eliminate them.
+
+### Threat-to-control analysis
 
 | Threat | Required response |
 |---|---|
+| Network man in the middle | TLS authenticates endpoints; CON-214 signatures, ceremony AEAD, provider/offer transcript binding, home signatures, VC audience, and device proof detect every substitution. TEST-229 mutates each field and asserts zero unauthorized side effects. |
+| Malicious same-device app copies another developer's public profile | A public profile supplies no authority. The attacker lacks the origin-anchored enrollment signature and matching platform binding; CON-214 rejects before branch lookup or consent. |
+| Link-handler or custom-scheme interception | CON-215 permits only verified installed-wallet dispatch and forbids browser/custom-scheme fallback. Any ambiguity burns every ceremony value under REQ-225. |
+| Callback interception or forged `completed` result | Callback carries no secret or credential and is outside the authorization chain. Only a verified rendezvous bundle plus CON-206/CON-207 authorizes. |
+| Concurrent application/account/ceremony mix-up | Enrollment evidence and the encrypted transcript bind exact application, profile, account scope, device key, permission, provider, offer, request ID, and ceremony ID. Cross-splices fail TEST-229. |
 | Application A colludes with application B | Their public Selfsame artifacts provide no equality test; other shared account data remains outside scope. |
 | Account A1 is confused with A2 in one application | The authenticated account context selects the scope and expected `acct:` alias; issuer, grant, proof, status, and state checks reject every cross-account artifact. |
 | Application reuses or replaces an account scope | Atomic uniqueness and immutability checks reject reuse; missing scope fails as `AccountScopeUnavailable` rather than creating a new identity. |
-| Account scope is disclosed | It may correlate that application account's private storage but cannot derive a home key without the recovery secret; rotate only through an explicit identity migration, not silently. |
-| Malicious rendezvous | May withhold, replay, retain, or reorder ciphertext and sees bounded network metadata, including direct-browser Origin; end-to-end AEAD, transcript, expiry, and one-ceremony checks prevent it from forging or authorizing an accepted exchange. |
-| Compromised provider directory/profile | Profile authenticity is the application's responsibility; SDK rejects values outside the authenticated embedded profile. |
-| Stolen VC | Cannot pass CON-207 without the device private key. |
-| Stolen device key | Grant remains usable until its ID appears in fresh verified CRDT state or it expires; user initiates unlink from a home controller. |
-| Malicious account authority | Can lie about or suppress its own `acct:` mapping but cannot sign as the home DID or device. |
+| Account scope is disclosed | It may correlate that application's private account storage but cannot derive a home key without the recovery secret; rotate only through explicit identity migration. |
+| Malicious rendezvous | It may withhold, replay, retain, or reorder ciphertext and observe bounded metadata; end-to-end AEAD, immutable transcript binding, expiry, and one-ceremony checks prevent forgery or authorization. |
+| Malicious or withholding state resolver | It cannot forge an accepted signed closure or remove a G-Set entry; stale or incomplete state fails closed and resolver/peer diversity limits withholding. |
+| Compromised application profile distribution | Production verification requires the OQ-207 origin-authenticated profile mechanism. Caller-delivered fields alone fail CON-214. |
+| Stolen VC | It cannot pass CON-207 without the device private key. |
+| Stolen device key | The grant remains usable until its ID appears in fresh verified CRDT state or it expires; the home controller revokes the exact grant ID. |
 | Username squatting or reassignment | Authenticated atomic reservation prevents races; version 1 tombstones released names permanently. |
 | Reused public username | UI warns that voluntary reuse can correlate accounts; authorization continues to use only the opaque alias. |
-| Malicious or withholding state resolver | Cannot forge an accepted signed closure or remove a G-Set entry; stale or incomplete state fails closed and resolver diversity limits withholding. |
 | Stale authorization state | Authorization fails after `maxClosureAgeSeconds`; the precise availability tradeoff blocks the gate. |
-| Context host compromise | Has no verification-time effect because contexts are pinned and not fetched. |
-| Algorithm confusion | Exact EdDSA allowlist and key-type checks; no input-selected algorithms. |
-| Identifier normalization attack | Restrictive canonical application IDs and generated ASCII `acct:` localparts; general comparison follows RFC 3986/RFC 7565. |
+| Context host compromise | It has no verification-time effect because contexts are pinned and not fetched. |
+| Algorithm confusion | Exact EdDSA allowlists, protected headers, and key-type checks reject input-selected algorithms. |
+| Identifier normalization attack | Restrictive canonical application IDs and generated ASCII `acct:` localparts remove equivalent spellings; general comparison follows RFC 3986/RFC 7565. |
 | Status-projection correlation | Projection is optional; random indexes, aggregation, stapling, caching, and proxying reduce but do not eliminate observation. |
-| Recovery-secret compromise | All application branches are compromised; recovery and rotation are outside v1 and must be specified before production. |
 
 ## `did:crdt` compatibility boundary
 
@@ -2149,11 +2831,16 @@ No implementation task may be marked ready until all boxes are checked:
 
 - [ ] A fresh-context cross-model adversarial review covers KDF separation,
       DID/VC key representation, holder binding, alias equivalence, provider
-      selection, revocation, normalization, and privacy.
+      selection, revocation, application authentication, network MITM,
+      same-device app substitution, ceremony mix-up, callback hijack,
+      normalization, and privacy.
 - [ ] A second review verifies the revised document and closes every blocking
       finding from the first.
 - [ ] A human cryptography/security reviewer approves CON-202, CON-205,
       CON-206, CON-207, CON-210, CON-211, CON-212, and CON-213.
+- [ ] Mobile platform security reviewers approve CON-214 and CON-215, including
+      the exact Android and Apple target/caller identity checks and the
+      fail-without-web-fallback behavior.
 - [ ] Two independent implementations reproduce the normative KDF and wire
       vectors required by NFR-202.
 - [ ] The `did:crdt` method explicitly defines the `JsonWebKey` projection and
@@ -2163,8 +2850,8 @@ No implementation task may be marked ready until all boxes are checked:
 - [ ] A privacy review covers `acct:` harvesting, WebFinger, state lookups,
       optional username reuse, CRDT revocation enumeration, projection
       retrieval, account-scope storage, provider and browser-Origin metadata,
-      and
-      cross-application and cross-account correlation.
+      mobile handoff/callback metadata, and cross-application and cross-account
+      correlation.
 - [ ] OQ-201, OQ-202, and OQ-204 through OQ-207 are either resolved
       normatively or explicitly accepted by the human owner with bounded
       consequences. OQ-203 is resolved by ADR-210.
@@ -2172,6 +2859,8 @@ No implementation task may be marked ready until all boxes are checked:
       contradictory credential and derivation claims.
 - [ ] PROTO-002 passes its own Tier-1 gate and two independent providers pass
       both its black-box suite and TEST-226 without Anuna infrastructure.
+- [ ] TEST-227 through TEST-231 pass against real Android and Apple platform
+      adapters with hostile sibling apps and alternate link handlers installed.
 - [ ] Human security sign-off records an approval version and commit.
 
 ## Open questions
@@ -2251,29 +2940,48 @@ application identities or explicit test migrations.
 
 Owner: SPEC-001 maintainer + HOC.
 
-### OQ-207: How does the phone authenticate the requesting application? — blocking
+### OQ-207: Exact profile-origin and mobile-platform evidence — blocking
 
-An authenticated embedded profile tells a conforming application which branch
-to request, but a malicious application can replay another developer's public
-profile and claim its `applicationId`. The phone must not disclose, sign with,
-or issue a grant from an existing application branch merely because untrusted
-request data names it.
+CON-214 and CON-215 now fix the security shape: an origin-authenticated,
+backend-signed, short-lived enrollment statement; exact
+application/account/device/permission/provider/offer binding; platform
+caller/target evidence; and verified-origin consent. A copied public profile,
+custom scheme, display label, callback, or TLS session alone is explicitly
+insufficient.
 
-A complete solution probably combines:
+The remaining work is deliberately narrow but still blocks production:
 
-- control of the HTTPS `applicationId` origin;
-- a backend-signed, short-lived enrollment offer bound to the application
-  account and device key;
-- platform application identity or attestation where available; and
-- a consent screen that names the verified developer origin and requested
-  account operation.
+1. specify the HTTPS `applicationId`-origin profile discovery, media type,
+   cache, signature, key rotation/revocation, redirect, and offline rules so the
+   wallet never trusts a key obtained only from its caller;
+2. fix the Android minimum API and exact checks for explicit wallet targeting,
+   calling package/UID sharing, signing-certificate rotation, verified App
+   Links, and immutable one-shot return capabilities;
+3. fix the Apple Team-ID/bundle-ID and associated-domain validation, the
+   Selfsame Universal Link invocation origin, `universalLinksOnly` failure
+   behavior, and the claimed HTTPS return path;
+4. decide how multiple independently implemented conforming wallet apps are
+   discovered and selected without a user-managed endpoint or an Anuna-only
+   package allowlist; and
+5. publish cross-platform canonical JWS, profile, handoff, MITM, replay,
+   application-substitution, and callback-hijack vectors.
 
-The exact cross-platform evidence and acceptance predicate need their own
-contract. Until then, the "application profile is authentic application input"
-trust assumption is suitable for an in-process prototype, not a wallet service
-exposed to arbitrary applications.
+The Android candidate is an explicit component/result flow whose installed
+signing identity is checked against the authenticated profile; Android verified
+App Links may carry a non-secret return. The Apple candidate is a Universal
+Link opened only when an associated installed Selfsame app can handle it, with
+an associated HTTPS return to the developer app. On both platforms the
+backend-signed CON-214 evidence remains mandatory: link routing authenticates a
+target or return association, not the whole application-account request.
 
-Owner: Selfsame wallet + application-profile working group.
+Private-use/custom schemes, clipboard/pasteboard transfer, generic intents,
+embedded browser fallbacks, and a credential in a callback are not candidates.
+Until all five items are normative and TEST-227 through TEST-231 pass on real
+platforms, the profile-authenticity assumption is limited to an in-process
+prototype and a wallet service must not accept arbitrary application requests.
+
+Owner: Selfsame wallet + application-profile working group + mobile platform
+reviewers.
 
 ## Traceability
 
@@ -2287,6 +2995,7 @@ Owner: Selfsame wallet + application-profile working group.
 | No user endpoint configuration | REQ-209, REQ-212, REQ-219 | CON-208, CON-209, CON-213 | TEST-214, TEST-215, TEST-218, TEST-226 |
 | No mandatory Anuna infrastructure | REQ-210, REQ-214, REQ-219 | CON-201, CON-208, CON-213 | TEST-216, TEST-220, TEST-226 |
 | Replaceable, loss-tolerant blind rendezvous | REQ-209, REQ-212, REQ-219; PROTO-002 REQ-301–308 | CON-208, CON-209, CON-213; PROTO-002 CON-301–308 | TEST-214–216, TEST-218, TEST-220, TEST-226; PROTO-002 TEST-301–310 |
+| MITM-resistant same-device mobile authorization without self-scan | REQ-220–225 | CON-206, CON-207, CON-209, CON-214, CON-215 | TEST-227–231 |
 | Cross-application and cross-account privacy | REQ-201, REQ-203, REQ-213, REQ-215–218 | CON-202–205, CON-211, CON-212 | TEST-201, TEST-204–206, TEST-219, TEST-221–223, TEST-225 |
 | Compatibility with the `did:crdt` method boundary | REQ-201, REQ-203, REQ-205, REQ-208 | CON-202, CON-203, CON-210 | TEST-207, TEST-213, TEST-224 |
 
@@ -2308,8 +3017,10 @@ Any change to application-ID or account-scope canonicalization, account-scope
 lifecycle, key derivation, DID construction, JWK representation, accepted
 algorithms, signed bytes, holder proof, closure/projection freshness,
 revocation semantics, alias comparison, rendezvous eligibility, provider-hint
-binding, or the PROTO-002 version is a Tier-1 normative amendment and requires
-new vectors plus renewed security sign-off.
+binding, application enrollment evidence, mobile caller/wallet identity,
+same-device dispatch, callback authority, threat-model boundary, or the
+PROTO-002 version is a Tier-1 normative amendment and requires new vectors plus
+renewed security sign-off.
 
 ## Normative and informative sources
 
@@ -2337,6 +3048,29 @@ Normative external specifications:
 - IETF, RFC 3986, RFC 4648, RFC 5234, RFC 5869, RFC 7515, RFC 8032,
   RFC 8785, and BIP-39.
 
+Informative mobile security and interoperability sources:
+
+- IETF, [RFC 8252 — OAuth 2.0 for Native
+  Apps](https://datatracker.ietf.org/doc/html/rfc8252), especially claimed
+  HTTPS redirects, exact redirect matching, public-client secrets, and
+  inter-app interception.
+- Android Developers, [About Android App
+  Links](https://developer.android.com/training/app-links/about),
+  [Pending intents security](https://developer.android.com/privacy-and-security/risks/pending-intent),
+  and
+  [AppAuthenticator](https://developer.android.com/reference/androidx/security/app/authenticator/AppAuthenticator).
+- Apple Developer, [Supporting associated
+  domains](https://developer.apple.com/documentation/Xcode/supporting-associated-domains),
+  [Allowing apps and websites to link to your
+  content](https://developer.apple.com/documentation/xcode/allowing-apps-and-websites-to-link-to-your-content/),
+  and
+  [`universalLinksOnly`](https://developer.apple.com/documentation/uikit/uiapplication/openexternalurloptionskey/universallinksonly).
+- OpenID Foundation, [OpenID for Verifiable Presentations
+  1.0](https://openid.net/specs/openid-4-verifiable-presentations-1_0-final.html),
+  used only as an informative precedent for same-device invocation,
+  nonce/audience binding, replay, and session-mix-up analysis. SPEC-004 does
+  not claim OpenID4VP conformance.
+
 Standards constraints that are easy to miss:
 
 - RFC 7565 identifies an account at a provider; it does not define how to
@@ -2351,6 +3085,18 @@ Standards constraints that are easy to miss:
 - Bitstring Status List requires at least 131,072 bits and can itself create
   correlation through status identifiers and retrieval behavior; in this
   profile it is a derivative projection, never the Selfsame source of truth.
+- Android App Links and Apple Universal Links bind an HTTPS origin to an
+  installed app/route; neither authenticates the complete application-account
+  enrollment statement, so CON-214 remains independently required.
+- An immutable Android `PendingIntent` prevents field injection and a one-shot
+  capability prevents replay; an implicit or mutable capability is not
+  equivalent.
+- Apple's `universalLinksOnly` option makes absence of an associated installed
+  app a dispatch failure. Opening the same URL with ordinary web fallback would
+  disclose the link capability outside the permitted handoff boundary.
+- RFC 8252 warns that public native clients cannot keep distributed secrets and
+  that private-use schemes can be claimed by another app. SPEC-004 therefore
+  uses no app-embedded authenticator and gives a custom scheme no authority.
 
 The informative
 [functional prior-art survey](../docs/selfsame-functional-prior-art.md)
@@ -2361,6 +3107,20 @@ combination; that is an engineering conclusion, not a legal novelty claim.
 
 ## Changelog
 
+- **0.5.0 — 2026-07-30 — draft, normative.** Adds the same-device mobile path
+  for a developer app and Selfsame wallet installed on one phone. The OS
+  handoff replaces self-scanning but deliberately reuses the existing
+  transcript, rendezvous offer/bundle, verifier predicate, and separate
+  `did:crdt` state-publication path. Defines layered, origin-signed application
+  enrollment evidence; verified wallet dispatch; a non-authoritative callback;
+  fresh-ceremony failure semantics; and Android/Apple conformance boundaries.
+  Replaces the former threat table with an explicit protected-asset,
+  trust-boundary, adversary-capability, authorization-chain, MITM-invariant,
+  security-goal, exclusion, residual-risk, and threat-to-control model. Adds
+  REQ-220–225, ADR-213–214, CON-214–215, and TEST-227–231; narrows OQ-207 to
+  the exact profile-origin/platform evidence; and updates CON-201, the
+  Orientation controls, happy paths, Tier-1 gate, traceability, amendment
+  channels, and sources.
 - **0.4.1 — 2026-07-30 — documentation-only.** Renumbers this document as
   [[SPEC-004-application-scoped-identity]] after
   [[SPEC-003-android-apk-distribution]] was allocated on `main`, and retargets
