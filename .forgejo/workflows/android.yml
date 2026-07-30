@@ -249,6 +249,7 @@ jobs:
             echo "The merged manifest declares permissions that are not on the" >&2
             echo "allowlist:" >&2
             echo "$extra" | sed 's/^/    /' >&2
+            echo "PERMISSIONS not on allowlist: $(echo $extra | tr '\n' ' ')" > /tmp/stage.err
             echo "" >&2
             echo "A dependency has widened what this app asks the OS for. Read" >&2
             echo "src-tauri/android-permissions.allow, decide whether the new" >&2
@@ -281,10 +282,12 @@ jobs:
           bytes=$(wc -c < "/tmp/$name")
           mb=$(( bytes / 1048576 ))
           echo "APK is ${mb} MiB (${bytes} bytes)"
+          echo "size: ${mb} MiB (${bytes} bytes)" > /tmp/size.txt
           echo "largest entries:"
           unzip -l "/tmp/$name" | sort -rn | head -4 | sed 's/^/    /'
           if [ "$bytes" -gt 83886080 ]; then
             echo "" >&2
+            echo "SIZE ${mb} MiB over the 80 MiB ceiling; largest: $(unzip -l "/tmp/$name" | sort -rn | sed -n 2p | awk '{print $1" "$4}')" > /tmp/stage.err
             echo "APK is ${mb} MiB, over the 80 MiB ceiling." >&2
             echo "Check whether debug info is back in lib/arm64-v8a/*.so —" >&2
             echo "the entry listing above says what grew. SPEC-003 OBS-203." >&2
@@ -345,7 +348,12 @@ jobs:
           set -uo pipefail
           # Preflight first: a missing secret is the likeliest failure and the
           # one a bare "Failing after 4s" explains least.
-          line=$(cat /tmp/preflight.err 2>/dev/null \
+          # Ordered most-specific first. A post-build failure used to report the
+          # *successful* build's last line, because this only ever read
+          # build.log — which is how a size-guard trip looked identical to a
+          # working build.
+          line=$(cat /tmp/stage.err 2>/dev/null \
+                 || cat /tmp/preflight.err 2>/dev/null \
                  || grep -A 4 '^\* What went wrong:' /tmp/build.log 2>/dev/null | tail -n +2 \
                  || tail -n 3 /tmp/build.log 2>/dev/null \
                  || echo "failed before the build step")
