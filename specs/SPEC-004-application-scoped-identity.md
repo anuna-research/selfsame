@@ -3,14 +3,14 @@ id: SPEC-004
 title: Application- and Account-Scoped Identity — deterministic home keys, acct aliases, portable device grants, and provider discovery
 status: draft
 tier: 1
-version: 0.5.0
+version: 0.6.0
 audience: agent, human, application developer, infrastructure provider
 author: Anuna Research (drafted with Codex, 2026-07-30)
 last-updated: 2026-07-30
 owner-repo: selfsame
 affects-repos: selfsame, anuna-ssi, did-crdt, adopting applications
-review-gate: not-approved — Tier-1; all ADRs are PROPOSED; cross-model adversarial review, independent KDF vectors, privacy review, and human security sign-off are outstanding
-depends-on: did:crdt Method Specification; PROTO-002 Selfsame Rendezvous Protocol v1; W3C VC Data Model 2.0; W3C VC JOSE/COSE; W3C DID Core 1.0; optional W3C Bitstring Status List 1.0 projection; RFC 7565; RFC 7033; RFC 3986; RFC 4648; RFC 5234; RFC 5869; RFC 7515; RFC 8032; RFC 8785
+review-gate: not-approved — Tier-1; all ADRs are PROPOSED; cross-model adversarial review, independent KDF/SPAKE2 vectors, privacy review, and human cryptography/security sign-off are outstanding
+depends-on: did:crdt Method Specification; PROTO-002 Selfsame Rendezvous Protocol v1; PROTO-003 Selfsame Pairing Protocol v1; W3C VC Data Model 2.0; W3C VC JOSE/COSE; W3C DID Core 1.0; optional W3C Bitstring Status List 1.0 projection; RFC 7565; RFC 7033; RFC 3986; RFC 4648; RFC 5234; RFC 5869; RFC 7515; RFC 8032; RFC 8785; RFC 9382; RFC 9496
 ---
 
 # SPEC-004 — Application- and Account-Scoped Identity
@@ -26,15 +26,19 @@ and issues a W3C Verifiable Credential that grants a particular device narrowly
 scoped access to that account in that application.
 
 **User promise.** A person who uses Selfsame in application A and application B
-SHALL scan, consent, and continue. They SHALL NOT select a rendezvous server,
-copy endpoints, import a second recovery phrase, or edit a configuration file.
-Application A and application B SHALL nevertheless see different home keys,
-different DIDs, different account aliases, different grants, and independently
-operated providers. If one application supports two signed-in accounts, its
-ordinary account switcher SHALL select the corresponding Selfsame identity
-without asking the person for a derivation index or Selfsame setting. The
-person MAY separately opt into one public, human-readable username for an
-account; it is never required to link, restore, or authorize a device.
+SHALL scan, consent, and continue. The cross-device fallback is the
+application's authenticated identity plus a short
+`<number>-<word>-<word>` code; the same-device path requires no scan or typing.
+They SHALL NOT select a rendezvous server, copy endpoints, import a second
+recovery phrase, or edit a configuration file. Application A and application B
+SHALL nevertheless see different home keys, different DIDs, different account
+aliases, different grants, independently operated providers, and
+application-bound pairing transcripts. If one application supports two
+signed-in accounts, its ordinary account switcher SHALL select the
+corresponding Selfsame identity without asking the person for a derivation
+index or Selfsame setting. The person MAY separately opt into one public,
+human-readable username for an account; it is never required to link, restore,
+or authorize a device.
 
 **Infrastructure promise.** The Selfsame project defines protocols, ships
 client libraries, supplies a reference server, and maintains conformance tests.
@@ -101,7 +105,13 @@ operator-neutral mailbox protocol the rendezvous compatibility boundary ·
 authorization reuse the existing ceremony, with OS handoff replacing only the
 scan ·
 [[SPEC-004-application-scoped-identity#ADR-214]] require layered application
-authentication before the wallet uses an application-account branch.
+authentication before the wallet uses an application-account branch ·
+[[SPEC-004-application-scoped-identity#ADR-215]] replace the long direct-secret
+manual code with two-word SPAKE2 ·
+[[SPEC-004-application-scoped-identity#ADR-216]] separate application/provider
+routing from the human PAKE password ·
+[[SPEC-004-application-scoped-identity#ADR-217]] compose the confirmed PAKE key
+with the existing blind mailbox.
 
 **Load-bearing.**
 [[SPEC-004-application-scoped-identity#REQ-201]] one secret produces a different
@@ -124,6 +134,14 @@ operator identity, determines rendezvous eligibility ·
 authorization requires no self-scan or typed code ·
 [[SPEC-004-application-scoped-identity#REQ-222]] no caller can use a public
 profile alone to obtain an application-account grant ·
+[[SPEC-004-application-scoped-identity#REQ-226]] every short human code uses
+SPAKE2 with mutual confirmation ·
+[[SPEC-004-application-scoped-identity#REQ-227]] many applications and
+providers route without a global directory or user endpoint configuration ·
+[[SPEC-004-application-scoped-identity#REQ-228]] the pairing provider remains a
+blind relay, not a PAKE endpoint ·
+[[SPEC-004-application-scoped-identity#REQ-229]] one failed pairing attempt
+burns the complete ceremony ·
 [[SPEC-004-application-scoped-identity#NFR-201]] application identities are
 pairwise unlinkable from their public data ·
 [[SPEC-004-application-scoped-identity#NFR-205]] all authorization checks fail
@@ -155,18 +173,28 @@ the Tier-1 gate in
 - Proof nonces are single-use and expire within 120 seconds.
 - Rendezvous probes have a per-endpoint deadline of at most 1500 ms.
 - Only providers passing
-  [[PROTO-002-selfsame-rendezvous-v1#CON-301]] are eligible; all mailbox use
-  then follows that protocol's bounded, blind, immutable contract.
-- A same-device ceremony secret is delivered only to an installed,
+  [[PROTO-003-selfsame-pairing-v1#CON-401]] and
+  [[PROTO-002-selfsame-rendezvous-v1#CON-301]] are eligible; the PAKE relay and
+  encrypted mailbox then follow their separate bounded contracts.
+- The canonical human code is
+  `<two-digit profile route><six-digit nameplate>-<BIP-39 word>-<BIP-39 word>`.
+  Its words are used only by end-to-end SPAKE2 with explicit confirmation.
+- A QR or same-device bootstrap carries the application ID, profile digest,
+  and the same human code. A bare code without application context is never
+  broadcast to candidate applications or providers.
+- A same-device pairing bootstrap is delivered only to an installed,
   platform-verified Selfsame wallet target; no browser or unverified custom
   scheme receives it.
 - Selfsame does not disclose branch existence, derive an existing branch, sign,
   publish, or write a grant until application enrollment evidence, the offer
   transcript, and available platform identity all agree.
 - A mobile completion callback is advisory and contains no grant, DID, account
-  scope, key, link code, provider secret, or verifier acceptance decision.
-- Ambiguous or failed delivery of ceremony material permanently abandons that
-  ceremony; retry starts with a fresh secret, offer, slots, and ciphertext.
+  scope, key, pairing bootstrap/code, provider secret, or verifier acceptance
+  decision.
+- Ambiguous or failed delivery, peer claim, SPAKE2 frame, or confirmation
+  permanently abandons that ceremony; retry starts with fresh words,
+  nameplate, role tokens, ephemerals, derived mailbox secret, offer, slots, and
+  ciphertext.
 
 ---
 
@@ -329,19 +357,26 @@ person to edit a URI, domain, DID document, or provider configuration.
 ### User links another device
 
 1. The initiating application supplies the active authenticated account scope,
-   creates the target device key and offer, then filters and probes the
-   providers in its embedded profile.
-2. It selects a healthy rendezvous endpoint, obtains CON-214 enrollment
-   evidence bound to the exact account, key, permission, provider, and offer,
-   and places that choice in the authenticated link-ceremony provider hint.
-3. The joining device scans the link code and follows the selected provider; it
-   does not run its own independent election.
-4. The phone verifies the application enrollment evidence and offer, shows
+   creates the target device key, offer, and CON-214 evidence, then filters and
+   probes the pairing-capable rendezvous providers in its embedded profile.
+2. It selects one descriptor, asks its PROTO-003 service for a provider-local
+   nameplate, generates two BIP-39 words and a fresh SPAKE2 role-A ephemeral,
+   writes `pA`, and displays a QR whose logical bootstrap contains the
+   application ID, profile digest, and the same
+   `<route><nameplate>-<word>-<word>` code shown as the manual fallback.
+3. The wallet scans the QR, or receives the exact application identity and
+   code through the manual path. It authenticates that application's profile,
+   follows the profile-local route, and runs SPAKE2 as role B through the
+   selected blind relay; it never runs an independent provider election.
+4. After both sides verify explicit confirmation MACs, they derive the
+   128-bit PROTO-002 mailbox secret from the PAKE key. The application writes
+   the encrypted offer and the wallet reads it.
+5. The wallet verifies the application enrollment evidence and offer, shows
    authenticated-origin consent, creates a random grant ID, and issues the
    device grant.
-5. The existing encrypted ceremony carries the VC as opaque
+6. The existing encrypted ceremony carries the VC as opaque
    `application/vc+jwt` bytes.
-6. The joining device proves possession of the `cnf` private key to the
+7. The joining device proves possession of the `cnf` private key to the
    application verifier.
 
 ### User authorizes an application on the same phone
@@ -352,38 +387,43 @@ device. It is not selected merely because Selfsame is installed: authorizing a
 laptop or other remote target continues to use the cross-device path above.
 
 1. The developer application authenticates its active account, creates a fresh
-   application-account-scoped device key, selects a conforming rendezvous,
-   constructs the ordinary offer, obtains the application enrollment evidence
-   in CON-214 bound to that provider and offer, writes the encrypted offer, and
-   begins polling the ordinary bundle slot.
-2. Instead of displaying that offer as a QR code, its Selfsame SDK passes the
-   existing one-time link code to the installed Selfsame wallet through the
-   platform adapter in CON-215. The adapter either reaches the verified wallet
-   app or returns `WalletUnavailable`; it never sends ceremony material to a
-   browser, clipboard, generic intent, unverified URL-scheme handler, install
-   page, analytics event, or notification.
-3. Selfsame reads and authenticates the same encrypted offer used by the
+   application-account-scoped device key, selects a pairing-capable
+   rendezvous descriptor, constructs the ordinary offer and application
+   enrollment evidence in CON-214, allocates the PROTO-003 nameplate, and
+   writes its SPAKE2 `pA`.
+2. Instead of displaying the QR, its Selfsame SDK passes the logical PROTO-003
+   bootstrap to the installed Selfsame wallet through the platform adapter in
+   CON-215. The adapter either reaches the verified wallet app or returns
+   `WalletUnavailable`; it never sends ceremony material to a browser,
+   clipboard, generic intent, unverified URL-scheme handler, install page,
+   analytics event, or notification.
+3. The two apps run the same end-to-end SPAKE2 exchange used cross-device,
+   through the selected provider. The provider is not a SPAKE2 endpoint.
+   After mutual confirmation, both derive the ordinary mailbox secret; the
+   developer app writes the encrypted offer and begins polling the bundle.
+4. Selfsame reads and authenticates the same encrypted offer used by the
    cross-device flow. Before showing consent, it verifies the application
    origin and enrollment evidence, the active application/account/device/offer
    bindings, expiry and one-time nonce, and every platform identity signal the
    adapter can securely provide.
-4. The consent screen names the authenticated application origin and account
+5. The consent screen names the authenticated application origin and account
    operation, the target device, and the exact requested permissions. A label
    supplied only by the calling app is never presented as verified identity.
-5. On approval, Selfsame derives or selects the application-account home,
+6. On approval, Selfsame derives or selects the application-account home,
    issues the device VC, publishes signed `did:crdt` state through the
    separately selected state service, and writes the encrypted grant to the
    existing rendezvous bundle slot. No DID delta is written to a rendezvous
    mailbox slot.
-6. The developer application receives and verifies the bundle through its
+7. The developer application receives and verifies the bundle through its
    already-running mailbox poll and then proves possession of the device key.
    An optional OS callback merely foregrounds that pending application
    session; it carries no credential or authority and cannot make a failed
    bundle pass.
-7. If secure wallet invocation is unavailable, ambiguous, intercepted, or
+8. If secure wallet invocation is unavailable, ambiguous, intercepted, or
    falls back toward the web, both apps abandon the ceremony. An install/help
-   action contains no ceremony material, and a later retry creates a fresh
-   secret, offer, slots, ciphertext, enrollment nonce, and evidence.
+   action contains no ceremony material, and a later retry creates fresh
+   words, nameplate, tokens, SPAKE2 ephemerals, mailbox secret, offer, slots,
+   ciphertext, enrollment nonce, and evidence.
 
 The person taps **Continue in Selfsame**, reviews consent, and returns. They do
 not scan their own screen, type a code, choose a server, or grant a mobile link
@@ -622,9 +662,12 @@ availability exception.
 
 The initiating client SHALL select a provider using
 [[SPEC-004-application-scoped-identity#CON-208]]. A descriptor becomes eligible
-only by passing the capability contract in
+only by passing both capability contracts in
+[[PROTO-003-selfsame-pairing-v1#CON-401]] and
 [[PROTO-002-selfsame-rendezvous-v1#CON-301]]. The person SHALL NOT be asked to
-type, paste, scan, or choose an endpoint during the normal path.
+type, paste, scan, or choose an endpoint during the normal path. Scanning a QR
+or entering the application's identity and short pairing code is ceremony
+bootstrap, not endpoint selection.
 
 The UI MAY show the selected operator and privacy policy and MAY expose an
 advanced administrator policy. Such visibility SHALL NOT turn an
@@ -672,8 +715,10 @@ digest in the authenticated provider hint defined by
 The joining client SHALL follow that choice for the in-progress ceremony. It
 SHALL NOT independently select a different rendezvous. If the selected
 provider becomes unavailable, the initiator SHALL abandon that ceremony and
-create a fresh secret, slots, offer, ciphertext, and authenticated hint before
-either party moves, as required by
+create fresh material before either party moves. Fresh material includes the
+two words, nameplate, role tokens, SPAKE2 ephemerals and confirmations, derived
+mailbox secret, offer, slots, ciphertext, and authenticated hint, as required by
+[[PROTO-003-selfsame-pairing-v1#REQ-406]] and
 [[PROTO-002-selfsame-rendezvous-v1#REQ-307]].
 
 Trace: [[SPEC-004-application-scoped-identity#TEST-218]],
@@ -706,7 +751,8 @@ needs only:
    publication and a backend enrollment-signing key conforming to CON-214;
 5. for same-device mobile, the Android and/or Apple application bindings in
    CON-201 and CON-215;
-6. one or more providers conforming to
+6. one or more providers conforming to both
+   [[PROTO-003-selfsame-pairing-v1]] and
    [[PROTO-002-selfsame-rendezvous-v1]];
 7. one or more state resolvers or peer paths that exchange complete,
    causally valid `did:crdt` signed closures and revocation deltas;
@@ -717,9 +763,9 @@ A developer MAY additionally deploy a W3C Bitstring Status List projection
 host. That optional service does not participate in core issuance, linking,
 revocation authority, or Selfsame authorization.
 
-The reference implementation SHALL expose the black-box PROTO-002 conformance
-suite and the end-to-end profile suite so either can run without contacting
-Anuna infrastructure.
+The reference implementation SHALL expose the black-box PROTO-002 and
+PROTO-003 conformance suites and the end-to-end profile suite so each can run
+without contacting Anuna infrastructure.
 
 Trace: [[SPEC-004-application-scoped-identity#TEST-220]],
 [[SPEC-004-application-scoped-identity#TEST-226]],
@@ -815,20 +861,25 @@ functionality of Selfsame.
 
 Trace: [[SPEC-004-application-scoped-identity#TEST-225]]
 
-### REQ-219: Protocol conformance determines rendezvous eligibility
+### REQ-219: Protocol conformance determines pairing and rendezvous eligibility
 
 A rendezvous descriptor naming `selfsame-rendezvous-v1` SHALL be eligible only
-when its URL is canonical and its bounded capability probe passes
-[[PROTO-002-selfsame-rendezvous-v1#CON-301]]. After selection, both clients and
-the operator SHALL use
+when its mailbox URL is canonical, its pairing fields conform to
+[[PROTO-003-selfsame-pairing-v1#CON-401]], and both bounded capability probes
+pass. After selection, both clients and the operator SHALL use
+[[PROTO-003-selfsame-pairing-v1#CON-402]] through
+[[PROTO-003-selfsame-pairing-v1#CON-408]] for pairing and
 [[PROTO-002-selfsame-rendezvous-v1#CON-302]] through
 [[PROTO-002-selfsame-rendezvous-v1#CON-308]] for every mailbox operation.
 Operator identity, commercial relationship, co-location with a state resolver,
 or an Anuna allowlist SHALL NOT substitute for protocol conformance.
 
-Changing providers after any slot request has been sent or a hint has been
-published SHALL abandon the prior ceremony and create a fresh secret, slots,
-offer, ciphertext, and authenticated hint as required by
+Changing providers after a PROTO-003 session is allocated, any pairing frame
+or mailbox request has been sent, or a bootstrap/hint has been published SHALL
+abandon the prior ceremony and create fresh words, nameplate, tokens,
+ephemerals, derived secret, slots, offer, ciphertext, and authenticated hint as
+required by
+[[PROTO-003-selfsame-pairing-v1#REQ-406]] and
 [[PROTO-002-selfsame-rendezvous-v1#REQ-307]]. It SHALL NOT rotate or alter the
 application-account identity.
 
@@ -851,10 +902,11 @@ Trace: [[SPEC-004-application-scoped-identity#TEST-227]]
 ### REQ-221: Same-device handoff reuses one authorization ceremony
 
 The same-device path SHALL use the same fresh offer, application evidence,
-provider selection, rendezvous slots, encrypted grant bundle, acceptance
-predicate, device proof, and state-publication path as the cross-device
-ceremony; only delivery of the existing one-time link code to Selfsame and an
-optional non-authoritative UI return differ.
+provider selection, SPAKE2 roles and confirmation, derived rendezvous slots,
+encrypted grant bundle, acceptance predicate, device proof, and
+state-publication path as the cross-device ceremony; only delivery of the
+logical pairing bootstrap to Selfsame and an optional non-authoritative UI
+return differ.
 
 This prevents a platform adapter from becoming a second grant protocol with a
 different security state machine.
@@ -880,14 +932,15 @@ Trace: [[SPEC-004-application-scoped-identity#TEST-228]],
 
 ### REQ-223: Ceremony secrets do not cross an unverified mobile channel
 
-The invoking SDK SHALL NOT deliver a link code, ceremony secret, offer
-plaintext, account scope, device private key, grant, or decryption key through
-a generic/implicit intent, unverified custom URL scheme, browser or install-page
-fallback, clipboard, pasteboard, notification payload, analytics event, crash
-report, or application log.
+The invoking SDK SHALL NOT deliver a pairing code or bootstrap, word secret,
+role token, PAKE key, mailbox secret, offer plaintext, account scope, device
+private key, grant, or decryption key through a generic/implicit intent,
+unverified custom URL scheme, browser or install-page fallback, clipboard,
+pasteboard, notification payload, analytics event, crash report, or
+application log.
 
-The platform adapter may carry the link code only after it has constrained
-delivery to the installed wallet target as defined by
+The platform adapter may carry the pairing bootstrap only after it has
+constrained delivery to the installed wallet target as defined by
 [[SPEC-004-application-scoped-identity#CON-215]].
 
 Trace: [[SPEC-004-application-scoped-identity#TEST-229]],
@@ -913,12 +966,77 @@ Trace: [[SPEC-004-application-scoped-identity#TEST-231]]
 When the platform cannot prove delivery to the intended installed wallet, a
 browser or alternate handler is offered, the wallet reports a caller-binding
 mismatch, or the dispatch result is ambiguous, the SDK SHALL permanently
-abandon that ceremony and retry only with a fresh secret, offer, slots,
-ciphertext, request ID, enrollment evidence, and provider hint.
+abandon that ceremony and retry only with fresh words, nameplate, role tokens,
+SPAKE2 ephemerals, derived mailbox secret, offer, slots, ciphertext, request
+ID, enrollment evidence, and provider hint.
 
 An install or help link is a separate action containing no ceremony data.
 
 Trace: [[SPEC-004-application-scoped-identity#TEST-230]]
+
+### REQ-226: Every short human code uses SPAKE2
+
+The canonical human pairing code SHALL be the
+`<route><nameplate>-<word>-<word>` value defined by
+[[PROTO-003-selfsame-pairing-v1#CON-402]]. The two words SHALL be used only as
+the 22-bit password input to the end-to-end SPAKE2 construction in
+[[PROTO-003-selfsame-pairing-v1#CON-403]] and
+[[PROTO-003-selfsame-pairing-v1#CON-404]].
+
+Both clients SHALL require explicit role-separated confirmation. No client
+SHALL treat the short code as a bearer key, feed it to the former direct-secret
+HKDF, omit SPAKE2, or accept a provider-generated peer confirmation.
+
+Trace: [[SPEC-004-application-scoped-identity#TEST-232]],
+[[SPEC-004-application-scoped-identity#TEST-233]]
+
+### REQ-227: Application context makes the short code routable
+
+The QR and same-device carriers SHALL convey the logical bootstrap in
+[[PROTO-003-selfsame-pairing-v1#CON-402]], including the canonical
+`applicationId`, authenticated profile digest, and short code. A manual
+cross-device path SHALL additionally establish the exact application context
+unless the wallet already possesses it through an origin-authenticated
+ceremony channel.
+
+The route digits SHALL select only within that application's authenticated
+profile. A bare code SHALL NOT be interpreted globally, broadcast, resolved by
+an operator registry, or tried against historic/undeclared providers. Missing
+application context fails as `MissingApplicationContext` without a network
+request.
+
+Trace: [[SPEC-004-application-scoped-identity#TEST-234]],
+[[SPEC-004-application-scoped-identity#TEST-235]]
+
+### REQ-228: The pairing provider is not a trust anchor
+
+The application and wallet SHALL be the two SPAKE2 endpoints. The selected
+provider SHALL conform to the blind relay boundary in
+[[PROTO-003-selfsame-pairing-v1#REQ-404]] and SHALL receive no word, word
+index, password-equivalent verifier, PAKE key, mailbox key, offer/grant
+plaintext, DID, account scope, or authorization decision.
+
+A provider may operate both pairing and PROTO-002 services, but co-location
+confers no application, account, DID-state, credential, or PAKE authority.
+
+Trace: [[SPEC-004-application-scoped-identity#TEST-233]],
+[[SPEC-004-application-scoped-identity#TEST-235]]
+
+### REQ-229: One failed pairing attempt burns every dependent value
+
+The application and wallet SHALL each lock one peer under
+[[PROTO-003-selfsame-pairing-v1#CON-407]]. A wrong word, conflicting claim,
+invalid point, confirmation mismatch, frame fork, timeout, carrier mismatch,
+ambiguous post-display request, or provider change SHALL permanently abandon
+the complete pairing and grant ceremony.
+
+A retry SHALL generate new words, numeric code, provider session, role tokens,
+SPAKE2 ephemerals, derived mailbox secret, offer, slots, ciphertext, request
+ID, ceremony ID, enrollment evidence, and provider hint. The wallet SHALL
+evaluate at most one initiator confirmation per minted ceremony.
+
+Trace: [[SPEC-004-application-scoped-identity#TEST-233]],
+[[SPEC-004-application-scoped-identity#TEST-235]]
 
 ## Non-functional requirements
 
@@ -947,8 +1065,10 @@ At least two independent implementations SHALL reproduce every normative KDF,
 application ID, account-scope validation, opaque alias, username grammar,
 grant-ID, JWK, JWS, revocation-delta, challenge, and provider-selection test
 vector, plus every application-enrollment and mobile-handoff vector,
-byte-for-byte before the Tier-1 gate closes. PROTO-002's capability, slot,
-HTTP, expiry, and retry vectors are part of this portability gate.
+byte-for-byte before the Tier-1 gate closes. PROTO-003's code packing,
+binding, SPAKE2 messages, confirmations, relay, and mailbox-secret vectors and
+PROTO-002's capability, slot, HTTP, expiry, and retry vectors are part of this
+portability gate.
 
 ### NFR-203: Data minimization
 
@@ -973,17 +1093,19 @@ authorization decisions are made.
 Malformed profiles, aliases, DID closures, revocation state, JWKs, VCs, JWS
 headers, enrollment statements, platform bindings, mobile handoffs, callbacks,
 status projections, permission sets, challenges, provider hints, rendezvous
-capabilities, or mailbox responses SHALL produce a typed failure and no
-authenticated session.
+capabilities, pairing bootstraps, short codes, routes, nameplates, SPAKE2
+points, confirmations, role tokens, relay responses, or mailbox responses
+SHALL produce a typed failure and no authenticated session.
 
 There SHALL be no TOFU path for issuer keys, projection issuers, account
 authorities, or provider descriptors.
 
 ### NFR-206: Provider diversity
 
-The protocol SHALL permit the account, rendezvous, state, and optional
-status-projection roles to be operated by different organizations. No wire
-identifier SHALL assume they share a DNS origin or deployment stack.
+The protocol SHALL permit the account, pairing, rendezvous, state, and optional
+status-projection roles to be operated by different organizations. A selected
+descriptor may bind separate pairing and mailbox origins, but no wire
+identifier SHALL assume any other roles share a DNS origin or deployment stack.
 
 ### NFR-207: Selection latency
 
@@ -1247,11 +1369,12 @@ end-to-end ceremony property.
 **Status:** PROPOSED.
 
 When the target developer app and Selfsame wallet are on one phone, the
-platform handoff replaces only the physical act of scanning or typing the link
-code. The developer app still writes the offer and polls for the encrypted
-grant under [[PROTO-002-selfsame-rendezvous-v1]], while Selfsame still reads the
-offer, obtains consent, and writes the bundle. Signed `did:crdt` deltas continue
-through the separate state-publication role.
+platform handoff replaces only the physical act of scanning or typing the
+PROTO-003 bootstrap. The developer app and wallet still run the same
+application-to-wallet SPAKE2 exchange through the blind relay, derive the same
+PROTO-002 mailbox secret, exchange the encrypted offer/grant, and apply the
+same acceptance predicate. Signed `did:crdt` deltas continue through the
+separate state-publication role.
 
 This settles at the composition rung of the Simplicity Ladder: one ceremony,
 one acceptance predicate, one loss/retry model, and one adversarial test corpus
@@ -1299,6 +1422,68 @@ caller-supplied name or icon is rejected because it authenticates presentation,
 not authority. CON-214 fixes the logical statement and acceptance invariants;
 OQ-207 remains blocking for the exact cross-platform key-discovery, wire, and
 platform-evidence profiles.
+
+### ADR-215: Use two-word SPAKE2 for the human pairing code
+
+**Status:** PROPOSED.
+
+The human code is the
+`<two-digit route><six-digit nameplate>-<BIP-39 word>-<BIP-39 word>` value in
+[[PROTO-003-selfsame-pairing-v1]]. The two words provide 22 bits and are used
+only by end-to-end SPAKE2 with explicit role-separated confirmation and an
+N=1 burn-on-first-failure rule.
+
+The former 41-character Bech32m code correctly carried 128 random bits, but it
+made the accessibility fallback impractical. A two-word value cannot safely
+replace that secret inside the former direct HKDF: PAKE is mandatory whenever
+the short form is accepted. Conversely, maintaining separate high-entropy QR
+and low-entropy manual cryptographic ceremonies is rejected because it creates
+a downgrade boundary and duplicates the security state machine. QR, manual,
+and same-device paths therefore carry one logical SPAKE2 bootstrap.
+
+The existing Hark/cbcl-bus composition is reused at the primitive and UX
+levels. Its hub-as-SPAKE2-responder trust model is not reused.
+
+### ADR-216: Route within an authenticated application profile
+
+**Status:** PROPOSED.
+
+A bare Hark-style numeric nameplate works only when both peers already know one
+hub. Selfsame must support unrelated applications whose profiles name
+different providers. Version 1 therefore scopes the numeric component:
+
+```text
+number = two-digit profile route || six-digit provider nameplate
+```
+
+The QR and verified same-device carrier include the canonical application ID
+and profile digest. A manual path supplies the application identity beside the
+short code unless the wallet already has that authenticated context. The route
+then selects one descriptor only within that profile. Other applications may
+reuse every route and nameplate without collision because the PAKE transcript
+binds the application, profile, and complete descriptor.
+
+A global Selfsame provider directory, centrally allocated numeric prefixes,
+and code broadcast are rejected. They would make shared infrastructure or
+privacy-leaking fan-out necessary. A short code cannot by itself identify an
+arbitrary HTTPS endpoint; the separate application context is therefore a
+normative bootstrap requirement, not optional UX decoration.
+
+### ADR-217: Pair end to end, then reuse the blind mailbox
+
+**Status:** PROPOSED.
+
+The developer application is SPAKE2 role A and the Selfsame wallet is role B.
+The selected provider is only the bounded four-frame relay defined by
+[[PROTO-003-selfsame-pairing-v1]]. It stores no password-equivalent verifier
+and cannot impersonate a client merely by compromising provider storage.
+
+After mutual confirmation, both endpoints derive the existing 16-byte
+PROTO-002 mailbox secret from the PAKE key and bound transcript. Offer/grant
+AEAD, application enrollment evidence, consent, home signatures, VC
+validation, holder proof, and `did:crdt` state remain independent controls.
+Successful PAKE proves shared knowledge of the OOB words; it does not
+authenticate a developer origin or authorize a device by itself.
 
 ## Contracts
 
@@ -1350,6 +1535,9 @@ shape:
       "id": "au-primary",
       "url": "https://rendezvous-au.provider.example",
       "protocol": "selfsame-rendezvous-v1",
+      "pairingUrl": "https://pairing-au.provider.example",
+      "pairingProtocol": "selfsame-pairing-v1",
+      "pairingRoute": "03",
       "priority": 10,
       "weight": 80,
       "validUntil": "2027-07-30T00:00:00Z"
@@ -1358,6 +1546,9 @@ shape:
       "id": "global-secondary",
       "url": "https://rendezvous.example.net",
       "protocol": "selfsame-rendezvous-v1",
+      "pairingUrl": "https://pairing.example.net",
+      "pairingProtocol": "selfsame-pairing-v1",
+      "pairingRoute": "17",
       "priority": 20,
       "weight": 20,
       "validUntil": "2027-07-30T00:00:00Z"
@@ -1429,9 +1620,16 @@ verification in CON-215 authenticate it; field presence is not proof.
 Every provider ID MUST match `[a-z0-9][a-z0-9-]{0,62}` and be unique within its
 role. Every provider URL MUST be HTTPS, contain an authority, and contain no
 user information or fragment. A rendezvous `validUntil` value MUST be a UTC
-XML Schema `dateTimeStamp`; an expired descriptor is ineligible.
-Rendezvous URLs have the stricter canonical-origin grammar in
+XML Schema `dateTimeStamp`; an expired descriptor is ineligible. Rendezvous
+`url` values have the stricter canonical-origin grammar in
 [[PROTO-002-selfsame-rendezvous-v1#CON-301]] and MUST conform to it.
+
+Every rendezvous descriptor additionally MUST contain `pairingUrl`,
+`pairingProtocol`, and `pairingRoute` as defined by
+[[PROTO-003-selfsame-pairing-v1#CON-401]]. Pairing URLs use the same canonical
+origin grammar. Pairing routes are exactly two ASCII digits and unique within
+the profile; their numeric value has no global meaning. `pairingUrl` and `url`
+MAY have different origins and MAY be operated by different organizations.
 
 `revocation.method` MUST equal `did-crdt-revocations-v1` in profile version 1.
 The `projection` member is OPTIONAL. Its absence disables Bitstring projection
@@ -1439,8 +1637,9 @@ without disabling issuance or revocation. If present, its URLs identify only
 allocation and publication hosts: the application-account home DID remains the
 status-list credential issuer and authority under CON-210.
 
-For hashing in CON-209, the canonical descriptor bytes are the RFC 8785 JSON
-Canonicalization Scheme serialization of the complete rendezvous descriptor.
+For hashing in CON-209 and PROTO-003, the canonical descriptor bytes are the
+RFC 8785 JSON Canonicalization Scheme serialization of the complete rendezvous
+descriptor, including all three pairing fields.
 
 ### CON-202: Application and account key hierarchy
 
@@ -1838,7 +2037,7 @@ The verifier SHALL atomically mark the nonce used whether verification succeeds
 or fails. It SHALL reject a nonce issued for another application, account,
 grant, verifier session, or time window.
 
-### CON-208: Rendezvous provider selection
+### CON-208: Pairing-capable rendezvous provider selection
 
 For one link attempt, the initiator:
 
@@ -1846,17 +2045,21 @@ For one link attempt, the initiator:
 2. rejects expired, malformed, non-HTTPS, unsupported-protocol, or
    locally-forbidden descriptors;
 3. groups remaining descriptors by ascending numeric `priority`;
-4. probes all descriptors in the lowest-priority group concurrently with a
-   per-probe deadline of at most 1500 ms;
-5. forms the eligible set only from endpoints whose base URL and complete
-   capability response pass
+4. probes both pairing and mailbox capabilities for all descriptors in the
+   lowest-priority group concurrently with a per-probe deadline of at most
+   1500 ms;
+5. forms the eligible set only from descriptors whose pairing fields and
+   response pass [[PROTO-003-selfsame-pairing-v1#CON-401]] and whose mailbox
+   base URL and response pass
    [[PROTO-002-selfsame-rendezvous-v1#CON-301]];
 6. selects one eligible descriptor by cryptographically random weighted choice,
    where zero weight means ineligible;
 7. if none are eligible, repeats steps 4–6 with the next priority group; and
 8. if every group fails, returns `NoEligibleRendezvous`.
 
-Health responses are hints, not trust anchors. All ceremony confidentiality and
+Health responses are hints, not trust anchors. A descriptor supplies one
+profile-local route covering its bound pairing and mailbox services; the two
+URLs may have different operators. All ceremony confidentiality and
 authenticity remain end-to-end.
 
 Selection MUST NOT use a stable user identifier, home DID, `acct:` URI, device
@@ -1877,27 +2080,31 @@ The link ceremony SHALL bind this logical value:
 }
 ```
 
-The provider hint MUST be confidential until the joining device has the
-out-of-band link secret and MUST be authenticated as part of the same
-transcript that protects the offer and grant bundle.
+The provider hint MUST be confidential inside the post-PAKE encrypted offer and
+MUST be authenticated as part of the same transcript that protects the offer
+and grant bundle. Before that offer exists, the PROTO-003 binding already
+commits both clients to the application ID, profile digest, provider ID,
+complete descriptor digest, route, and nameplate.
 
 The hint SHALL NOT contain `accountScopeId`. The transcript-bound offer digest
 and encrypted grant bind the ceremony to the expected RFC 7565 account without
 disclosing the private derivation selector to the rendezvous provider.
 
-The concrete carrier MAY be the secret-derived discovery record already
-proposed by SPEC-001 ADR-014 or a future ceremony version with room in the
-out-of-band code. Whichever carrier is selected by the ceremony specification
-MUST preserve the logical fields and acceptance rules above.
+The provider hint's concrete carrier is the encrypted offer opened under the
+confirmed PAKE-derived mailbox secret. Provider discovery itself uses the
+logical bootstrap and profile-local route in
+[[SPEC-004-application-scoped-identity#CON-216]]. A secret-derived DHT record,
+global provider directory, and endpoint inside the human words are not
+version-1 carriers.
 
 The joiner verifies:
 
 - exact application ID;
 - a supported profile version;
-- provider ID present in its embedded profile;
+- provider ID selected by the route in its origin-authenticated profile;
 - descriptor digest equal to its local descriptor;
 - offer digest equal to the offer it is processing; and
-- transcript authentication before first use of the endpoint.
+- PROTO-003 binding and confirmation before deriving or using a mailbox slot.
 
 ### CON-210: CRDT revocation and optional status projection
 
@@ -2056,21 +2263,26 @@ No set, rename, removal, reservation, or tombstone operation changes
 `accountScopeId`, the home DID, any key, the stable alias, existing grant IDs,
 VCs, device proofs, revocation G-Set entries, or provider selection.
 
-### CON-213: Rendezvous protocol binding
+### CON-213: Pairing and rendezvous protocol binding
 
 For profile version 1, a rendezvous descriptor is recognized only when:
 
 1. `protocol` is exactly `selfsame-rendezvous-v1`;
 2. `url` is a canonical base URL under
    [[PROTO-002-selfsame-rendezvous-v1#CON-301]];
-3. the descriptor passes expiry, local policy, priority, and weight checks in
+3. `pairingProtocol`, `pairingUrl`, and `pairingRoute` pass
+   [[PROTO-003-selfsame-pairing-v1#CON-401]];
+4. the descriptor passes expiry, local policy, priority, and weight checks in
    [[SPEC-004-application-scoped-identity#CON-208]]; and
-4. a bounded `GET /healthz` returns a capability object accepted by
+5. bounded pairing and mailbox probes return capability objects accepted by
+   [[PROTO-003-selfsame-pairing-v1#CON-401]] and
    [[PROTO-002-selfsame-rendezvous-v1#CON-301]].
 
-The selected descriptor's exact base URL is the only rendezvous origin for
-that ceremony. The clients derive fresh offer and bundle slots and perform all
-mailbox requests under
+The selected descriptor's exact `pairingUrl` is the only PAKE relay origin and
+its exact `url` is the only mailbox origin for that ceremony. Clients perform
+pairing under [[PROTO-003-selfsame-pairing-v1#CON-402]] through
+[[PROTO-003-selfsame-pairing-v1#CON-408]], derive fresh offer and bundle slots
+only after mutual confirmation, and perform all mailbox requests under
 [[PROTO-002-selfsame-rendezvous-v1#CON-302]] through
 [[PROTO-002-selfsame-rendezvous-v1#CON-308]]. They reject redirects,
 credentials, cookies, content encoding, oversized responses, unrecognized
@@ -2080,18 +2292,21 @@ another endpoint or protocol.
 The authenticated hint in
 [[SPEC-004-application-scoped-identity#CON-209]] binds the exact descriptor
 digest, so a joiner never accepts a health response or redirect as a provider
-substitution. If the selected provider fails after any slot request or hint
-publication, both parties abandon its ceremony state. A newly selected provider
-receives a new secret, slots, offer, ciphertext, and hint; no mailbox record is
-copied.
+substitution. If the selected provider fails after a pairing session is
+allocated, a bootstrap is displayed, or any frame/slot request is sent, both
+parties abandon its ceremony state. A newly selected descriptor receives new
+words, number, session, role tokens, SPAKE2 ephemerals, mailbox secret, slots,
+offer, ciphertext, and hint; no frame or mailbox record is copied.
 
-A rendezvous descriptor supplies no DID-state, account-authority, or
+A pairing/rendezvous descriptor supplies no DID-state, account-authority, or
 status-projection endpoint. Those roles require their own profile descriptors
 and protocols even when one operator or DNS origin implements several roles.
 
-Implements: REQ-209, REQ-210, REQ-212, REQ-214, REQ-219.
+Implements: REQ-209, REQ-210, REQ-212, REQ-214, REQ-219, REQ-226, REQ-228,
+REQ-229.
 
-Verified by: TEST-214, TEST-215, TEST-216, TEST-218, TEST-220, TEST-226.
+Verified by: TEST-214, TEST-215, TEST-216, TEST-218, TEST-220, TEST-226,
+TEST-232, TEST-233, TEST-235.
 
 ### CON-214: Application enrollment evidence
 
@@ -2196,22 +2411,26 @@ CON-213, and CON-214 before invoking Selfsame. The closed logical handoff is:
   "handoffVersion": 1,
   "mode": "same-device",
   "ceremonyId": "<same 32-byte identifier as CON-214>",
-  "applicationId": "https://photos.example/selfsame/application",
-  "profileDigest": "<same digest as CON-214>",
   "offerDigest": "<same digest as CON-214>",
-  "linkCode": "<existing one-time Selfsame link code>",
+  "pairingBootstrap": {
+    "version": 1,
+    "applicationId": "https://photos.example/selfsame/application",
+    "profileDigest": "<same digest as CON-214>",
+    "code": "03482715-rocket-anchor"
+  },
   "returnUri": "https://photos.example/.well-known/selfsame/return"
 }
 ```
 
-The recognizer accepts exactly the first six members and the optional seventh
+The recognizer accepts exactly the first five members and the optional sixth
 `returnUri` member, in the shown order, after the platform adapter has
 delivered a typed value. It does not extract fields with regular expressions
-or act on a partial parse. The inherited application ID, base64url,
-offer-digest, link-code, and HTTPS URI grammars apply. When present,
-`returnUri` is exact-string equal to the URI in CON-214, has no user
-information or fragment, and is declared by the authenticated platform
-binding.
+or act on a partial parse. `pairingBootstrap` passes
+[[PROTO-003-selfsame-pairing-v1#CON-402]] and its application/profile values
+equal CON-214 exactly. The inherited base64url, offer-digest, and HTTPS URI
+grammars apply. When present, `returnUri` is exact-string equal to the URI in
+CON-214, has no user information or fragment, and is declared by the
+authenticated platform binding.
 
 The SDK chooses the same-device path only after the adapter positively
 identifies an installed wallet conformance target:
@@ -2229,11 +2448,13 @@ identifies an installed wallet conformance target:
   for CON-214. Declaring itself equivalent is insufficient; its conformance
   suite and threat analysis must land in a new spec revision.
 
-After dispatch, the developer app keeps polling the existing bundle slot.
-Selfsame uses `linkCode` to enter the ordinary offer/grant ceremony, applies
-CON-214 before consent, and returns the grant only through the encrypted
-rendezvous bundle. State deltas are submitted through the profile's state
-resolver role, never through a `/rendezvous/{slot}` record.
+After dispatch, both apps run PROTO-003 through the selected `pairingUrl`.
+Only after mutual confirmation do they derive the PROTO-002 mailbox slots.
+The developer app then writes the encrypted offer and polls the bundle.
+Selfsame applies CON-214 before consent and returns the grant only through the
+encrypted rendezvous bundle. State deltas are submitted through the profile's
+state resolver role, never through a pairing frame or `/rendezvous/{slot}`
+record.
 
 An optional platform return contains exactly:
 
@@ -2246,8 +2467,9 @@ An optional platform return contains exactly:
 ```
 
 `outcome` is one of `completed`, `cancelled`, or `failed`. This object contains
-no link code, secret, provider, profile digest, offer digest, account scope,
-DID, alias, key, credential, ciphertext, permission, or error detail. It is
+no pairing code/bootstrap, word, token, PAKE/mailbox key, provider, profile
+digest, offer digest, account scope, DID, alias, key, credential, ciphertext,
+permission, or error detail. It is
 accepted only to foreground a locally pending ceremony with the same
 `ceremonyId`; it does not stop polling, supply grant data, or alter the
 acceptance result.
@@ -2259,9 +2481,102 @@ ambiguous post-dispatch condition, abandons the ceremony under REQ-225.
 Installation/help UI is then offered separately with no ceremony value.
 
 Implements: REQ-209, REQ-211, REQ-212, REQ-220, REQ-221, REQ-222, REQ-223,
-REQ-224, REQ-225.
+REQ-224, REQ-225, REQ-226, REQ-227, REQ-229.
 
-Verified by: TEST-218, TEST-227, TEST-228, TEST-229, TEST-230, TEST-231.
+Verified by: TEST-218, TEST-227, TEST-228, TEST-229, TEST-230, TEST-231,
+TEST-232, TEST-235.
+
+### CON-216: Cross-application pairing bootstrap and routing
+
+The initiating application creates the logical bootstrap and canonical QR
+payload in [[PROTO-003-selfsame-pairing-v1#CON-402]] only after:
+
+1. CON-208 selects one descriptor and both capability probes pass;
+2. the provider allocates its six-digit nameplate;
+3. the application generates two uniformly random BIP-39 word indices and
+   combines the descriptor's exact `pairingRoute` with that nameplate;
+4. the complete PROTO-003 binding is constructed from the authenticated
+   profile and selected descriptor; and
+5. the provider acknowledges the immutable `pA` write.
+
+The application renders the canonical QR and the same human code. It SHALL
+also render the authenticated application origin beside a manual fallback; it
+SHALL NOT render or ask the person to copy the pairing or mailbox URL.
+
+On receipt, the wallet:
+
+1. parses the closed bootstrap before network use;
+2. obtains the exact profile through the origin-authenticated
+   `applicationId` mechanism required by OQ-207;
+3. requires its RFC 8785 SHA-256 digest to equal `profileDigest`;
+4. splits the eight digits into a two-digit route and six-digit nameplate;
+5. resolves the route to exactly one unexpired descriptor in that profile;
+6. re-runs both bounded capability checks; and
+7. constructs the same PROTO-003 binding before claiming the session.
+
+Zero or multiple matching routes return `PairingRouteMismatch`. A bare code
+without application context returns `MissingApplicationContext` with no
+network request. A changed profile digest, provider descriptor, route,
+nameplate, or protocol returns a fresh-ceremony failure; the wallet never
+repairs, guesses, broadcasts, or falls back.
+
+Implements: REQ-209, REQ-210, REQ-212, REQ-219, REQ-226, REQ-227.
+
+Verified by: TEST-214, TEST-216, TEST-218, TEST-226, TEST-232, TEST-234,
+TEST-235.
+
+### CON-217: SPAKE2-to-mailbox composition
+
+The application is PROTO-003 role A and Selfsame is role B. They execute the
+closed state machine in
+[[PROTO-003-selfsame-pairing-v1#CON-403]] through
+[[PROTO-003-selfsame-pairing-v1#CON-407]]. Neither may display consent, derive
+an application branch, request a mailbox slot, or send an offer/grant before
+the confirmation required for its role succeeds.
+
+After mutual confirmation, both derive `mailbox_secret_16` under
+[[PROTO-003-selfsame-pairing-v1#CON-408]]. That value becomes the only
+`secret_16` for PROTO-002 slot derivation. The application then encrypts and
+writes the ordinary offer; the wallet reads and authenticates it, applies
+CON-214, obtains consent, and writes the encrypted grant bundle.
+
+The encrypted transcript binds `binding_hash`, the provider hint in CON-209,
+offer digest, ceremony/request IDs, application/account, device key,
+permission set, and enrollment evidence. A valid PAKE confirmation is
+necessary transport authentication but is never sufficient application
+authentication or authorization.
+
+Implements: REQ-211, REQ-212, REQ-219, REQ-221, REQ-222, REQ-226, REQ-228.
+
+Verified by: TEST-217, TEST-218, TEST-226, TEST-227, TEST-228, TEST-229,
+TEST-233, TEST-235.
+
+### CON-218: Pairing failure and downgrade closure
+
+Every condition enumerated by
+[[PROTO-003-selfsame-pairing-v1#REQ-406]] or REQ-225/REQ-229 moves the local
+ceremony directly to terminal `burned`. A burned ceremony accepts no new
+frame, confirmation, profile, provider, carrier, callback, mailbox record, or
+application evidence.
+
+The following modes are not version-1 alternatives and return
+`PairingDowngrade`:
+
+- deriving an AEAD or mailbox secret directly from either word, `wib`, or the
+  human code;
+- omitting either confirmation MAC;
+- making the provider a SPAKE2 responder or password-verifier holder;
+- using Hark/cbcl-bus transcript labels without Selfsame binding;
+- treating the QR as an authoritative browser/custom-scheme URL;
+- accepting a bare code by searching providers; or
+- changing provider or carrier while retaining any ceremony value.
+
+The only retry transition is `burned -> new ceremony`, with every value listed
+in REQ-229 regenerated.
+
+Implements: REQ-223, REQ-225, REQ-226, REQ-227, REQ-228, REQ-229.
+
+Verified by: TEST-229, TEST-230, TEST-232, TEST-233, TEST-234, TEST-235.
 
 ## Test specifications
 
@@ -2354,22 +2669,25 @@ no method operation or merge can make `is_revoked(id)` false.
 
 Exercise priority, weight, bounded parallel probes, incompatible protocol,
 timeouts, unhealthy endpoints, malformed descriptors, and total failure.
-Against the PROTO-002 capability oracle, reject a plain `ok` body, unknown or
-duplicate JSON members, wrong semantics, a 4 KiB maximum, redirects,
-compression, wrong media type, oversized response, and a response arriving
-after 1500 ms. No rejected descriptor may enter the weighted choice.
+Against both PROTO-003 and PROTO-002 capability oracles, reject a plain `ok`
+body, unknown or duplicate JSON members, wrong fixed semantics, a 4 KiB
+mailbox maximum, invalid/duplicate pairing routes, redirects, compression,
+wrong media type, oversized response, and a response arriving after 1500 ms.
+No descriptor failing either service may enter the weighted choice.
 
 ### TEST-215: One initiator, one selection
 
 Give two devices different health observations and profile revisions. Confirm
-that the joiner follows only a valid initiator hint and never starts a second
-election for the same ceremony.
+that the joiner follows only the route and descriptor bound by the valid
+initiator bootstrap/hint and never starts a second election for the same
+ceremony.
 
 ### TEST-216: No global fallback
 
 Build a release client with an empty or wholly unhealthy profile. Assert that
 no DNS lookup or connection targets an Anuna/Selfsame endpoint and that the
-operation ends as `NoEligibleRendezvous`.
+operation ends as `NoEligibleRendezvous`. Give a wallet a bare
+`number-word-word` code and likewise require zero network fan-out.
 
 ### TEST-217: Opaque transport
 
@@ -2379,9 +2697,10 @@ independent non-CBCL verifier.
 
 ### TEST-218: Provider-hint integrity
 
-Alter application ID, profile version, provider ID, descriptor digest, offer
-digest, ciphertext, and authentication tag separately. Every alteration is
-rejected before grant retrieval.
+Alter application ID, profile version/digest, provider ID, pairing route,
+nameplate, descriptor digest, offer digest, SPAKE2 binding/confirmation,
+ciphertext, and authentication tag separately. Every alteration is rejected
+before grant retrieval.
 
 ### TEST-219: Provider-independent recovery
 
@@ -2392,11 +2711,11 @@ node, and home key do not change.
 ### TEST-220: Independent developer conformance
 
 Run a complete issue-link-verify-revoke flow using only third-party account,
-rendezvous, and state services. The rendezvous first passes the independent
-PROTO-002 black-box suite. Exercise two accounts in the same application,
-disable Bitstring projection, block all Anuna domains, and require both flows
-to pass. Repeat with a third-party projection host and require identical
-Selfsame authorization results.
+pairing, rendezvous, and state services. The pairing/rendezvous pair first
+passes the independent PROTO-003 and PROTO-002 black-box suites. Exercise two
+accounts in the same application, disable Bitstring projection, block all
+Anuna domains, and require both flows to pass. Repeat with a third-party
+projection host and require identical Selfsame authorization results.
 
 ### TEST-221: Device-key separation
 
@@ -2465,23 +2784,29 @@ removal and reject later reassignment. Confirm byte identity of all home keys,
 DIDs, stable aliases, grants, proofs, and revocation entries before and after
 each username operation.
 
-### TEST-226: Rendezvous protocol integration and failover
+### TEST-226: Pairing and rendezvous protocol integration and failover
 
-**Validates:** REQ-209, REQ-210, REQ-212, REQ-214, REQ-219, CON-208,
-CON-209, CON-213.
+**Validates:** REQ-209, REQ-210, REQ-212, REQ-214, REQ-219, REQ-226–229,
+CON-208, CON-209, CON-213, CON-216–218.
 
-Run [[PROTO-002-selfsame-rendezvous-v1#TEST-301]] through
+Run [[PROTO-003-selfsame-pairing-v1#TEST-401]] through
+[[PROTO-003-selfsame-pairing-v1#TEST-412]] and
+[[PROTO-002-selfsame-rendezvous-v1#TEST-301]] through
 [[PROTO-002-selfsame-rendezvous-v1#TEST-310]] against two independently
-implemented providers, then complete the same application-account ceremony
-through each. Confirm selection uses only a conforming capability response and
-all traffic remains on the descriptor origin.
+implemented provider pairs, then complete the same application-account
+ceremony through each. Confirm selection requires both capability responses,
+SPAKE2 stays end to end, and pairing/mailbox traffic remains on the two exact
+descriptor origins.
 
-Make the first provider unavailable once after an unacknowledged initial slot
-request and once after publishing its authenticated provider hint, then select
-the second. In both cases require a new secret, offer slot, bundle slot, offer,
-ciphertext, descriptor digest, and hint. Require no shared slot or ciphertext
-across the two operators and no change to the application-account node, home
-key, DID, stable alias, account scope, grant semantics, or `did:crdt` state.
+Make the first provider unavailable after allocation, after `pA`, after `pB`,
+after each confirmation, after an unacknowledged initial slot request, and
+after publishing its authenticated provider hint, then select the second. In
+every post-allocation case require new words, number, nameplate, role tokens,
+SPAKE2 ephemerals/frames, derived secret, offer slot, bundle slot, offer,
+ciphertext, descriptor digest, and hint. Require no shared frame, slot, or
+ciphertext across operators and no change to the application-account node,
+home key, DID, stable alias, account scope, grant semantics, or `did:crdt`
+state.
 
 Deploy a state resolver beside the first rendezvous and at a separate origin in
 turn. Neither arrangement may change mailbox traffic or make the selected
@@ -2498,16 +2823,18 @@ through a tap-to-Selfsame handoff, with the target app holding the device
 private key and polling the selected rendezvous throughout.
 
 The positive test requires no QR render, camera permission, typed/pasted code,
-endpoint chooser, or credential-sized OS callback. The wallet reads the
-ordinary offer, shows the authenticated application/account/device/permission
-consent, writes the ordinary encrypted bundle, and publishes signed DID state
+endpoint chooser, or credential-sized OS callback. The apps complete
+PROTO-003 with mutual confirmation, derive the same mailbox secret, exchange
+the ordinary encrypted offer/bundle, show authenticated
+application/account/device/permission consent, and publish signed DID state
 only to the separately selected state service. The app accepts through CON-206
 and proves the device key through CON-207.
 
 Repeat as a cross-device ceremony with fresh randomness. The platform traces
-differ only at link-code delivery and optional foreground return; provider
-selection, mailbox routes, accepted grant semantics, device proof, state
-publication, and failure decisions are otherwise equivalent.
+differ only at bootstrap delivery and optional foreground return; provider
+selection, SPAKE2 transcript, mailbox derivation, accepted grant semantics,
+device proof, state publication, and failure decisions are otherwise
+equivalent.
 
 ### TEST-228: Enrollment evidence acceptance and replay
 
@@ -2528,20 +2855,23 @@ other application and account unchanged.
 
 ### TEST-229: MITM, local-app substitution, and ceremony mix-up
 
-**Validates:** REQ-205, REQ-206, REQ-207, REQ-222, REQ-223, CON-206, CON-209,
-CON-214, CON-215.
+**Validates:** REQ-205, REQ-206, REQ-207, REQ-222, REQ-223, REQ-226–229,
+CON-206, CON-209, CON-214 through CON-218.
 
-Place an adversary on every network path and give it control of the rendezvous,
-one state resolver, a second installed mobile app, all callback/link parameters,
-and caller-supplied name/icon metadata. It does not control the OS, recovery
-secret, developer enrollment-signing key, or target device private key.
+Place an adversary on every network path and give it control of the pairing
+relay, rendezvous, one state resolver, a second installed mobile app, all
+callback/bootstrap parameters, and caller-supplied name/icon metadata. It does
+not control the OS, recovery secret, developer enrollment-signing key, human
+code before use, or target device private key.
 
 Mutate application ID, profile digest, account scope, device key digest,
 permission set, provider ID, descriptor digest, offer digest, request ID,
-ceremony ID, platform binding, return URI, issue/expiry time, JWS protected
-header, offer ciphertext, provider hint, grant ciphertext, VC audience, and
-device proof one at a time. Then splice each valid value from application A,
-account A1, and ceremony C1 into B, A2, and C2 in every pairwise direction.
+ceremony ID, pairing route, nameplate, either word, either SPAKE2 point or
+confirmation, role label, platform binding, return URI, issue/expiry time, JWS
+protected header, offer ciphertext, provider hint, grant ciphertext, VC
+audience, and device proof one at a time. Then splice each valid value from
+application A, account A1, and ceremony C1 into B, A2, and C2 in every pairwise
+direction.
 
 Every mutation or splice is rejected before a home-key signature, delta
 publication, grant-bundle write, branch-existence disclosure, or verified
@@ -2564,10 +2894,12 @@ both platforms.
 
 The adapter never supplies ceremony material to any alternate target, web
 request, clipboard/pasteboard, notification, log, crash report, or analytics
-sink. It returns the closed CON-215 error, abandons the offer and both slots,
-and displays only a ceremony-free install/help action. A successful later
-attempt uses a different secret, request ID, ceremony ID, offer, slots,
-ciphertext, enrollment evidence, and hint. No abandoned value is reused.
+sink. It returns the closed CON-215 error, burns the PROTO-003 session and
+dependent offer/slots, and displays only a ceremony-free install/help action.
+A successful later attempt uses different words, number, nameplate, tokens,
+SPAKE2 ephemerals/frames, derived secret, request ID, ceremony ID, offer,
+slots, ciphertext, enrollment evidence, and hint. No abandoned value is
+reused.
 
 ### TEST-231: Completion callback is non-authoritative
 
@@ -2585,6 +2917,68 @@ authorizes; a lost callback with a valid bundle does not invalidate the grant.
 The serialized callback has exactly three fields and contains none of the
 secret or identity values prohibited by CON-215.
 
+### TEST-232: Short-code grammar, routing, and bootstrap
+
+**Validates:** REQ-226, REQ-227, ADR-215, ADR-216, CON-201, CON-216, CON-218.
+
+Run [[PROTO-003-selfsame-pairing-v1#TEST-402]],
+[[PROTO-003-selfsame-pairing-v1#TEST-408]], and
+[[PROTO-003-selfsame-pairing-v1#TEST-409]]. Require the example
+`03482715-account-clinic` to select route `03`, nameplate `482715`, and only the
+descriptor with `pairingRoute: "03"` in the authenticated application
+profile.
+
+Give the wallet the same code with no application context and require
+`MissingApplicationContext` with zero DNS/HTTP requests. Reuse the complete
+code across two applications and require different bindings, PAKE keys, and
+mailbox slots. Duplicate routes, global interpretation, provider broadcast,
+and an undeclared fallback all fail before a peer claim.
+
+### TEST-233: SPAKE2 confirmation, blind relay, and burn
+
+**Validates:** REQ-226, REQ-228, REQ-229, ADR-215, ADR-217, CON-217, CON-218.
+
+Run [[PROTO-003-selfsame-pairing-v1#TEST-403]] through
+[[PROTO-003-selfsame-pairing-v1#TEST-407]],
+[[PROTO-003-selfsame-pairing-v1#TEST-410]], and
+[[PROTO-003-selfsame-pairing-v1#TEST-411]]. The correct words produce mutual
+confirmation and one shared mailbox secret. Any wrong word, invalid point,
+changed binding, missing/wrong MAC, provider fork, reflection, race, retry, or
+downgrade produces no mailbox request or application-account side effect.
+
+Instrument the wallet to prove it evaluates at most one `cA` for a minted
+ceremony. Inspect provider state to prove it contains no password-equivalent
+verifier, PAKE/mailbox key, application/account identifier, offer, or grant.
+
+### TEST-234: Many-application manual routing
+
+**Validates:** REQ-227, ADR-216, CON-216, CON-218.
+
+Create three unrelated application IDs, each with at least two providers and
+overlapping two-digit routes. For each application, deliver its exact
+application identity and one human code without a QR. The wallet authenticates
+only that profile, selects only its routed descriptor, and completes pairing
+without user endpoint selection or Anuna infrastructure.
+
+Swap application identities, profile versions/digests, descriptors, or route
+assignments. Every swap fails confirmation or profile validation and burns the
+ceremony. The wallet never searches another application or provider.
+
+### TEST-235: Carrier equivalence and full authorization chain
+
+**Validates:** REQ-226–229, ADR-215–217, CON-214–218.
+
+Deliver equivalent fresh bootstraps by QR, manual application-context entry,
+and verified same-device handoff. Each path runs the same PROTO-003 roles and
+confirmation, derives a PROTO-002 mailbox secret, processes the same logical
+offer/grant fields, and requires the complete CON-206/CON-207 predicate.
+
+Then capture a complete correct code and successfully complete SPAKE2 while
+omitting or mutating developer enrollment evidence, consent, home signature,
+VC audience, holder key, device proof, or fresh `did:crdt` state. Require zero
+accepted grants. This distinguishes PAKE password knowledge from application
+or credential authority.
+
 ## Security and threat model
 
 The threat model is normative. A happy path that succeeds outside these
@@ -2598,8 +2992,9 @@ boundaries is a specification defect even if its signatures verify.
    application, including the private `accountScopeId`;
 3. the binding between the authenticated developer origin, active application
    account, target device key, requested permissions, and resulting grant;
-4. the ceremony secret, offer/grant plaintexts, enrollment evidence, provider
-   hint, transcript, and one-time identifiers;
+4. the human words, role tokens, SPAKE2 ephemerals/key, derived mailbox secret,
+   offer/grant plaintexts, enrollment evidence, provider hint, transcripts,
+   and one-time identifiers;
 5. device private keys and the authorization value of issued VCs;
 6. the completeness and freshness of signed `did:crdt` authorization and
    revocation state; and
@@ -2612,7 +3007,8 @@ This profile relies on:
 
 - platform-protected storage keeping the recovery secret and device private
   keys confidential;
-- BIP-39, HKDF-SHA-512, SHA-256, Ed25519, JWS, the selected AEAD, and their
+- BIP-39, ristretto255, SPAKE2, HKDF-SHA-256/HKDF-SHA-512,
+  HMAC-SHA-256, SHA-256/SHA-512, Ed25519, JWS, the selected AEAD, and their
   domain separation remaining secure for their stated uses;
 - the HTTPS `applicationId` origin and a backend enrollment-signing key
   authenticated through the mechanism that will close OQ-207;
@@ -2621,8 +3017,9 @@ This profile relies on:
   one-shot result capabilities used by CON-215;
 - the application authenticating its active account and preserving that
   account's immutable scope across normal account recovery;
-- TLS authenticating the account authority and selected service endpoint, while
-  end-to-end signatures and AEAD—not TLS—establish grant and DID-state truth;
+- TLS authenticating the account authority and selected service endpoints,
+  while end-to-end SPAKE2, signatures, and AEAD—not TLS—establish pairing,
+  grant, and DID-state truth;
 - the account authority truthfully reporting the account↔DID mapping in its own
   namespace; and
 - verifiers enforcing closure freshness and the complete CON-206 and CON-207
@@ -2635,8 +3032,9 @@ specification's Tier-1 gate remains closed.
 
 The following are explicitly untrusted:
 
-- the rendezvous operator, any state resolver, status-projection host, network
-  path, browser, URL handler, and completion-callback recipient;
+- the pairing and rendezvous operators, any state resolver,
+  status-projection host, network path, browser, URL handler, and
+  completion-callback recipient;
 - every caller-supplied application name, icon, package/bundle string, link
   parameter, profile, callback value, and error description; and
 - other applications and application accounts, including ones colluding with
@@ -2646,11 +3044,15 @@ The following are explicitly untrusted:
 
 The adversary may:
 
-- intercept, delay, drop, replay, reorder, duplicate, redirect, and mutate
-  network messages, and may operate a selected rendezvous or state service;
+- intercept, delay, drop, replay, reorder, duplicate, redirect, fork, and
+  mutate network messages, and may operate a selected pairing, rendezvous, or
+  state service;
+- enumerate or pre-claim public pairing nameplates, make one online guess
+  against each locked endpoint, and retain every PAKE relay frame;
 - install a malicious app on the same device, register competing custom
   schemes and implicit intents, launch Selfsame with arbitrary bytes, replay a
-  copied public profile, and intercept any callback the OS does not bind;
+  copied public profile/bootstrap, and intercept any callback the OS does not
+  bind;
 - start concurrent ceremonies and splice otherwise valid application, account,
   key, permission, provider, offer, evidence, callback, VC, proof, status, and
   DID-state values between them;
@@ -2675,9 +3077,14 @@ authenticated application origin
           | signs CON-214: app + account + device key + permission
           |                + provider + offer + nonce + expiry
           v
-encrypted, transcript-bound offer
+application/profile context + number-word-word
           |
-          | OS handoff transports only the one-time link capability
+          | app and wallet run mutually confirmed SPAKE2
+          | pairing provider relays only opaque pA,pB,cA,cB
+          v
+confirmed PAKE key -> derived PROTO-002 mailbox secret
+          |
+          | encrypted, transcript-bound offer
           | rendezvous transports only opaque immutable ciphertext
           v
 application-account home controller
@@ -2693,14 +3100,17 @@ verifier applies CON-206 + CON-207 + fresh signed closure
 completion callback ───── usability only; outside the authorization chain
 ```
 
-The application ID, profile digest, account scope, device key, requested
-permissions, provider descriptor, offer digest, request/ceremony IDs, expiry,
-VC issuer/subject/audience/account/permissions/grant ID, DID closure, and device
-challenge are each signed, encrypted-and-authenticated, or checked against a
-signed value before acceptance. A man in the middle can deny service or replay
-already observed bytes, but cannot change one of those values, move a result to
-another application/account/device/ceremony, or make a callback authorize
-without causing a named verification failure.
+The application ID, profile digest, provider descriptor/route/nameplate,
+SPAKE2 roles and transcript, account scope, device key, requested permissions,
+offer digest, request/ceremony IDs, expiry, VC
+issuer/subject/audience/account/permissions/grant ID, DID closure, and device
+challenge are each mutually confirmed, signed, encrypted-and-authenticated, or
+checked against a signed value before acceptance. A man in the middle can deny
+service, claim a public nameplate, make one bounded word guess, or replay
+already observed bytes, but cannot silently change one of those values, move a
+result to another application/account/device/ceremony, derive the accepted
+mailbox key without the words, or make a callback authorize without causing a
+named verification failure.
 
 The invariant is two-sided: rejection occurs before the first unauthorized home
 signature, delta publication, bundle write, branch-existence disclosure, or
@@ -2716,8 +3126,12 @@ mechanism.
 - **Ceremony integrity and anti-replay:** every request is fresh, one-time,
   transcript-bound, and unusable across application, account, provider, offer,
   or callback contexts.
-- **Confidentiality:** the rendezvous, URL handlers, callbacks, and unrelated
-  apps learn no offer/grant plaintext, account scope, or private key.
+- **Pairing authentication:** a passive provider transcript enables no offline
+  word test; each endpoint requires the peer's role-separated confirmation and
+  the wallet evaluates at most one active guess per ceremony.
+- **Confidentiality:** the pairing relay, rendezvous, URL handlers, callbacks,
+  and unrelated apps learn no PAKE/mailbox key, offer/grant plaintext, account
+  scope, or private key.
 - **Authorization-state integrity:** only causally valid controller-signed
   deltas affect state; revocation is grow-only and stale/incomplete closure
   fails closed.
@@ -2741,12 +3155,18 @@ mechanism.
 - Compromise of the recovery secret compromises every derived application
   branch. Recovery-secret rotation is outside v1 and must be specified before
   production.
-- A ceremony secret is a short-lived bearer capability. Disclosure may reveal
-  offer/grant plaintext and enable delivery interference even though the VC
-  still requires the target device key. Suspected disclosure always burns the
-  ceremony under REQ-225.
-- A malicious rendezvous, resolver, account authority, or network can deny
-  service. This profile bounds and detects withholding; it cannot guarantee
+- The two words provide only 22 bits. SPAKE2 prevents passive offline guessing
+  but permits one active guess per locked endpoint; N=1 burn bounds rather than
+  eliminates this risk.
+- The complete application context and code are a short-lived OOB capability.
+  Disclosure before use lets an attacker race pairing and may reveal
+  offer/grant plaintext or enable delivery interference even though CON-214,
+  consent, home signatures, and the target device key still gate
+  authorization. Suspected disclosure always burns the ceremony under
+  REQ-229.
+- A malicious pairing provider can pre-claim, fork, or withhold frames; a
+  malicious rendezvous, resolver, account authority, or network can deny
+  service. This profile bounds and detects these actions but cannot guarantee
   availability against every selected operator colluding.
 - Pairwise derivation cannot prevent correlation through email, payment, IP
   address, device fingerprinting, a deliberately reused public username,
@@ -2761,16 +3181,20 @@ mechanism.
 
 | Threat | Required response |
 |---|---|
-| Network man in the middle | TLS authenticates endpoints; CON-214 signatures, ceremony AEAD, provider/offer transcript binding, home signatures, VC audience, and device proof detect every substitution. TEST-229 mutates each field and asserts zero unauthorized side effects. |
+| Network man in the middle | TLS authenticates endpoints; PROTO-003 binds the application/profile/descriptor/route/nameplate and requires both confirmation MACs; CON-214 signatures, ceremony AEAD, home signatures, VC audience, and device proof detect later substitution. TEST-229 and TEST-233 mutate each layer and assert zero unauthorized side effects. |
+| Passive provider attempts an offline word dictionary | SPAKE2 frames and confirmation do not expose a password verifier. TEST-233 captures complete provider state and requires no offline guess predicate. |
+| Active nameplate guess or pre-claim | The nameplate is public and provides no security. Atomic single claim, client peer locking, 600-second expiry, rate limiting, and permanent N=1 burn bound guessing and make interference a visible restart. |
+| Malicious pairing provider terminates SPAKE2 | CON-217 requires the application and wallet as roles A/B and CON-218 rejects provider-generated frames or a password-verifier mode. Provider compromise yields no password equivalent or accepted key. |
+| Bare code is tried across applications/providers | CON-216 requires origin-authenticated application context before routing and confines the two-digit route to that exact profile. Missing context makes zero network requests. |
 | Malicious same-device app copies another developer's public profile | A public profile supplies no authority. The attacker lacks the origin-anchored enrollment signature and matching platform binding; CON-214 rejects before branch lookup or consent. |
 | Link-handler or custom-scheme interception | CON-215 permits only verified installed-wallet dispatch and forbids browser/custom-scheme fallback. Any ambiguity burns every ceremony value under REQ-225. |
 | Callback interception or forged `completed` result | Callback carries no secret or credential and is outside the authorization chain. Only a verified rendezvous bundle plus CON-206/CON-207 authorizes. |
-| Concurrent application/account/ceremony mix-up | Enrollment evidence and the encrypted transcript bind exact application, profile, account scope, device key, permission, provider, offer, request ID, and ceremony ID. Cross-splices fail TEST-229. |
+| Concurrent application/account/ceremony mix-up | The PAKE binding first commits application/profile/descriptor/route/nameplate; enrollment evidence and the encrypted transcript then bind account scope, device key, permission, offer, request ID, and ceremony ID. Cross-splices fail TEST-229 and TEST-234. |
 | Application A colludes with application B | Their public Selfsame artifacts provide no equality test; other shared account data remains outside scope. |
 | Account A1 is confused with A2 in one application | The authenticated account context selects the scope and expected `acct:` alias; issuer, grant, proof, status, and state checks reject every cross-account artifact. |
 | Application reuses or replaces an account scope | Atomic uniqueness and immutability checks reject reuse; missing scope fails as `AccountScopeUnavailable` rather than creating a new identity. |
 | Account scope is disclosed | It may correlate that application's private account storage but cannot derive a home key without the recovery secret; rotate only through explicit identity migration. |
-| Malicious rendezvous | It may withhold, replay, retain, or reorder ciphertext and observe bounded metadata; end-to-end AEAD, immutable transcript binding, expiry, and one-ceremony checks prevent forgery or authorization. |
+| Malicious rendezvous | It may withhold, replay, retain, or reorder ciphertext and observe bounded metadata; the confirmed PAKE-derived slot secret, end-to-end AEAD, immutable transcript binding, expiry, and one-ceremony checks prevent forgery or authorization. |
 | Malicious or withholding state resolver | It cannot forge an accepted signed closure or remove a G-Set entry; stale or incomplete state fails closed and resolver/peer diversity limits withholding. |
 | Compromised application profile distribution | Production verification requires the OQ-207 origin-authenticated profile mechanism. Caller-delivered fields alone fail CON-214. |
 | Stolen VC | It cannot pass CON-207 without the device private key. |
@@ -2833,11 +3257,13 @@ No implementation task may be marked ready until all boxes are checked:
       DID/VC key representation, holder binding, alias equivalence, provider
       selection, revocation, application authentication, network MITM,
       same-device app substitution, ceremony mix-up, callback hijack,
-      normalization, and privacy.
+      SPAKE2 password mapping/transcript/confirmation, provider routing,
+      N=1 burn, downgrade, normalization, and privacy.
 - [ ] A second review verifies the revised document and closes every blocking
       finding from the first.
 - [ ] A human cryptography/security reviewer approves CON-202, CON-205,
-      CON-206, CON-207, CON-210, CON-211, CON-212, and CON-213.
+      CON-206, CON-207, CON-210, CON-211, CON-212, CON-213, CON-216,
+      CON-217, and CON-218.
 - [ ] Mobile platform security reviewers approve CON-214 and CON-215, including
       the exact Android and Apple target/caller identity checks and the
       fail-without-web-fallback behavior.
@@ -2850,16 +3276,17 @@ No implementation task may be marked ready until all boxes are checked:
 - [ ] A privacy review covers `acct:` harvesting, WebFinger, state lookups,
       optional username reuse, CRDT revocation enumeration, projection
       retrieval, account-scope storage, provider and browser-Origin metadata,
-      mobile handoff/callback metadata, and cross-application and cross-account
-      correlation.
+      pairing nameplates/frames/tokens, mobile handoff/callback metadata, and
+      cross-application and cross-account correlation.
 - [ ] OQ-201, OQ-202, and OQ-204 through OQ-207 are either resolved
       normatively or explicitly accepted by the human owner with bounded
       consequences. OQ-203 is resolved by ADR-210.
 - [ ] SPEC-001 is explicitly amended or profiles this document without
       contradictory credential and derivation claims.
-- [ ] PROTO-002 passes its own Tier-1 gate and two independent providers pass
-      both its black-box suite and TEST-226 without Anuna infrastructure.
-- [ ] TEST-227 through TEST-231 pass against real Android and Apple platform
+- [ ] PROTO-002 and PROTO-003 pass their own Tier-1 gates and two independent
+      provider/client stacks pass their black-box suites and TEST-226 without
+      Anuna infrastructure.
+- [ ] TEST-227 through TEST-235 pass, including real Android and Apple platform
       adapters with hostile sibling apps and alternate link handlers installed.
 - [ ] Human security sign-off records an approval version and commit.
 
@@ -2912,19 +3339,22 @@ and resistant to silent cross-application correlation.
 
 Owner: application-profile working group.
 
-### OQ-205: Exact discovery carrier
+### OQ-205: Exact discovery carrier — RESOLVED by ADR-216
 
-CON-209 fixes the provider hint's authenticated semantics but leaves its
-carrier to the link-ceremony specification. SPEC-001 ADR-014's secret-derived
-discovery record is the current candidate. Its public-DHT metadata and
-anti-abuse properties require review before it becomes this profile's mandatory
-carrier.
+PROTO-003 and CON-216 now separate routing from password authentication. QR
+and verified same-device carriers contain the canonical application ID,
+profile digest, and short code. A manual path supplies the application context
+beside the code unless it already arrived through an origin-authenticated
+channel. The first two digits select one descriptor only inside that profile;
+the remaining six locate the provider session.
 
-PROTO-002 does not resolve this bootstrapping question: it begins once a client
-has the authenticated descriptor and ceremony secret, then completely defines
-how that client uses the selected mailbox.
+The provider hint itself travels inside the post-PAKE encrypted offer under
+CON-209. A secret-derived DHT record, global provider directory, code
+broadcast, and endpoint embedded in the two words are not version-1 carriers.
+The exact profile-origin retrieval mechanism remains the narrower blocking
+item in OQ-207.
 
-Owner: SPEC-001 maintainer.
+Owner: application-profile working group.
 
 ### OQ-206: Migration of the existing SPEC-001 identity — blocking for existing users
 
@@ -2976,9 +3406,10 @@ target or return association, not the whole application-account request.
 
 Private-use/custom schemes, clipboard/pasteboard transfer, generic intents,
 embedded browser fallbacks, and a credential in a callback are not candidates.
-Until all five items are normative and TEST-227 through TEST-231 pass on real
-platforms, the profile-authenticity assumption is limited to an in-process
-prototype and a wallet service must not accept arbitrary application requests.
+Until all five items are normative and TEST-227 through TEST-235 pass,
+including real-platform carrier tests, the profile-authenticity assumption is
+limited to an in-process prototype and a wallet service must not accept
+arbitrary application requests.
 
 Owner: Selfsame wallet + application-profile working group + mobile platform
 reviewers.
@@ -2992,10 +3423,12 @@ reviewers.
 | RFC 7565 stable alias and optional username | REQ-203, REQ-204, REQ-218 | CON-203, CON-204, CON-212 | TEST-204–206, TEST-225 |
 | Portable VC device grant | REQ-205–208, REQ-211 | CON-205–210 | TEST-207–213, TEST-217 |
 | Controller-owned convergent revocation | REQ-207, REQ-208 | CON-205, CON-206, CON-210 | TEST-211–213, TEST-224 |
-| No user endpoint configuration | REQ-209, REQ-212, REQ-219 | CON-208, CON-209, CON-213 | TEST-214, TEST-215, TEST-218, TEST-226 |
-| No mandatory Anuna infrastructure | REQ-210, REQ-214, REQ-219 | CON-201, CON-208, CON-213 | TEST-216, TEST-220, TEST-226 |
-| Replaceable, loss-tolerant blind rendezvous | REQ-209, REQ-212, REQ-219; PROTO-002 REQ-301–308 | CON-208, CON-209, CON-213; PROTO-002 CON-301–308 | TEST-214–216, TEST-218, TEST-220, TEST-226; PROTO-002 TEST-301–310 |
-| MITM-resistant same-device mobile authorization without self-scan | REQ-220–225 | CON-206, CON-207, CON-209, CON-214, CON-215 | TEST-227–231 |
+| No user endpoint configuration | REQ-209, REQ-212, REQ-219, REQ-227 | CON-208, CON-209, CON-213, CON-216 | TEST-214, TEST-215, TEST-218, TEST-226, TEST-232, TEST-234 |
+| No mandatory Anuna infrastructure | REQ-210, REQ-214, REQ-219, REQ-227 | CON-201, CON-208, CON-213, CON-216 | TEST-216, TEST-220, TEST-226, TEST-234 |
+| Human `number-word-word` pairing with SPAKE2 | REQ-226, REQ-229; PROTO-003 REQ-401–408 | CON-216–218; PROTO-003 CON-401–408 | TEST-232, TEST-233, TEST-235; PROTO-003 TEST-401–412 |
+| Many applications and providers route without a global directory | REQ-209, REQ-210, REQ-212, REQ-227 | CON-201, CON-208, CON-213, CON-216 | TEST-214–216, TEST-218, TEST-226, TEST-232, TEST-234 |
+| Replaceable blind pairing and rendezvous | REQ-209, REQ-212, REQ-219, REQ-228; PROTO-002 REQ-301–308; PROTO-003 REQ-401–408 | CON-208, CON-209, CON-213, CON-216–218; PROTO-002 CON-301–308; PROTO-003 CON-401–408 | TEST-214–216, TEST-218, TEST-220, TEST-226, TEST-233; PROTO-002 TEST-301–310; PROTO-003 TEST-401–412 |
+| MITM-resistant same-device mobile authorization without self-scan | REQ-220–229 | CON-206, CON-207, CON-209, CON-214–218 | TEST-227–235 |
 | Cross-application and cross-account privacy | REQ-201, REQ-203, REQ-213, REQ-215–218 | CON-202–205, CON-211, CON-212 | TEST-201, TEST-204–206, TEST-219, TEST-221–223, TEST-225 |
 | Compatibility with the `did:crdt` method boundary | REQ-201, REQ-203, REQ-205, REQ-208 | CON-202, CON-203, CON-210 | TEST-207, TEST-213, TEST-224 |
 
@@ -3018,16 +3451,20 @@ lifecycle, key derivation, DID construction, JWK representation, accepted
 algorithms, signed bytes, holder proof, closure/projection freshness,
 revocation semantics, alias comparison, rendezvous eligibility, provider-hint
 binding, application enrollment evidence, mobile caller/wallet identity,
-same-device dispatch, callback authority, threat-model boundary, or the
-PROTO-002 version is a Tier-1 normative amendment and requires new vectors plus
-renewed security sign-off.
+same-device dispatch, pairing grammar/entropy/routing, SPAKE2 suite/transcript,
+confirmation/burn behavior, callback authority, threat-model boundary, or the
+PROTO-002/PROTO-003 version is a Tier-1 normative amendment and requires new
+vectors plus renewed security sign-off.
 
 ## Normative and informative sources
 
-Normative internal protocol:
+Normative internal protocols:
 
 - [[PROTO-002-selfsame-rendezvous-v1]] defines the wire and operator contract
-  named by `selfsame-rendezvous-v1`.
+  named by `selfsame-rendezvous-v1` after PAKE confirmation.
+- [[PROTO-003-selfsame-pairing-v1]] defines the routable human code,
+  application-to-wallet SPAKE2, blind relay, confirmation/burn rules, and
+  mailbox-secret derivation named by `selfsame-pairing-v1`.
 
 Normative external specifications:
 
@@ -3045,8 +3482,10 @@ Normative external specifications:
 - IETF, [RFC 7565 — The `acct` URI
   Scheme](https://datatracker.ietf.org/doc/html/rfc7565).
 - IETF, [RFC 7033 — WebFinger](https://datatracker.ietf.org/doc/html/rfc7033).
-- IETF, RFC 3986, RFC 4648, RFC 5234, RFC 5869, RFC 7515, RFC 8032,
-  RFC 8785, and BIP-39.
+- IETF/IRTF, RFC 3986, RFC 4648, RFC 5234, RFC 5869, RFC 7515, RFC 8032,
+  RFC 8785, [RFC 9382 — SPAKE2](https://datatracker.ietf.org/doc/html/rfc9382),
+  [RFC 9496 — ristretto255 and
+  decaf448](https://datatracker.ietf.org/doc/html/rfc9496), and BIP-39.
 
 Informative mobile security and interoperability sources:
 
@@ -3085,6 +3524,15 @@ Standards constraints that are easy to miss:
 - Bitstring Status List requires at least 131,072 bits and can itself create
   correlation through status identifiers and retrieval behavior; in this
   profile it is a derivative projection, never the Selfsame source of truth.
+- RFC 9382 requires explicit key confirmation and warns that SPAKE2 is not
+  augmented. Selfsame makes the application and wallet the PAKE endpoints so
+  a provider stores no password-equivalent verifier.
+- Two BIP-39 English words are 22 bits, not a BIP-39 mnemonic and not a
+  high-entropy bearer secret. Offline resistance comes from PAKE; the online
+  bound comes from one peer claim and permanent burn.
+- A provider-local numeric nameplate cannot identify an arbitrary service.
+  The authenticated application profile and two-digit profile route provide
+  the missing many-application/many-provider context.
 - Android App Links and Apple Universal Links bind an HTTPS origin to an
   installed app/route; neither authenticates the complete application-account
   enrollment statement, so CON-214 remains independently required.
@@ -3107,6 +3555,20 @@ combination; that is an engineering conclusion, not a legal novelty claim.
 
 ## Changelog
 
+- **0.6.0 — 2026-07-30 — draft, normative.** Replaces the long
+  high-entropy human fallback with the Hark/cbcl-bus-style
+  `<number>-<word>-<word>` pattern and makes SPAKE2 mandatory for every short
+  code. Separates routing from authentication: the QR/OS bootstrap carries the
+  application context, the first two digits select a descriptor inside that
+  authenticated profile, and the remaining six identify one provider-local
+  session. Makes the application and wallet the SPAKE2 endpoints, keeps the
+  provider a blind four-frame relay, requires mutual confirmation and N=1
+  burn, and derives the existing PROTO-002 mailbox secret only from the
+  confirmed PAKE key. Adds [[PROTO-003-selfsame-pairing-v1]], REQ-226–229,
+  ADR-215–217, CON-216–218, and TEST-232–235; resolves OQ-205; and updates
+  provider selection, profile descriptors, mobile flow, threat model, Tier-1
+  gate, traceability, and sources. No VC, home-key hierarchy, `did:crdt`
+  publication, or revocation semantics change.
 - **0.5.0 — 2026-07-30 — draft, normative.** Adds the same-device mobile path
   for a developer app and Selfsame wallet installed on one phone. The OS
   handoff replaces self-scanning but deliberately reuses the existing

@@ -3,14 +3,14 @@ id: PROTO-002
 title: Selfsame Rendezvous Protocol v1 — a blind, replaceable link mailbox
 status: draft
 tier: 1
-version: 0.1.1
+version: 0.2.0
 audience: application developer, SDK implementer, infrastructure operator, security reviewer
 author: Anuna Research (drafted with Codex, 2026-07-30)
 last-updated: 2026-07-30
 owner-repo: selfsame
 affects-repos: selfsame, adopting applications, independent rendezvous implementations
 review-gate: not-approved — Tier-1; independent interoperability vectors, adversarial protocol review, privacy review, production-operator review, and human security sign-off are outstanding
-depends-on: RFC 2119; RFC 3986; RFC 4648; RFC 5234; RFC 8174; RFC 9110; RFC 9111; WHATWG Fetch; JSON Schema 2020-12; BLAKE3
+depends-on: PROTO-003 Selfsame Pairing Protocol v1 when used by SPEC-004; RFC 2119; RFC 3986; RFC 4648; RFC 5234; RFC 8174; RFC 9110; RFC 9111; WHATWG Fetch; JSON Schema 2020-12; BLAKE3
 ---
 
 # PROTO-002 — Selfsame Rendezvous Protocol v1
@@ -23,10 +23,12 @@ point a conforming Selfsame SDK at any conforming operator without registering
 with Anuna, changing the linking ceremony, or teaching the person to configure
 an endpoint.
 
-**User promise.** The person scans or types one short-lived link code and
+**User promise.** The person completes the enclosing pairing ceremony and
 continues. They do not select, authenticate to, or troubleshoot a rendezvous
 operator. Changing operators does not change an application-account DID, key,
-alias, grant, or account scope.
+alias, grant, or account scope. In SPEC-004, the human code belongs to
+[[PROTO-003-selfsame-pairing-v1]]; this mailbox never interprets its digits or
+words.
 
 **Operator promise.** A rendezvous is a blind, bounded, two-direction mailbox.
 It stores opaque bytes at unguessable slot addresses. It never parses an offer,
@@ -49,7 +51,8 @@ valid.
            |                                    v
            +---- GET /healthz ----------> [capability probe]
                                                 |
-       128-bit link secret                      |
+       128-bit mailbox secret                   |
+    (random or confirmed-PAKE-derived)          |
           /          \                          |
    offer slot       bundle slot                 |
        |                |                       |
@@ -89,14 +92,15 @@ and carries no trust.
 
 **Controls digest.**
 
-- Only an authenticated application profile supplies the HTTPS origin; link
+- Only an authenticated application profile supplies the HTTPS origin; pairing
   codes, offers, responses, and redirects never replace it.
 - Clients reject every redirect and never send cookies, credentials, DIDs,
   account aliases, account scopes, stable user identifiers, or protocol-level
   application identifiers. A browser-generated `Origin` is the explicit
   transport-metadata exception governed by CON-307.
 - Slot names are exactly 26 lower-case RFC 4648 base32 characters derived from
-  a fresh 128-bit ceremony secret; a ceremony secret is never reused.
+  a fresh 128-bit pseudorandom mailbox secret; a mailbox secret is never
+  reused. A low-entropy human code is never an admissible `secret_16`.
 - Records are opaque non-empty octet strings of at most 69,632 bytes.
 - A first write is immutable for exactly 600 seconds. An identical retry does
   not extend expiry; a different retry cannot overwrite it.
@@ -109,9 +113,10 @@ and carries no trust.
   undeclared fallback endpoint in version 1.
 
 **Open.** Production availability and commercial SLOs are application/operator
-policy, not wire interoperability. The provider-hint carrier remains owned by
-[[SPEC-004-application-scoped-identity#OQ-205]]; once a client has the selected
-descriptor and ceremony secret, this protocol completely defines provider use.
+policy, not wire interoperability. Once a client has the selected descriptor
+and mailbox secret, this protocol completely defines provider use. SPEC-004's
+application/profile routing and human code are supplied by
+[[PROTO-003-selfsame-pairing-v1]].
 
 ---
 
@@ -158,8 +163,8 @@ contract.
 
 | Role | Responsibility |
 |---|---|
-| Initiator | Selects the provider and creates the ceremony secret and offer slot. |
-| Joiner | Learns the authenticated provider hint and reads or writes the opposite slot. |
+| Initiator | Selects the provider, obtains a fresh mailbox secret from its enclosing ceremony, and creates the offer slot. |
+| Joiner | Obtains the same mailbox secret through the enclosing ceremony and reads or writes the opposite slot. |
 | Rendezvous operator | Implements only the capability and opaque-slot contracts. |
 | Application verifier | Decrypts, parses, verifies, and authorizes; the operator never does. |
 | State resolver | Exchanges `did:crdt` closures and deltas under a separate protocol, even when deployed at the same origin. |
@@ -182,9 +187,11 @@ contract.
 
 - selection priority and weighting, owned by
   [[SPEC-004-application-scoped-identity#CON-208]];
-- the authenticated provider-hint carrier, owned by
-  [[SPEC-004-application-scoped-identity#CON-209]] and OQ-205;
-- offer, grant, VC, AEAD, transcript, or link-code formats;
+- application/profile routing and the authenticated provider-hint carrier,
+  owned by [[SPEC-004-application-scoped-identity#CON-209]],
+  [[SPEC-004-application-scoped-identity#CON-216]], and
+  [[PROTO-003-selfsame-pairing-v1]];
+- offer, grant, VC, AEAD, transcript, or pairing-code formats;
 - DID resolution, signed-closure retrieval, or delta publication;
 - status-list projection;
 - operator discovery, registration, payment, or commercial SLOs;
@@ -197,11 +204,12 @@ contract.
    descriptor, and probes its `GET /healthz` endpoint.
 2. It accepts the provider only if the response passes CON-301 and arrives
    within [[SPEC-004-application-scoped-identity|SPEC-004's]] probe deadline.
-3. The ceremony creates a fresh 16-byte secret, derives the offer and bundle
-   slots with CON-302, encrypts the offer end to end, and writes the offer with
-   CON-304.
-4. After learning the authenticated provider hint and secret, the home
-   controller repeatedly reads the offer slot until it receives the exact
+3. The enclosing ceremony supplies a fresh 16-byte pseudorandom mailbox secret.
+   For SPEC-004 this occurs only after mutual PROTO-003 confirmation. The
+   client derives the offer and bundle slots with CON-302, encrypts the offer
+   end to end, and writes it with CON-304.
+4. After obtaining the same authenticated descriptor and mailbox secret, the
+   home controller repeatedly reads the offer slot until it receives the exact
    bytes or the signed offer expires.
 5. It decrypts and validates the offer locally, creates the encrypted response,
    and writes the bundle slot.
@@ -398,8 +406,11 @@ base32lower-no-pad(
 
 Here `role` is exactly `offer` or `bundle`. The legacy domain string is an
 opaque cryptographic label, not a dependency on Anuna infrastructure. Retaining
-it reuses the existing core, test vectors, and link codes rather than creating
-a second cryptographic ceremony solely to rename a domain separator.
+it reuses the existing core and test vectors rather than creating a second
+mailbox solely to rename a domain separator. The input may be fresh CSPRNG
+output or the confirmed PAKE-derived output in
+[[PROTO-003-selfsame-pairing-v1#CON-408]]; its source does not alter the slot
+function.
 
 The 128-bit output makes enumeration no easier than guessing the 128-bit
 secret. Role separation prevents one direction from sharing an address with
@@ -574,10 +585,18 @@ profile/capability protocol token; clients reject every unknown token.
 Inputs:
 
 ```text
-secret_16 = exactly 16 CSPRNG bytes unique to this ceremony
+secret_16 = exactly 16 pseudorandom bytes unique to this ceremony
 role      = exactly UTF8("offer") or UTF8("bundle")
 domain    = UTF8("anuna-ssi/v1/slot/")
 ```
+
+`secret_16` MUST be either fresh uniform CSPRNG output or the exact output of a
+separately specified KDF whose input key material has at least 128 bits of
+cryptographic strength. In SPEC-004 it MUST be
+`mailbox_secret_16` from
+[[PROTO-003-selfsame-pairing-v1#CON-408]] after mutual confirmation. A human
+pairing code, BIP-39 word pair, password index bytes, or direct hash/KDF of
+low-entropy input is invalid.
 
 Derivation:
 
@@ -752,7 +771,8 @@ user-visible ceremony deadline.
 
 Poll schedules are client policy, but clients SHOULD add randomized jitter and
 SHALL NOT issue more than two `GET` requests per second per slot. A `404` is
-not evidence that a link code is invalid until the local offer deadline passes.
+not evidence that the enclosing pairing ceremony is invalid until the local
+offer deadline passes.
 
 ### CON-307: Browser CORS
 
@@ -923,7 +943,9 @@ and require `409` with the original record unchanged.
 
 This protocol assumes:
 
-- ceremony secrets contain 128 bits from a CSPRNG and are never reused;
+- mailbox secrets have at least 128 bits of cryptographic strength and are
+  never reused; SPEC-004 obtains them only from a mutually confirmed
+  [[PROTO-003-selfsame-pairing-v1]] key;
 - BLAKE3 preimage resistance and the ceremony AEAD remain secure;
 - the application profile and provider hint are authenticated as specified by
   [[SPEC-004-application-scoped-identity|SPEC-004]];
@@ -941,7 +963,7 @@ without breaking the end-to-end ceremony.
 | Threat | Required response |
 |---|---|
 | Slot enumeration | 128-bit pseudorandom address; no list/prefix API; uniform absent response. |
-| Operator reads content | Content is AEAD ciphertext; operator never receives the link secret. |
+| Operator reads content | Content is AEAD ciphertext; operator never receives the mailbox secret. |
 | Operator substitutes content | Client AEAD and transcript verification reject it; immutable writes prevent the corresponding conforming-server race. |
 | Lost first-write response | Identical PUT retry returns `204` without changing bytes or expiry. |
 | Lost read response | Repeatable GET returns the same bytes until expiry. |
@@ -996,9 +1018,9 @@ No production implementation or profile may claim
       and sudden-death behavior.
 - [ ] A human security reviewer approves ADR-301 through ADR-305 and CON-301
       through CON-308.
-- [ ] [[SPEC-004-application-scoped-identity|SPEC-004's]] provider-hint carrier
-      is resolved without introducing an undeclared global rendezvous or
-      discovery host.
+- [ ] [[PROTO-003-selfsame-pairing-v1]] passes its Tier-1 gate when this
+      mailbox is used with SPEC-004; short human input never reaches CON-302
+      except through its confirmed mailbox-secret derivation.
 - [ ] Human security sign-off records the approved protocol version and commit.
 
 ## Traceability
@@ -1031,6 +1053,8 @@ end-to-end cryptographic verification without a new protocol version.
 
 ## Normative and informative sources
 
+- [[PROTO-003-selfsame-pairing-v1]] defines the confirmed mailbox-secret
+  derivation used by [[SPEC-004-application-scoped-identity]].
 - Selfsame,
   [`test-vectors/spec-001-v1.json`](../test-vectors/spec-001-v1.json),
   normative source for the slot vectors adopted in CON-302.
@@ -1049,8 +1073,14 @@ end-to-end cryptographic verification without a new protocol version.
 ## Changelog
 
 <details>
-<summary>Revision history — 0.1.0 → 0.1.1</summary>
+<summary>Revision history — 0.1.0 → 0.2.0</summary>
 
+- **0.2.0 — 2026-07-30 — draft, normative.** Profiles `secret_16` as a
+  128-bit pseudorandom mailbox secret rather than necessarily direct CSPRNG
+  output. Binds SPEC-004 use to the mutually confirmed PAKE derivation in
+  [[PROTO-003-selfsame-pairing-v1]], rejects every low-entropy human code as
+  direct slot input, and resolves the former discovery-carrier dependency.
+  Slot derivation and the HTTP/operator contract are byte-for-byte unchanged.
 - **0.1.1 — 2026-07-30 — documentation-only.** Retargets the
   application-identity dependency to
   [[SPEC-004-application-scoped-identity]] after
