@@ -3,14 +3,14 @@ id: PROTO-003
 title: Selfsame Pairing Protocol v1 — routable num-word-word SPAKE2
 status: draft
 tier: 1
-version: 0.1.0
+version: 0.2.0
 audience: application developer, SDK implementer, wallet implementer, infrastructure operator, security reviewer
-author: Anuna Research (drafted with Codex, 2026-07-30)
-last-updated: 2026-07-30
+author: Anuna Research (drafted with Codex, 2026-07-30; amended with Claude, 2026-07-31)
+last-updated: 2026-07-31
 owner-repo: selfsame
 affects-repos: selfsame, hark, cbcl-bus, adopting applications, independent pairing implementations
 review-gate: not-approved — Tier-1; independent cryptographic vectors, cross-model adversarial review, privacy review, production-operator review, and human cryptography sign-off are outstanding
-depends-on: SPEC-004; PROTO-002; RFC 2104; RFC 2119; RFC 3986; RFC 4648; RFC 5234; RFC 5869; RFC 6234; RFC 8174; RFC 8785; RFC 9110; RFC 9382; RFC 9496; BIP-39
+depends-on: SPEC-004; PROTO-002; PROTO-004; RFC 2104; RFC 2119; RFC 3986; RFC 4648; RFC 5234; RFC 5869; RFC 6234; RFC 8174; RFC 8785; RFC 9110; RFC 9382; RFC 9496; BIP-39
 ---
 
 # PROTO-003 — Selfsame Pairing Protocol v1
@@ -202,7 +202,10 @@ routing, not a mandatory Selfsame directory.
 - application-account key derivation, VC issuance, consent, holder proof, and
   `did:crdt` revocation, owned by
   [[SPEC-004-application-scoped-identity]];
-- the encrypted offer/bundle mailbox wire contract, owned by
+- the sealed offer/bundle record, its key schedule, and its AEAD, owned by
+  [[PROTO-004-selfsame-ceremony-envelope-v1]], which consumes the
+  `mailbox_secret_16` and `binding_hash` this protocol produces;
+- the mailbox slot, HTTP transport, immutability, and expiry contract, owned by
   [[PROTO-002-selfsame-rendezvous-v1]];
 - the exact platform-specific verified-wallet invocation mechanism;
 - a global application or provider registry;
@@ -899,10 +902,16 @@ mailbox_secret_16 = HKDF-SHA256(
   L    = 16)
 ```
 
-The output is a fresh 128-bit pseudorandom secret and becomes `secret_16` in
-[[PROTO-002-selfsame-rendezvous-v1#CON-302]]. The selected descriptor's `url`
-is the only mailbox origin. Offer and bundle encryption, transcript binding,
-size, immutable writes, repeatable reads, CORS, expiry, and retry follow
+The output is a fresh 128-bit pseudorandom secret. It becomes `secret_16` in
+[[PROTO-002-selfsame-rendezvous-v1#CON-302]] for slot derivation, and — with
+`binding_hash` — the sole input to the envelope keys in
+[[PROTO-004-selfsame-ceremony-envelope-v1#CON-501]]. Those are separate
+functions with separate outputs: a slot name is public and a key is not.
+
+The selected descriptor's `url` is the only mailbox origin. Offer and bundle
+encryption follows
+[[PROTO-004-selfsame-ceremony-envelope-v1#CON-502]]; size, immutable writes,
+repeatable reads, CORS, expiry, and retry follow
 [[PROTO-002-selfsame-rendezvous-v1#CON-302]] through
 [[PROTO-002-selfsame-rendezvous-v1#CON-308]] without alteration.
 
@@ -1207,8 +1216,10 @@ Normative internal specifications:
 
 - [[SPEC-004-application-scoped-identity]] defines application profiles,
   application authentication, consent, VC grants, holder proof, and revocation.
-- [[PROTO-002-selfsame-rendezvous-v1]] defines the encrypted offer/grant
-  mailbox used after PAKE confirmation.
+- [[PROTO-002-selfsame-rendezvous-v1]] defines the blind mailbox used after
+  PAKE confirmation.
+- [[PROTO-004-selfsame-ceremony-envelope-v1]] defines the sealed offer/grant
+  record derived from the confirmed key and `binding_hash`.
 
 Normative external specifications:
 
@@ -1249,6 +1260,19 @@ Standards constraints that are easy to miss:
 
 ## Changelog
 
+- **0.2.0 — 2026-07-31 — draft, normative.** Repairs a scope gap: this document
+  placed "the encrypted offer/bundle mailbox wire contract" out of scope and
+  delegated it to [[PROTO-002-selfsame-rendezvous-v1]], which had itself placed
+  offer, grant, and AEAD formats out of scope. Neither owned the sealed record
+  carrying every Selfsame device grant. The out-of-scope list now separates the
+  sealed record, owned by [[PROTO-004-selfsame-ceremony-envelope-v1]], from the
+  mailbox transport, owned by PROTO-002. CON-408 correspondingly names
+  PROTO-004 as the consumer of `mailbox_secret_16` and `binding_hash` for
+  encryption, replacing a reference to PROTO-002 contracts that do not define
+  it, and records that slot derivation and key derivation are separate
+  functions over the same secret. No code grammar, packing, SPAKE2
+  construction, transcript, confirmation, burn rule, or derivation output
+  changed.
 - **0.1.0 — 2026-07-30 — draft, normative.** First protocol draft. Defines
   profile-local `route || nameplate` routing, the canonical
   `<8 digits>-<word>-<word>` code, a QR/bootstrap envelope, exact BIP-39 index

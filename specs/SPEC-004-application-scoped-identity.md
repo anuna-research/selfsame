@@ -3,14 +3,14 @@ id: SPEC-004
 title: Application- and Account-Scoped Identity — deterministic home keys, acct aliases, portable device grants, and provider discovery
 status: draft
 tier: 1
-version: 0.6.0
+version: 0.7.0
 audience: agent, human, application developer, infrastructure provider
-author: Anuna Research (drafted with Codex, 2026-07-30)
-last-updated: 2026-07-30
+author: Anuna Research (drafted with Codex, 2026-07-30; amended with Claude, 2026-07-31)
+last-updated: 2026-07-31
 owner-repo: selfsame
 affects-repos: selfsame, anuna-ssi, did-crdt, adopting applications
-review-gate: not-approved — Tier-1; all ADRs are PROPOSED; cross-model adversarial review, independent KDF/SPAKE2 vectors, privacy review, and human cryptography/security sign-off are outstanding
-depends-on: did:crdt Method Specification; PROTO-002 Selfsame Rendezvous Protocol v1; PROTO-003 Selfsame Pairing Protocol v1; W3C VC Data Model 2.0; W3C VC JOSE/COSE; W3C DID Core 1.0; optional W3C Bitstring Status List 1.0 projection; RFC 7565; RFC 7033; RFC 3986; RFC 4648; RFC 5234; RFC 5869; RFC 7515; RFC 8032; RFC 8785; RFC 9382; RFC 9496
+review-gate: not-approved — Tier-1; all ADRs are PROPOSED; cross-model adversarial review, independent KDF/SPAKE2/AEAD vectors, privacy review, and human cryptography/security sign-off are outstanding
+depends-on: did:crdt Method Specification; PROTO-002 Selfsame Rendezvous Protocol v1; PROTO-003 Selfsame Pairing Protocol v1; PROTO-004 Selfsame Ceremony Envelope v1; W3C VC Data Model 2.0; W3C VC JOSE/COSE; W3C DID Core 1.0; optional W3C Bitstring Status List 1.0 projection; RFC 7565; RFC 7033; RFC 3986; RFC 4648; RFC 5234; RFC 5869; RFC 7515; RFC 8032; RFC 8439; RFC 8785; RFC 9382; RFC 9496
 ---
 
 # SPEC-004 — Application- and Account-Scoped Identity
@@ -111,7 +111,9 @@ manual code with two-word SPAKE2 ·
 [[SPEC-004-application-scoped-identity#ADR-216]] separate application/provider
 routing from the human PAKE password ·
 [[SPEC-004-application-scoped-identity#ADR-217]] compose the confirmed PAKE key
-with the existing blind mailbox.
+with the existing blind mailbox ·
+[[SPEC-004-application-scoped-identity#ADR-218]] own the ceremony envelope in a
+protocol and its payload here.
 
 **Load-bearing.**
 [[SPEC-004-application-scoped-identity#REQ-201]] one secret produces a different
@@ -176,6 +178,16 @@ the Tier-1 gate in
   [[PROTO-003-selfsame-pairing-v1#CON-401]] and
   [[PROTO-002-selfsame-rendezvous-v1#CON-301]] are eligible; the PAKE relay and
   encrypted mailbox then follow their separate bounded contracts.
+- Every ceremony record is sealed by
+  [[PROTO-004-selfsame-ceremony-envelope-v1#CON-502]] under a role-separated
+  key that seals exactly one plaintext. The payload member sets are closed and
+  live in [[SPEC-004-application-scoped-identity#CON-219]].
+- `offerDigest` is computed over `offer_core` — the offer payload without the
+  enrollment evidence and provider hint that carry it — so nothing commits to
+  a digest of itself.
+- A stable `acct:` alias is named deterministically by the home controller and
+  becomes usable only once its authority record and reciprocal JRD exist; the
+  gate is verification, not issuance order.
 - The canonical human code is
   `<two-digit profile route><six-digit nameplate>-<BIP-39 word>-<BIP-39 word>`.
   Its words are used only by end-to-end SPAKE2 with explicit confirmation.
@@ -278,6 +290,7 @@ There is no global public "Selfsame user DID" in this profile.
 - RFC 7565 `acct:` values in DID Core `alsoKnownAs`;
 - an optional human-readable RFC 7565 account username;
 - reciprocal `acct:` → DID binding using RFC 7033 WebFinger;
+- the ceremony offer and grant bundle payloads carried by the sealed envelope;
 - W3C VC Data Model 2.0 device grants secured with W3C VC JOSE/COSE;
 - device proof of possession and an explicit authorization predicate;
 - `did:crdt` credential revocation, expiry, and fail-closed verification;
@@ -316,7 +329,9 @@ There is no global public "Selfsame user DID" in this profile.
 3. Selfsame validates both inputs, derives B's application and account nodes,
    and constructs the account's home DID and opaque `acct:` localpart.
 4. Application B provisions that `acct:` value at its declared account
-   authority and publishes the reciprocal WebFinger binding.
+   authority and publishes the reciprocal WebFinger binding. Because the SDK is
+   in process here, this happens before issuance — the preferred order in
+   [[SPEC-004-application-scoped-identity#CON-204]].
 5. Selfsame issues a B-scoped device grant to the device.
 6. Application B verifies the VC, status, account binding, and device proof.
 
@@ -373,10 +388,16 @@ person to edit a URI, domain, DID document, or provider configuration.
    the encrypted offer and the wallet reads it.
 5. The wallet verifies the application enrollment evidence and offer, shows
    authenticated-origin consent, creates a random grant ID, and issues the
-   device grant.
-6. The existing encrypted ceremony carries the VC as opaque
-   `application/vc+jwt` bytes.
-7. The joining device proves possession of the `cnf` private key to the
+   device grant naming the deterministic `acct:` alias.
+6. The ceremony carries the VC as opaque `application/vc+jwt` bytes in the
+   sealed bundle payload defined by
+   [[SPEC-004-application-scoped-identity#CON-219]].
+7. The application recomputes the expected alias from the grant's `issuer`,
+   provisions it at its account authority, and publishes the reciprocal
+   WebFinger binding. This is the remote-controller order in
+   [[SPEC-004-application-scoped-identity#CON-204]]; until it completes, the
+   grant exists but no verifier accepts it.
+8. The joining device proves possession of the `cnf` private key to the
    application verifier.
 
 ### User authorizes an application on the same phone
@@ -414,11 +435,14 @@ laptop or other remote target continues to use the cross-device path above.
    separately selected state service, and writes the encrypted grant to the
    existing rendezvous bundle slot. No DID delta is written to a rendezvous
    mailbox slot.
-7. The developer application receives and verifies the bundle through its
-   already-running mailbox poll and then proves possession of the device key.
-   An optional OS callback merely foregrounds that pending application
-   session; it carries no credential or authority and cannot make a failed
-   bundle pass.
+7. The developer application receives the bundle through its already-running
+   mailbox poll, recognizes it under
+   [[PROTO-004-selfsame-ceremony-envelope-v1#CON-503]], provisions the
+   recomputed `acct:` alias under
+   [[SPEC-004-application-scoped-identity#CON-204]], verifies the grant, and
+   then proves possession of the device key. An optional OS callback merely
+   foregrounds that pending application session; it carries no credential or
+   authority and cannot make a failed bundle pass.
 8. If secure wallet invocation is unavailable, ambiguous, intercepted, or
    falls back toward the web, both apps abandon the ceremony. An install/help
    action contains no ceremony material, and a later retry creates fresh
@@ -551,9 +575,24 @@ Trace: [[SPEC-004-application-scoped-identity#TEST-204]],
 ### REQ-204: Every `acct:` alias names a real, reciprocally bound account
 
 An application SHALL provision each exact `acct:` account at its declared
-account authority before the DID publishes that alias. It SHALL NOT fabricate
+account authority, and that authority SHALL publish the reciprocal binding,
+before any verifier accepts a grant naming that alias. It SHALL NOT fabricate
 an `acct:` URI merely by combining a user name or public key with a developer
 domain.
+
+The obligation is anchored at acceptance, not at issuance. The stable alias is
+a deterministic function of the home DID under
+[[SPEC-004-application-scoped-identity#CON-203]], so the home controller can
+name it before any authority has heard of it — and a name asserted by the
+controller alone proves nothing, exactly as DID Core says of `alsoKnownAs`. The
+provisioned account record and its reciprocal JRD are what convert that
+assertion into a binding, and
+[[SPEC-004-application-scoped-identity#CON-206]] step 9 is where a verifier
+requires it. Placing the obligation at issuance instead would make the first
+enrollment of an account impossible whenever the home controller is a wallet on
+another device: the authority cannot recompute a localpart from a home DID that
+has not been derived yet, and the wallet does not hold the application's
+authenticated account channel.
 
 The account authority SHALL answer the RFC 7033 WebFinger query for that
 `acct:` URI over HTTPS. The JRD `subject` SHALL equal the normalized account
@@ -696,15 +735,20 @@ Trace: [[SPEC-004-application-scoped-identity#TEST-216]],
 ### REQ-211: The VC remains opaque inside the link transport
 
 The link ceremony SHALL carry the compact JWS bytes together with the exact
-media type `application/vc+jwt` inside its existing transcript-bound encrypted
-bundle.
+media type `application/vc+jwt` in the `grant` and `grantMediaType` members of
+the bundle payload defined by
+[[SPEC-004-application-scoped-identity#CON-219]], sealed by
+[[PROTO-004-selfsame-ceremony-envelope-v1#CON-502]].
 
 The outer CBCL or other application transport SHALL NOT translate the VC
 properties, reserialize its JWS components, replace its signature, or call an
-outer signature "VC conformance." The same bytes SHALL be independently
-verifiable after extraction by a non-CBCL application.
+outer signature "VC conformance." The ceremony envelope SHALL NOT be described
+as securing the credential: it protects the transport, and the credential's own
+JWS is the only signature a verifier accepts. The same bytes SHALL be
+independently verifiable after extraction by a non-CBCL application.
 
-Trace: [[SPEC-004-application-scoped-identity#TEST-217]]
+Trace: [[SPEC-004-application-scoped-identity#TEST-217]],
+[[SPEC-004-application-scoped-identity#TEST-236]]
 
 ### REQ-212: The provider choice follows the ceremony
 
@@ -1066,9 +1110,11 @@ application ID, account-scope validation, opaque alias, username grammar,
 grant-ID, JWK, JWS, revocation-delta, challenge, and provider-selection test
 vector, plus every application-enrollment and mobile-handoff vector,
 byte-for-byte before the Tier-1 gate closes. PROTO-003's code packing,
-binding, SPAKE2 messages, confirmations, relay, and mailbox-secret vectors and
-PROTO-002's capability, slot, HTTP, expiry, and retry vectors are part of this
-portability gate.
+binding, SPAKE2 messages, confirmations, relay, and mailbox-secret vectors,
+PROTO-002's capability, slot, HTTP, expiry, and retry vectors, and PROTO-004's
+envelope key schedule, sealed record, and rejection vectors are part of this
+portability gate. The `offerDigest` and payload vectors in
+[[SPEC-004-application-scoped-identity#CON-219]] are included.
 
 ### NFR-203: Data minimization
 
@@ -1094,8 +1140,9 @@ Malformed profiles, aliases, DID closures, revocation state, JWKs, VCs, JWS
 headers, enrollment statements, platform bindings, mobile handoffs, callbacks,
 status projections, permission sets, challenges, provider hints, rendezvous
 capabilities, pairing bootstraps, short codes, routes, nameplates, SPAKE2
-points, confirmations, role tokens, relay responses, or mailbox responses
-SHALL produce a typed failure and no authenticated session.
+points, confirmations, role tokens, relay responses, mailbox responses, sealed
+ceremony records, or ceremony payloads SHALL produce a typed failure and no
+authenticated session.
 
 There SHALL be no TOFU path for issuer keys, projection issuers, account
 authorities, or provider descriptors.
@@ -1119,9 +1166,15 @@ SHALL NOT serially block all fallbacks.
 ### NFR-208: Algorithm confinement
 
 Version 1 SHALL use Ed25519/EdDSA only for the application-account home JWS,
-developer enrollment JWS, and device proof. Algorithm agility SHALL occur by a
-new profile version and explicit migration, never by accepting an algorithm
-named by untrusted input.
+developer enrollment JWS, and device proof.
+
+The ceremony envelope SHALL use only the HKDF-SHA-256 key schedule and RFC 8439
+ChaCha20-Poly1305 AEAD fixed by
+[[PROTO-004-selfsame-ceremony-envelope-v1#NFR-502]]. No algorithm identifier
+appears in a sealed record, so there is nothing for untrusted input to select.
+
+Algorithm agility SHALL occur by a new profile version and explicit migration,
+never by accepting an algorithm named by untrusted input.
 
 ## Architecture decisions
 
@@ -1191,6 +1244,12 @@ without choosing an interaction protocol. DID Core permits any RFC 3986 URI in
 The assertion is not proof of equivalence. DID Core recommends reciprocal or
 independent verification. This profile therefore requires a WebFinger JRD whose
 `subject` is the account URI and whose `aliases` contains the DID.
+
+That the assertion proves nothing is exactly why
+[[SPEC-004-application-scoped-identity#CON-204]] anchors the provisioning
+obligation at acceptance rather than at publication or issuance. A controller
+may name its own deterministic alias at any time; only the authority's record
+and reciprocal JRD make it usable, and only a verifier checks for them.
 
 The stable localpart is derived from the application-account home DID and then
 actually provisioned. It is not the user's existing email or display handle.
@@ -1479,11 +1538,54 @@ The selected provider is only the bounded four-frame relay defined by
 and cannot impersonate a client merely by compromising provider storage.
 
 After mutual confirmation, both endpoints derive the existing 16-byte
-PROTO-002 mailbox secret from the PAKE key and bound transcript. Offer/grant
-AEAD, application enrollment evidence, consent, home signatures, VC
-validation, holder proof, and `did:crdt` state remain independent controls.
-Successful PAKE proves shared knowledge of the OOB words; it does not
-authenticate a developer origin or authorize a device by itself.
+PROTO-002 mailbox secret from the PAKE key and bound transcript. That secret,
+with `binding_hash`, is also the sole input to the
+[[PROTO-004-selfsame-ceremony-envelope-v1#CON-501]] envelope keys.
+Application enrollment evidence, consent, home signatures, VC validation,
+holder proof, and `did:crdt` state remain independent controls. Successful PAKE
+proves shared knowledge of the OOB words; it does not authenticate a developer
+origin or authorize a device by itself.
+
+### ADR-218: Own the ceremony envelope in a protocol, its payload here
+
+**Status:** PROPOSED.
+
+The sealed record that carries every offer and every grant is defined by
+[[PROTO-004-selfsame-ceremony-envelope-v1]]. Its payload member sets are
+defined by [[SPEC-004-application-scoped-identity#CON-219]].
+
+Until version 0.7.0 neither existed. PROTO-002 placed "offer, grant, VC, AEAD,
+transcript, or pairing-code formats" out of scope; PROTO-003 placed "the
+encrypted offer/bundle mailbox wire contract" out of scope and delegated it to
+PROTO-002. Each document reasonably declined a concern outside its
+responsibility, and the concern fell between them: this specification's threat
+model named "the ceremony AEAD" and "the selected AEAD" without any document
+having selected one, and CON-206 read an issuer closure "from the encrypted
+bundle" without any document defining a bundle.
+
+The split follows the boundary the two existing protocols already draw. A
+mailbox slot and the octets inside it are separate concerns in PROTO-002;
+one layer up, the sealed envelope and the payload inside it are separate in the
+same way. Cryptographic properties — suite, key schedule, nonce discipline,
+transcript binding, recognition order — belong in a protocol that two
+independent clients implement identically and that a cryptography reviewer signs
+off once. Application-account content — account scope, device key, permissions,
+enrollment evidence, grant — belongs here, where a new permission shape is an
+ordinary profile amendment rather than a Tier-1 cryptographic one.
+
+Rejected:
+
+- defining the envelope in this document — a 3,600-line application profile is
+  the wrong home for a keystream-reuse argument, and every payload change would
+  then require renewed cryptography sign-off;
+- extending PROTO-002 to cover it — PROTO-002 is deliberately blind and must
+  stay implementable by an operator who knows nothing about credentials;
+- extending PROTO-003 to cover it — pairing ends at mutual confirmation, and
+  loading transport encryption onto it would merge two independent burn and
+  retry state machines; and
+- leaving it undefined and inheriting SPEC-001's CBCL envelope — that document
+  is not in this vault, this specification explicitly declines to amend it, and
+  an unstated inheritance is how the gap arose.
 
 ## Contracts
 
@@ -1765,8 +1867,13 @@ Construction is deliberately two-stage:
 
 1. create the `did:crdt` genesis and compute `home_did` from the root public key
    using the pinned method; then
-2. provision `acct_uri` and apply a root-signed DID document-data update that
-   sets `alsoKnownAs` to that URI.
+2. compute `acct_uri` from `home_did` and apply a root-signed DID
+   document-data update that sets `alsoKnownAs` to that URI.
+
+Provisioning `acct_uri` at the account authority is a third, independent step
+owned by [[SPEC-004-application-scoped-identity#CON-204]]. It may precede or
+follow step 2, because step 2 is a controller assertion and provisioning is
+what a verifier actually checks.
 
 The alias SHALL NOT be an input to DID genesis or DID identifier derivation.
 This ordering prevents a circular definition in which the alias hashes the DID
@@ -1797,11 +1904,43 @@ match it and the profile authority, and atomically create or return the
 idempotent binding for that application account. It SHALL reject an alias
 already bound to another account or DID.
 
-Only after provisioning and reciprocal WebFinger publication succeed may the
-home key sign the `SetDocumentData` update that publishes `alsoKnownAs` or
-issue a device grant. On failure, the SDK SHALL leave the alias unpublished,
-issue no grant, and return a typed integration error; it SHALL NOT ask the
-person to repair the alias.
+Ordering depends on where the home controller sits.
+
+**When the SDK is in process with the application** — the second-application
+and account-switch paths — the SDK derives the home DID, hands it to the
+application, and the application provisions before either the
+`SetDocumentData` update or the first grant is signed. This is the preferred
+order because it never produces a grant that no verifier can accept.
+
+**When the home controller is a remote or same-device wallet** — every
+[[PROTO-003-selfsame-pairing-v1]] ceremony — the wallet MAY sign the
+`SetDocumentData` update publishing the deterministic alias and MAY issue a
+device grant naming it before the authority holds a record. The application
+then, on opening the CON-219 bundle and before attempting acceptance:
+
+1. reads `issuer` from the grant and recomputes the expected localpart under
+   [[SPEC-004-application-scoped-identity#CON-203]];
+2. requires the grant's `credentialSubject.account` to equal that recomputed
+   URI exactly, rejecting the grant outright on any mismatch;
+3. provisions the account record and publishes the reciprocal JRD; and
+4. only then runs [[SPEC-004-application-scoped-identity#CON-206]].
+
+No authority is conferred by the earlier ordering. Between issuance and
+provisioning the grant exists but is unusable, because CON-206 step 9 fails
+closed on the missing binding. A verifier SHALL NOT relax step 9 on the grounds
+that the grant is newly issued, and SHALL NOT cache a negative result in a way
+that prevents acceptance once provisioning completes.
+
+If provisioning or reciprocal publication cannot complete, the application
+SHALL return `AccountProvisioningFailed`, SHALL NOT retry acceptance, and
+SHALL revoke the exact grant ID under
+[[SPEC-004-application-scoped-identity#CON-210]] or, when it cannot reach the
+home controller to do so, SHALL record the grant ID as never-accepted and rely
+on `validUntil`. It SHALL NOT ask the person to repair the alias, and SHALL NOT
+present an unprovisioned alias as an active identity.
+
+On any failure the SDK leaves the account scope, home key, DID keys, other
+grants, and revocation state unchanged.
 
 The reciprocal query is:
 
@@ -1960,8 +2099,11 @@ The credential:
 - MUST use the expected application-account home DID as `issuer`;
 - MUST use the offered device DID as `credentialSubject.id`;
 - MUST set `application` and `aud` to the expected canonical application ID;
-- MUST set `account` to the issuer DID's verified stable opaque RFC 7565 alias,
-  never the optional human-readable alias;
+- MUST set `account` to the stable opaque RFC 7565 alias computed from the
+  issuer DID under [[SPEC-004-application-scoped-identity#CON-203]], never the
+  optional human-readable alias; the issuer computes this value deterministically
+  and a verifier requires it to be reciprocally bound at CON-206 step 9, not at
+  issuance time;
 - MUST contain a non-empty set of permission URIs declared by the profile;
 - MUST contain exactly one `SelfsameDidCrdtStatusEntry`, with matching
   `status_id`, `credentialId`, issuer DID, and grant token;
@@ -1994,7 +2136,9 @@ order:
    contexts; require `credentialSubject.account` to equal the expected account;
    perform no remote context retrieval.
 9. Verify the reciprocal RFC 7565 account binding in CON-204 or a fresh
-   authenticated cache of that exact binding.
+   authenticated cache of that exact binding. This step is the sole gate on
+   alias provisioning: a deterministically named but unprovisioned alias fails
+   closed here, whatever order issuance and provisioning happened to take.
 10. Enforce `revocation.maxClosureAgeSeconds` on the causally valid closure and
     require its revocation G-Set not to contain the exact VC `id`, using
     `Document::is_revoked` or the pinned method-equivalent check. If an
@@ -2076,22 +2220,30 @@ The link ceremony SHALL bind this logical value:
   "profileVersion": 1,
   "providerId": "au-primary",
   "descriptorDigest": "<base64url SHA-256 of canonical descriptor>",
-  "offerDigest": "<base64url transcript offer digest>"
+  "offerDigest": "<the CON-219 offerDigest>"
 }
 ```
 
-The provider hint MUST be confidential inside the post-PAKE encrypted offer and
-MUST be authenticated as part of the same transcript that protects the offer
-and grant bundle. Before that offer exists, the PROTO-003 binding already
-commits both clients to the application ID, profile digest, provider ID,
-complete descriptor digest, route, and nameplate.
+`offerDigest` is exactly the value defined by
+[[SPEC-004-application-scoped-identity#CON-219]]. Because the hint is one of
+the two members CON-219 excludes from `offer_core`, placing the digest here
+creates no cycle: the hint commits to the offer, and the offer does not commit
+to the hint.
+
+The provider hint MUST be confidential inside the sealed offer defined by
+[[SPEC-004-application-scoped-identity#CON-219]] and
+[[PROTO-004-selfsame-ceremony-envelope-v1#CON-502]], and is authenticated by
+that envelope's tag over additional authenticated data containing the PROTO-003
+`binding_hash`. Before that offer exists, the PROTO-003 binding already commits
+both clients to the application ID, profile digest, provider ID, complete
+descriptor digest, route, and nameplate.
 
 The hint SHALL NOT contain `accountScopeId`. The transcript-bound offer digest
 and encrypted grant bind the ceremony to the expected RFC 7565 account without
 disclosing the private derivation selector to the rendezvous provider.
 
-The provider hint's concrete carrier is the encrypted offer opened under the
-confirmed PAKE-derived mailbox secret. Provider discovery itself uses the
+The provider hint's concrete carrier is the sealed offer opened under the
+confirmed PAKE-derived envelope key. Provider discovery itself uses the
 logical bootstrap and profile-local route in
 [[SPEC-004-application-scoped-identity#CON-216]]. A secret-derived DHT record,
 global provider directory, and endpoint inside the human words are not
@@ -2328,7 +2480,7 @@ developer backend authenticates this closed logical statement:
   ],
   "providerId": "au-primary",
   "descriptorDigest": "<base64url SHA-256 of the canonical descriptor>",
-  "offerDigest": "<base64url transcript offer digest>",
+  "offerDigest": "<the CON-219 offerDigest>",
   "platformBindingId": "android:com.example.photos:<cert-sha256>",
   "returnUri": "https://photos.example/.well-known/selfsame/return",
   "issuedAt": "2026-07-30T10:00:00Z",
@@ -2347,10 +2499,25 @@ key.
 The JSON recognizer rejects duplicate members, unknown members, non-canonical
 base64url, arrays with duplicates or non-profile permissions, timestamps with
 offsets other than `Z`, and any value outside the inherited CON-201, CON-205,
-CON-209, and CON-211 grammars. `requestedPermissions` is sorted by Unicode code
-point and is an exact subset of `allowedPermissions`. `expiresAt` is later than
-`issuedAt` by at most 120 seconds. Both random identifiers decode to exactly 32
-bytes.
+CON-209, CON-211, and CON-219 grammars. `requestedPermissions` is sorted by
+Unicode code point and is an exact subset of `allowedPermissions`. `expiresAt`
+is later than `issuedAt` by at most 120 seconds. Both random identifiers decode
+to exactly 32 bytes.
+
+`offerDigest` is the value defined by
+[[SPEC-004-application-scoped-identity#CON-219]], computed over `offer_core`
+only. The backend therefore signs a digest of the offer's semantic content
+before the offer is assembled and sealed, and this statement is one of the two
+members CON-219 excludes from that digest. A statement whose `offerDigest`
+covered the statement itself would be unsatisfiable; an implementation that
+computes the digest over the complete offer payload MUST be rejected as
+non-conforming rather than accommodated.
+
+Every other member of this statement that also appears in `offer_core` —
+`requestId`, `ceremonyId`, `applicationId`, `profileVersion`, `profileDigest`,
+`accountScopeId`, `requestedPermissions`, `issuedAt`, and `expiresAt` — SHALL
+be exact-string equal to its counterpart there, and `deviceKeyDigest` SHALL
+equal the SHA-256 of the canonical `deviceKeyJwk` in `offer_core`.
 
 `platformBindingId` selects one binding from the authenticated profile:
 
@@ -2365,9 +2532,10 @@ part of OQ-207. This contract fixes the values they must authenticate. A
 production wallet cannot treat a profile and key delivered only by the caller
 as authenticated.
 
-The compact JWS appears only inside the encrypted ceremony offer. The
-`accountScopeId`, evidence JWS, and its private claims never appear in the OS
-handoff, rendezvous plaintext, callback, URL, log, analytics, or consent label.
+The compact JWS appears only inside the sealed ceremony offer defined by
+[[SPEC-004-application-scoped-identity#CON-219]]. The `accountScopeId`,
+evidence JWS, and its private claims never appear in the OS handoff,
+rendezvous plaintext, callback, URL, log, analytics, or consent label.
 
 Before showing consent, Selfsame:
 
@@ -2536,15 +2704,21 @@ the confirmation required for its role succeeds.
 
 After mutual confirmation, both derive `mailbox_secret_16` under
 [[PROTO-003-selfsame-pairing-v1#CON-408]]. That value becomes the only
-`secret_16` for PROTO-002 slot derivation. The application then encrypts and
-writes the ordinary offer; the wallet reads and authenticates it, applies
-CON-214, obtains consent, and writes the encrypted grant bundle.
+`secret_16` for PROTO-002 slot derivation and the only input, with
+`binding_hash`, to the envelope keys in
+[[PROTO-004-selfsame-ceremony-envelope-v1#CON-501]]. The application then seals
+and writes the offer payload defined by
+[[SPEC-004-application-scoped-identity#CON-219]]; the wallet reads it,
+recognizes it under
+[[PROTO-004-selfsame-ceremony-envelope-v1#CON-503]], applies CON-214, obtains
+consent, and seals and writes the grant bundle.
 
-The encrypted transcript binds `binding_hash`, the provider hint in CON-209,
-offer digest, ceremony/request IDs, application/account, device key,
-permission set, and enrollment evidence. A valid PAKE confirmation is
-necessary transport authentication but is never sufficient application
-authentication or authorization.
+The sealed transcript binds `binding_hash` as additional authenticated data,
+and its payload binds the provider hint in CON-209, the `offerDigest` in
+CON-219, ceremony/request IDs, application/account, device key, permission set,
+and enrollment evidence. A valid PAKE confirmation is necessary transport
+authentication but is never sufficient application authentication or
+authorization.
 
 Implements: REQ-211, REQ-212, REQ-219, REQ-221, REQ-222, REQ-226, REQ-228.
 
@@ -2578,6 +2752,148 @@ Implements: REQ-223, REQ-225, REQ-226, REQ-227, REQ-228, REQ-229.
 
 Verified by: TEST-229, TEST-230, TEST-232, TEST-233, TEST-234, TEST-235.
 
+### CON-219: Ceremony offer and grant bundle payloads
+
+Both ceremony records are sealed by
+[[PROTO-004-selfsame-ceremony-envelope-v1#CON-502]] and recognized by
+[[PROTO-004-selfsame-ceremony-envelope-v1#CON-503]]. This contract declares the
+two payload member sets that PROTO-004 leaves to the enclosing profile, and the
+digest rule that lets a developer backend commit to an offer it does not yet
+hold.
+
+For both roles, the declared nesting bound is 8 and the declared payload bound
+is 69,611 octets. Every base64url value is canonical and unpadded; every
+timestamp is an XML Schema `dateTimeStamp` normalized to UTC `Z`; every
+inherited value obeys the grammar of the contract that defines it.
+
+#### The offer payload
+
+The application seals this object under `K_offer`:
+
+```json
+{
+  "payloadVersion": 1,
+  "role": "offer",
+  "ceremonyId": "<base64url 32 random octets>",
+  "requestId": "<base64url 32 random octets>",
+  "applicationId": "https://photos.example/selfsame/application",
+  "profileVersion": 1,
+  "profileDigest": "<base64url SHA-256 of the RFC 8785 profile>",
+  "accountScopeId": "<canonical private account scope>",
+  "deviceDid": "did:key:<device>",
+  "deviceKeyJwk": {
+    "kty": "OKP",
+    "crv": "Ed25519",
+    "alg": "EdDSA",
+    "x": "<base64url-no-padding raw 32-octet device public key>"
+  },
+  "requestedPermissions": [
+    "https://photos.example/selfsame/application#device"
+  ],
+  "issuedAt": "2026-07-30T10:00:00Z",
+  "expiresAt": "2026-07-30T10:02:00Z",
+  "enrollmentEvidence": "<compact JWS defined by CON-214>",
+  "providerHint": { "…": "the CON-209 object" }
+}
+```
+
+The member set is exactly those fifteen names. `accountScopeId` conforms to
+[[SPEC-004-application-scoped-identity#CON-211]]; `deviceKeyJwk` is the exact
+key that CON-205 requires in `cnf.jwk`, and `deviceDid` encodes the same key;
+`requestedPermissions` is a non-empty set, sorted by Unicode code point, that is
+an exact subset of the profile's `allowedPermissions`; `expiresAt` is later than
+`issuedAt` by at most 120 seconds.
+
+#### `offer_core` and `offerDigest`
+
+```text
+offer_core  = the offer payload object with the members
+              "enrollmentEvidence" and "providerHint" removed
+
+offerDigest = BASE64URL-NOPAD(SHA-256(RFC8785(offer_core)))
+```
+
+`offer_core` is therefore the thirteen members from `payloadVersion` through
+`expiresAt`. `offerDigest` is the digest defined by
+[[PROTO-004-selfsame-ceremony-envelope-v1#CON-503]] over that named subset.
+
+The two excluded members are exactly the two that carry `offerDigest`
+themselves — the CON-214 enrollment evidence and the CON-209 provider hint.
+Excluding them is what makes the digest well-defined: a digest computed over an
+object containing itself has no fixed point, and version 1 does not attempt one.
+
+The construction order is consequently fixed:
+
+1. the application assembles `offer_core`;
+2. it computes `offerDigest`;
+3. its backend signs the CON-214 statement carrying that `offerDigest`;
+4. the application builds the CON-209 hint carrying the same `offerDigest`;
+5. the application assembles the complete offer payload and seals it.
+
+On receipt, the wallet recomputes `offerDigest` from the `offer_core` members of
+the payload it actually opened, and requires it to equal both the `offerDigest`
+inside the verified enrollment evidence and the `offerDigest` inside the
+provider hint. A mismatch in either returns `OfferMismatch` under
+[[SPEC-004-application-scoped-identity#CON-214]].
+
+The excluded members are not thereby unauthenticated: the PROTO-004 tag covers
+the complete payload, and the CON-214 signature independently covers every
+security-relevant `offer_core` value. `offerDigest` exists only so that a
+backend which never sees the sealed record can still bind its signature to the
+exact request that will be sealed.
+
+#### The bundle payload
+
+The wallet seals this object under `K_bundle`:
+
+```json
+{
+  "payloadVersion": 1,
+  "role": "bundle",
+  "ceremonyId": "<the exact ceremonyId from the offer>",
+  "requestId": "<the exact requestId from the offer>",
+  "grantMediaType": "application/vc+jwt",
+  "grant": "<base64url of the compact JWS octets>",
+  "issuerClosure": "<base64url of a signed did:crdt closure, OPTIONAL>"
+}
+```
+
+The member set is exactly those seven names, of which `issuerClosure` is the
+only OPTIONAL one. `grantMediaType` is exactly `application/vc+jwt`.
+`grant` decodes to the compact JWS octets required by
+[[SPEC-004-application-scoped-identity#REQ-205]], at most 65,536 octets, and is
+carried without translation as
+[[SPEC-004-application-scoped-identity#REQ-211]] requires.
+
+`issuerClosure`, when present, is the closure
+[[SPEC-004-application-scoped-identity#CON-206]] step 4 may consume without a
+state-resolver round trip. It is OPTIONAL because the 69,611-octet payload
+bound must also hold a 65,536-octet grant: an implementation that cannot fit
+both SHALL omit the closure and let the verifier resolve it, and SHALL NOT
+truncate either value. The size budget is the reason
+[[PROTO-004-selfsame-ceremony-envelope-v1#OQ-502]] treats bundle length as
+observable metadata.
+
+A bundle SHALL NOT contain the account scope, the home key, a DID document, an
+alias, a provider secret, an acceptance decision, or an error description.
+
+#### Acceptance
+
+The wallet SHALL NOT interpret an offer payload before
+[[PROTO-004-selfsame-ceremony-envelope-v1#CON-503]] recognition succeeds, and
+SHALL apply [[SPEC-004-application-scoped-identity#CON-214]] to the recognized
+value before consent. The application SHALL NOT treat a bundle as an
+authorization before recognition succeeds and
+[[SPEC-004-application-scoped-identity#CON-206]] and
+[[SPEC-004-application-scoped-identity#CON-207]] both pass. A `ceremonyId` or
+`requestId` in a bundle that does not exactly equal the one this application
+sealed into its offer is a rejection, not a new ceremony.
+
+Implements: REQ-205, REQ-206, REQ-207, REQ-211, REQ-217, REQ-221, REQ-222,
+REQ-223.
+
+Verified by: TEST-217, TEST-228, TEST-229, TEST-231, TEST-236.
+
 ## Test specifications
 
 ### TEST-201: Application separation
@@ -2607,6 +2923,21 @@ localpart and complete RFC 7565 URI.
 Accept only when DID `alsoKnownAs`, WebFinger `subject`, WebFinger `aliases`,
 the application profile authority, and VC account all match. Break each edge
 individually and require rejection.
+
+Exercise both CON-204 orderings for a first-ever enrollment of one account.
+In the in-process order, provision before issuance and require acceptance. In
+the remote-controller order, issue through a complete
+[[PROTO-003-selfsame-pairing-v1]] ceremony first and assert that the grant is
+**rejected** at CON-206 step 9 while the alias is unprovisioned, then
+provision, then require the same unmodified grant bytes to be accepted. Require
+no re-issuance, no new grant ID, no key change, and no DID change between the
+two attempts.
+
+Substitute an alias that is well-formed but not the CON-203 function of the
+grant's `issuer` and require rejection before provisioning is attempted. Make
+provisioning fail permanently and require `AccountProvisioningFailed`, a
+revocation of the exact grant ID, no accepted session, and no retry of
+acceptance.
 
 ### TEST-206: Account privacy
 
@@ -2979,6 +3310,41 @@ VC audience, holder key, device proof, or fresh `did:crdt` state. Require zero
 accepted grants. This distinguishes PAKE password knowledge from application
 or credential authority.
 
+### TEST-236: Ceremony payloads, offer digest, and envelope integration
+
+**Validates:** REQ-205, REQ-211, REQ-222, ADR-218, CON-214, CON-217, CON-219;
+PROTO-004 CON-501 through CON-504.
+
+Run [[PROTO-004-selfsame-ceremony-envelope-v1#TEST-501]] through
+[[PROTO-004-selfsame-ceremony-envelope-v1#TEST-506]] against two independently
+implemented clients, then complete an application-account ceremony through
+each.
+
+Accept the normative offer and bundle payload vectors. For each role, reject a
+payload with an unknown member, a missing required member, a member whose value
+violates its inherited grammar, a `requestedPermissions` array that is empty,
+unsorted, duplicated, or not a subset of `allowedPermissions`, a `grant`
+exceeding 65,536 octets, a `grantMediaType` other than `application/vc+jwt`,
+and a bundle whose `ceremonyId` or `requestId` differs from the offer's.
+
+Compute `offerDigest` over `offer_core` for every vector and require two
+independent implementations to agree byte-for-byte. Assert the exclusion rule
+directly: adding, removing, or mutating `enrollmentEvidence` or `providerHint`
+does not change `offerDigest`, and mutating any of the thirteen `offer_core`
+members does. Present an offer whose enrollment-evidence `offerDigest` was
+computed over the complete payload rather than `offer_core` and require
+`OfferMismatch`, not acceptance.
+
+Splice a valid offer from ceremony C1 into C2 and require
+`EnvelopeAuthFailed` before payload recognition, proving that the envelope tag
+rather than a payload field is the first line of defence. Present a bundle
+whose grant is valid but whose payload fails CON-503 canonicality and require
+zero acceptance, zero session, and zero device-proof challenge.
+
+Extract the `grant` octets from a completed bundle and require byte identity
+with the issued compact JWS and successful verification by an independent
+non-CBCL verifier, confirming that the envelope secured transport only.
+
 ## Security and threat model
 
 The threat model is normative. A happy path that succeeds outside these
@@ -3008,8 +3374,13 @@ This profile relies on:
 - platform-protected storage keeping the recovery secret and device private
   keys confidential;
 - BIP-39, ristretto255, SPAKE2, HKDF-SHA-256/HKDF-SHA-512,
-  HMAC-SHA-256, SHA-256/SHA-512, Ed25519, JWS, the selected AEAD, and their
-  domain separation remaining secure for their stated uses;
+  HMAC-SHA-256, SHA-256/SHA-512, BLAKE3, Ed25519, JWS, the RFC 8439
+  ChaCha20-Poly1305 AEAD fixed by
+  [[PROTO-004-selfsame-ceremony-envelope-v1#CON-502]], and their domain
+  separation remaining secure for their stated uses;
+- conforming clients honouring
+  [[PROTO-004-selfsame-ceremony-envelope-v1#REQ-502]], since a reused envelope
+  key repeats a keystream and the constant nonce depends on that invariant;
 - the HTTPS `applicationId` origin and a backend enrollment-signing key
   authenticated through the mechanism that will close OQ-207;
 - the mobile OS correctly enforcing application sandboxing, installed-app
@@ -3195,6 +3566,9 @@ mechanism.
 | Application reuses or replaces an account scope | Atomic uniqueness and immutability checks reject reuse; missing scope fails as `AccountScopeUnavailable` rather than creating a new identity. |
 | Account scope is disclosed | It may correlate that application's private account storage but cannot derive a home key without the recovery secret; rotate only through explicit identity migration. |
 | Malicious rendezvous | It may withhold, replay, retain, or reorder ciphertext and observe bounded metadata; the confirmed PAKE-derived slot secret, end-to-end AEAD, immutable transcript binding, expiry, and one-ceremony checks prevent forgery or authorization. |
+| Sealed record spliced between ceremonies, roles, or applications | PROTO-004 additional authenticated data covers the role octet and PROTO-003 `binding_hash`, so a spliced record fails the tag check before payload recognition. TEST-236 and PROTO-004 TEST-504 assert rejection with zero side effects. |
+| Envelope key reused across two plaintexts | PROTO-004 REQ-502 makes each role key single-use; PROTO-002 slot immutability and PROTO-003 burn semantics enforce it from two independent directions, and PROTO-004 TEST-503 asserts at most one ciphertext per key per ceremony. |
+| Grant issued before its alias is provisioned | It confers nothing: CON-206 step 9 fails closed on the missing reciprocal binding, and CON-204 requires the application to provision or return `AccountProvisioningFailed` and revoke the grant ID. |
 | Malicious or withholding state resolver | It cannot forge an accepted signed closure or remove a G-Set entry; stale or incomplete state fails closed and resolver/peer diversity limits withholding. |
 | Compromised application profile distribution | Production verification requires the OQ-207 origin-authenticated profile mechanism. Caller-delivered fields alone fail CON-214. |
 | Stolen VC | It cannot pass CON-207 without the device private key. |
@@ -3283,10 +3657,17 @@ No implementation task may be marked ready until all boxes are checked:
       consequences. OQ-203 is resolved by ADR-210.
 - [ ] SPEC-001 is explicitly amended or profiles this document without
       contradictory credential and derivation claims.
-- [ ] PROTO-002 and PROTO-003 pass their own Tier-1 gates and two independent
-      provider/client stacks pass their black-box suites and TEST-226 without
-      Anuna infrastructure.
-- [ ] TEST-227 through TEST-235 pass, including real Android and Apple platform
+- [ ] PROTO-002, PROTO-003, and PROTO-004 pass their own Tier-1 gates and two
+      independent provider/client stacks pass their black-box suites and
+      TEST-226 without Anuna infrastructure.
+- [ ] A human cryptography reviewer approves
+      [[PROTO-004-selfsame-ceremony-envelope-v1#CON-501]] and
+      [[PROTO-004-selfsame-ceremony-envelope-v1#CON-502]], and explicitly
+      accepts or rejects the constant-nonce construction.
+- [ ] TEST-201 through TEST-226 pass against the reference implementation, with
+      the normative KDF, alias, VC, holder-binding, revocation, account-scope,
+      and username vectors published.
+- [ ] TEST-227 through TEST-236 pass, including real Android and Apple platform
       adapters with hostile sibling apps and alternate link handlers installed.
 - [ ] Human security sign-off records an approval version and commit.
 
@@ -3421,7 +3802,9 @@ reviewers.
 | Different home identity per application account | REQ-201, REQ-202, REQ-213 | CON-201, CON-202, CON-211 | TEST-201–203, TEST-219, TEST-222, TEST-223 |
 | Multiple accounts switch without Selfsame configuration | REQ-216, REQ-217 | CON-202, CON-211 | TEST-222, TEST-223 |
 | RFC 7565 stable alias and optional username | REQ-203, REQ-204, REQ-218 | CON-203, CON-204, CON-212 | TEST-204–206, TEST-225 |
-| Portable VC device grant | REQ-205–208, REQ-211 | CON-205–210 | TEST-207–213, TEST-217 |
+| Portable VC device grant | REQ-205–208, REQ-211 | CON-205–210, CON-219 | TEST-207–213, TEST-217, TEST-236 |
+| A defined, sealed ceremony envelope and payload | REQ-205, REQ-211, REQ-222, REQ-223 | ADR-218, CON-217, CON-219; PROTO-004 CON-501–504 | TEST-236; PROTO-004 TEST-501–506 |
+| An alias usable only once reciprocally bound | REQ-203, REQ-204 | CON-203, CON-204, CON-206 | TEST-205, TEST-206 |
 | Controller-owned convergent revocation | REQ-207, REQ-208 | CON-205, CON-206, CON-210 | TEST-211–213, TEST-224 |
 | No user endpoint configuration | REQ-209, REQ-212, REQ-219, REQ-227 | CON-208, CON-209, CON-213, CON-216 | TEST-214, TEST-215, TEST-218, TEST-226, TEST-232, TEST-234 |
 | No mandatory Anuna infrastructure | REQ-210, REQ-214, REQ-219, REQ-227 | CON-201, CON-208, CON-213, CON-216 | TEST-216, TEST-220, TEST-226, TEST-234 |
@@ -3465,6 +3848,9 @@ Normative internal protocols:
 - [[PROTO-003-selfsame-pairing-v1]] defines the routable human code,
   application-to-wallet SPAKE2, blind relay, confirmation/burn rules, and
   mailbox-secret derivation named by `selfsame-pairing-v1`.
+- [[PROTO-004-selfsame-ceremony-envelope-v1]] defines the envelope key
+  schedule, AEAD, sealed record, and payload recognition rules that carry the
+  [[SPEC-004-application-scoped-identity#CON-219]] offer and bundle.
 
 Normative external specifications:
 
@@ -3483,6 +3869,8 @@ Normative external specifications:
   Scheme](https://datatracker.ietf.org/doc/html/rfc7565).
 - IETF, [RFC 7033 — WebFinger](https://datatracker.ietf.org/doc/html/rfc7033).
 - IETF/IRTF, RFC 3986, RFC 4648, RFC 5234, RFC 5869, RFC 7515, RFC 8032,
+  [RFC 8439 — ChaCha20 and Poly1305 for IETF
+  Protocols](https://datatracker.ietf.org/doc/html/rfc8439),
   RFC 8785, [RFC 9382 — SPAKE2](https://datatracker.ietf.org/doc/html/rfc9382),
   [RFC 9496 — ristretto255 and
   decaf448](https://datatracker.ietf.org/doc/html/rfc9496), and BIP-39.
@@ -3555,6 +3943,38 @@ combination; that is an engineering conclusion, not a legal novelty claim.
 
 ## Changelog
 
+- **0.7.0 — 2026-07-31 — draft, normative.** Closes three review findings, each
+  a gap between documents rather than a defect inside one.
+
+  *The ceremony envelope had no owner.* PROTO-002 placed offer/grant/AEAD
+  formats out of scope while PROTO-003 delegated that same contract to
+  PROTO-002, so the layer carrying every device grant was unspecified. Adds
+  [[PROTO-004-selfsame-ceremony-envelope-v1]] owning the key schedule, AEAD,
+  sealed record, and recognition rules, and CON-219 owning the offer and
+  bundle payload member sets. Adds ADR-218 and TEST-236; affects REQ-211,
+  NFR-202, NFR-208, CON-209, CON-214, CON-215, CON-217, and the trust-boundary
+  list.
+
+  *`offerDigest` was undefined and circular.* It was referenced thirteen times
+  and defined nowhere, and its two carriers — the CON-214 enrollment evidence
+  and the CON-209 provider hint — both sat inside the offer they digested.
+  CON-219 defines it over `offer_core`, the offer payload with exactly those
+  two members removed, and fixes the construction order so a developer backend
+  can sign before the offer is sealed. Affects CON-209 and CON-214.
+
+  *First-time enrollment through a pairing ceremony was impossible.* CON-204
+  forbade issuing a grant before the alias was provisioned, but in every
+  PROTO-003 ceremony the wallet derives the home DID that the authority needs
+  to recompute the localpart, so no ordering satisfied both. Moves the
+  obligation from issuance to acceptance: a controller may name its own
+  deterministic alias, and CON-206 step 9 remains the sole gate. Adds
+  `AccountProvisioningFailed` and a revoke duty. Affects REQ-204, ADR-203,
+  CON-203, CON-204, CON-205, CON-206, TEST-205, and two happy paths.
+
+  Also extends the Tier-1 gate, which previously required TEST-226 through
+  TEST-235 but never required the KDF, alias, VC, holder-binding, revocation,
+  account-scope, or username tests to pass. No key hierarchy, DID construction,
+  VC profile, revocation semantics, pairing grammar, or SPAKE2 change.
 - **0.6.0 — 2026-07-30 — draft, normative.** Replaces the long
   high-entropy human fallback with the Hark/cbcl-bus-style
   `<number>-<word>-<word>` pattern and makes SPAKE2 mandatory for every short

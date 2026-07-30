@@ -3,10 +3,10 @@ id: PROTO-002
 title: Selfsame Rendezvous Protocol v1 — a blind, replaceable link mailbox
 status: draft
 tier: 1
-version: 0.2.0
+version: 0.2.1
 audience: application developer, SDK implementer, infrastructure operator, security reviewer
-author: Anuna Research (drafted with Codex, 2026-07-30)
-last-updated: 2026-07-30
+author: Anuna Research (drafted with Codex, 2026-07-30; amended with Claude, 2026-07-31)
+last-updated: 2026-07-31
 owner-repo: selfsame
 affects-repos: selfsame, adopting applications, independent rendezvous implementations
 review-gate: not-approved — Tier-1; independent interoperability vectors, adversarial protocol review, privacy review, production-operator review, and human security sign-off are outstanding
@@ -191,7 +191,13 @@ contract.
   owned by [[SPEC-004-application-scoped-identity#CON-209]],
   [[SPEC-004-application-scoped-identity#CON-216]], and
   [[PROTO-003-selfsame-pairing-v1]];
-- offer, grant, VC, AEAD, transcript, or pairing-code formats;
+- the sealed-record envelope, its key schedule, its AEAD, and its payload
+  recognition rules, owned by
+  [[PROTO-004-selfsame-ceremony-envelope-v1]];
+- offer, grant, and VC payload formats, owned by
+  [[PROTO-004-selfsame-ceremony-envelope-v1]] and
+  [[SPEC-004-application-scoped-identity#CON-219]];
+- pairing-code formats, owned by [[PROTO-003-selfsame-pairing-v1]];
 - DID resolution, signed-closure retrieval, or delta publication;
 - status-list projection;
 - operator discovery, registration, payment, or commercial SLOs;
@@ -1073,8 +1079,18 @@ end-to-end cryptographic verification without a new protocol version.
 ## Changelog
 
 <details>
-<summary>Revision history — 0.1.0 → 0.2.0</summary>
+<summary>Revision history — 0.1.0 → 0.2.1</summary>
 
+- **0.2.1 — 2026-07-31 — documentation-only.** Repairs a scope gap rather than
+  a behaviour: this document placed "offer, grant, VC, AEAD, transcript, or
+  pairing-code formats" out of scope while
+  [[PROTO-003-selfsame-pairing-v1]] placed the same contract out of scope and
+  delegated it here, so no document owned the sealed record carrying every
+  Selfsame device grant. The out-of-scope list now names
+  [[PROTO-004-selfsame-ceremony-envelope-v1]],
+  [[PROTO-003-selfsame-pairing-v1]], and
+  [[SPEC-004-application-scoped-identity#CON-219]] as the owners. No REQ, NFR,
+  ADR, CON, or TEST changed; the mailbox remains blind to record contents.
 - **0.2.0 — 2026-07-30 — draft, normative.** Profiles `secret_16` as a
   128-bit pseudorandom mailbox secret rather than necessarily direct CSPRNG
   output. Binds SPEC-004 use to the mutually confirmed PAKE derivation in
