@@ -15,13 +15,16 @@
 The pure core of [[SPEC-004-application-scoped-identity]] is implementable from
 the specification text. **All twenty-six contracts** are now implemented and
 tested against the specification's own `TEST-2NN` criteria, with a published
-conformance corpus. **Fourteen findings** are recorded below. Three deserve a
-reviewer's attention ahead of the rest: `FINDING-005` is a security defect in a
-pinned dependency, `FINDING-004` is an unpublishable digest, and `FINDING-013` is
-a contradiction between two contracts whose failure mode is that an implementer
-manufactures the evidence one of them forbids. `FINDING-014` is the largest in
-scope — the specification defines no observability signals at all — and
-[[EXP-001-proposed-obs]] drafts the set it needs.
+conformance corpus. **Fifteen findings** are recorded below, one of which
+(`FINDING-004`) is **withdrawn as incorrect**. Three deserve a reviewer's
+attention ahead of the rest: `FINDING-005` is a security defect in a pinned
+dependency; `FINDING-013` is a contradiction between two contracts whose failure
+mode is that an implementer manufactures the evidence one of them forbids; and
+`FINDING-015` is an operation `CON-206` requires of a service contract that does
+not define it, which leaves every conforming resolver unusable for the step that
+names it. `FINDING-014` is the largest in scope — the specification defines no
+observability signals at all — and [[EXP-001-proposed-obs]] drafts the set it
+needs.
 
 The specification is unusually implementable for its size. Where it was
 ambiguous it was ambiguous in small, local ways, and in every case the
@@ -144,32 +147,39 @@ no fractional part.
 timestamps semantically is the wrong fix: it would mean parsing before comparing,
 at a trust boundary, ahead of the signature check.
 
-### FINDING-004 — `CON-224` declares a `context_digest` for a file that was never published
+### FINDING-004 — *withdrawn*: `CON-224`'s declared `context_digest` is correct
 
-`CON-224` states that the version 1 context is `contexts/device-grant-v1.jsonld`
-in the `selfsame` repository, that it is **1,045 octets**, and that
+**Status: withdrawn. The finding was wrong.**
+
+This finding originally claimed that `CON-224`'s version-1 context —
+`contexts/device-grant-v1.jsonld`, **1,045 octets**, with
 
 ```text
 context_digest = 9dba4d065a9b7f54acbcfe8d75e1f2c8e7fe4ab8a4b87a4ad3f883c45a3d1183
 ```
 
-That file did not exist in the repository. The digest is therefore unverifiable,
-and no implementation can adopt it without asserting agreement with bytes nobody
-can read.
+— had never been published, and that the digest was therefore unverifiable. That
+is false. The file is in the repository, added by `9db569e` and present on `main`
+before this prototype branched. It is exactly 1,045 octets and its `SHA-256` is
+exactly the declared value.
 
-**What was done:** the logical context `CON-205` prints was serialised in **RFC
-8785 canonical form** — 794 octets, digest
-`4f1eece1611f06657fca7d00c23e13e39431464c039861192e0ea1d05e5c1e20` — and shipped
-as `contexts/device-grant-v1.jsonld`. Both digests are constants in `context.rs`
-and a test asserts they still differ, so the day the real file arrives the test
-fails loudly and in the right place.
+On the strength of the mistaken claim, this prototype replaced the artefact with
+a 794-octet RFC 8785 re-serialisation of the same logical context and pinned the
+digest `4f1eece1…`. That was a protocol break, not a repair: it changed the
+immutable octets behind a stable `/v1` IRI, so this build and the published
+corpus disagreed with every existing version-1 verifier about what the context
+*is*. The original artefact and digest have been restored.
 
-**Proposed resolution:** publish the file, and **make it canonical**. Canonical
-form is regenerable from the specification text alone, so a second implementation
-can reproduce the octets and therefore the digest — which is what `NFR-202`
-requires and what a pretty-printed file with an unstated indentation convention
-can never provide. This is already a Tier-1 gate item; the recommendation is
-about *which* bytes to publish.
+**What remains true:** canonical form would have been the better choice *at
+version 1*, because it is regenerable from the specification text alone, which is
+what `NFR-202` wants and what a pretty-printed file with an unstated indentation
+convention cannot provide. That is now a **version 2** proposal, not a version 1
+correction — `CON-224` is explicit that a change of octets is a new IRI ending
+`/v2` with a new `profileVersion`.
+
+**Method note:** the claim was checkable in one command against the merge base
+and was not checked. A finding that an artefact is missing needs the same
+evidence standard as a finding that one is wrong.
 
 ### FINDING-005 — `CON-210`'s unauthenticated-write argument depends on a call the pinned method does not make by default
 
@@ -375,6 +385,60 @@ by values already public to the party emitting them. A metric that let an
 operator reconstruct which accounts a person holds would defeat `NFR-201` more
 thoroughly than any protocol flaw, because it would do so quietly and at scale.
 
+### FINDING-015 — `CON-206` needs a signed closure; the `did:crdt` service it pins publishes none
+
+`CON-206` step 4 has a verifier "obtain the issuer's **signed** `did:crdt`
+closure from the encrypted bundle, local cache, or a profile-declared state
+resolver", and step 5 then has it "recompute the self-certifying DID, verify
+every required delta and authorization rule". Signed deltas are the input both
+steps assume.
+
+`CON-201` pins what a `stateResolvers` entry is: a node conforming to "the
+`did:crdt` method's own service contract — `CON-003` HTTP Resolution API", with
+`protocol` exactly `did-crdt-service-v1`. At the pinned revision `adb5c7ac` that
+contract exposes four routes, and the resolution one is:
+
+```text
+GET /{did}   →   200 application/did+ld+json   (a W3C resolution result)
+```
+
+A resolution result is the *projection* of CRDT state: a DID Document plus
+metadata, with no deltas and no signatures on it. Nothing in it can be verified,
+so a verifier that accepted it would be trusting the resolver's own
+authorisation decisions — which is the substitution `CON-206`'s freshness split
+exists to prevent, arriving by a different door. There is no other route: the
+method publishes no signed-closure endpoint, media type, or serialisation.
+
+Note that this is precisely the defect `CON-201` was already trying to fix when
+it retired `did-crdt-signed-closure-v1` for naming "no contract". The token was
+replaced with one that names a real contract; the contract does not contain the
+operation.
+
+**Taken as:** a spec-level gap between SPEC-004 and its pinned method. The
+prototype fails closed rather than guessing: a resolver that answers `GET /{did}`
+with anything other than a verifiable signed closure is recorded as *reached and
+unusable*, which under `CON-206` does **not** open the bundled-closure path. The
+wire shape it does accept — `{target, deltas}`, mirroring the method's own
+`ClosureBundle` — is stated explicitly in `state::SignedClosure` so a second
+implementation can produce it, and it is replayed through
+`Document::merge_verified_bundle`, the one entry point that verifies each
+signature (see `FINDING-005` for why the obviously-named one does not).
+
+**Proposed resolution:** one of
+
+1. add a signed-closure route to the `did:crdt` service contract — the natural
+   shape is `GET /dids/{did}/closure` returning the `ClosureBundle` the method
+   already exports, which is what the SPEC-001 CLI already consumes from a
+   deployed node; or
+2. have `CON-201` name that route directly and bump the profile token, so
+   `stateResolvers` describes the operation SPEC-004 needs rather than the
+   nearest contract that exists.
+
+Until one of them lands, an adopting application's resolvers are declaratively
+conforming and functionally unusable for step 4, and every acceptance depends on
+the bundle path — which `CON-206` permits only at first acceptance, so repeat
+sessions fail closed. This should be closed before the Tier-1 gate.
+
 ## Gate Evidence Record
 
 Per [[PROTO-001-usdd-agent-protocol]] §Gate Evidence Record. `unverified` is a
@@ -557,12 +621,18 @@ Three, offered for Phase 4 rather than as findings against the specification.
   fixed point" is the difference between transcribing a rule and knowing when a
   test is testing the right thing. Several findings above were only visible
   because the reasoning was on the page next to the rule.
-- **Two findings came from reading dependencies rather than the specification.**
-  `FINDING-004` and `FINDING-005` are both about artefacts SPEC-004 relies on —
-  a file that was never published, and an API whose default is not the safe one.
-  Neither is visible from the specification text alone, which is an argument for
-  the Tier-1 gate's insistence on a reference implementation rather than review
-  by inspection.
+- **A finding came from reading dependencies rather than the specification.**
+  `FINDING-005` is about an artefact SPEC-004 relies on: an API whose default is
+  not the safe one. It is not visible from the specification text alone, which is
+  an argument for the Tier-1 gate's insistence on a reference implementation
+  rather than review by inspection.
+- **The withdrawn finding is the more instructive one.** `FINDING-004` claimed a
+  declared artefact had never been published. It had, on `main`, before this
+  branch existed — one `git show` against the merge base would have settled it.
+  Acting on the unchecked claim produced a protocol break dressed as a repair: a
+  re-serialised context behind an IRI whose octets `CON-224` says never change.
+  "The artefact is missing" is a factual claim about a repository and needs the
+  same evidence as any other.
 - **A surviving mutant found an untestable branch, not just an untested one.**
   `bounded_body` checks its bound twice: once against `Content-Length` before
   transfer, once against the octets actually read. Removing the second check

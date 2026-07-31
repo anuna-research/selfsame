@@ -403,8 +403,20 @@ pub fn verify(
 
     // `CON-214`: every member that also appears in `offer_core` "SHALL be
     // exact-string equal to its counterpart there".
+    //
+    // *Every* one. `applicationId`, `profileVersion`, and `profileDigest` are
+    // shared members too, and checking them against the profile above is a
+    // different check: the profile is what the wallet fetched, the offer is what
+    // this ceremony carried. A backend that signs a statement whose profile
+    // fields match the fetched profile while the *offer* carries different ones
+    // satisfies the first check and contradicts the offer it claims to be
+    // enrolling — which is exactly the substitution exact-string equality across
+    // both is there to catch.
     if statement.request_id != observed.offer.request_id
         || statement.ceremony_id != observed.offer.ceremony_id
+        || statement.application_id != observed.offer.application_id
+        || statement.profile_version != observed.offer.profile_version
+        || statement.profile_digest != observed.offer.profile_digest
     {
         return Err(EnrollmentError::OfferMismatch);
     }

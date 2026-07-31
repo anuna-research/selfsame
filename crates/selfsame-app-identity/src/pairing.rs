@@ -483,7 +483,11 @@ pub struct Ceremony {
     role: Role,
     binding_hash: [u8; 32],
     preconditions: BootstrapPreconditions,
+    /// This party validated the **peer's** confirmation — `cB` for the
+    /// application, `cA` for the wallet. This is the one that gates action.
     confirmed: bool,
+    /// This party's own confirmation came back through the relay: evidence the
+    /// peer holds it, and half of `CON-217`'s mutual confirmation.
     peer_confirmed: bool,
     application_authenticated: bool,
     initiator_confirmations_seen: u32,
@@ -542,6 +546,30 @@ impl Ceremony {
     /// per minted ceremony." A second one burns the ceremony rather than being
     /// ignored — an attacker who can retry confirmations against one minted
     /// ceremony is an attacker with more than one guess at the code.
+    ///
+    /// # Which confirmation opens the gate
+    ///
+    /// [`Confirmation::role`] names the party that **produced** the MAC, and a
+    /// party is never authenticated by its own. PROTO-003 CON-405 states the
+    /// obligation from each side:
+    ///
+    /// > Role B SHALL NOT \[accept\] application data before validating `cA`.
+    /// > Role A SHALL NOT accept the PAKE or mailbox output before validating
+    /// > `cB`.
+    ///
+    /// and its state machine says the same thing twice:
+    ///
+    /// ```text
+    /// A: allocate -> pA stored -> pB locked -> cA stored -> cB verified -> confirmed
+    /// B: claim    -> pA locked -> pB stored -> cA verified -> cB stored -> confirmed
+    /// ```
+    ///
+    /// Each role reaches `confirmed` by **verifying the peer's** value, not by
+    /// storing its own. So the peer-produced confirmation is what sets
+    /// [`confirmed`](Self::mutually_confirmed) and opens [`may`](Self::may);
+    /// this party's own MAC, relayed back, is only evidence the peer received
+    /// it. Reading it the other way round lets a party unlock the ceremony by
+    /// processing its own outbound frame — no peer required.
     pub fn accept_confirmation(
         &mut self,
         confirmation: Confirmation,
@@ -554,11 +582,13 @@ impl Ceremony {
             ));
         }
         if confirmation.role == self.role {
-            self.confirmed = true;
+            // This party's own MAC. It confirms nothing to this party.
+            self.peer_confirmed = true;
             return Ok(());
         }
-        // A confirmation made for the peer's role. The wallet evaluates at most
-        // one initiator confirmation per minted ceremony.
+        // The peer's MAC: the one this role is required to validate. For the
+        // wallet that is the application's `cA`, and REQ-229 allows exactly one
+        // per minted ceremony — the counter is what bounds active guessing.
         if self.role == Role::Wallet {
             self.initiator_confirmations_seen += 1;
             if self.initiator_confirmations_seen > 1 {
@@ -566,7 +596,7 @@ impl Ceremony {
                 return Err(PairingError::Burned);
             }
         }
-        self.peer_confirmed = true;
+        self.confirmed = true;
         Ok(())
     }
 
@@ -600,15 +630,38 @@ impl Ceremony {
             // CON-217: "Neither may … derive an application branch, request a
             // mailbox slot, or send an offer/grant before the confirmation
             // required for its role succeeds."
-            GatedAction::DeriveApplicationBranch
-            | GatedAction::RequestMailboxSlot
-            | GatedAction::SendOffer
-            | GatedAction::SendGrantBundle => {
+            GatedAction::RequestMailboxSlot | GatedAction::SendOffer => {
                 if self.confirmed {
                     Ok(())
                 } else {
                     Err(PairingError::Unconfirmed)
                 }
+            }
+            // The same confirmation gate, plus REQ-222 where the wallet is the
+            // party acting. These two are Selfsame's own operations, and
+            // REQ-222 names them among the things it "SHALL NOT" do "unless the
+            // enrollment evidence in CON-214 authenticates the application
+            // origin":
+            //
+            // > Selfsame SHALL NOT disclose whether an application branch
+            // > exists, derive or select an existing application-account home,
+            // > sign or publish an authorization delta, issue a device grant,
+            // > or write a grant bundle …
+            //
+            // A confirmed PAKE says only that the channel has two ends. CON-217
+            // is explicit that it "is never sufficient application
+            // authentication or authorization", and the prohibition here starts
+            // at *disclosing that a branch exists* — so a hostile application
+            // must not be able to reach a branch derivation by completing a
+            // pairing it was always able to complete.
+            GatedAction::DeriveApplicationBranch | GatedAction::SendGrantBundle => {
+                if !self.confirmed {
+                    return Err(PairingError::Unconfirmed);
+                }
+                if self.role == Role::Wallet && !self.application_authenticated {
+                    return Err(PairingError::ApplicationUnauthenticated);
+                }
+                Ok(())
             }
             // Consent needs both halves. A confirmed channel to an
             // unauthenticated application is exactly what REQ-222 refuses, and
@@ -897,38 +950,46 @@ mod tests {
 
     #[test]
     fn nothing_transport_bearing_happens_before_this_roles_confirmation() {
-        let mut c = ready(Role::Wallet);
-        for action in [
-            GatedAction::DeriveApplicationBranch,
-            GatedAction::RequestMailboxSlot,
-            GatedAction::SendOffer,
-            GatedAction::SendGrantBundle,
-        ] {
+        let mut c = ready(Role::Application);
+        for action in [GatedAction::RequestMailboxSlot, GatedAction::SendOffer] {
             assert_eq!(c.may(action), Err(PairingError::Unconfirmed), "{action:?}");
+        }
+        // Role A is confirmed by verifying role B's `cB`, not by storing its own
+        // `cA`. Its own MAC coming back changes nothing about what it may do.
+        c.accept_confirmation(Confirmation { role: Role::Application, binding_hash: BINDING })
+            .unwrap();
+        for action in [GatedAction::RequestMailboxSlot, GatedAction::SendOffer] {
+            assert_eq!(
+                c.may(action),
+                Err(PairingError::Unconfirmed),
+                "{action:?} unlocked on this party's own outbound MAC"
+            );
         }
         c.accept_confirmation(Confirmation { role: Role::Wallet, binding_hash: BINDING })
             .unwrap();
-        for action in [
-            GatedAction::DeriveApplicationBranch,
-            GatedAction::RequestMailboxSlot,
-            GatedAction::SendOffer,
-            GatedAction::SendGrantBundle,
-        ] {
+        for action in [GatedAction::RequestMailboxSlot, GatedAction::SendOffer] {
             assert!(c.may(action).is_ok(), "{action:?}");
         }
+        assert!(c.mutually_confirmed());
     }
 
     #[test]
-    fn a_peers_confirmation_does_not_open_this_roles_gate() {
-        // "the confirmation required for **its role**" — a wallet that acted on
-        // the application's confirmation would be acting on a claim it had not
-        // itself verified.
-        let mut c = ready(Role::Wallet);
-        c.accept_confirmation(Confirmation { role: Role::Application, binding_hash: BINDING })
-            .unwrap();
-        assert!(c.peer_confirmed);
-        assert_eq!(c.may(GatedAction::SendOffer), Err(PairingError::Unconfirmed));
-        assert!(!c.mutually_confirmed());
+    fn a_party_is_not_confirmed_by_its_own_outbound_mac() {
+        // PROTO-003 CON-405: "Role B SHALL NOT [accept] application data before
+        // validating `cA`. Role A SHALL NOT accept the PAKE or mailbox output
+        // before validating `cB`." Each side reaches `confirmed` by verifying
+        // the *peer's* value. A party that unlocked on its own would need no
+        // peer at all, which is the whole of the guarantee.
+        for role in [Role::Wallet, Role::Application] {
+            let mut c = ready(role);
+            c.accept_confirmation(Confirmation { role, binding_hash: BINDING }).unwrap();
+            assert_eq!(
+                c.may(GatedAction::RequestMailboxSlot),
+                Err(PairingError::Unconfirmed),
+                "{role:?} unlocked on its own confirmation"
+            );
+            assert!(!c.mutually_confirmed());
+        }
     }
 
     #[test]
@@ -938,7 +999,9 @@ mod tests {
         let mut c = ready(Role::Wallet);
         assert_eq!(c.may(GatedAction::DisplayConsent), Err(PairingError::Unconfirmed));
 
-        c.accept_confirmation(Confirmation { role: Role::Wallet, binding_hash: BINDING })
+        // The wallet is role B: it is confirmed by validating the application's
+        // `cA`.
+        c.accept_confirmation(Confirmation { role: Role::Application, binding_hash: BINDING })
             .unwrap();
         assert_eq!(
             c.may(GatedAction::DisplayConsent),
@@ -948,6 +1011,29 @@ mod tests {
 
         c.record_application_authenticated().unwrap();
         assert!(c.may(GatedAction::DisplayConsent).is_ok());
+    }
+
+    #[test]
+    fn the_wallet_discloses_no_branch_and_issues_no_grant_before_con_214_authenticates() {
+        // REQ-222: Selfsame "SHALL NOT disclose whether an application branch
+        // exists, derive or select an existing application-account home, … issue
+        // a device grant, or write a grant bundle unless the enrollment evidence
+        // in CON-214 authenticates the application origin". A completed PAKE is
+        // not that evidence — any application that can run a ceremony has one.
+        let mut c = ready(Role::Wallet);
+        c.accept_confirmation(Confirmation { role: Role::Application, binding_hash: BINDING })
+            .unwrap();
+        for action in [GatedAction::DeriveApplicationBranch, GatedAction::SendGrantBundle] {
+            assert_eq!(
+                c.may(action),
+                Err(PairingError::ApplicationUnauthenticated),
+                "{action:?} was permitted on a PAKE confirmation alone"
+            );
+        }
+        c.record_application_authenticated().unwrap();
+        for action in [GatedAction::DeriveApplicationBranch, GatedAction::SendGrantBundle] {
+            assert!(c.may(action).is_ok(), "{action:?}");
+        }
     }
 
     #[test]

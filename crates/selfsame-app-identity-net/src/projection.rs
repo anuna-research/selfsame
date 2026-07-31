@@ -63,18 +63,28 @@ pub struct FetchedProjection {
 
 /// Fetch a status list credential (`CON-210`).
 ///
-/// The caller supplies the list identifier from the grant's
+/// The caller supplies `statusListCredential` from the grant's
 /// `BitstringStatusListEntry`. What comes back is signed bytes; the signature is
 /// the issuer's, not the host's, and verifying it is the caller's next step.
+///
+/// # Containment, not concatenation
+///
+/// In a conforming W3C `BitstringStatusListEntry` this value is already an
+/// **absolute URL**. Appending it to the profile's declared base produces
+/// nonsense — `https://status-cache/lists/https://status-cache/…` — and the
+/// fetch simply fails, which reads to a caller as an unavailable projection
+/// rather than as the malformed request it is.
+///
+/// The property that concatenation was reaching for is real and is kept: a
+/// grant must not be able to name a host the profile never declared, or the
+/// credential would choose where its own revocation status is read from. So the
+/// absolute URL is *checked to be within* `credential_base_url` and then
+/// requested exactly as given.
 pub async fn fetch(
     policy: &ProjectionPolicy,
     status_list_credential: &str,
 ) -> Result<FetchedProjection, NetError> {
-    // The identifier is appended to the profile's declared base, so a
-    // projection cannot name a host the profile never declared. A fully
-    // qualified identifier from the credential would let the grant choose where
-    // its own status is read from.
-    let url = format!("{}{status_list_credential}", policy.credential_base_url);
+    let url = contained_url(&policy.credential_base_url, status_list_credential)?;
 
     let response = client(FETCH_DEADLINE)?
         .get(&url)
@@ -99,6 +109,30 @@ pub async fn fetch(
 
     let octets = bounded_body(response, MAX_PROJECTION_OCTETS).await?;
     Ok(FetchedProjection { octets, source: url })
+}
+
+/// The declared absolute URL, once it is established to be under `base`.
+///
+/// "Under" is a path-boundary test, not a prefix test. `https://status.example`
+/// as a base must not admit `https://status.example.attacker.test/…`, which a
+/// bare `starts_with` would, so the base is normalised to end in `/` before the
+/// comparison and the candidate must extend it by at least one character.
+fn contained_url(base: &str, declared: &str) -> Result<String, NetError> {
+    if !declared.starts_with("https://") {
+        return Err(NetError::Refused("statusListCredential is not an absolute HTTPS URL"));
+    }
+    // A fragment or a dot segment would let one string denote two resources.
+    if declared.contains('#') || declared.contains("/..") || declared.contains("/./") {
+        return Err(NetError::Refused("statusListCredential is not a canonical URL"));
+    }
+    let mut boundary = base.trim_end_matches('/').to_string();
+    boundary.push('/');
+    if !declared.starts_with(&boundary) || declared.len() <= boundary.len() {
+        return Err(NetError::Refused(
+            "statusListCredential names a host the profile never declared",
+        ));
+    }
+    Ok(declared.to_string())
 }
 
 /// Allocate a `(credential, index)` pair at issuance (`CON-210`).
@@ -174,13 +208,40 @@ mod tests {
     }
 
     #[test]
-    fn the_credential_url_is_built_from_the_profiles_declared_base() {
-        // A fully qualified identifier taken from the grant would let the grant
-        // choose where its own status is read from — which is the one place a
-        // credential must not have a say.
+    fn a_declared_url_under_the_profiles_base_is_requested_exactly_as_given() {
+        // A conforming BitstringStatusListEntry carries an absolute URL.
+        // Appending it to the base produced `https://…/lists/https://…`, which
+        // no host serves — every projection fetch failed, and failed looking
+        // like an unavailable projection rather than a malformed request.
         let p = policy();
-        let url = format!("{}{}", p.credential_base_url, "list-7");
-        assert!(url.starts_with("https://status.example/lists/"));
+        let declared = "https://status.example/lists/list-7";
+        assert_eq!(contained_url(&p.credential_base_url, declared).unwrap(), declared);
+    }
+
+    #[test]
+    fn a_url_outside_the_declared_base_is_refused() {
+        // The property concatenation was reaching for, kept: a grant must not
+        // choose where its own revocation status is read from.
+        let p = policy();
+        for outside in [
+            "https://attacker.example/lists/list-7",
+            // Prefix-matching without a path boundary would admit this.
+            "https://status.example.attacker.test/lists/list-7",
+            // A dot segment climbs out of the base after the check.
+            "https://status.example/lists/../../elsewhere/list-7",
+            // Not absolute: the old shape, now refused rather than concatenated.
+            "list-7",
+            "/lists/list-7",
+            // Plaintext.
+            "http://status.example/lists/list-7",
+            // The base itself names no list.
+            "https://status.example/lists/",
+        ] {
+            assert!(
+                contained_url(&p.credential_base_url, outside).is_err(),
+                "{outside} was accepted"
+            );
+        }
     }
 
     #[test]

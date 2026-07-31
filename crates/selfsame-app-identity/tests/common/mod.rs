@@ -254,6 +254,12 @@ pub struct Ceremony {
 /// The instant every fixture is built around: `2026-07-30T12:00:00Z`.
 pub const NOW: i64 = 1_785_412_800;
 
+/// The verifier session the fixture's challenge is issued in (`CON-207`).
+///
+/// Opaque, and one verifier's own value. The fixture uses a single session
+/// throughout; `con_206_acceptance` exercises the cross-session refusal.
+pub const VERIFIER_SESSION: &str = "verifier-session-1";
+
 pub fn mnemonic(entropy: u8) -> Mnemonic {
     Mnemonic::from_entropy_in(bip39::Language::English, &[entropy; 16])
         .expect("128 bits is a valid BIP-39 entropy length")
@@ -333,6 +339,7 @@ impl Ceremony {
             application_id: application_id.to_string(),
             account: account.as_str().to_string(),
             grant_hash: proof::grant_hash(&grant_bytes),
+            session: VERIFIER_SESSION.to_string(),
             issued_at: NOW - 5,
         };
         let signature = proof::sign(&challenge, &device_key);
@@ -369,7 +376,7 @@ impl Ceremony {
             issuer: Some(&self.issuer),
             jrd: Some(&self.jrd),
             projection: None,
-            proof: Some((&self.challenge, &self.signature)),
+            proof: Some((&self.challenge, &self.signature, VERIFIER_SESSION)),
         }
     }
 }

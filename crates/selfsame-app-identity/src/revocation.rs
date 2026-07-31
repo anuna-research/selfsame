@@ -148,7 +148,20 @@ pub fn revoke_credential(
     credential_id: &str,
     now_milliseconds: u64,
 ) -> Result<SignedDelta, RevocationError> {
-    if !credential_id.contains("#grant-") {
+    // `CON-205`: `grant_id = home_did || "#grant-" || grant_token`, and the token
+    // is 32 octets base64url. Every part of that is checked, against *this*
+    // document's DID.
+    //
+    // A `contains` test admitted any string with the substring anywhere —
+    // another home's grant, a token with a mangled tail, a whole URL with the
+    // fragment in the middle. The revocation set is compared as text, so the
+    // entry signed would not be the entry a verifier looks for: the intended
+    // grant stays live, `Submission::observe` never sees its identifier, and the
+    // controller waits on a confirmation that cannot arrive.
+    let Some(token) = credential_id.strip_prefix(&format!("{}#grant-", document.did)) else {
+        return Err(RevocationError::NotAGrantId);
+    };
+    if crate::codec::decode_b64url_32(token).is_err() {
         return Err(RevocationError::NotAGrantId);
     }
     let public = home_key.verifying_key().to_bytes();
@@ -284,8 +297,17 @@ mod tests {
         (doc, k, method)
     }
 
-    fn grant_id(doc: &Document, token: &str) -> String {
-        format!("{}#grant-{token}", doc.did)
+    /// A grant ID for this document, with a canonical 43-character token.
+    ///
+    /// `label` picks the token; it is *not* the token. CON-205 fixes the token
+    /// as 32 octets base64url, and `revoke_credential` now checks that, so a
+    /// fixture using a short stand-in would be testing a shape no grant has.
+    fn grant_id(doc: &Document, label: &str) -> String {
+        let mut octets = [0u8; 32];
+        for (i, b) in label.bytes().enumerate().take(32) {
+            octets[i] = b;
+        }
+        format!("{}#grant-{}", doc.did, crate::codec::b64url(&octets))
     }
 
     fn revoke(doc: &mut Document, k: &ed25519_dalek::SigningKey, method: &str, id: &str, ms: u64) {
@@ -306,10 +328,42 @@ mod tests {
     #[test]
     fn a_credential_id_that_is_not_a_grant_identifier_is_refused() {
         let (doc, k, method) = document(1);
-        assert!(matches!(
-            revoke_credential(&doc, &k, &method, "not-a-grant", 1_000),
-            Err(RevocationError::NotAGrantId)
-        ));
+        let (other, _, _) = document(2);
+        let token = {
+            let id = grant_id(&doc, "AAAA");
+            id.rsplit("#grant-").next().unwrap().to_string()
+        };
+
+        for wrong in [
+            "not-a-grant".to_string(),
+            // A `contains` test admitted every one of these.
+            //
+            // Another home's grant. Signed into *this* document's set, it
+            // revokes nothing anyone will look for.
+            grant_id(&other, "AAAA"),
+            // The fragment buried in a longer string.
+            format!("https://example/redirect?to={}#grant-{token}", doc.did),
+            // The right DID, a token that is not 32 canonical octets.
+            format!("{}#grant-AAAA", doc.did),
+            format!("{}#grant-", doc.did),
+            format!("{}#grant-{token}=", doc.did),
+            format!("{}#grant-{token}extra", doc.did),
+            // A status identifier, which shares the shape and is not a grant.
+            format!("{}#status-{token}", doc.did),
+            // The DID as a prefix of a different DID.
+            format!("{}x#grant-{token}", doc.did),
+        ] {
+            assert!(
+                matches!(
+                    revoke_credential(&doc, &k, &method, &wrong, 1_000),
+                    Err(RevocationError::NotAGrantId)
+                ),
+                "`{wrong}` was signed into the revocation set"
+            );
+        }
+
+        // And the one that is a grant of this document still works.
+        assert!(revoke_credential(&doc, &k, &method, &grant_id(&doc, "AAAA"), 1_000).is_ok());
     }
 
     // TEST-213: idempotence.

@@ -28,6 +28,7 @@
 //! [SPEC-004]: ../../../specs/SPEC-004-application-scoped-identity.md
 
 use anyhow::{anyhow, bail, Result};
+use zeroize::Zeroize as _;
 
 use selfsame_app_identity::profile::{ApplicationId, ApplicationProfile};
 use selfsame_app_identity::scope::AccountScopeId;
@@ -102,14 +103,29 @@ fn derive(args: &[String]) -> Result<()> {
     // deployment is the phone. The CLI holds a device key and no recovery
     // secret, so the phrase has to come from somewhere, and stdin is the only
     // carrier that leaves no trace behind the invocation.
-    eprintln!("  recovery phrase (twelve words, then Enter):");
-    let mut phrase = String::new();
-    std::io::stdin().read_line(&mut phrase)?;
+    //
+    // "Leaves no trace" is a claim about echo as much as about argv. A plain
+    // `read_line` prints the phrase as it is typed, and a terminal keeps
+    // scrollback: the words then sit in the buffer of whatever window this ran
+    // in, survive the process, and are recoverable by anything that can scroll
+    // up or read a session log. `read_password` turns echo off for the read and
+    // restores it afterwards, including on interrupt.
+    eprintln!("  recovery phrase (twelve words, then Enter — not echoed):");
+    let mut phrase = rpassword::read_password()
+        .map_err(|e| anyhow!("could not read the recovery phrase without echo: {e}"))?;
     let parsed = hierarchy::Mnemonic::parse_in_normalized(
         bip39::Language::English,
         phrase.trim(),
     )
-    .map_err(|_| anyhow!("that is not a valid BIP-39 recovery phrase"))?;
+    .map_err(|_| {
+        // Zeroed on the failure path too — a mistyped phrase is usually a
+        // correct phrase with one wrong word.
+        phrase.zeroize();
+        anyhow!("that is not a valid BIP-39 recovery phrase")
+    })?;
+    // The parsed `Mnemonic` owns the entropy from here; the transcription does
+    // not need to outlive the parse.
+    phrase.zeroize();
 
     let home = hierarchy::derive(&parsed, &application, &scope);
     let did = home.home_did().map_err(|e| anyhow!("did:crdt derivation failed: {e}"))?;

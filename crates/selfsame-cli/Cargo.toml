@@ -26,3 +26,5 @@ anyhow = { workspace = true }
 qrcode = { version = "0.14", default-features = false }
 tokio = { workspace = true }
 bip39 = { version = "2", default-features = false, features = ["std"] }
+rpassword = "7"
+zeroize = "1.9.0"

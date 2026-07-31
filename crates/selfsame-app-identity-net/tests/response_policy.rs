@@ -223,6 +223,73 @@ async fn a_chunked_response_with_no_declared_length_is_still_bounded() {
 }
 
 #[tokio::test]
+async fn an_endless_chunked_body_is_abandoned_at_the_bound_rather_than_buffered() {
+    // The bound has to hold *during* transfer, not after it. Reading the whole
+    // body and measuring afterwards refuses the same responses this test's
+    // predecessor covers — five bounded chunks — while offering no protection
+    // at all against the case that matters: a server that never stops.
+    //
+    // This server writes 64 KiB chunks until the client goes away, which is
+    // unbounded from the client's side. A `bounded_body` that buffered first
+    // would keep accepting them until memory ran out; one that checks per chunk
+    // returns after the fifth and drops the connection.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("binds");
+    let port = listener.local_addr().unwrap().port();
+
+    let written = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counter = written.clone();
+    tokio::spawn(async move {
+        if let Ok((mut socket, _)) = listener.accept().await {
+            use tokio::io::AsyncWriteExt as _;
+            let _ = socket
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\n\
+                      Content-Type: application/selfsame-profile+json\r\n\
+                      Transfer-Encoding: chunked\r\n\r\n",
+                )
+                .await;
+            let chunk = vec![b'a'; 65_536];
+            // Until the write fails, which is what the client dropping the
+            // connection looks like from here.
+            loop {
+                if socket.write_all(b"10000\r\n").await.is_err()
+                    || socket.write_all(&chunk).await.is_err()
+                    || socket.write_all(b"\r\n").await.is_err()
+                {
+                    break;
+                }
+                counter.fetch_add(chunk.len(), std::sync::atomic::Ordering::Relaxed);
+                // A ceiling far above the bound: if the client is still reading
+                // at 64 MiB it is not enforcing one, and the test should fail
+                // rather than run the machine out of memory proving it.
+                if counter.load(std::sync::atomic::Ordering::Relaxed) > 64 * 1_024 * 1_024 {
+                    break;
+                }
+            }
+        }
+    });
+
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(Duration::from_millis(5_000))
+        .build()
+        .expect("builds");
+    let r = client
+        .get(format!("http://127.0.0.1:{port}/selfsame/application"))
+        .send()
+        .await
+        .expect("the chunked response arrives");
+
+    let outcome = selfsame_app_identity_net::testing::bounded_body(r, 4_096).await;
+    assert!(outcome.is_err(), "an endless body must be refused");
+    assert!(
+        written.load(std::sync::atomic::Ordering::Relaxed) < 8 * 1_024 * 1_024,
+        "the client kept reading far past its 4,096-octet bound, which means the \
+         bound is applied after buffering rather than during transfer"
+    );
+}
+
+#[tokio::test]
 async fn the_bound_is_inclusive_at_its_own_value() {
     let body = vec![b'a'; 4_096];
     let r = response(200, &json_headers(), body.clone());

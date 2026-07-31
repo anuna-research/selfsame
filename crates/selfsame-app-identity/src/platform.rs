@@ -95,7 +95,20 @@ pub enum PlatformError {
     /// The adapter would have to fall back outside its permitted boundary.
     #[error("UnverifiedWalletTarget")]
     UnverifiedWalletTarget,
+    /// No conforming wallet is installed.
+    ///
+    /// `CON-222`: "where none does, the result is `WalletUnavailable` and an
+    /// install action containing no ceremony value." Distinct from
+    /// [`UnverifiedWalletTarget`](Self::UnverifiedWalletTarget), which means a
+    /// candidate existed and did not authenticate — the person is offered an
+    /// install in the first case and a refusal in the second, and a caller that
+    /// cannot tell them apart renders the wrong one.
+    #[error("WalletUnavailable")]
+    WalletUnavailable,
     /// The OS is below the level the contract requires.
+    ///
+    /// Externally this collapses to `WalletUnavailable` — no conforming wallet
+    /// can run here — while staying separable in a local diagnostic.
     #[error("WalletUnavailable")]
     BelowMinimumApiLevel,
     /// A binding identifier is not the shape its platform fixes.
@@ -231,7 +244,10 @@ pub fn android_select(
         return Err(PlatformError::BelowMinimumApiLevel);
     }
     match candidates.len() {
-        0 => Err(PlatformError::UnverifiedWalletTarget),
+        // The ordinary state of a device with no wallet yet. Not a failed
+        // check — there was nothing to check — so the caller can offer the
+        // install action CON-222 describes instead of reporting a refusal.
+        0 => Err(PlatformError::WalletUnavailable),
         1 => Ok(candidates[0].clone()),
         _ => {
             let chosen = person_chose.ok_or(PlatformError::UnverifiedWalletTarget)?;
@@ -298,11 +314,27 @@ pub fn apple_dispatch(outcome: UniversalLinkOutcome, universal_links_only: bool)
 /// authenticates" and "SHALL NOT treat any payload-supplied identifier as caller
 /// evidence".
 ///
-/// [`CallerEvidence::Unattributed`] therefore **passes** this check and closes
-/// nothing: it means the platform said nothing, and the binding is left to the
-/// `CON-214` signature and `CON-221` confirmation. Returning an error there
-/// would be wrong — it would refuse every conforming Apple ceremony — and
-/// silently treating a payload value as evidence would be worse.
+/// # Absent attribution is permitted on exactly one platform
+///
+/// [`CallerEvidence::Unattributed`] passes against an **Apple** binding and
+/// closes nothing: `CON-223` gives the wallet nothing but the associated origin
+/// to compare, so refusing there would refuse every conforming Apple ceremony,
+/// and the binding is left to the `CON-214` signature and `CON-221`
+/// confirmation.
+///
+/// It does **not** pass against an Android binding. `CON-222` states the
+/// comparison as an obligation with a named failure:
+///
+/// > The wallet obtains the calling package through the `PendingIntent`
+/// > creator, or `getCallingPackage()` where the invocation form provides it,
+/// > and compares it to the `platformBindingId` in the `CON-214` evidence. A
+/// > mismatch is `PlatformBindingMismatch`.
+///
+/// An adapter that supplies no package on Android has not performed that
+/// comparison, and "I could not check" is not a pass. Letting it through would
+/// make the mandatory check optional for exactly the caller with a reason to
+/// suppress it — the Apple carve-out would become a universal bypass, reachable
+/// by any Android caller whose adapter simply reports nothing.
 pub fn caller_matches_binding(
     evidence: &CallerEvidence,
     binding: &MobileBinding,
@@ -326,8 +358,14 @@ pub fn caller_matches_binding(
                 Err(PlatformError::PlatformBindingMismatch)
             }
         }
-        // The platform attributed nothing. Not evidence, and not a failure.
-        (CallerEvidence::Unattributed, _) => Ok(()),
+        // Apple: the platform attributed nothing, which CON-223 anticipates.
+        // Not evidence, and not a failure.
+        (CallerEvidence::Unattributed, MobileBinding::Apple { .. }) => Ok(()),
+        // Android: CON-222 requires the calling-package comparison, and an
+        // unattributed caller is one it could not be performed on.
+        (CallerEvidence::Unattributed, MobileBinding::Android { .. }) => {
+            Err(PlatformError::PlatformBindingMismatch)
+        }
         // Android evidence against an Apple binding or vice versa: a caller on
         // one platform presenting the other's binding.
         _ => Err(PlatformError::PlatformBindingMismatch),
@@ -389,10 +427,11 @@ mod tests {
 
     #[test]
     fn no_candidate_is_wallet_unavailable_and_several_is_the_persons_choice() {
-        assert_eq!(
-            android_select(&[], 30, None),
-            Err(PlatformError::UnverifiedWalletTarget)
-        );
+        // CON-222: "where none does, the result is `WalletUnavailable` and an
+        // install action containing no ceremony value." The install action is
+        // the caller's to offer, and it can only offer it if the outcome says
+        // "no wallet here" rather than "a wallet failed to authenticate".
+        assert_eq!(android_select(&[], 30, None), Err(PlatformError::WalletUnavailable));
 
         let two = [target("com.wallet.a"), target("com.wallet.b")];
         // An adapter that picked would be choosing which app receives the
@@ -495,13 +534,25 @@ mod tests {
     }
 
     #[test]
-    fn an_unattributed_caller_passes_and_closes_nothing() {
+    fn an_unattributed_apple_caller_passes_and_closes_nothing() {
         // The residual gap is closed by the CON-214 signature and CON-221
         // confirmation, not by the platform. Refusing here would refuse every
         // conforming Apple ceremony; treating a payload value as evidence would
         // be worse.
         assert!(caller_matches_binding(&CallerEvidence::Unattributed, &apple_binding()).is_ok());
-        assert!(caller_matches_binding(&CallerEvidence::Unattributed, &android_binding()).is_ok());
+    }
+
+    #[test]
+    fn an_unattributed_android_caller_fails_the_mandatory_comparison() {
+        // CON-222 makes the calling-package comparison an obligation with a
+        // named failure. An adapter that reports nothing has not performed it,
+        // and "could not check" is not "checked and matched" — otherwise the
+        // Apple carve-out becomes a universal bypass any Android caller can
+        // reach by staying quiet.
+        assert_eq!(
+            caller_matches_binding(&CallerEvidence::Unattributed, &android_binding()),
+            Err(PlatformError::PlatformBindingMismatch)
+        );
     }
 
     #[test]

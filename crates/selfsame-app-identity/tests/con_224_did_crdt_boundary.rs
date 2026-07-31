@@ -255,13 +255,26 @@ fn the_jsonwebkey_projection_is_still_not_producible() {
 
 // ── revocation across the boundary ─────────────────────────────────────────
 
+/// A grant ID for `did`, with the canonical 43-character token `CON-205` fixes.
+///
+/// `label` selects a token and is not one: the token is 32 octets base64url, and
+/// `revoke_credential` checks that, so a short stand-in would exercise a shape no
+/// grant ever has.
+fn grant_id(did: &str, label: &str) -> String {
+    let mut octets = [0u8; 32];
+    for (i, b) in label.bytes().enumerate().take(32) {
+        octets[i] = b;
+    }
+    format!("{did}#grant-{}", selfsame_app_identity::codec::b64url(&octets))
+}
+
 #[test]
 fn a_grant_id_revokes_and_converges_under_every_merge_order() {
     // The last paragraph of TEST-224, and the one part of it that "is already
     // part of the inspected method and requires no new did:crdt amendment".
     let base = home(APPLICATION_ID, 1);
     let ids: Vec<String> =
-        ["AAAA", "BBBB", "CCCC"].iter().map(|t| format!("{}#grant-{t}", base.did)).collect();
+        ["AAAA", "BBBB", "CCCC"].iter().map(|t| grant_id(&base.did, t)).collect();
 
     let deltas: Vec<SignedDelta> = ids
         .iter()
@@ -292,7 +305,7 @@ fn a_grant_id_revokes_and_converges_under_every_merge_order() {
 #[test]
 fn revocation_is_permanent_across_the_method_interface() {
     let mut h = home(APPLICATION_ID, 1);
-    let id = format!("{}#grant-AAAA", h.did);
+    let id = grant_id(&h.did, "AAAA");
     let delta = revocation::revoke_credential(&h.document, &h.key, &h.method_id, &id, 1_000)
         .expect("signs");
     revocation::admit_revocation(&mut h.document, delta).expect("admitted");
@@ -312,7 +325,7 @@ fn one_accounts_revocation_does_not_reach_a_sibling_account() {
     let mut a1 = home(APPLICATION_ID, 1);
     let a2 = home(APPLICATION_ID, 2);
 
-    let id = format!("{}#grant-AAAA", a1.did);
+    let id = grant_id(&a1.did, "AAAA");
     let delta = revocation::revoke_credential(&a1.document, &a1.key, &a1.method_id, &id, 1_000)
         .expect("signs");
     revocation::admit_revocation(&mut a1.document, delta.clone()).expect("admitted");

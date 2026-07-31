@@ -20,30 +20,73 @@
 //! failing on pairing alone is a different operational story from one failing on
 //! both.
 //!
-//! # What is *not* decided here
+//! # What *is* decided here, and what is not
 //!
-//! Whether the capability body is acceptable. `CON-401` and `CON-301` define
-//! those shapes and belong to PROTO-003 and PROTO-002; this module reports
-//! whether a bounded request returned a plausible success, and the eligibility
-//! decision stays in [`selfsame_app_identity::selection`]. A probe result is a
-//! hint, never a trust anchor — `CON-208` says so, and keeping the judgement in
-//! the pure core is how that stays true.
+//! `CON-401` and `CON-301` do not describe a "plausible success" — each fixes an
+//! exact JSON object, an exact media type, `Cache-Control: no-store`, and a
+//! 2,048-byte ceiling, and says in as many words that anything else "makes the
+//! descriptor ineligible". So the response check belongs here, at the only place
+//! that ever sees the response. A probe that reported `true` for a `204`, or for
+//! `text/plain` carrying arbitrary bytes, would let a broken or hostile provider
+//! be selected and suppress the fallback that exists for exactly that case —
+//! the ceremony would then fail later, further from the cause.
+//!
+//! What stays in [`selfsame_app_identity::selection`] is the *eligibility* rule:
+//! which descriptors are in the lowest-priority group, how the two flags
+//! combine, and what happens when a group is exhausted. A probe result remains a
+//! hint and never a trust anchor — `CON-208` says so — and answering "is this a
+//! conforming capability object?" does not change that.
 
 use std::time::{Duration, Instant};
 
 use selfsame_app_identity::profile::RendezvousDescriptor;
 use selfsame_app_identity::selection::{ProbeOutcome, MAX_PROBE_MILLISECONDS};
 
-use crate::{carried_cookies, client, has_content_encoding};
+use crate::{bounded_body, carried_cookies, client, has_content_encoding, media_type};
 
 /// The per-probe deadline `CON-208` step 4 caps.
 pub const PROBE_DEADLINE: Duration = Duration::from_millis(MAX_PROBE_MILLISECONDS as u64);
 
-/// The PROTO-003 capability path.
-const PAIRING_CAPABILITY_PATH: &str = "/selfsame-pairing/v1/capability";
+/// The PROTO-003 `CON-401` capability endpoint: `pairingUrl || "/pair/v1/healthz"`.
+const PAIRING_CAPABILITY_PATH: &str = "/pair/v1/healthz";
 
-/// The PROTO-002 capability path.
-const MAILBOX_CAPABILITY_PATH: &str = "/selfsame-rendezvous/v1/capability";
+/// The PROTO-002 `CON-301` capability endpoint: `base_url || "/healthz"`.
+const MAILBOX_CAPABILITY_PATH: &str = "/healthz";
+
+/// `CON-401` and `CON-301` both cap a capability body at 2,048 octets.
+const MAX_CAPABILITY_OCTETS: usize = 2_048;
+
+/// The exact eight members and values `CON-401` fixes for a pairing capability.
+const PAIRING_CAPABILITY: &[(&str, Expected)] = &[
+    ("protocol", Expected::Text("selfsame-pairing-v1")),
+    ("status", Expected::Text("ok")),
+    ("nameplateDigits", Expected::Int(6)),
+    ("sessionTtlSeconds", Expected::Int(600)),
+    ("frameBytes", Expected::Int(32)),
+    ("claimSemantics", Expected::Text("single-responder")),
+    ("relaySemantics", Expected::Text("opaque-four-frame")),
+    ("providerPakeRole", Expected::Text("none")),
+];
+
+/// The exact seven members and values `CON-301` fixes for a mailbox capability.
+const MAILBOX_CAPABILITY: &[(&str, Expected)] = &[
+    ("protocol", Expected::Text("selfsame-rendezvous-v1")),
+    ("status", Expected::Text("ok")),
+    ("maxRecordBytes", Expected::Int(69_632)),
+    ("slotTtlSeconds", Expected::Int(600)),
+    ("writeSemantics", Expected::Text("immutable-idempotent")),
+    ("readSemantics", Expected::Text("repeatable-until-expiry")),
+    ("cors", Expected::Bool(true)),
+];
+
+/// One fixed member value. Both contracts are `const`-valued throughout: there
+/// is "no runtime feature or algorithm negotiation" to express.
+#[derive(Clone, Copy)]
+enum Expected {
+    Text(&'static str),
+    Int(i64),
+    Bool(bool),
+}
 
 /// Probe every descriptor in a group concurrently (`CON-208` step 4).
 ///
@@ -62,20 +105,31 @@ pub async fn probe_one(descriptor: &RendezvousDescriptor) -> ProbeOutcome {
     let pairing = format!("{}{PAIRING_CAPABILITY_PATH}", descriptor.pairing_url);
     let mailbox = format!("{}{MAILBOX_CAPABILITY_PATH}", descriptor.url);
 
-    let (pairing_ok, mailbox_ok) = tokio::join!(reachable(&pairing), reachable(&mailbox));
+    let (pairing_ok, mailbox_ok) = tokio::join!(
+        capability_ok(&pairing, PAIRING_CAPABILITY),
+        capability_ok(&mailbox, MAILBOX_CAPABILITY)
+    );
 
     // The elapsed time is the slower of the two, because they ran together.
     let elapsed = started.elapsed().as_millis().min(u32::MAX as u128) as u32;
     ProbeOutcome { pairing_ok, mailbox_ok, elapsed_milliseconds: elapsed }
 }
 
-/// One bounded capability request.
+/// One bounded capability request, judged against its contract's fixed object.
 ///
 /// `CON-213`'s response policy applies here as everywhere: no redirect, no
 /// cookies, no content encoding, and no server-nominated endpoint. A probe that
 /// accepted a redirect would let a provider point the ceremony elsewhere before
 /// the authenticated hint has had anything to say about it.
-async fn reachable(url: &str) -> bool {
+///
+/// On top of that, `CON-401` and `CON-301` each fix the whole response:
+/// **exactly** `200`, `application/json`, `Cache-Control: no-store`, at most
+/// 2,048 octets, and a JSON object with exactly the declared members and values.
+/// Both spell out that anything else — "unknown or missing members, duplicate
+/// names, redirects, content encoding, a media type other than
+/// `application/json`, a body over 2,048 bytes, or a non-`200` response" — makes
+/// the descriptor ineligible, so every one of those is a `false` here.
+async fn capability_ok(url: &str, expected: &[(&str, Expected)]) -> bool {
     let Ok(http) = client(PROBE_DEADLINE) else { return false };
     let Ok(response) = http
         .get(url)
@@ -86,17 +140,55 @@ async fn reachable(url: &str) -> bool {
     else {
         return false;
     };
-    if response.status().is_redirection()
-        || !response.status().is_success()
+
+    // `200` exactly. `is_success()` would admit `204 No Content`, whose empty
+    // body is not the object either contract requires.
+    if response.status() != reqwest::StatusCode::OK
         || has_content_encoding(&response)
         || carried_cookies(&response)
+        || media_type(&response) != "application/json"
+        || !is_no_store(&response)
     {
         return false;
     }
-    // The capability body's *shape* is PROTO-002/PROTO-003's to judge. What is
-    // decided here is only that a bounded, unredirected, uncompressed,
-    // cookie-free success arrived.
-    true
+
+    let Ok(body) = bounded_body(response, MAX_CAPABILITY_OCTETS).await else { return false };
+    capability_matches(&body, expected)
+}
+
+/// `Cache-Control: no-store`, which both contracts require on every response.
+fn is_no_store(response: &reqwest::Response) -> bool {
+    response
+        .headers()
+        .get(reqwest::header::CACHE_CONTROL)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.split(',').any(|d| d.trim().eq_ignore_ascii_case("no-store")))
+}
+
+/// Whether the octets are exactly the capability object the contract declares.
+///
+/// Uses the core's recogniser rather than a permissive parser, so the
+/// duplicate-member and canonical-number prohibitions `CON-301` names are the
+/// same ones every other Selfsame document is read under.
+fn capability_matches(octets: &[u8], expected: &[(&str, Expected)]) -> bool {
+    use selfsame_app_identity::json::{self, Json, Limits};
+
+    let limits = Limits { max_bytes: MAX_CAPABILITY_OCTETS, max_depth: 4 };
+    let Ok(value) = json::recognise(octets, limits) else { return false };
+    let Some(members) = value.as_object() else { return false };
+
+    // "The JSON object has exactly those eight members and values." Exactly:
+    // a missing member and an extra one are both refusals, so the count is
+    // checked before the values.
+    if members.len() != expected.len() {
+        return false;
+    }
+    expected.iter().all(|(name, want)| match (value.get(name), want) {
+        (Some(Json::String(got)), Expected::Text(w)) => got == w,
+        (Some(Json::Integer(got)), Expected::Int(w)) => got == w,
+        (Some(Json::Bool(got)), Expected::Bool(w)) => got == w,
+        _ => false,
+    })
 }
 
 /// Poll a fixed set of futures to completion concurrently.
@@ -183,6 +275,125 @@ mod tests {
     fn the_probe_deadline_is_the_one_con_208_caps() {
         assert_eq!(PROBE_DEADLINE, Duration::from_millis(1_500));
         assert_eq!(PROBE_DEADLINE.as_millis() as u32, MAX_PROBE_MILLISECONDS);
+    }
+
+    #[test]
+    fn the_capability_paths_are_the_ones_the_protocols_publish() {
+        // CON-401: `pairingUrl || "/pair/v1/healthz"`.
+        // CON-301: `base_url || "/healthz"`.
+        // Any other spelling returns 404 from every conforming provider, which
+        // reads as "no healthy descriptor" and exhausts the whole roster.
+        assert_eq!(PAIRING_CAPABILITY_PATH, "/pair/v1/healthz");
+        assert_eq!(MAILBOX_CAPABILITY_PATH, "/healthz");
+    }
+
+    const GOOD_PAIRING: &[u8] = br#"{"protocol":"selfsame-pairing-v1","status":"ok",
+        "nameplateDigits":6,"sessionTtlSeconds":600,"frameBytes":32,
+        "claimSemantics":"single-responder","relaySemantics":"opaque-four-frame",
+        "providerPakeRole":"none"}"#;
+
+    const GOOD_MAILBOX: &[u8] = br#"{"protocol":"selfsame-rendezvous-v1","status":"ok",
+        "maxRecordBytes":69632,"slotTtlSeconds":600,
+        "writeSemantics":"immutable-idempotent","readSemantics":"repeatable-until-expiry",
+        "cors":true}"#;
+
+    #[test]
+    fn the_declared_capability_objects_are_accepted() {
+        assert!(capability_matches(GOOD_PAIRING, PAIRING_CAPABILITY));
+        assert!(capability_matches(GOOD_MAILBOX, MAILBOX_CAPABILITY));
+    }
+
+    #[test]
+    fn an_empty_or_arbitrary_body_is_not_a_capability_object() {
+        // The 204 case, and the text/plain case, once they reach the body: both
+        // used to reach an unconditional `true`.
+        for body in [&b""[..], b"ok", b"null", b"[]", b"{}"] {
+            assert!(!capability_matches(body, PAIRING_CAPABILITY), "{body:?} is not a capability");
+            assert!(!capability_matches(body, MAILBOX_CAPABILITY), "{body:?} is not a capability");
+        }
+    }
+
+    #[test]
+    fn a_missing_extra_or_altered_member_makes_the_descriptor_ineligible() {
+        // Missing one member.
+        assert!(!capability_matches(
+            br#"{"protocol":"selfsame-rendezvous-v1","status":"ok","maxRecordBytes":69632,
+                 "slotTtlSeconds":600,"writeSemantics":"immutable-idempotent",
+                 "readSemantics":"repeatable-until-expiry"}"#,
+            MAILBOX_CAPABILITY
+        ));
+        // One member too many.
+        assert!(!capability_matches(
+            br#"{"protocol":"selfsame-rendezvous-v1","status":"ok","maxRecordBytes":69632,
+                 "slotTtlSeconds":600,"writeSemantics":"immutable-idempotent",
+                 "readSemantics":"repeatable-until-expiry","cors":true,"extra":1}"#,
+            MAILBOX_CAPABILITY
+        ));
+        // A larger advertised record limit: "a version-1 client never sends or
+        // accepts more".
+        assert!(!capability_matches(
+            br#"{"protocol":"selfsame-rendezvous-v1","status":"ok","maxRecordBytes":131072,
+                 "slotTtlSeconds":600,"writeSemantics":"immutable-idempotent",
+                 "readSemantics":"repeatable-until-expiry","cors":true}"#,
+            MAILBOX_CAPABILITY
+        ));
+        // An unknown protocol token: "clients reject every unknown token".
+        assert!(!capability_matches(
+            br#"{"protocol":"selfsame-rendezvous-v2","status":"ok","maxRecordBytes":69632,
+                 "slotTtlSeconds":600,"writeSemantics":"immutable-idempotent",
+                 "readSemantics":"repeatable-until-expiry","cors":true}"#,
+            MAILBOX_CAPABILITY
+        ));
+        // A draining provider: CON-301 says `/healthz` returns 503 with an
+        // empty body, but a `"status":"draining"` object is refused too.
+        assert!(!capability_matches(
+            br#"{"protocol":"selfsame-rendezvous-v1","status":"draining","maxRecordBytes":69632,
+                 "slotTtlSeconds":600,"writeSemantics":"immutable-idempotent",
+                 "readSemantics":"repeatable-until-expiry","cors":true}"#,
+            MAILBOX_CAPABILITY
+        ));
+    }
+
+    #[test]
+    fn a_string_where_an_integer_belongs_is_refused() {
+        // `"6"` is not `6`. A permissive comparison would coerce and accept a
+        // provider advertising something it does not implement.
+        assert!(!capability_matches(
+            br#"{"protocol":"selfsame-pairing-v1","status":"ok","nameplateDigits":"6",
+                 "sessionTtlSeconds":600,"frameBytes":32,"claimSemantics":"single-responder",
+                 "relaySemantics":"opaque-four-frame","providerPakeRole":"none"}"#,
+            PAIRING_CAPABILITY
+        ));
+    }
+
+    #[test]
+    fn a_duplicate_member_name_is_refused() {
+        // CON-301 names this explicitly. The core's recogniser is what enforces
+        // it, which is why the body goes through `json::recognise` rather than a
+        // permissive parser that would keep one of the two.
+        assert!(!capability_matches(
+            br#"{"protocol":"selfsame-pairing-v1","protocol":"selfsame-pairing-v1",
+                 "status":"ok","nameplateDigits":6,"sessionTtlSeconds":600,"frameBytes":32,
+                 "claimSemantics":"single-responder","relaySemantics":"opaque-four-frame",
+                 "providerPakeRole":"none"}"#,
+            PAIRING_CAPABILITY
+        ));
+    }
+
+    #[test]
+    fn a_body_over_the_bound_is_refused_by_the_recogniser_too() {
+        // `bounded_body` refuses it in transit; this is the second line, for a
+        // body that arrives inside the transport bound but pads past the
+        // contract's own 2,048.
+        let mut oversized = GOOD_MAILBOX.to_vec();
+        oversized.splice(1..1, format!(r#""pad":"{}","#, "x".repeat(2_100)).bytes());
+        assert!(!capability_matches(&oversized, MAILBOX_CAPABILITY));
+    }
+
+    #[test]
+    fn the_two_capabilities_are_not_interchangeable() {
+        assert!(!capability_matches(GOOD_PAIRING, MAILBOX_CAPABILITY));
+        assert!(!capability_matches(GOOD_MAILBOX, PAIRING_CAPABILITY));
     }
 
     #[tokio::test]

@@ -490,6 +490,11 @@ fn con_207() -> Json {
         application_id: APPLICATION_ID.into(),
         account: "acct:ss-example@accounts.photos.example".into(),
         grant_hash: proof::grant_hash(b"a grant"),
+        // The verifier session is a ledger-side binding, deliberately absent
+        // from `proof_input` — CON-207 fixes those octets and the device could
+        // not know this value. It is therefore not a corpus input either: a
+        // second implementation reproduces the signature without it.
+        session: "verifier-session-1".into(),
         issued_at: NOW,
     };
     let signature = proof::sign(&challenge, &device);
@@ -1079,14 +1084,11 @@ fn con_224() -> Json {
         accept(Json::obj([
             ("contextDigest", Json::text(hex(&context::CONTEXT_DIGEST))),
             (
-                "spec004DeclaredDigest",
-                Json::text(hex(&context::SPEC_004_DECLARED_DIGEST)),
-            ),
-            (
                 "note",
                 Json::text(
-                    "CON-224 declares a 1045-octet file that was never published; \
-                     this corpus records both digests so the divergence is visible",
+                    "the version-1 octets CON-224 declares, verbatim; a second \
+                     implementation agrees on this digest or it is not reading \
+                     the same context",
                 ),
             ),
         ])),

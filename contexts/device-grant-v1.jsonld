@@ -1,1 +1,35 @@
-{"@context":{"@protected":true,"SelfsameDeviceGrantCredential":"https://anuna.io/selfsame/vocab/device-grant/v1#SelfsameDeviceGrantCredential","SelfsameDidCrdtStatusEntry":{"@context":{"@protected":true,"credentialId":{"@id":"https://anuna.io/selfsame/vocab/device-grant/v1#credentialId","@type":"@id"},"id":"@id","statusPurpose":"https://www.w3.org/ns/credentials/status#statusPurpose","type":"@type"},"@id":"https://anuna.io/selfsame/vocab/device-grant/v1#SelfsameDidCrdtStatusEntry"},"account":{"@id":"https://anuna.io/selfsame/vocab/device-grant/v1#account","@type":"@id"},"application":{"@id":"https://anuna.io/selfsame/vocab/device-grant/v1#application","@type":"@id"},"permissions":{"@container":"@set","@id":"https://anuna.io/selfsame/vocab/device-grant/v1#permissions","@type":"@id"}}}
+{
+  "@context": {
+    "@protected": true,
+    "SelfsameDeviceGrantCredential":
+      "https://anuna.io/selfsame/vocab/device-grant/v1#SelfsameDeviceGrantCredential",
+    "application": {
+      "@id": "https://anuna.io/selfsame/vocab/device-grant/v1#application",
+      "@type": "@id"
+    },
+    "account": {
+      "@id": "https://anuna.io/selfsame/vocab/device-grant/v1#account",
+      "@type": "@id"
+    },
+    "permissions": {
+      "@id": "https://anuna.io/selfsame/vocab/device-grant/v1#permissions",
+      "@type": "@id",
+      "@container": "@set"
+    },
+    "SelfsameDidCrdtStatusEntry": {
+      "@id":
+        "https://anuna.io/selfsame/vocab/device-grant/v1#SelfsameDidCrdtStatusEntry",
+      "@context": {
+        "@protected": true,
+        "id": "@id",
+        "type": "@type",
+        "statusPurpose":
+          "https://www.w3.org/ns/credentials/status#statusPurpose",
+        "credentialId": {
+          "@id": "https://anuna.io/selfsame/vocab/device-grant/v1#credentialId",
+          "@type": "@id"
+        }
+      }
+    }
+  }
+}

@@ -259,8 +259,17 @@ pub struct Evidence<'a> {
     pub jrd: Option<&'a alias::Jrd>,
     /// The projection observation, when the profile enables one.
     pub projection: Option<Projection>,
-    /// The consumed challenge and the device's signature over it.
-    pub proof: Option<(&'a Challenge, &'a [u8; 64])>,
+    /// The consumed challenge, the device's signature over it, and the verifier
+    /// session this acceptance is running in.
+    ///
+    /// The session is part of the tuple rather than a field of its own so that
+    /// a caller cannot supply a proof without saying which session it belongs
+    /// to. `CON-207` requires rejecting "a nonce issued for another
+    /// application, account, grant, verifier session, or time window", and the
+    /// session is the one a verifier with a shared durable nonce ledger would
+    /// otherwise never check. A verifier with a single session passes the same
+    /// constant it issued the challenge under.
+    pub proof: Option<(&'a Challenge, &'a [u8; 64], &'a str)>,
 }
 
 /// An accepted grant.
@@ -404,7 +413,7 @@ pub fn accept_grant(
     }
 
     // ── 13 ─────────────────────────────────────────────────────────────────
-    let (challenge, signature) = evidence
+    let (challenge, signature, session) = evidence
         .proof
         .ok_or_else(|| AcceptError::at(AcceptStep::Proof, "no device proof supplied"))?;
     proof::matches_binding(
@@ -412,6 +421,7 @@ pub fn accept_grant(
         &grant.application,
         grant.account.as_str(),
         &proof::grant_hash(grant_bytes),
+        session,
     )
     .map_err(|e: ProofError| AcceptError::at(AcceptStep::Proof, e.to_string()))?;
     proof::verify(challenge, signature, &grant.device_public_key)

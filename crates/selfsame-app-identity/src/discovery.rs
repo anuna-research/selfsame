@@ -171,6 +171,31 @@ pub fn cache_is_fresh(fetched_at: UnixSeconds, now: UnixSeconds) -> bool {
     now >= fetched_at && now - fetched_at <= MAX_CACHE_SECONDS
 }
 
+/// Whether a cached profile may be served at all (`CON-220`).
+///
+/// `CON-220` states two conditions and they are not the same one:
+///
+/// > A party SHALL evict a cached profile immediately on any digest mismatch and
+/// > SHALL NOT serve one whose `validUntil`-bearing descriptors have all
+/// > expired.
+///
+/// [`cache_is_fresh`] answers the first clause's companion — age. This answers
+/// the second. The two come apart in exactly the case worth caring about: a
+/// profile fetched twenty minutes ago, well inside the 3,600-second bound, whose
+/// descriptors expired ten minutes ago. Age says "use it"; `CON-208` then finds
+/// no eligible descriptor and the ceremony fails — while the origin may already
+/// be publishing usable replacements that a re-fetch would have found.
+///
+/// A profile with no descriptors at all cannot arise: `CON-201` requires
+/// `rendezvous` to be a non-empty array, so `all` here is never vacuously true.
+pub fn cache_is_usable(
+    profile: &ApplicationProfile,
+    fetched_at: UnixSeconds,
+    now: UnixSeconds,
+) -> bool {
+    cache_is_fresh(fetched_at, now) && profile.rendezvous.iter().any(|d| d.valid_until > now)
+}
+
 /// Recognise the tier-3 origin-enumeration response (`CON-220`).
 ///
 /// Exactly two members, at most 32 entries, every entry an absolute HTTPS URI on

@@ -122,20 +122,44 @@ pub(crate) fn client(deadline: Duration) -> Result<reqwest::Client, NetError> {
 /// The distinction matters: a truncated body is a *different document*, and a
 /// recogniser handed one would either refuse it for the wrong reason or, worse,
 /// accept a prefix that happens to parse.
+///
+/// # The bound holds during transfer, not after it
+///
+/// `Content-Length` is a courtesy, not a guarantee: a chunked response, or one
+/// with no length at all, offers nothing to check up front. Buffering the whole
+/// body first and measuring afterwards would make this function a bound on what
+/// a *cooperative* server sends and no bound at all on what a hostile one does —
+/// an endpoint could stream indefinitely past `max_octets` and exhaust memory
+/// while every caller in this crate believed it was protected.
+///
+/// So the body is consumed a chunk at a time and abandoned the moment the total
+/// exceeds the bound. The connection is dropped with it, so an endpoint that
+/// keeps sending is talking to nobody.
 pub async fn bounded_body(
-    response: reqwest::Response,
+    mut response: reqwest::Response,
     max_octets: usize,
 ) -> Result<Vec<u8>, NetError> {
     // `Content-Length`, where the server offers one, lets an oversized body be
-    // refused before it is transferred.
+    // refused before it is transferred at all. Where it does not, the loop below
+    // is what enforces the bound.
     if response.content_length().is_some_and(|n| n > max_octets as u64) {
         return Err(NetError::TooLarge);
     }
-    let bytes = response.bytes().await.map_err(|e| NetError::Transport(e.to_string()))?;
-    if bytes.len() > max_octets {
-        return Err(NetError::TooLarge);
+    // Capacity from the advertised length where there is one, capped at the
+    // bound so a dishonest `Content-Length` cannot make this allocate either.
+    let hint = response.content_length().unwrap_or(0).min(max_octets as u64) as usize;
+    let mut body = Vec::with_capacity(hint);
+    while let Some(chunk) =
+        response.chunk().await.map_err(|e| NetError::Transport(e.to_string()))?
+    {
+        if body.len() + chunk.len() > max_octets {
+            // Refused before the oversized octets are retained. `response` is
+            // dropped on return, which closes the connection.
+            return Err(NetError::TooLarge);
+        }
+        body.extend_from_slice(&chunk);
     }
-    Ok(bytes.to_vec())
+    Ok(body)
 }
 
 /// Whether a response carries a content encoding other than `identity`.

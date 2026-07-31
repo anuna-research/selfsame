@@ -24,7 +24,7 @@ use selfsame_app_identity::ceremony::{
 use selfsame_app_identity::codec;
 use selfsame_app_identity::enrollment::{self, EnrollmentError, EnrollmentStatement, Observed, RequestLedger};
 use selfsame_app_identity::json::{self, Json};
-use selfsame_app_identity::profile::ApplicationProfile;
+use selfsame_app_identity::profile::{ApplicationProfile, MobileBinding};
 use selfsame_app_identity::{didkey, selection};
 
 const NOW_OFFER: i64 = NOW;
@@ -553,6 +553,91 @@ fn a_handoff_with_an_unknown_member_or_a_wrong_version_is_refused() {
         Handoff::recognise(&json::canonicalise(&Json::Object(members))),
         Err(CeremonyError::BadValue { path, .. }) if path == "handoffVersion"
     ));
+}
+
+#[test]
+fn a_malformed_return_uri_is_refused_rather_than_read_as_absent() {
+    // `and_then(Json::as_str)` turned every present-but-not-a-string value into
+    // `None`, so a malformed handoff recognised as a well-formed one with no
+    // return — the difference between "refused" and "silently accepted".
+    let base = Handoff {
+        ceremony_id: codec::b64url(&[1u8; 32]),
+        offer_digest: codec::b64url(&[5u8; 32]),
+        code: [9u8; 16],
+        return_uri: None,
+    };
+    for value in [
+        Json::int(7),
+        Json::Null,
+        Json::Bool(true),
+        Json::arr([Json::text("https://photos.example/return")]),
+        Json::obj([("href", Json::text("https://photos.example/return"))]),
+    ] {
+        let Json::Object(mut members) = base.to_json() else { unreachable!() };
+        members.push(("returnUri".into(), value.clone()));
+        assert!(
+            Handoff::recognise(&json::canonicalise(&Json::Object(members))).is_err(),
+            "a returnUri of {value:?} was read as absent"
+        );
+    }
+
+    // Present, a string, and not a canonical HTTPS URI.
+    for text in ["", "not a uri", "http://photos.example/return", "javascript:alert(1)"] {
+        let Json::Object(mut members) = base.to_json() else { unreachable!() };
+        members.push(("returnUri".into(), Json::text(text)));
+        assert!(
+            Handoff::recognise(&json::canonicalise(&Json::Object(members))).is_err(),
+            "`{text}` was recognised as a return URI"
+        );
+    }
+}
+
+#[test]
+fn a_return_uri_is_bound_to_the_authenticated_platform_binding() {
+    // A destination the caller chose is a destination an attacker chose. Only
+    // the URI the CON-214-authenticated binding declares may be used, and
+    // equality is exact: two paths on one origin are two destinations.
+    let declared = "https://photos.example/.well-known/selfsame/return";
+    let apple = MobileBinding::Apple {
+        id: "apple:TEAM123456:com.example.photos:https://photos.example".into(),
+        team_id: "TEAM123456".into(),
+        bundle_id: "com.example.photos".into(),
+        return_uri: declared.into(),
+    };
+    let android = MobileBinding::Android {
+        id: "android:com.example.photos:AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI".into(),
+        package_name: "com.example.photos".into(),
+        signing_certificate_sha256: vec![
+            "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI".into(),
+        ],
+    };
+    let handoff = |uri: Option<&str>| Handoff {
+        ceremony_id: codec::b64url(&[1u8; 32]),
+        offer_digest: codec::b64url(&[5u8; 32]),
+        code: [9u8; 16],
+        return_uri: uri.map(str::to_string),
+    };
+
+    assert!(handoff(Some(declared)).binds_to(&apple).is_ok());
+    // No return at all is the ordinary case and binds to anything.
+    assert!(handoff(None).binds_to(&apple).is_ok());
+    assert!(handoff(None).binds_to(&android).is_ok());
+
+    for attacker in [
+        "https://attacker.example/.well-known/selfsame/return",
+        // Same origin, different path.
+        "https://photos.example/attacker-controlled",
+        // Same host, different scheme-authority.
+        "https://photos.example.attacker.test/.well-known/selfsame/return",
+    ] {
+        assert!(
+            handoff(Some(attacker)).binds_to(&apple).is_err(),
+            "`{attacker}` was accepted against a binding declaring `{declared}`"
+        );
+    }
+
+    // CON-222's return path is a verified App Link, not a handoff member.
+    assert!(handoff(Some(declared)).binds_to(&android).is_err());
 }
 
 #[test]

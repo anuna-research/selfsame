@@ -136,8 +136,32 @@ pub struct DeviceGrant {
     pub valid_until: UnixSeconds,
     /// The `did:crdt` status entry.
     pub status_id: String,
-    /// Whether an optional Bitstring projection entry accompanies it.
-    pub has_projection_entry: bool,
+    /// The optional Bitstring projection entry accompanying it.
+    ///
+    /// Kept whole rather than as a flag: `CON-210` has a verifier read a bit
+    /// from a signed status list, and reading it needs the credential URL and
+    /// the index. A boolean records that a projection *exists* and throws away
+    /// everything needed to consult it, which makes any later observation
+    /// unattributable to this grant.
+    pub projection_entry: Option<BitstringStatusEntry>,
+}
+
+/// A conforming W3C `BitstringStatusListEntry` (`CON-205`, `CON-210`).
+///
+/// All five members are required by W3C Bitstring Status List 1.0. Recognising
+/// only `type` and `statusListIndex` would admit an entry that names no list to
+/// read, or names one for a different purpose, and would silently accept a
+/// second status object that is not a projection at all.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BitstringStatusEntry {
+    /// The entry's own identifier.
+    pub id: String,
+    /// The purpose this bit expresses. `revocation` for a Selfsame grant.
+    pub status_purpose: String,
+    /// The index of this grant's bit, a canonical base-10 integer.
+    pub status_list_index: String,
+    /// The absolute URL of the signed status list credential.
+    pub status_list_credential: String,
 }
 
 impl DeviceGrant {
@@ -281,6 +305,10 @@ const SUBJECT_MEMBERS: &[&str] = &["id", "application", "account", "permissions"
 
 const STATUS_MEMBERS: &[&str] = &["id", "type", "statusPurpose", "credentialId"];
 
+/// The five members W3C Bitstring Status List 1.0 fixes for an entry.
+const BITSTRING_MEMBERS: &[&str] =
+    &["id", "type", "statusPurpose", "statusListIndex", "statusListCredential"];
+
 /// Recognise a credential payload and check every cross-field equality
 /// `CON-205` states.
 ///
@@ -384,7 +412,7 @@ pub fn recognise(payload: &Json) -> Result<DeviceGrant, GrantError> {
     }
 
     // ── credentialStatus ───────────────────────────────────────────────────
-    let (status_id, has_projection_entry) = recognise_status(payload, &issuer, &token, &id)?;
+    let (status_id, projection_entry) = recognise_status(payload, &issuer, &token, &id)?;
 
     // ── cnf ────────────────────────────────────────────────────────────────
     let cnf = payload.get("cnf").expect("checked above");
@@ -423,7 +451,7 @@ pub fn recognise(payload: &Json) -> Result<DeviceGrant, GrantError> {
         valid_from,
         valid_until,
         status_id,
-        has_projection_entry,
+        projection_entry,
     })
 }
 
@@ -434,7 +462,7 @@ fn recognise_status(
     issuer: &str,
     token: &str,
     grant_id: &str,
-) -> Result<(String, bool), GrantError> {
+) -> Result<(String, Option<BitstringStatusEntry>), GrantError> {
     let node = payload.get("credentialStatus").expect("checked above");
     let (selfsame, projection) = match node {
         Json::Array(items) => match items.len() {
@@ -461,30 +489,63 @@ fn recognise_status(
         return Err(bad("credentialStatus.credentialId", "does not equal the grant id"));
     }
 
-    let has_projection = match projection {
-        None => false,
+    let projection_entry = match projection {
+        None => None,
         Some(entry) => {
+            // A *conforming* BitstringStatusListEntry, not merely one carrying
+            // the two members this used to look at.
+            closed(entry, BITSTRING_MEMBERS, "credentialStatus")?;
             if entry.get("type").and_then(Json::as_str) != Some(BITSTRING_ENTRY_TYPE) {
                 return Err(bad(
                     "credentialStatus",
                     "the second entry is not a BitstringStatusListEntry",
                 ));
             }
+            let member = |name: &'static str| -> Result<String, GrantError> {
+                entry
+                    .get(name)
+                    .and_then(Json::as_str)
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string)
+                    .ok_or(bad("credentialStatus", "the projection entry is incomplete"))
+            };
+            let id = member("id")?;
+            let status_purpose = member("statusPurpose")?;
+            let status_list_index = member("statusListIndex")?;
+            let status_list_credential = member("statusListCredential")?;
+
+            // The projection expresses the same thing the CRDT entry does, so a
+            // second purpose here would be a bit about something else.
+            if status_purpose != "revocation" {
+                return Err(bad(
+                    "credentialStatus.statusPurpose",
+                    "the projection entry is not for revocation",
+                ));
+            }
             // `CON-210`: "canonical base-10 integer with no leading zeroes".
-            let index = entry
-                .get("statusListIndex")
-                .and_then(Json::as_str)
-                .ok_or(bad("credentialStatus", "the projection entry has no statusListIndex"))?;
-            if index.is_empty()
-                || !index.bytes().all(|b| b.is_ascii_digit())
-                || (index.len() > 1 && index.starts_with('0'))
+            if status_list_index.bytes().any(|b| !b.is_ascii_digit())
+                || (status_list_index.len() > 1 && status_list_index.starts_with('0'))
             {
                 return Err(bad("credentialStatus", "statusListIndex is not a canonical integer"));
             }
-            true
+            // W3C requires an absolute URL, and CON-210's publication host is
+            // HTTPS. A relative value would be resolved against something, and
+            // what it was resolved against would decide which list was read.
+            if !status_list_credential.starts_with("https://") {
+                return Err(bad(
+                    "credentialStatus.statusListCredential",
+                    "is not an absolute HTTPS URL",
+                ));
+            }
+            Some(BitstringStatusEntry {
+                id,
+                status_purpose,
+                status_list_index,
+                status_list_credential,
+            })
         }
     };
-    Ok((expected_status_id, has_projection))
+    Ok((expected_status_id, projection_entry))
 }
 
 fn closed(value: &Json, allowed: &[&str], path: &'static str) -> Result<(), GrantError> {

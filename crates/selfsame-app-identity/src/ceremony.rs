@@ -269,6 +269,14 @@ pub struct OfferPayload {
     pub offer_digest: String,
 }
 
+/// The four members `CON-219`'s `deviceKeyJwk` has, exactly.
+///
+/// Exactly, because [`OfferCore::to_json`] reserialises this object from its
+/// parsed parts. Anything the recogniser tolerates but the serialiser then
+/// normalises is a difference between the octets that were signed and the
+/// octets that are digested.
+const DEVICE_JWK_MEMBERS: &[&str] = &["kty", "crv", "alg", "x"];
+
 /// Recognise an offer payload as a closed language.
 pub fn recognise_offer(octets: &[u8]) -> Result<OfferPayload, CeremonyError> {
     let limits = Limits { max_bytes: MAX_PAYLOAD_OCTETS, max_depth: MAX_PAYLOAD_DEPTH };
@@ -318,15 +326,28 @@ pub fn recognise_offer(octets: &[u8]) -> Result<OfferPayload, CeremonyError> {
     let jwk = payload
         .get("deviceKeyJwk")
         .ok_or_else(|| CeremonyError::BadMember("deviceKeyJwk".into()))?;
-    for (name, _) in jwk.as_object().ok_or_else(|| bad("deviceKeyJwk", "is not an object"))? {
-        if !["kty", "crv", "alg", "x"].contains(&name.as_str()) {
+    // Exactly the four declared members, no more and — the part that used to be
+    // missing — no fewer. A closed check alone admits a JWK with `alg` absent or
+    // `alg: "none"`, and `OfferCore::to_json` then reserialises it *with*
+    // `alg: "EdDSA"`. The device-key digest and the offer digest would be
+    // computed over an object nobody sent, which is a signature over one
+    // document authenticating another.
+    let members = jwk.as_object().ok_or_else(|| bad("deviceKeyJwk", "is not an object"))?;
+    for (name, _) in members {
+        if !DEVICE_JWK_MEMBERS.contains(&name.as_str()) {
             return Err(CeremonyError::UnknownMember(format!("deviceKeyJwk.{name}")));
         }
+    }
+    if members.len() != DEVICE_JWK_MEMBERS.len() {
+        return Err(bad("deviceKeyJwk", "is not exactly the four declared members"));
     }
     if jwk.get("kty").and_then(Json::as_str) != Some("OKP")
         || jwk.get("crv").and_then(Json::as_str) != Some("Ed25519")
     {
         return Err(bad("deviceKeyJwk", "is not an OKP/Ed25519 key"));
+    }
+    if jwk.get("alg").and_then(Json::as_str) != Some(crate::jws::ALG) {
+        return Err(bad("deviceKeyJwk", "alg is not EdDSA"));
     }
     let device_public_key = codec::decode_b64url_32(
         jwk.get("x").and_then(Json::as_str).ok_or_else(|| bad("deviceKeyJwk.x", "is absent"))?,
@@ -660,12 +681,64 @@ impl Handoff {
         let mut code = [0u8; CODE_OCTETS];
         code.copy_from_slice(&decoded);
 
-        Ok(Self {
-            ceremony_id,
-            offer_digest,
-            code,
-            return_uri: value.get("returnUri").and_then(Json::as_str).map(str::to_string),
-        })
+        // `returnUri` is optional, and *absent* is the only way it may be
+        // missing. `and_then(Json::as_str)` silently turned a present non-string
+        // — a number, an object, `null` — into `None`, so a malformed handoff
+        // recognised as a well-formed one without a return.
+        let return_uri = match value.get("returnUri") {
+            None => None,
+            Some(v) => Some(
+                v.as_str()
+                    .ok_or_else(|| bad("returnUri", "is present and is not a string"))?
+                    .to_string(),
+            ),
+        };
+        if let Some(uri) = &return_uri {
+            // The grammar, here. Whether it is *the* return URI is
+            // [`Handoff::binds_to`]'s question, because answering it needs the
+            // authenticated binding, which this function does not have.
+            crate::uri::recognise(uri, crate::uri::UriPolicy::PROVIDER_URL)
+                .map_err(|_| bad("returnUri", "is not a canonical HTTPS URI"))?;
+        }
+
+        Ok(Self { ceremony_id, offer_digest, code, return_uri })
+    }
+
+    /// Check the return URI against the authenticated platform binding
+    /// (`CON-215`, `CON-222`, `CON-223`).
+    ///
+    /// A handoff's `returnUri` is a destination, and a destination the *caller*
+    /// chose is a destination an attacker chose. `REQ-222` will not let a public
+    /// profile field stand as application authentication, and the same reasoning
+    /// applies one level down: the only return URI that may be used is the one
+    /// the `CON-214`-authenticated `MobileBinding` declares.
+    ///
+    /// So this is exact-string equality against the binding, not a prefix or
+    /// origin test — `CON-223`'s association is with a specific URL, and two
+    /// paths on one origin are two destinations.
+    ///
+    /// An Android binding declares no return URI: `CON-222`'s return path is a
+    /// verified App Link on the `applicationId` origin, not a handoff member. A
+    /// handoff carrying one against an Android binding is therefore refused
+    /// rather than ignored.
+    pub fn binds_to(
+        &self,
+        binding: &crate::profile::MobileBinding,
+    ) -> Result<(), CeremonyError> {
+        use crate::profile::MobileBinding;
+        match (&self.return_uri, binding) {
+            (None, _) => Ok(()),
+            (Some(uri), MobileBinding::Apple { return_uri, .. }) => {
+                if uri == return_uri {
+                    Ok(())
+                } else {
+                    Err(bad("returnUri", "is not the one the authenticated binding declares"))
+                }
+            }
+            (Some(_), MobileBinding::Android { .. }) => {
+                Err(bad("returnUri", "an Android binding declares no handoff return URI"))
+            }
+        }
     }
 }
 

@@ -58,7 +58,7 @@ fn the_issued_grant_recognises_with_every_cross_field_equality_intact() {
     assert_eq!(g.id, format!("{}#grant-{}", c.home_did, g.token));
     assert_eq!(g.status_id, format!("{}#status-{}", c.home_did, g.token));
     assert_eq!(g.token.len(), 43);
-    assert!(!g.has_projection_entry);
+    assert!(g.projection_entry.is_none());
     // The device key in `cnf.jwk` is the key the subject DID encodes.
     assert_eq!(didkey::decode(&g.device_did).unwrap(), g.device_public_key);
 }
@@ -496,12 +496,31 @@ fn step_13_rejects_a_missing_wrong_or_mismatched_device_proof() {
     // Signed by another device — REQ-206's whole point.
     let impostor = ed25519_dalek::SigningKey::from_bytes(&[99u8; 32]);
     let forged = proof::sign(&c.challenge, &impostor);
-    let evidence = Evidence { proof: Some((&c.challenge, &forged)), ..c.evidence() };
+    let evidence =
+        Evidence { proof: Some((&c.challenge, &forged, common::VERIFIER_SESSION)), ..c.evidence() };
     refused_at(&c, c.expectation(), evidence, AcceptStep::Proof);
 
     // A nonce issued for a different grant.
     let other = Ceremony::build(0, 2, 3, APPLICATION_ID);
-    let evidence = Evidence { proof: Some((&other.challenge, &other.signature)), ..c.evidence() };
+    let evidence = Evidence {
+        proof: Some((&other.challenge, &other.signature, common::VERIFIER_SESSION)),
+        ..c.evidence()
+    };
+    refused_at(&c, c.expectation(), evidence, AcceptStep::Proof);
+}
+
+#[test]
+fn step_13_rejects_a_nonce_issued_in_another_verifier_session() {
+    // CON-207: the verifier "SHALL reject a nonce issued for another
+    // application, account, grant, verifier session, or time window."
+    //
+    // Every other binding here agrees — same application, same account, same
+    // grant, valid signature — and only the session differs. That is the case a
+    // verifier running concurrent sessions over one durable nonce ledger sees,
+    // and the one that used to be accepted.
+    let c = Ceremony::accepted();
+    let evidence =
+        Evidence { proof: Some((&c.challenge, &c.signature, "a-different-session")), ..c.evidence() };
     refused_at(&c, c.expectation(), evidence, AcceptStep::Proof);
 }
 

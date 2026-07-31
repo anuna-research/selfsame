@@ -113,13 +113,21 @@ pub async fn fetch(
 /// That last clause is why this returns an error rather than the stale value
 /// when the network is unavailable. A grace period here would extend the life of
 /// a revoked enrollment key by exactly the length of the outage.
+///
+/// Age is not the only reason to evict. `CON-220` also forbids serving a profile
+/// "whose `validUntil`-bearing descriptors have all expired", which is a
+/// separate condition and comes apart from age in the case that matters: a
+/// profile fetched twenty minutes ago whose descriptors expired ten minutes ago
+/// is inside its cache bound and useless, and re-fetching may find the
+/// replacements the origin has already published. [`discovery::cache_is_usable`]
+/// is both conditions.
 pub async fn fetch_or_cached(
     application_id: &ApplicationId,
     cached: Option<&FetchedProfile>,
     now: UnixSeconds,
 ) -> Result<FetchedProfile, NetError> {
     if let Some(held) = cached {
-        if discovery::cache_is_fresh(held.fetched_at, now)
+        if discovery::cache_is_usable(&held.profile, held.fetched_at, now)
             && held.profile.application_id == *application_id
         {
             return Ok(held.clone());
@@ -210,6 +218,39 @@ mod tests {
         // error rather than a stale hit. That is the point: no grace period.
         let outcome = fetch_or_cached(&id, Some(&held), 1_000 + 3_601).await;
         assert!(outcome.is_err(), "a stale cache entry must not be served");
+    }
+
+    #[tokio::test]
+    async fn a_cached_profile_whose_descriptors_have_all_expired_is_not_reused() {
+        // CON-220: a party "SHALL NOT serve one whose `validUntil`-bearing
+        // descriptors have all expired". A separate condition from age, and this
+        // is the case where they disagree: comfortably inside the 3,600-second
+        // bound, and every descriptor already dead.
+        //
+        // Serving it means CON-208 finds no eligible descriptor and the ceremony
+        // fails — while the origin may already be publishing replacements.
+        let octets = fixture_profile_octets();
+        let profile = ApplicationProfile::recognise(&octets).unwrap();
+        let last_expiry =
+            profile.rendezvous.iter().map(|d| d.valid_until).max().expect("a descriptor");
+        let id = profile.application_id.clone();
+        let held = FetchedProfile { profile, fetched_at: last_expiry - 60 };
+
+        // Sixty seconds old — well inside the bound — and one second past the
+        // last descriptor's expiry.
+        assert!(discovery::cache_is_fresh(held.fetched_at, last_expiry + 1));
+        let outcome = fetch_or_cached(&id, Some(&held), last_expiry + 1).await;
+        assert!(
+            outcome.is_err(),
+            "a profile with no live descriptor was served from cache instead of revalidated"
+        );
+
+        // One second earlier the last descriptor is still live, so the same
+        // entry is served without a request.
+        let reused = fetch_or_cached(&id, Some(&held), last_expiry - 1)
+            .await
+            .expect("a profile with a live descriptor is still cacheable");
+        assert_eq!(reused.fetched_at, held.fetched_at);
     }
 
     /// The `CON-201` example profile, canonically serialised.

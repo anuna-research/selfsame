@@ -26,28 +26,27 @@
 //! and `tests/purity.rs` allows this module — and only this module — to name the
 //! host for that reason.
 //!
-//! # An unresolved gap in the specification
+//! # The version-1 octets are the ones already published
 //!
 //! `CON-224` states that the version 1 file is **1,045 octets** with
-//! `context_digest = 9dba4d06…`. That file was never published: the contract
-//! names `contexts/device-grant-v1.jsonld` in the `selfsame` repository, and the
-//! repository did not contain it. So the declared digest is unverifiable, and
-//! this crate cannot adopt it without asserting agreement with bytes nobody can
-//! read.
+//! `context_digest = 9dba4d06…`, and names `contexts/device-grant-v1.jsonld` in
+//! the `selfsame` repository. That file is exactly there, it is exactly 1,045
+//! octets, and its `SHA-256` is exactly the declared value. [`CONTEXT_OCTETS`]
+//! compiles in those bytes and [`CONTEXT_DIGEST`] is that digest.
 //!
-//! What ships instead is the logical context from `CON-205`, serialised in **RFC
-//! 8785 canonical form** — 794 octets, digest [`CONTEXT_DIGEST`]. Canonical form
-//! is proposed deliberately: it is regenerable from the specification text
-//! alone, so a second implementation can reproduce the octets and therefore the
-//! digest, which is what `NFR-202` requires and what a pretty-printed file with
-//! an unstated indentation convention could never provide.
+//! This crate briefly shipped a 794-octet RFC 8785 re-serialisation of the same
+//! logical context instead, on the mistaken premise that the declared file had
+//! never been published. Canonical form would have been the better choice at
+//! version 1 — it is regenerable from the specification text alone — but it is
+//! not a choice available now. `CON-224` is explicit that the octets served at
+//! the IRI "SHALL NEVER change", and the digest, not the serialisation, is what
+//! every issued credential and every existing version-1 verifier commits to.
+//! Re-serialising changes the immutable bytes behind a stable `/v1` IRI and
+//! silently forks this build from every conforming verifier.
 //!
-//! [`SPEC_004_DECLARED_DIGEST`] records the specification's value so the
-//! divergence is visible rather than quietly resolved in this crate's favour.
-//! Closing it is a Tier-1 gate item — *"The Selfsame JSON-LD context is
-//! published at the `CON-224` IRI with immutable content, its `context_digest`
-//! recorded here and in the corpus"* — and is recorded as `FINDING-004` in the
-//! `EXP-001` report.
+//! So the rule is the one `CON-224` already states: a change of serialisation is
+//! a change of octets, and a change of octets is a new IRI ending `/v2` with a
+//! new `profileVersion` — never a new digest behind the old name.
 
 use crate::json::{self, Json, JsonError, Limits};
 
@@ -67,20 +66,15 @@ pub const W3C_VC_CONTEXT: &str = "https://www.w3.org/ns/credentials/v2";
 /// `profileVersion`.
 pub const CONTEXT_OCTETS: &[u8] = include_bytes!("../../../contexts/device-grant-v1.jsonld");
 
-/// `SHA-256(CONTEXT_OCTETS)` — the authority `CON-224` names.
+/// `SHA-256(CONTEXT_OCTETS)` — the authority `CON-224` names, and the exact
+/// value that contract declares for version 1.
 pub const CONTEXT_DIGEST: [u8; 32] = [
-    0x4f, 0x1e, 0xec, 0xe1, 0x61, 0x1f, 0x06, 0x65, 0x7f, 0xca, 0x7d, 0x00, 0xc2, 0x3e, 0x13, 0xe3,
-    0x94, 0x31, 0x46, 0x4c, 0x03, 0x98, 0x61, 0x19, 0x2e, 0x0e, 0xa1, 0xd0, 0x5e, 0x5c, 0x1e, 0x20,
-];
-
-/// The digest SPEC-004 `CON-224` declares, for a file that was never published.
-///
-/// Recorded so the divergence is visible. See the module documentation and
-/// `FINDING-004`.
-pub const SPEC_004_DECLARED_DIGEST: [u8; 32] = [
     0x9d, 0xba, 0x4d, 0x06, 0x5a, 0x9b, 0x7f, 0x54, 0xac, 0xbc, 0xfe, 0x8d, 0x75, 0xe1, 0xf2, 0xc8,
     0xe7, 0xfe, 0x4a, 0xb8, 0xa4, 0xb8, 0x7a, 0x4a, 0xd3, 0xf8, 0x83, 0xc4, 0x5a, 0x3d, 0x11, 0x83,
 ];
+
+/// `CON-224`: the version-1 context file is exactly 1,045 octets.
+pub const CONTEXT_OCTET_COUNT: usize = 1_045;
 
 /// `CON-224`: the context file is at most 8,192 octets.
 pub const MAX_CONTEXT_OCTETS: usize = 8_192;
@@ -167,31 +161,23 @@ mod tests {
     }
 
     #[test]
-    fn the_shipped_context_is_rfc_8785_canonical_and_therefore_regenerable() {
-        // This is the property that makes the digest reproducible from the
-        // specification text alone: a second implementation builds the logical
-        // context CON-205 prints, canonicalises it, and gets these octets.
-        let limits = Limits { max_bytes: MAX_CONTEXT_OCTETS, max_depth: 8 };
-        assert!(
-            json::is_canonical(CONTEXT_OCTETS, limits).unwrap(),
-            "the context file must be RFC 8785 canonical"
-        );
+    fn the_shipped_octets_are_the_ones_con_224_declares() {
+        // The whole point of CON-224 is that these bytes never move. A
+        // reformat, a re-serialisation, or a stray trailing newline is a
+        // different document behind the same immutable `/v1` IRI, and this is
+        // where that fails — before it can fork this build from every existing
+        // version-1 verifier.
+        assert_eq!(CONTEXT_OCTETS.len(), CONTEXT_OCTET_COUNT);
         assert!(!CONTEXT_OCTETS.starts_with(&[0xEF, 0xBB, 0xBF]), "no byte-order mark");
+        assert_eq!(
+            hex(&context_digest()),
+            "9dba4d065a9b7f54acbcfe8d75e1f2c8e7fe4ab8a4b87a4ad3f883c45a3d1183",
+            "the shipped octets are not the ones CON-224 declares for version 1"
+        );
     }
 
-    #[test]
-    fn the_shipped_digest_diverges_from_the_one_spec_004_declares() {
-        // Recorded as a test rather than only as prose, so the divergence
-        // cannot be lost when someone regenerates the file. CON-224 names a
-        // 1,045-octet file that was never published; this ships 794 canonical
-        // octets instead. Closing the gap is a Tier-1 gate item, and this
-        // assertion is what will fail — loudly, and in the right place — on the
-        // day the real file arrives.
-        assert_ne!(
-            CONTEXT_DIGEST, SPEC_004_DECLARED_DIGEST,
-            "CON-224's declared digest now matches: adopt it and delete this test"
-        );
-        assert_eq!(CONTEXT_OCTETS.len(), 794);
+    fn hex(bytes: &[u8; 32]) -> String {
+        bytes.iter().map(|b| format!("{b:02x}")).collect()
     }
 
     #[test]

@@ -82,7 +82,22 @@ pub enum ProofError {
 ///
 /// `CON-207`: the verifier "SHALL reject a nonce issued for another application,
 /// account, grant, verifier session, or time window". Recording the binding at
-/// issuance is what makes that decidable later.
+/// issuance is what makes that decidable later — all five of them.
+///
+/// # Why the session is a field and not part of `proof_input`
+///
+/// `CON-207` fixes `proof_input` exactly, and the session is not in it. That is
+/// consistent: the session is the *verifier's* own notion, the device has no way
+/// to know it, and putting it in the signed octets would require telling the
+/// device a value that means nothing to it.
+///
+/// So the session is enforced where the other stateful rules are — at the
+/// ledger, on the recorded challenge. Without it, a verifier running concurrent
+/// sessions against one durable nonce store has four of the contract's five
+/// bindings: a challenge issued in session A, for the same application, account
+/// and grant, is indistinguishable from one issued in session B and is accepted
+/// there. The nonce is single-use, so this is not unlimited, but it is a
+/// challenge crossing exactly the boundary the contract names.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Challenge {
     /// The verifier's 32 random octets.
@@ -93,6 +108,12 @@ pub struct Challenge {
     pub account: String,
     /// `SHA-256` of the exact grant octets.
     pub grant_hash: [u8; 32],
+    /// The verifier session this challenge was issued in.
+    ///
+    /// Opaque to this crate and to the device: whatever a verifier uses to tell
+    /// its own concurrent sessions apart. A verifier that genuinely has one
+    /// session passes one constant and loses nothing.
+    pub session: String,
     /// When the verifier issued it.
     pub issued_at: UnixSeconds,
 }
@@ -204,15 +225,21 @@ impl NonceLedger {
 }
 
 /// Check that a consumed challenge was issued for the binding now being claimed.
+///
+/// All four of `CON-207`'s non-temporal bindings — application, account, grant,
+/// and verifier session. `session` is the caller's current session; a verifier
+/// with one session passes the same constant it issued with.
 pub fn matches_binding(
     challenge: &Challenge,
     application_id: &str,
     account: &str,
     grant_hash: &[u8; 32],
+    session: &str,
 ) -> Result<(), ProofError> {
     if challenge.application_id != application_id
         || challenge.account != account
         || &challenge.grant_hash != grant_hash
+        || challenge.session != session
     {
         return Err(ProofError::NonceMismatch);
     }
@@ -232,12 +259,16 @@ mod tests {
         ed25519_dalek::SigningKey::from_bytes(&[seed; 32])
     }
 
+    const S1: &str = "session-a";
+    const S2: &str = "session-b";
+
     fn challenge() -> Challenge {
         Challenge {
             nonce: [5u8; NONCE_OCTETS],
             application_id: APP.into(),
             account: A1.into(),
             grant_hash: grant_hash(b"a grant"),
+            session: S1.into(),
             issued_at: 1_000,
         }
     }
@@ -398,18 +429,47 @@ mod tests {
     #[test]
     fn a_nonce_issued_for_another_binding_is_refused() {
         let c = challenge();
-        assert!(matches_binding(&c, APP, A1, &grant_hash(b"a grant")).is_ok());
+        assert!(matches_binding(&c, APP, A1, &grant_hash(b"a grant"), S1).is_ok());
         assert_eq!(
-            matches_binding(&c, OTHER_APP, A1, &grant_hash(b"a grant")),
+            matches_binding(&c, OTHER_APP, A1, &grant_hash(b"a grant"), S1),
             Err(ProofError::NonceMismatch)
         );
         assert_eq!(
-            matches_binding(&c, APP, A2, &grant_hash(b"a grant")),
+            matches_binding(&c, APP, A2, &grant_hash(b"a grant"), S1),
             Err(ProofError::NonceMismatch)
         );
         assert_eq!(
-            matches_binding(&c, APP, A1, &grant_hash(b"other")),
+            matches_binding(&c, APP, A1, &grant_hash(b"other"), S1),
             Err(ProofError::NonceMismatch)
         );
+    }
+
+    #[test]
+    fn a_nonce_issued_in_another_verifier_session_is_refused() {
+        // CON-207 names the verifier session alongside application, account and
+        // grant. It is the one a verifier with a durable nonce ledger shared
+        // across concurrent sessions would otherwise never check: same
+        // application, same account, same grant, different session — and every
+        // other binding agrees.
+        let c = challenge();
+        assert!(matches_binding(&c, APP, A1, &grant_hash(b"a grant"), S1).is_ok());
+        assert_eq!(
+            matches_binding(&c, APP, A1, &grant_hash(b"a grant"), S2),
+            Err(ProofError::NonceMismatch),
+            "a challenge issued in one session was accepted in another"
+        );
+    }
+
+    #[test]
+    fn the_session_is_not_part_of_the_signed_octets() {
+        // CON-207 fixes `proof_input` exactly and the session is not in it. The
+        // device could not supply it if it were — the value is the verifier's
+        // own. This pins that adding the binding did not change what is signed,
+        // so a device built against the contract still interoperates.
+        let mut a = challenge();
+        let mut b = challenge();
+        a.session = S1.into();
+        b.session = S2.into();
+        assert_eq!(proof_input(&a), proof_input(&b));
     }
 }
