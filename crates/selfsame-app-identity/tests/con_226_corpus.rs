@@ -37,7 +37,10 @@ use common::*;
 use selfsame_app_identity::accept::AcceptStep;
 use selfsame_app_identity::json::{self, Json};
 use selfsame_app_identity::scope::AccountScopeId;
-use selfsame_app_identity::{alias, ceremony, codec, discovery, enrollment, hierarchy, profile, succession};
+use selfsame_app_identity::{
+    alias, ceremony, codec, discovery, enrollment, hierarchy, pairing, platform, profile,
+    succession,
+};
 
 /// Where the corpus lives, beside the SPEC-001 and LifeHash vectors.
 const CORPUS_PATH: &str = "../../test-vectors/spec-004-v1.json";
@@ -66,6 +69,25 @@ fn required_tokens() -> Vec<&'static str> {
         "HandoffMalformed",
         "HandoffAmbiguous",
         "UserDenied",
+        // CON-213
+        "TransportRefused",
+        "OriginMismatch",
+        // CON-216
+        "ProviderNotUnique",
+        "RecordMismatch",
+        // CON-217
+        "Unconfirmed",
+        "ApplicationUnauthenticated",
+        // CON-218 — the nine version-1 downgrades
+        "SecretFromCode",
+        "RoutingInCode",
+        "WordsOnMachineCarrier",
+        "MissingConfirmation",
+        "ProviderAsPakeEndpoint",
+        "ForeignTranscriptLabels",
+        "QrAsUrl",
+        "ProviderSearch",
+        "ChangeWithRetainedValues",
         // CON-219
         "PayloadTooLarge",
         // CON-225
@@ -230,7 +252,13 @@ fn build_corpus() -> Json {
         ("con_211_account_scope", con_211()),
         ("con_212_human_alias", con_212()),
         ("con_214_enrollment_evidence", con_214()),
+        ("con_213_protocol_binding", con_213()),
         ("con_215_same_device_handoff", con_215()),
+        ("con_216_bootstrap_obligations", con_216()),
+        ("con_217_pake_composition", con_217()),
+        ("con_218_downgrade_closure", con_218()),
+        ("con_222_android_binding", con_222()),
+        ("con_223_apple_binding", con_223()),
         ("con_219_ceremony_payloads", con_219()),
         ("con_220_profile_discovery", con_220()),
         ("con_224_credential_context", con_224()),
@@ -515,6 +543,229 @@ fn con_215() -> Json {
         ));
     }
     Json::Array(cases)
+}
+
+// ── CON-213 ────────────────────────────────────────────────────────────────
+
+fn con_213() -> Json {
+    Json::Array(vec![
+        case(
+            "con_213_bound_origins",
+            "the selected descriptor's pairingUrl is the only PAKE relay origin and its url the only mailbox origin",
+            Json::obj([
+                ("pairingUrl", Json::text("https://pairing-au.provider.example")),
+                ("mailboxUrl", Json::text("https://rendezvous-au.provider.example")),
+            ]),
+            accept(Json::obj([("separateOrigins", Json::Bool(true))])),
+        ),
+        case(
+            "con_213_transport_refused",
+            "a redirect, credentials, cookies, content encoding, an oversized or unrecognised response, destructive-read semantics, or a server-nominated endpoint",
+            Json::obj([("condition", Json::text("serverNominatedEndpoint"))]),
+            reject("TransportRefused"),
+        ),
+        case(
+            "con_213_origin_mismatch",
+            "a mailbox request aimed at the PAKE relay origin, or either aimed elsewhere",
+            Json::obj([("origin", Json::text("https://attacker.example"))]),
+            reject("OriginMismatch"),
+        ),
+    ])
+}
+
+// ── CON-216 ────────────────────────────────────────────────────────────────
+
+fn con_216() -> Json {
+    Json::Array(vec![
+        case(
+            "con_216_five_preconditions",
+            "all five steps complete before the code may be displayed by either party",
+            Json::obj([("preconditions", Json::int(5))]),
+            accept(Json::obj([("mayDisplayCode", Json::Bool(true))])),
+        ),
+        case(
+            "con_216_provider_not_unique",
+            "a providerId matching zero or several descriptors",
+            Json::obj([("providerId", Json::text("no-such-provider"))]),
+            reject("ProviderNotUnique"),
+        ),
+        case(
+            "con_216_record_mismatch",
+            "a changed profile digest, descriptor, nameplate, or protocol in the CON-409 record",
+            Json::obj([("profileDigest", Json::text("changed"))]),
+            reject("RecordMismatch"),
+        ),
+        case(
+            "con_216_origin_entry_offered_early",
+            "tier-3 origin entry offered before tiers 1 and 2 were attempted",
+            Json::obj([("earlierTiersExhausted", Json::Bool(false))]),
+            reject("RoutingInCode"),
+        ),
+    ])
+}
+
+// ── CON-217 ────────────────────────────────────────────────────────────────
+
+fn con_217() -> Json {
+    Json::Array(vec![
+        case(
+            "con_217_confirmed_and_authenticated",
+            "consent shown only after this role's confirmation and CON-214 verification",
+            Json::obj([
+                ("roleConfirmed", Json::Bool(true)),
+                ("applicationAuthenticated", Json::Bool(true)),
+            ]),
+            accept(Json::obj([("mayDisplayConsent", Json::Bool(true))])),
+        ),
+        case(
+            "con_217_unconfirmed",
+            "deriving a branch, requesting a slot, or sending an offer before this role's confirmation",
+            Json::obj([("roleConfirmed", Json::Bool(false))]),
+            reject("Unconfirmed"),
+        ),
+        case(
+            "con_217_confirmation_is_not_authorization",
+            "a valid PAKE confirmation is never sufficient application authentication",
+            Json::obj([
+                ("roleConfirmed", Json::Bool(true)),
+                ("applicationAuthenticated", Json::Bool(false)),
+            ]),
+            reject("ApplicationUnauthenticated"),
+        ),
+        case(
+            "con_217_peer_confirmation_does_not_open_this_gate",
+            "the confirmation required is this role's, not the peer's",
+            Json::obj([("confirmedRole", Json::text("peer"))]),
+            reject("Unconfirmed"),
+        ),
+    ])
+}
+
+// ── CON-218 ────────────────────────────────────────────────────────────────
+
+fn con_218() -> Json {
+    let modes = [
+        ("SecretFromCode", "an AEAD or mailbox secret derived directly from C, bypassing SPAKE2"),
+        ("RoutingInCode", "a route, nameplate, provider, or application identifier inside the human code"),
+        ("WordsOnMachineCarrier", "the word rendering transported through a machine carrier instead of C"),
+        ("MissingConfirmation", "either confirmation MAC omitted"),
+        ("ProviderAsPakeEndpoint", "the provider made a SPAKE2 responder or password-verifier holder"),
+        ("ForeignTranscriptLabels", "Hark or cbcl-bus transcript labels without Selfsame binding"),
+        ("QrAsUrl", "the QR treated as an authoritative browser or custom-scheme URL"),
+        ("ProviderSearch", "a code accepted by searching providers rather than resolving its CON-409 record"),
+        ("ChangeWithRetainedValues", "provider or carrier changed while ceremony values were retained"),
+    ];
+    let mut cases = vec![case(
+        "con_218_fresh_retry",
+        "a retry regenerating all thirteen REQ-229 values and sharing none with the abandoned ceremony",
+        Json::obj([(
+            "regeneratedValues",
+            Json::Array(pairing::REGENERATED_VALUES.iter().map(|v| Json::text(*v)).collect()),
+        )]),
+        accept(Json::obj([("reusedValues", Json::int(0))])),
+    )];
+    for (token, description) in modes {
+        cases.push(case(
+            &format!("con_218_{}", to_snake(token)),
+            description,
+            Json::obj([("mode", Json::text(token))]),
+            reject(token),
+        ));
+    }
+    cases.push(case(
+        "con_218_burned_is_terminal",
+        "a burned ceremony accepts no new frame, confirmation, profile, provider, carrier, callback, mailbox record, or application evidence",
+        Json::obj([("state", Json::text("burned"))]),
+        reject("ChangeWithRetainedValues"),
+    ));
+    Json::Array(cases)
+}
+
+// ── CON-222 and CON-223 (group 3, platform-conditional) ────────────────────
+
+fn con_222() -> Json {
+    Json::Array(vec![
+        case(
+            "con_222_explicit_component_dispatch",
+            "an explicit component intent to a positively identified installed package",
+            Json::obj([
+                ("platform", Json::text("android")),
+                ("minApiLevel", Json::int(platform::MIN_ANDROID_API_LEVEL as i64)),
+                ("dispatch", Json::text("ExplicitComponent")),
+            ]),
+            accept(Json::text("Dispatched")),
+        ),
+        case(
+            "con_222_implicit_intent_refused",
+            "an implicit intent never carries ceremony material, including when exactly one candidate resolves",
+            Json::obj([
+                ("platform", Json::text("android")),
+                ("dispatch", Json::text("Implicit")),
+                ("candidates", Json::int(1)),
+            ]),
+            reject("UnverifiedWalletTarget"),
+        ),
+        case(
+            "con_222_below_api_level_thirty",
+            "package visibility filtering and App Link verification fail undetectably below level 30",
+            Json::obj([("platform", Json::text("android")), ("apiLevel", Json::int(29))]),
+            reject("WalletUnavailable"),
+        ),
+        case(
+            "con_222_caller_package_mismatch",
+            "the calling package does not match the platformBindingId in the CON-214 evidence",
+            Json::obj([
+                ("platform", Json::text("android")),
+                ("callingPackage", Json::text("com.attacker.app")),
+            ]),
+            reject("PlatformBindingMismatch"),
+        ),
+    ])
+}
+
+fn con_223() -> Json {
+    Json::Array(vec![
+        case(
+            "con_223_universal_link_handled",
+            "a Universal Link opened with universalLinksOnly reaching an associated installed app",
+            Json::obj([
+                ("platform", Json::text("apple")),
+                ("universalLinksOnly", Json::Bool(true)),
+            ]),
+            accept(Json::text("Dispatched")),
+        ),
+        case(
+            "con_223_no_associated_app_is_terminal",
+            "absence is a dispatch failure rather than a web navigation; no Safari, web view, install page, or custom scheme",
+            Json::obj([
+                ("platform", Json::text("apple")),
+                ("universalLinksOnly", Json::Bool(true)),
+                ("handled", Json::Bool(false)),
+            ]),
+            reject("WalletUnavailable"),
+        ),
+        case(
+            "con_223_association_mismatch",
+            "the return URI origin does not match the declared platform binding",
+            Json::obj([
+                ("platform", Json::text("apple")),
+                ("origin", Json::text("https://attacker.example")),
+            ]),
+            reject("PlatformBindingMismatch"),
+        ),
+        case(
+            "con_223_unattributed_caller_closes_nothing",
+            "Apple attributes no caller for a Universal Link open; the gap is closed by CON-214 and CON-221, not by the platform",
+            Json::obj([
+                ("platform", Json::text("apple")),
+                ("callerEvidence", Json::text("Unattributed")),
+            ]),
+            accept(Json::obj([
+                ("platformClosesGap", Json::Bool(false)),
+                ("closedBy", Json::arr([Json::text("CON-214"), Json::text("CON-221")])),
+            ])),
+        ),
+    ])
 }
 
 // ── CON-219 ────────────────────────────────────────────────────────────────

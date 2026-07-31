@@ -16,7 +16,7 @@ mandatory infrastructure operator anywhere in the picture.
 ## Quick start
 
 ```bash
-cargo test -p selfsame-app-identity          # 305 tests
+cargo test -p selfsame-app-identity          # 338 tests
 SELFSAME_REGEN_CORPUS=1 cargo test -p selfsame-app-identity --test con_226_corpus
 ```
 
@@ -141,6 +141,8 @@ shotgun-parser shape LangSec rules out, whatever the convention about which is
 | `accept` | CON-206 | REQ-207 — the thirteen-step predicate |
 | `proof` | CON-207 | REQ-206 — device proof of possession |
 | `selection` | CON-208, CON-209 | REQ-209, REQ-212 — provider choice and the hint |
+| `pairing` | CON-213, 216, 217, 218 | REQ-226–229 — descriptor binding, bootstrap obligations, PAKE composition, burn closure |
+| `platform` | CON-222, CON-223 | REQ-220, REQ-223, REQ-225 — Android and Apple adapter conformance |
 | `revocation` | CON-210 | REQ-208 — the grow-only revocation set |
 | `enrollment` | CON-214 | REQ-222 — application enrollment evidence |
 | `ceremony` | CON-215, CON-219 | REQ-211, REQ-220–225 — payloads and handoff |
@@ -164,6 +166,16 @@ shotgun-parser shape LangSec rules out, whatever the convention about which is
 - **`Submission` is a type, not a boolean.** A resolver's acknowledgement is not
   evidence of revocation, and the type makes "we sent it" impossible to read as
   "it is revoked".
+- **A burned ceremony has no way back.** `Ceremony::burn` is one-way and there is
+  no `reset`, because `CON-218`'s only retry transition is `burned -> new
+  ceremony`. `CeremonyValues` makes the second half checkable: it fingerprints
+  the thirteen values `REQ-229` names, so "did the retry reuse anything?" gets a
+  list rather than a promise.
+- **`platform` has no `verify_signing_certificate`.** `CON-222` records the
+  target's signing identity for audit and explicitly does *not* check it against
+  a registry, because none exists — which is why `CON-221` confirmation is
+  required at first enrollment. A function implying an authority would invent
+  one.
 
 ## API reference
 

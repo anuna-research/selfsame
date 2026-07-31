@@ -84,6 +84,8 @@ pub mod grant;
 pub mod hierarchy;
 pub mod json;
 pub mod jws;
+pub mod pairing;
+pub mod platform;
 pub mod profile;
 pub mod proof;
 pub mod revocation;

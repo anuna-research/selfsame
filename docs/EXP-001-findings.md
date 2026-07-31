@@ -5,7 +5,7 @@
 | id | EXP-001-findings |
 | brief | [[EXP-001-spec-004-reference-implementation]] |
 | conflict record | [[CONFLICT-001-spec-004-tier1-gate]] |
-| status | complete — converged on the covered surface, blocked on the rest |
+| status | complete — all 26 contracts implemented; primitives and FFI remain |
 | date | 2026-07-31 |
 | author | Claude Opus 5 (1M context), `claude-opus-5[1m]` |
 | reviewer | **none** — see the Gate Evidence Record |
@@ -13,22 +13,25 @@
 ## Recommendation
 
 The pure core of [[SPEC-004-application-scoped-identity]] is implementable from
-the specification text. Fourteen of its twenty-six contracts are now implemented
-and tested against the specification's own `TEST-2NN` criteria, with a published
-conformance corpus. **Ten findings** are recorded below; two of them —
-`FINDING-004` and `FINDING-005` — are defects in artefacts the specification
-depends on rather than in the specification's prose, and one of those is a
-security defect that the Tier-1 review should treat as blocking.
+the specification text. **All twenty-six contracts** are now implemented and
+tested against the specification's own `TEST-2NN` criteria, with a published
+conformance corpus. **Thirteen findings** are recorded below. Three deserve a
+reviewer's attention ahead of the rest: `FINDING-005` is a security defect in a
+pinned dependency, `FINDING-004` is an unpublishable digest, and `FINDING-013` is
+a contradiction between two contracts whose failure mode is that an implementer
+manufactures the evidence one of them forbids.
 
 The specification is unusually implementable for its size. Where it was
 ambiguous it was ambiguous in small, local ways, and in every case the
 fail-closed reading was available. That is the substantive result: a 6,100-line
-Tier-1 specification produced ten findings and no contradictions.
+Tier-1 specification governing cryptography, authorization, and revocation
+produced thirteen findings, of which exactly one — `FINDING-013` — is an
+internal contradiction rather than an underspecification.
 
 **Confidence:** high on the covered surface, and it is worth being precise about
 why. Every obligation implemented here was read from the specification and
-tested against the specification's own criteria, three hand-run mutants were
-killed by the tests written for them, and the whole is 305 tests. But
+tested against the specification's own criteria, seven hand-run mutants were
+killed by the tests written for them, and the whole is 338 tests. But
 Constitutional Principle 12 forbids this session from validating its own output,
 so "high confidence" here means *the author believes it correct*, which the
 protocol correctly treats as inadmissible evidence.
@@ -48,10 +51,16 @@ protocol correctly treats as inadmissible evidence.
 | `CON-210` revocation and projection | `revocation` | 16 (`TEST-213`, `TEST-240`) |
 | `CON-211` account scope | `scope` | 8 (`TEST-223`) |
 | `CON-212` human alias | `alias` | included above |
+| `CON-213` protocol binding | `pairing` | included below |
 | `CON-214` enrollment evidence | `enrollment` | included below |
 | `CON-215`/`219` ceremony payloads | `ceremony` | 25 (`TEST-228`, `231`, `236`) |
+| `CON-216` bootstrap obligations | `pairing` | included below |
+| `CON-217` PAKE composition | `pairing` | included below |
+| `CON-218` downgrade closure | `pairing` | 18 (`TEST-229`, `232`, `233`, `235`) |
 | `CON-220` profile discovery | `discovery` | 7 (`TEST-237`) |
 | `CON-221` first-enrollment confirmation | `confirm` | 7 (`TEST-238`) |
+| `CON-222` Android binding | `platform` | included below |
+| `CON-223` Apple binding | `platform` | 15 (`TEST-230`, `TEST-239`) |
 | `CON-224` credential context | `context` | 8 (`TEST-241`) |
 | `CON-225` identity succession | `succession` | 16 (`TEST-242`) |
 | `CON-226` conformance corpus | `tests/con_226_corpus.rs` | 5 (`TEST-243`) |
@@ -61,7 +70,7 @@ the one JSON recogniser and RFC 8785 canonicaliser, canonical base64url /
 base32 / base58btc, the restricted HTTPS URI grammar, the `dateTimeStamp`
 recogniser, the compact JWS layer, and `did:key`.
 
-**305 tests, all passing. `cargo clippy --all-targets` clean. The purity gate
+**338 tests, all passing. `cargo clippy --all-targets` clean. The purity gate
 passes: no network-capable crate is in the dependency graph.**
 
 ## What was NOT implemented, and why
@@ -69,16 +78,21 @@ passes: no network-capable crate is in the dependency graph.**
 Stated plainly, because a completion report that omits this is the false
 compliance [[PROTO-001-usdd-agent-protocol]] §Compliance Evidence measures.
 
+All twenty-six contracts now have an implementation. What remains unimplemented
+is **primitives and FFI**, not contracts — and the distinction matters, because
+every obligation the six late contracts state turns out to be about ordering,
+binding, and closure rather than about the primitive underneath.
+
 | Not implemented | Why |
 |---|---|
-| `CON-213`, `CON-216`, `CON-217`, `CON-218` | Each is a *binding* to [[PROTO-003-selfsame-pairing-v1]] — SPAKE2, nameplates, role tokens, the `CON-409` record ladder. PROTO-003 is a separate specification with its own open Tier-1 gate and no implementation in this repository. Implementing the binding without the thing bound would produce a shape, not a contract. |
-| `CON-222`, `CON-223` | Android and Apple platform adapters. These are native platform code — `PackageManager`, `PendingIntent` flags, `universalLinksOnly`, associated domains — and cannot be exercised meaningfully outside an integration harness with hostile sibling apps installed, which `TEST-239` correctly requires. |
+| PROTO-003's SPAKE2 (`CON-403`–`CON-408`) | The password mapping, the two messages, the confirmation MACs, and the derivation of `mailbox_secret_16` from the PAKE key. A separate specification with its own open Tier-1 gate. `pairing` takes a [`Confirmation`] carrying the role it was made for and the `binding_hash` it covers, which is everything `CON-213`/`216`/`217`/`218` actually ask about — swapping in a real SPAKE2 changes what *produces* one, not what may be done once one exists. |
+| PROTO-002's mailbox HTTP and PROTO-004's AEAD envelope | Likewise separate specifications. `CON-213`'s transport policy is implemented as a response predicate; the requests are the shell's. |
+| Android and Apple **FFI** | `PackageManager`, `PendingIntent`, `UIApplication.open`, associated domains. `CON-222`/`CON-223`'s *policy* — binding grammars, caller-identity comparison, dispatch flags, the return-path origin rule, the API-30 floor — is implemented and tested; the native calls are not, and cannot be outside the harness `TEST-239` requires. |
 | The effectful shell | HTTP profile fetch, WebFinger, provider probes, `did:crdt` state resolution and delta submission. Deliberately out of scope: the purity boundary is the point, and every one of these is injected as a parameter so the decision it feeds is tested without it. |
-| `TEST-220`, `TEST-226`, `TEST-227`, `TEST-229`, `TEST-230`, `TEST-234`, `TEST-235`, `TEST-239` | Each requires two independently implemented provider stacks, a mobile integration harness, or an adversary with network control. They are gate items, not unit tests. |
+| `TEST-220`, `TEST-226`, `TEST-227`, `TEST-234`, `TEST-239` | Each requires two independently implemented provider stacks, a mobile integration harness, or an adversary with network control. They are gate items, not unit tests. `TEST-229`, `TEST-230`, `TEST-233` and `TEST-235` are now partly covered: their state-machine and closure obligations are tested, their network and platform halves are not. |
 
-The corpus's `CON-222`/`CON-223` groups are consequently absent rather than
-stubbed. `CON-226` says cases outside group 3 "SHALL NOT be platform-conditional";
-group 3 itself is platform-conditional by construction and is owed.
+The corpus carries `CON-222`/`CON-223` as group 3, which `CON-226` permits to be
+platform-conditional. Every other group is platform-neutral, as it requires.
 
 ## Findings
 
@@ -248,6 +262,79 @@ refused, because the core cannot know what the shell could have reached.
 **Proposed resolution:** either make it an obligation on the shell with a named
 observable (`OBS-###`), or state that the record is the whole control.
 
+### FINDING-011 — `REQ-229` bounds initiator confirmations but does not say what a second one does
+
+> The wallet SHALL evaluate at most one initiator confirmation per minted
+> ceremony.
+
+The bound is clear; the consequence of exceeding it is not. Two readings are
+available — ignore the second confirmation, or burn the ceremony — and they
+differ materially. Ignoring it leaves the ceremony live for a peer that has just
+demonstrated it will retry, which is an attacker with more than one guess at a
+128-bit code delivered over a human channel.
+
+**Taken as:** burn. `CON-218` says "Every condition enumerated by … `REQ-229`
+moves the local ceremony directly to terminal `burned`", and a second initiator
+confirmation is a condition `REQ-229` enumerates.
+**Proposed resolution:** say so in `REQ-229`. The inference is available but it
+requires reading two contracts together, and the fail-open reading is the one an
+implementer reaches for first because it is less disruptive.
+
+### FINDING-012 — `CON-222` compares a calling package to a `platformBindingId`, which is a different shape
+
+> The wallet obtains the calling package … and compares it to the
+> `platformBindingId` in the `CON-214` evidence.
+
+A calling package is `com.example.photos`. A `platformBindingId` is
+`android:com.example.photos:<cert-sha256>`. They are not comparable as written,
+so a literal implementation either always fails or does an undeclared substring
+match — and an undeclared substring match over an identifier that contains a
+package name is exactly the kind of comparison that admits
+`com.example.photos.evil`.
+
+**Taken as:** compare against the binding's `packageName` member, having
+resolved the binding from the authenticated profile by its `platformBindingId`.
+**Proposed resolution:** state the comparison precisely. "…resolves the binding
+named by `platformBindingId` in the authenticated profile and compares the
+calling package to that binding's `packageName`, as exact ASCII."
+
+### FINDING-013 — `CON-215` requires of every adapter something `CON-223` says Apple cannot provide
+
+`CON-215` sets the bar for a future adapter:
+
+> A future adapter must provide equivalent installed-target authentication,
+> no-network-fallback behavior, one-shot delivery, and **a caller-binding signal
+> for `CON-214`**.
+
+`CON-223` then records that one of the two adapters the specification itself
+defines cannot meet the last clause:
+
+> Apple provides no general equivalent of Android's calling-package attribution
+> for a Universal Link open.
+
+So as literally written, the Apple adapter fails the equivalence bar the
+specification sets for adapters. The intent is plainly that three properties are
+universal and the fourth is provided where the platform can, with the residual
+gap closed by the `CON-214` signature and `CON-221` confirmation — `CON-223` says
+exactly that — but `CON-215` does not carry the qualification.
+
+**Taken as:** the four universal properties are required of every adapter; the
+caller-binding signal is required only where the platform provides one.
+`AdapterConformance::is_conformant` is parameterised by platform for this reason,
+and a test asserts that Apple's policy conforms on Apple and does **not** conform
+on Android — because Android provides the signal, so omitting it there is a
+choice rather than a platform limit.
+**Proposed resolution:** qualify the clause in `CON-215`: "…and a caller-binding
+signal for `CON-214` where the platform authenticates one, or an explicit record
+that it does not, as `CON-223` gives for Apple."
+
+This one is worth a reviewer's attention beyond the wording. The failure mode of
+leaving it unqualified is not that an Apple adapter is rejected — it is that an
+implementer reads "must provide a caller-binding signal", finds the platform
+gives none, and **manufactures one** from a payload-supplied identifier. `CON-222`
+already forbids exactly that: "A caller-supplied package name in the payload is
+never evidence of anything."
+
 ## Gate Evidence Record
 
 Per [[PROTO-001-usdd-agent-protocol]] §Gate Evidence Record. `unverified` is a
@@ -260,7 +347,7 @@ gates:
   - gate: "Tests derived from requirements (REQ → TEST)"
     mechanism: "cargo test -p selfsame-app-identity"
     result: pass
-    evidence: "305 passed, 9 suites; every test file names the TEST-2NN it derives from"
+    evidence: "338 passed, 9 suites; every test file names the TEST-2NN it derives from"
 
   - gate: "Test-First / Red Gate"
     mechanism: "commit order for the json recogniser; mutation testing elsewhere"
@@ -270,7 +357,11 @@ gates:
       practical in one session, so PROTO-001's named fallback applies: three
       hand-run mutants (freshness bound min→max, validity window >= → >,
       lifetime bound removed) were each killed by the test written for them.
-      A full mutation run was NOT performed."
+      Four more were run against the pairing and platform contracts: dropping the
+      authentication half of the consent gate, making burn() a no-op, permitting
+      an implicit intent to carry ceremony material, and treating an
+      unattributed caller as a mismatch. Each was killed by the test written for
+      it. A full mutation run was NOT performed."
 
   - gate: "Purity: no I/O in the core"
     mechanism: "cargo test -p selfsame-app-identity --test purity"
@@ -292,10 +383,11 @@ gates:
   - gate: "CON-226 corpus published and complete"
     mechanism: "cargo test -p selfsame-app-identity --test con_226_corpus"
     result: pass
-    evidence: "test-vectors/spec-004-v1.json — 21,518 octets, 13 groups, 68
-      cases, sha256 d407d2c3ff126e3f063011d3801a41ee0cda0f19f1a53b730ee4ca768d6d6941.
-      The completeness rule is a test: every closed error token and each of
-      CON-206's thirteen steps has a case."
+    evidence: "test-vectors/spec-004-v1.json — 28,671 octets, 19 groups, 98
+      cases, sha256 a75ca4ff23b90fd2a7c883016dde6543698184577bf2e144ae9fc8328a558f6a.
+      The completeness rule is a test: every closed error token — including
+      CON-218's nine version-1 downgrades — and each of CON-206's thirteen steps
+      has a case."
 
   - gate: "Two independent implementations reproduce the normative vectors (NFR-202)"
     mechanism: "none available"
@@ -328,10 +420,26 @@ gates:
 
   - gate: "Full contract coverage"
     mechanism: "inspection against SPEC-004 §Contracts"
-    result: fail
-    evidence: "CON-213, CON-216, CON-217, CON-218 depend on PROTO-003, which is
-      unimplemented. CON-222, CON-223 are native platform adapters. See
-      'What was NOT implemented' above."
+    result: pass
+    evidence: "all 26 contracts (CON-201 through CON-226) have an implementation
+      and tests. What remains unimplemented is primitives and FFI — PROTO-002/3/4
+      and the native platform calls — not contracts. See 'What was NOT
+      implemented' above for the precise boundary."
+
+  - gate: "Ceremony obligations exercised against a live PROTO-003 stack"
+    mechanism: "none available"
+    result: unverified
+    evidence: "CON-213/216/217/218 are tested against an injected Confirmation
+      rather than a real SPAKE2 exchange. The ordering, binding, and closure
+      obligations are covered; the primitive is not implemented here."
+    owner: "the human owner"
+
+  - gate: "Platform adapters exercised on a real OS (TEST-239)"
+    mechanism: "none available"
+    result: unverified
+    evidence: "CON-222/223 policy is implemented and tested; the FFI is not.
+      TEST-239 requires hostile sibling apps and alternate link handlers
+      installed, which needs an integration harness."
     owner: "the human owner"
 ```
 
@@ -361,3 +469,11 @@ Three, offered for Phase 4 rather than as findings against the specification.
   Neither is visible from the specification text alone, which is an argument for
   the Tier-1 gate's insistence on a reference implementation rather than review
   by inspection.
+- **"It depends on PROTO-003" was too quick an answer.** Four contracts were
+  initially deferred on that ground and all four turned out to be implementable:
+  their obligations are about ordering, binding, and closure, and none of them
+  needs the SPAKE2 primitive to be decidable. `CON-218` needs no PROTO-003
+  concept at all. The lesson for Phase 4 is that a contract naming a dependency
+  is not the same as a contract *requiring* it, and the cheap test is to ask
+  which of its clauses actually mention the primitive rather than the ceremony
+  around it.
