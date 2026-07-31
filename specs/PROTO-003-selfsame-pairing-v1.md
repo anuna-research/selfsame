@@ -3,7 +3,7 @@ id: PROTO-003
 title: Selfsame Pairing Protocol v1 — routable num-word-word SPAKE2
 status: draft
 tier: 1
-version: 0.4.0
+version: 0.5.0
 audience: application developer, SDK implementer, wallet implementer, infrastructure operator, security reviewer
 author: Anuna Research (drafted with Codex, 2026-07-30; amended with Claude, 2026-07-31)
 last-updated: 2026-07-31
@@ -462,6 +462,17 @@ and no later than the bounded periods in
 [[PROTO-003-selfsame-pairing-v1#CON-405]]. It SHALL NOT log raw nameplates,
 tokens, frame bodies, or full client IP addresses.
 
+The same obligation binds a **record host**, a role that did not exist when
+this requirement was first written. A host serving
+[[PROTO-003-selfsame-pairing-v1#CON-409]] records SHALL delete each record at
+its `expiresAt` and SHALL NOT retain the record, its derived address, or any
+requesting network address beyond that moment. It MAY keep aggregate counters
+that are neither per-address nor per-record. A host that retains addresses
+accumulates exactly the device-pairing history CON-409's host-exposure rules
+exist to bound.
+
+Trace: [[PROTO-003-selfsame-pairing-v1#TEST-414]]
+
 ## Architecture decisions
 
 ### ADR-401: Separate routing context from the PAKE password
@@ -777,6 +788,58 @@ Rejected:
   networks where a person is most likely to be pairing a work laptop; and
 - **relays alone** — either someone ships a default list, or a cold wallet has
   nothing, which returns to the operator dependency this ADR avoids.
+
+### ADR-411: Bound the record host by content and lifetime, not by who operates it
+
+**Status:** PROPOSED.
+
+[[PROTO-003-selfsame-pairing-v1#OQ-402]] asked whether cross-application
+aggregation by a record host is acceptable. It is — but only because what a
+host can accumulate is already bounded by a closed six-member record and a
+600-second expiry, and because
+[[PROTO-003-selfsame-pairing-v1#CON-409]] now adds the two rules that were
+missing: randomised resolver selection and mandatory deletion at expiry.
+
+Bounding by content rather than by operator is the same choice
+[[PROTO-002-selfsame-rendezvous-v1]] made for the mailbox, where capability
+conformance and not operator identity determines eligibility. Any rule of the
+form "only a trusted party may host records" would need a trust list, and a
+trust list is the ecosystem dependency [[SPEC-004-application-scoped-identity#REQ-210]]
+and ADR-410 exist to avoid. The alternative — say nothing and let hosts retain
+what they like — leaves the one genuinely sensitive artefact, the
+(publisher, resolver) address pair, accumulating indefinitely at whichever
+relay is most widely declared.
+
+Randomised resolver selection is the load-bearing rule and it costs nothing. A
+publish necessarily reaches every declared relay, since the application cannot
+know which one the wallet will reach. A *resolve* need reach only one. Letting
+the wallet pick deterministically — first, fastest, last-used — hands that one
+relay a stable position from which it sees the pair for most ceremonies.
+Picking uniformly at random spreads the pair across the declared set and makes
+any single host's view a random sample rather than a census.
+
+The tier ordering deserves recording because it inverts the intuition that a
+fallback is a degradation. Tier 3 discloses nothing new — the application
+already knows every fact in its own record — so the tier ADR-410 had to defend
+as "not an embarrassment" is in fact the most private one available. Tier 1 is
+the fastest and the only one where aggregation is possible at all. An
+implementation SHOULD NOT therefore reorder the ladder for privacy: tiers 1 and
+2 are raced precisely so that a meaningful share of ceremonies never touch a
+relay, and tier 3's UX cost is real.
+
+Rejected:
+
+- **a trusted-host list or operator accreditation** — reintroduces the
+  ecosystem dependency the ladder was built to avoid;
+- **requiring publish and resolve on different hosts** — the transport cannot
+  guarantee it: a wallet with one cached relay has one choice, and tier 2's
+  separation is a property of DHT routing rather than something a client can
+  enforce. Randomised selection achieves the same distributional effect without
+  a rule that some clients cannot satisfy;
+- **forbidding shared relays** — unenforceable, and it would punish the
+  operators most likely to be well run; and
+- **saying nothing, as in version 0.4.0** — leaves retention undefined for the
+  only role that sees both sides of a pairing.
 
 ## Contracts
 
@@ -1410,9 +1473,9 @@ cache the `pairingRecordRelays` of every application profile it has
 authenticated, and MAY query that accumulated set. A relay holding no record for
 an address returns nothing, so querying an unrelated application's relay is
 harmless and discloses only the address. A party SHALL NOT add a relay to this
-cache from any source other than a profile it authenticated through the
-[[SPEC-004-application-scoped-identity#OQ-207]] origin mechanism — never from a
-caller, a bootstrap, a record, or another relay.
+cache from any source other than a profile it authenticated through
+[[SPEC-004-application-scoped-identity#CON-220]] — never from a caller, a
+bootstrap, a record, or another relay.
 
 **Tier 2 — a public distributed hash table.** Mainline BEP-44 mutable items are
 the version-2 default. This tier has no operator, and it reaches networks where
@@ -1443,6 +1506,56 @@ SHALL degrade to the next tier rather than fail when a tier is unavailable for
 platform, policy, or distribution reasons; tier 2 in particular may be absent on
 platforms where shipping a DHT client is impractical.
 
+#### Host exposure
+
+This subsection closes [[PROTO-003-selfsame-pairing-v1#OQ-402]].
+[[PROTO-003-selfsame-pairing-v1#ADR-411]] records the reasoning.
+
+A record host observes a publish and a resolve at one address, seconds apart,
+from two network addresses. What it learns is bounded and is worth stating
+exactly, because the bound is the control:
+
+| Learns | Does not learn |
+|---|---|
+| that a ceremony for one `applicationId` began at time T | which person, account, device, or home DID |
+| the publishing party's network address | any part of `C`, the SPAKE2 transcript, or any derived key |
+| the resolving party's address, **if it serves that resolve** | any offer or bundle plaintext |
+| the record's six declared members | any link between two ceremonies — 128-bit addresses are unlinkable |
+
+**The tiers' privacy order is the inverse of their convenience order**, which
+is worth saying plainly because it inverts the usual intuition about
+fallbacks. Tier 3 discloses nothing new at all: the application is the
+ceremony's counterparty and already knows every fact in the record. Tier 2 has
+no operator, and a publish and a resolve reach different nodes by construction,
+so no single party reliably observes the pair. Tier 1 is the only tier where
+aggregation is possible, and it is the fastest.
+
+Three rules bound it:
+
+1. **The application SHALL publish to every relay it declares**, not to one.
+2. **The resolving party SHALL choose which relay to query uniformly at
+   random** from its candidate set for that ceremony. It SHALL NOT prefer the
+   first, the fastest, the most recently successful, or the one it used for a
+   previous ceremony. Every relay therefore sees the publish, but at most one
+   sees a resolve, and which one is unpredictable — so the
+   (publisher, resolver) pair that actually links two devices is observed by
+   one host per ceremony rather than by all of them.
+3. **A host SHALL delete a record at `expiresAt`** and SHALL NOT retain the
+   record, its address, or any requesting network address beyond that moment.
+   It MAY keep aggregate counters that are not per-address and not per-record.
+
+Racing tier 2 is already REQUIRED above, and it carries a privacy consequence
+as well as an availability one: a ceremony that completes on the distributed
+hash table leaves every tier-1 relay holding a publish with no matching
+resolve.
+
+What remains, and is accepted rather than solved: a relay named by many
+profiles learns per-application ceremony volume and timing, and for the subset
+it serves it learns one device-pair address tuple. It never learns who, and it
+can withhold but never substitute. Whether the record should be encrypted so a
+host does not learn the `applicationId` either is
+[[PROTO-003-selfsame-pairing-v1#OQ-404]].
+
 Errors are `PairingRecordUnavailable`, `PairingRecordMalformed`,
 `PairingRecordBadSignature`, `PairingRecordExpired`, or
 `PairingRecordConflict`. `PairingRecordUnavailable` is returned only after every
@@ -1451,7 +1564,7 @@ under [[PROTO-003-selfsame-pairing-v1#REQ-406]].
 
 Implements: REQ-402, REQ-403, REQ-408, REQ-409.
 
-Verified by: TEST-402, TEST-408, TEST-409, TEST-413.
+Verified by: TEST-402, TEST-408, TEST-409, TEST-413, TEST-414.
 
 ## Test specifications
 
@@ -1660,6 +1773,41 @@ Resolve the same record through a relay transport and a distributed hash table,
 and through both raced concurrently. Require identical results and require no
 trust decision to depend on which transport answered.
 
+### TEST-414: Record-host exposure and retention
+
+**Validates:** NFR-403, CON-409, ADR-411.
+
+**What a host sees.** Instrument a tier-1 relay across a complete ceremony and
+require its total observation to be exactly the six record members, the
+publishing address, and — only where it served the resolve — the resolving
+address. Require it to contain no person, account, device, home DID, offer or
+bundle plaintext, SPAKE2 frame, derived key, or any part of `C`.
+
+**Unlinkability survives.** Run at least 1,000 ceremonies for one application
+from one wallet and require a host observing all of them to have no predicate
+that groups them by account or by device beyond network address — in
+particular, require record size and member values to carry no per-account
+signal, and require every derived address to be distinct.
+
+**Randomised selection.** With N declared relays, run many ceremonies and
+require each relay to receive every publish and to receive resolves at a rate
+statistically indistinguishable from 1/N. Reject an implementation that
+prefers the first, fastest, most recently successful, or previously used relay,
+and require the choice to be independent across ceremonies.
+
+**Tier-2 relief.** Complete a ceremony on the distributed hash table and
+require every tier-1 relay to hold a publish with no matching resolve.
+
+**Retention.** After `expiresAt`, require the host to serve nothing for that
+address and to retain no record, address, or requesting network address.
+Require any surviving counter to be neither per-address nor per-record. Query
+an expired address and require `PairingRecordUnavailable` with no distinction
+from an address that never existed.
+
+**Tier 3 discloses nothing new.** Complete a tier-3 ceremony and require the
+application's own host to learn no fact it did not already hold as the
+ceremony's counterparty.
+
 ## Trust assumptions
 
 - The application's profile is authenticated to its canonical HTTPS
@@ -1727,9 +1875,10 @@ It may not, for the protocol's remote-attacker claim:
   barrier; application evidence, consent, home signatures, and device binding
   still prevent an unauthenticated grant, but confidentiality and availability
   may be lost.
-- Two words provide only 22 bits. The N=1 rule bounds rather than eliminates
-  online guessing. A future change to retry count or word count is a Tier-1
-  amendment.
+- Twelve words provide 128 bits under
+  [[PROTO-003-selfsame-pairing-v1#ADR-406]], so online guessing is infeasible
+  and the N=1 rule is defence in depth rather than the primary bound. A future
+  change to word count or retry count is a Tier-1 amendment.
 - A guessed or enumerated nameplate can be claimed first to cause denial of
   service. Rate limits and a six-digit space reduce bulk abuse but cannot
   guarantee availability.
@@ -1738,10 +1887,17 @@ It may not, for the protocol's remote-attacker claim:
   remains authoritative for grant issuance.
 - Browser clients reveal their web `Origin` to the pairing provider. Native
   clients avoid that header, but IP/timing correlation remains possible.
-- Application identity must accompany a code somehow. QR and same-device
-  handoff make this automatic; a purely human cross-device fallback must show
-  the application ID as well as the short code. Eliminating that context would
-  require a global directory or a longer globally routable code.
+- No carrier conveys application identity: it is resolved from the signed
+  record at the code-derived address under
+  [[PROTO-003-selfsame-pairing-v1#CON-409]], which is what
+  [[PROTO-003-selfsame-pairing-v1#ADR-409]] bought by moving routing out of the
+  code. The residual moves to the record host, which reads the
+  `applicationId` in cleartext — bounded by CON-409's host-exposure rules and
+  reopened as [[PROTO-003-selfsame-pairing-v1#OQ-404]].
+- A record host learns per-application ceremony volume and timing, and one
+  device-pair address tuple for each resolve it serves. Randomised resolver
+  selection makes that a random sample rather than a census, and deletion at
+  `expiresAt` bounds how long it survives; neither eliminates it.
 
 ## Tier-1 Gate
 
@@ -1781,8 +1937,18 @@ No implementation task may be marked ready until all boxes are checked:
 - [ ] Field measurement of tier-2 reachability under
       [[PROTO-003-selfsame-pairing-v1#ADR-410]], on mobile and on managed
       networks, with a recorded fallback rate to tier 3.
-- [ ] OQ-402 and OQ-403 are resolved normatively or explicitly accepted by the
-      human owner with bounded consequences. OQ-401 is resolved by ADR-410.
+- [ ] OQ-403 and OQ-404 are resolved normatively or explicitly accepted by the
+      human owner with bounded consequences. OQ-401 is resolved by ADR-410 and
+      OQ-402 by ADR-411 and CON-409.
+- [ ] A privacy reviewer approves ADR-411 — specifically that bounding a record
+      host by content and lifetime, rather than by who operates it, is
+      sufficient, and that randomised resolver selection is an acceptable
+      substitute for guaranteed publish/resolve separation.
+- [ ] A human cryptography reviewer rules on OQ-404: whether a `C`-derived
+      record encryption key is sound at 128 bits, which would remove the
+      `applicationId` from a host's view entirely.
+- [ ] TEST-414 passes against two independently operated record hosts,
+      including the retention and randomised-selection assertions.
 - [ ] SPEC-004 0.9.0 or later records the completed reconciliation with
       ADR-406 through ADR-409, or this protocol is reverted.
 - [ ] SPEC-004's profile-origin and mobile-platform evidence gate closes.
@@ -1816,28 +1982,86 @@ application SHOULD declare.
 
 Owner: HOC + application-profile working group.
 
-### OQ-402: What does a meeting-point observer accumulate? — blocking for the privacy review
+### OQ-402: What does a meeting-point observer accumulate? — RESOLVED by ADR-411 and CON-409
 
-A record host observes a publish and a resolve at one address, seconds apart,
-from two addresses on the network. It learns neither which person nor which
-account, and 128-bit addressing makes ceremonies unlinkable to each other. But
-it does learn that two devices are pairing, and — because
-[[PROTO-003-selfsame-pairing-v1#CON-409]] cannot encrypt its payload — which
-application they are pairing with.
+**Is cross-application aggregation acceptable?** Yes, under a stated bound, and
+the bound is what a record contains and how long it survives rather than who
+operates the host. That is the same choice PROTO-002 makes for the mailbox,
+where capability conformance and not operator identity decides eligibility; any
+"trusted host" rule would need a list, and a list is the ecosystem dependency
+[[PROTO-003-selfsame-pairing-v1#ADR-410]] was built to avoid.
 
-The rendezvous operator already sees both endpoints today, since
-[[PROTO-003-selfsame-pairing-v1#CON-408]] makes one descriptor URL the only
-mailbox origin. The change is **aggregation scope**: today's observer is chosen
-by the application from its own profile and sees only that application's
-ceremonies, whereas a meeting-point transport must be reachable by a party that
-has no profile, and therefore sees across applications.
+The content bound already existed — a closed six-member record and a
+600-second expiry. CON-409's new host-exposure subsection adds the two rules
+that were missing: a resolving party chooses its relay uniformly at random, and
+a host deletes at `expiresAt`. NFR-403's ephemerality obligation now names the
+record host, a role that did not exist when it was written.
 
-The decision must fix whether that aggregation is acceptable, and whether
-transports must be structured so that publish and resolve can land on different
-hosts — which a DHT-backed cache arrangement permits and a single authoritative
-relay does not.
+**Must transports be structured so publish and resolve land on different
+hosts?** Not as a requirement, because no client can guarantee it — a wallet
+with one cached relay has one choice, and tier 2's separation is a property of
+DHT routing rather than something a client enforces. Randomised resolver
+selection achieves the same distributional effect without a rule some clients
+cannot satisfy: every relay necessarily sees the publish, at most one sees the
+resolve, and which one is unpredictable. The (publisher, resolver) pair that
+actually links two devices is thereby a random sample at any single host rather
+than a census. Racing tier 2, already required, means a share of ceremonies
+leave every relay holding a publish with no resolve at all.
 
-Owner: privacy reviewer + HOC.
+The analysis also produced something worth stating on its own: **the tiers'
+privacy order is the inverse of their convenience order.** Tier 3 discloses
+nothing new, because the application already knows every fact in its own
+record — so the tier ADR-410 had to defend as not-an-embarrassment turns out to
+be the most private one available.
+
+Accepted and not solved: a widely declared relay learns per-application
+ceremony volume and timing, and one device-pair address tuple for the subset it
+serves. It never learns who, and it can withhold but never substitute.
+
+The larger residual — that a host reads the `applicationId` at all — is
+promoted to [[PROTO-003-selfsame-pairing-v1#OQ-404]], because closing it means
+changing the record format rather than constraining hosts.
+
+Owner: privacy reviewer.
+
+### OQ-404: Should the meeting-point record be encrypted? — blocking for the privacy review
+
+[[PROTO-003-selfsame-pairing-v1#CON-409]] states that the record is signed and
+not encrypted, on the grounds that "no key exists at this point in the ceremony
+that could confidentially seal it: a key derived from `C` directly would let
+anyone resolving the address brute-force `C` itself."
+
+That reasoning does not survive the move to 128 bits, and the sentence appears
+to have outlived the 22-bit code it was written for. A key
+`rec_key = HKDF-SHA256(C, info = "…record…")`, domain-separated from `meet_seed`
+exactly as `meet_seed` is already separated from the SPAKE2 password and the
+mailbox secret, is derivable by both parties and by nobody else. A host holds
+the address and the ciphertext; recovering `C` from either means inverting HKDF
+or an Ed25519 public key, not a search over 2^128. The resolving party already
+holds `C` — it had to, to derive the address — so encryption costs it nothing.
+
+If that is right, the applicationId disclosure that OQ-402 accepted disappears:
+a host would learn only that some ceremony occurred at some address, which is
+the minimum any store-and-forward transport must learn. Aggregation would stop
+being cross-application because nothing in the record would name an
+application.
+
+Three things need checking before this becomes normative, which is why it is an
+open question rather than an amendment:
+
+1. whether a reviewer agrees the brute-force argument is void at 128 bits, or
+   whether it protects something the reasoning above misses;
+2. whether AEAD overhead keeps the record inside BEP-44's 1,000-octet mutable
+   item limit — it should, at a few hundred octets today, but the margin must be
+   computed rather than assumed; and
+3. whether any tier or diagnostic path legitimately needs to read the record
+   without holding `C`. None is known.
+
+Until then the record stays signed and cleartext, and OQ-402's bound stands.
+This is a record-format change and therefore a Tier-1 amendment requiring new
+vectors.
+
+Owner: human cryptography reviewer + privacy reviewer.
 
 ### OQ-403: Does version 1 coexist with version 2? — blocking for any deployed client
 
@@ -1868,6 +2092,7 @@ Owner: HOC.
 | A code a person can say, with room for discovery | REQ-402 | ADR-406, CON-402 | TEST-402, TEST-403, TEST-413 |
 | First-encounter routing without a spoken identity | REQ-402, REQ-403 | ADR-407, ADR-409, CON-409 | TEST-408, TEST-413 |
 | Discovery with no Selfsame-operated infrastructure | REQ-403 | ADR-410, CON-409 | TEST-413 |
+| A record host bounded by content and lifetime | REQ-403, NFR-403 | ADR-411, CON-409 | TEST-414 |
 | Either party may start the ceremony | REQ-408, REQ-409 | ADR-408, CON-402, CON-409 | TEST-409, TEST-413 |
 | One value, many renderings | REQ-402 | ADR-406, CON-402 | TEST-402, TEST-413 |
 
@@ -1939,6 +2164,50 @@ Standards constraints that are easy to miss:
 
 ## Changelog
 
+- **0.5.0 — 2026-07-31 — draft, normative.** Resolves OQ-402 and records what
+  the analysis turned up. No wire format, code grammar, SPAKE2 input, or
+  transcript changed.
+
+  *Aggregation is acceptable, bounded by content and lifetime rather than by
+  operator.* ADR-411 makes that choice explicitly, on the same grounds
+  PROTO-002 uses for the mailbox: any "trusted host" rule needs a list, and a
+  list is the ecosystem dependency ADR-410 was built to avoid. CON-409 gains a
+  host-exposure subsection stating exactly what a host learns and what it does
+  not, plus the two rules that were missing — a resolving party selects its
+  relay uniformly at random, and a host deletes at `expiresAt`. NFR-403 now
+  binds the record host, a role that did not exist when it was written. Adds
+  TEST-414 and a traceability row.
+
+  Randomised selection is the load-bearing rule and costs nothing: a publish
+  must reach every declared relay, but a resolve need reach only one, so
+  choosing deterministically would hand one host the (publisher, resolver) pair
+  for most ceremonies. Random selection makes any single host's view a sample
+  rather than a census. Guaranteed publish/resolve separation was rejected
+  because no client can promise it — a wallet with one cached relay has one
+  choice.
+
+  *The tiers' privacy order is the inverse of their convenience order.* Tier 3
+  discloses nothing new, since the application already knows every fact in its
+  own record, so the tier ADR-410 had to defend as not-an-embarrassment is the
+  most private one available. Recorded rather than acted on: the ladder is not
+  reordered, because racing tiers 1 and 2 is what keeps a share of ceremonies
+  off relays entirely.
+
+  *Opens OQ-404.* CON-409's justification for a cleartext record — that a
+  `C`-derived key "would let anyone resolving the address brute-force `C`" —
+  appears to have outlived the 22-bit code it was written for. At 128 bits a
+  domain-separated `HKDF(C)` record key is derivable by both parties and by
+  nobody else, and would remove the `applicationId` from a host's view
+  entirely, which is the residual OQ-402 had to accept. That is a record-format
+  change, so it is raised as a question for the cryptography reviewer rather
+  than amended in place.
+
+  Also corrects two residual-risk entries that still described the superseded
+  22-bit two-word code and the requirement to convey an application identity
+  alongside a code — both obsolete since 0.4.0, and both capable of driving an
+  incompatible implementation, which is the same defect the 0.4.0 pass fixed in
+  OQ-205 and the threat table but missed here. Retargets a stale
+  SPEC-004 OQ-207 reference to CON-220.
 - **0.4.0 — 2026-07-31 — draft, normative.** Resolves OQ-401. Adds ADR-410 and
   rewrites CON-409's transport section into a three-tier ladder: relays the
   resolving party has already authenticated from an application profile, a

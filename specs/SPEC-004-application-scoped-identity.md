@@ -3,7 +3,7 @@ id: SPEC-004
 title: Application- and Account-Scoped Identity — deterministic home keys, acct aliases, portable device grants, and provider discovery
 status: draft
 tier: 1
-version: 0.12.0
+version: 0.13.0
 audience: agent, human, application developer, infrastructure provider
 author: Anuna Research (drafted with Codex, 2026-07-30; amended with Claude, 2026-07-31)
 last-updated: 2026-07-31
@@ -117,7 +117,13 @@ with the existing blind mailbox ·
 [[SPEC-004-application-scoped-identity#ADR-219]] bind state transport to
 `did:crdt` and let the application be its own replica ·
 [[SPEC-004-application-scoped-identity#ADR-218]] own the ceremony envelope in a
-protocol and its payload here.
+protocol and its payload here ·
+[[SPEC-004-application-scoped-identity#ADR-220]] confirm the issuer at first
+enrollment rather than authenticate the wallet ·
+[[SPEC-004-application-scoped-identity#ADR-221]] name the credential vocabulary
+from a controlled origin and make its digest the authority ·
+[[SPEC-004-application-scoped-identity#ADR-222]] succeed an application
+identifier with a doubly signed, unpublished statement.
 
 **Load-bearing.**
 [[SPEC-004-application-scoped-identity#REQ-201]] one secret produces a different
@@ -148,20 +154,30 @@ providers route without a global directory or user endpoint configuration ·
 blind relay, not a PAKE endpoint ·
 [[SPEC-004-application-scoped-identity#REQ-229]] one failed pairing attempt
 burns the complete ceremony ·
+[[SPEC-004-application-scoped-identity#REQ-230]] an account's first issuer is
+confirmed, not trusted ·
+[[SPEC-004-application-scoped-identity#REQ-231]] identity succession is
+explicit, bounded, and confirmed ·
 [[SPEC-004-application-scoped-identity#NFR-201]] application identities are
 pairwise unlinkable from their public data ·
 [[SPEC-004-application-scoped-identity#NFR-205]] all authorization checks fail
 closed.
 
-**Blocking before implementation.**
-[[SPEC-004-application-scoped-identity#OQ-201]] authorization-state freshness ·
-[[SPEC-004-application-scoped-identity#OQ-202]] durable vocabulary ownership ·
-[[SPEC-004-application-scoped-identity#OQ-204]] application-ID migration ·
-[[SPEC-004-application-scoped-identity#OQ-206]] legacy identity migration ·
-[[SPEC-004-application-scoped-identity#OQ-207]] requesting-application
-authentication ·
-the Tier-1 gate in
-[[SPEC-004-application-scoped-identity#Tier-1 Gate]].
+**Blocking before implementation.** Every open question now has a normative
+resolution; what blocks is review, ratification, and evidence, all of it in the
+Tier-1 gate in [[SPEC-004-application-scoped-identity#Tier-1 Gate]]. The
+outstanding items are human ratification of the
+[[SPEC-004-application-scoped-identity#OQ-201]] freshness values; the
+operational duties on the
+[[SPEC-004-application-scoped-identity#OQ-202]] context origin; mobile platform
+review of [[SPEC-004-application-scoped-identity#CON-220]] through
+[[SPEC-004-application-scoped-identity#CON-223]]; security review of
+[[SPEC-004-application-scoped-identity#CON-221]] and
+[[SPEC-004-application-scoped-identity#CON-225]]; publication of the
+[[SPEC-004-application-scoped-identity#CON-226]] corpus with two independent
+stacks agreeing on it; two upstream `did:crdt` items — the `JsonWebKey`
+projection and whether verification relationships gate delta authorization;
+and reconciling SPEC-001 with this document.
 
 **Controls digest.**
 
@@ -174,7 +190,16 @@ the Tier-1 gate in
 - A human-readable alias is public, optional, never a KDF or authorization
   input, and never silently reassigned.
 - Credential revocation is an irreversible `did:crdt` operation; a status-list
-  projection can aid generic VC consumers but never overrides CRDT state.
+  projection can aid generic VC consumers but never overrides CRDT state. A set
+  projection bit is true at any age; an unset one past `validUntil` means
+  unavailable, never not-revoked.
+- Closure freshness has two tiers: establishing a session uses
+  `min(maxClosureAgeSeconds, propagationSlaSeconds)` and prefers an
+  independently resolved closure; continuing one uses `maxClosureAgeSeconds`.
+- The credential context is authoritative as bytes and a digest. Nothing
+  dereferences its IRI, and the naming origin is not a trust anchor.
+- An account's home DID changes only through an explicit, doubly signed,
+  person-confirmed, expiring succession that is never published.
 - Compact grants are at most 64 KiB and use only the EdDSA profile.
 - Proof nonces are single-use and expire within 120 seconds.
 - Rendezvous probes have a per-endpoint deadline of at most 1500 ms.
@@ -242,11 +267,16 @@ until the gate in [[SPEC-004-application-scoped-identity#Tier-1 Gate]] closes.
 [[SPEC-001-device-key-provisioning]] is deliberately an unresolved link. That
 document is not present in this vault, and per the dead-link discipline it is
 recorded here as visible debt rather than deleted to quiet the report: it is
-required by [[SPEC-004-application-scoped-identity#OQ-206]], by the Tier-1 gate
-item covering SPEC-001 amendment, and by
+required by the Tier-1 gate item covering SPEC-001 amendment and by
 [[PROTO-004-selfsame-ceremony-envelope-v1#OQ-501]]. Locating or reconstructing
 it is owned by the SPEC-001 maintainer and blocks those items, not this
 document's other content.
+
+It is no longer required by
+[[SPEC-004-application-scoped-identity#OQ-206]], which is withdrawn: no person
+holds a SPEC-001 identity, so no migration exists to specify. What remains is
+reconciling two documents that describe the same codebase, not rescuing a
+population.
 
 This specification is the second-application trigger anticipated by
 [[SPEC-001-device-key-provisioning]] ADR-011 and ADR-012. It proposes the
@@ -1154,6 +1184,54 @@ evaluate at most one initiator confirmation per minted ceremony.
 Trace: [[SPEC-004-application-scoped-identity#TEST-233]],
 [[SPEC-004-application-scoped-identity#TEST-235]]
 
+### REQ-230: An account's first issuer is confirmed, not trusted
+
+At the first enrollment of an authenticated application account, the person
+SHALL confirm the home DID fingerprint across the wallet and application screens
+defined by [[SPEC-004-application-scoped-identity#CON-221]] before the alias is provisioned or the grant is
+accepted.
+
+An application SHALL NOT accept a first grant without that confirmation, SHALL
+NOT offer an affordance to skip or suppress it, and SHALL fail closed when it
+cannot determine whether the account authority already holds a binding.
+
+At every subsequent enrollment the authority's existing binding is
+authoritative: a grant naming a different issuer SHALL be rejected under
+[[SPEC-004-application-scoped-identity#CON-204]], and the confirmation SHALL NOT be shown again.
+
+Rationale: without this, whichever wallet answers a first ceremony becomes the
+account's identity permanently, because [[SPEC-004-application-scoped-identity#CON-206]]'s expected-account
+input does not yet exist and the check degrades to self-consistency. See
+[[SPEC-004-application-scoped-identity#ADR-220]].
+
+Trace: [[SPEC-004-application-scoped-identity#TEST-238]]
+
+### REQ-231: Identity succession is explicit, bounded, and confirmed
+
+When an application account's home DID must be replaced because the developer's
+canonical `applicationId` changed, the replacement SHALL occur only through
+[[SPEC-004-application-scoped-identity#CON-225]]. Version 1 defines no other
+succession, and in particular no migration from an earlier derivation scheme.
+
+It SHALL be requested by the application, authorized by signatures from **both**
+the outgoing and the incoming home key, confirmed by the person comparing both
+fingerprints under [[SPEC-004-application-scoped-identity#CON-221]]'s display
+rules, bounded by an explicit expiry no longer than the incoming profile's
+`revocation.maxGrantLifetimeSeconds`, and invisible to every other application.
+
+Silent migration, wallet-initiated migration, unbounded overlap, a one-sided
+statement, a succession chain, and publication of the statement in any
+resolvable document are prohibited. An application that cannot complete CON-225
+SHALL enroll a fresh identity rather than approximate a migration.
+
+Rationale: [[SPEC-004-application-scoped-identity#REQ-202]] already declares
+that changing `applicationId` creates a new identity. This requirement does not
+weaken that — it defines the one audited path by which a person may carry an
+account across the boundary, and keeps every other path closed. See
+[[SPEC-004-application-scoped-identity#ADR-222]].
+
+Trace: [[SPEC-004-application-scoped-identity#TEST-242]]
+
 ## Non-functional requirements
 
 ### NFR-201: Pairwise application-account unlinkability
@@ -1224,8 +1302,16 @@ points, confirmations, role tokens, relay responses, mailbox responses, sealed
 ceremony records, or ceremony payloads SHALL produce a typed failure and no
 authenticated session.
 
-There SHALL be no TOFU path for issuer keys, projection issuers, account
-authorities, or provider descriptors.
+There SHALL be no TOFU path for projection issuers, account authorities, or
+provider descriptors.
+
+An account's **first** issuer key is the single case where no prior binding can
+exist, and it is closed by human confirmation rather than by prior trust:
+[[SPEC-004-application-scoped-identity#CON-221]] requires the person to compare the home DID fingerprint
+before the alias is provisioned, and [[SPEC-004-application-scoped-identity#REQ-230]] forbids skipping it.
+Every enrollment after the first is pinned by the account authority's binding,
+so there is no first-use trust remaining. An implementation that accepts a first
+grant without that confirmation **is** a TOFU path and does not conform.
 
 Trace: [[SPEC-004-application-scoped-identity#TEST-208]], [[SPEC-004-application-scoped-identity#TEST-211]], [[SPEC-004-application-scoped-identity#TEST-229]]
 
@@ -1427,7 +1513,9 @@ Rejected:
 - deletion from a revocation set — breaks convergence and permits accidental
   or malicious resurrection.
 
-Neither mechanism solves distribution freshness. OQ-201 remains blocking.
+Neither mechanism solves distribution freshness. That is bounded rather than
+solved, by the CON-206 freshness tiers and the CON-210 projection rules
+recorded under [[SPEC-004-application-scoped-identity#OQ-201]].
 
 ### ADR-209: Pin contexts; do not dereference them while verifying
 
@@ -1567,8 +1655,10 @@ keep one. A custom scheme or package/bundle label alone is rejected because it
 does not establish control of the application origin. Consent based on
 caller-supplied name or icon is rejected because it authenticates presentation,
 not authority. CON-214 fixes the logical statement and acceptance invariants;
-OQ-207 remains blocking for the exact cross-platform key-discovery, wire, and
-platform-evidence profiles.
+[[SPEC-004-application-scoped-identity#CON-220]] fixes key discovery and the
+wire, and [[SPEC-004-application-scoped-identity#CON-222]] and
+[[SPEC-004-application-scoped-identity#CON-223]] fix the platform-evidence
+profiles.
 
 ### ADR-215: Use two-word SPAKE2 for the human pairing code
 
@@ -1748,6 +1838,197 @@ Rejected:
 - **treating a delivery acknowledgement as success** — unchanged from CON-210:
   only a re-resolved verified closure containing the exact grant ID confirms a
   revocation.
+
+### ADR-220: Confirm the issuer at first enrollment rather than authenticate the wallet
+
+**Status:** PROPOSED.
+
+At an account's first enrollment the person confirms the new home DID's
+fingerprint across the two screens in
+[[SPEC-004-application-scoped-identity#CON-221]]. The application does not try
+to authenticate which wallet answered.
+
+`CON-206` takes as input "the exact RFC 7565 account expected by the current
+authenticated application-account context." At first enrollment that value does
+not exist: the application has never seen this person's home DID, so
+`CON-204`'s remote-controller ordering has it derive the expectation from the
+grant's own `issuer`. That is a self-consistency check, not an identity check —
+whichever wallet answers becomes the account's identity, permanently. It is
+trust-on-first-use of an issuer key, which
+[[SPEC-004-application-scoped-identity#NFR-205]] prohibits outright.
+
+The exposure is concentrated on the same-device path, where the SDK rather than
+the person selects the target. A malicious local wallet that receives the
+bootstrap holds `C`, so it completes SPAKE2, reads the offer, and can issue a
+grant from its own recovery secret. `CON-215` asks the adapter to verify "the
+installed wallet signing identity" — but an Anuna-only package allowlist is
+ruled out, so there is nothing to verify against.
+
+Authenticating the wallet cannot work without such a list, and a list would
+block independent implementations, which is the property
+[[SPEC-004-application-scoped-identity#REQ-214]] exists to protect. Confirming
+the *issuer* sidesteps that: the person already knows which wallet holds their
+recovery secret, so the question worth asking is not "is this a genuine wallet"
+but "is this the identity your wallet just derived." One comparison, on first
+enrollment only, converts trust-on-first-use into verified first use without
+any registry.
+
+Subsequent enrollments need no confirmation. Once the account authority holds a
+binding under `CON-204`, a grant naming a different issuer is rejected outright,
+so the ceremony is pinned by state the application already keeps.
+
+The compared value is the hex fingerprint, with the
+[[SPEC-002-visual-key-fingerprint]] LifeHash beside it as a recognition aid.
+That ordering is required rather than chosen:
+[[SPEC-002-visual-key-fingerprint#REQ-103]] states the hex "remains the
+normative comparison value" and SHALL NOT be replaced by pictures, and
+[[SPEC-002-visual-key-fingerprint#ADR-107]] defers promoting the image pending
+human-discrimination evidence. Asking for an image comparison here would move
+that backstop from a downstream document — the specification drift ADR-107
+names.
+
+Rejected:
+
+- **platform attestation of the wallet** — strongest binding, but needs a
+  registry of acceptable wallet builds, which
+  [[SPEC-004-application-scoped-identity#REQ-214]] rules out and which would
+  foreclose independent wallets;
+- **authority-side pinning alone** — correct for every enrollment after the
+  first and useless for the first, which is the only unprotected one;
+- **narrowing `NFR-205` to permit first-use trust** — cheapest, but it spends a
+  stated security property to avoid one comparison the person is well placed to
+  make; and
+- **comparing LifeHash images instead of hex** — contradicts
+  [[SPEC-002-visual-key-fingerprint#REQ-103]].
+
+### ADR-221: Name the vocabulary from a controlled origin, and make its digest the authority
+
+**Status:** PROPOSED.
+
+The credential context and vocabulary are named from
+`https://anuna.io/selfsame/…`, and the normative artifact is the exact context
+octets and their SHA-256 rather than whatever that URL serves.
+[[SPEC-004-application-scoped-identity#CON-224]] carries the rules.
+
+Through version 0.12.0 the identifier was `https://selfsame.dev/…`, described
+here as provisional pending proof of domain control. It resolved no NS records:
+the specification named a domain the project did not hold. That is worse than
+an unowned identifier looks, because the string is baked into every signed
+credential — an unregistered name in a credential is a name an adversary can
+register and then serve a context of their choosing from. `anuna.io` is under
+project control today, which settles the "prove control of a durable origin"
+half of OQ-202 by inspection rather than by a purchase order.
+
+The apparent tension with the Infrastructure promise is not real, and it is
+worth stating why rather than leaving a reader to wonder. Naming is not
+hosting. [[SPEC-004-application-scoped-identity#REQ-210]] forbids an Anuna
+endpoint *consulted at runtime* when a profile is missing or unhealthy;
+[[SPEC-004-application-scoped-identity#ADR-209]] forbids consulting this one at
+all. A conforming verifier never contacts `anuna.io`, so no adopting
+application acquires an operational dependency on Anuna by using the
+vocabulary. The name appears in bytes, not in traffic.
+
+Making the digest the authority is what reduces the origin to a name. Nothing
+fetches during verification, a party that fetches for another reason must
+compare, and the octets are archived independently — so hostile acquisition of
+the domain, or loss of it, changes no verification result. It also means a
+future stewardship change is a documentation event rather than a re-issuance
+event, provided the IRIs never move.
+
+Rejected:
+
+- **keep `selfsame.dev` unregistered** — cheapest, and it leaves a signed
+  identifier pointing at a name anyone may take;
+- **register `selfsame.dev`** — a better name for the project, and a purchase
+  is not a resolution: the gate item would still be open on the day the
+  decision was needed, and the registration becomes a permanent lapse risk that
+  the digest rule makes unnecessary;
+- **a content-addressed identifier such as
+  `urn:selfsame:credentials:device-grant:v1`** — immune to domain loss by
+  construction and the most honest expression of ADR-209, but
+  [[SPEC-004-application-scoped-identity#REQ-205]] claims W3C VC Data Model 2.0
+  conformance and that model expects context values to be URLs; buying immunity
+  the digest rule already provides at the cost of the conformance claim is the
+  wrong trade; and
+- **serving the context from each adopting application's origin** — removes the
+  single name entirely, and creates as many divergent vocabularies as there are
+  adopters.
+
+### ADR-222: Succeed an application identifier with a doubly signed, unpublished statement
+
+**Status:** PROPOSED.
+
+[[SPEC-004-application-scoped-identity#OQ-204]] is answered by
+[[SPEC-004-application-scoped-identity#CON-225]]: when a developer's canonical
+`applicationId` changes, an existing home key hands one application account to a
+key derived under the new identifier, with no third party able to make that
+claim and no other application learning that it happened.
+
+The pinned-key rule is the decision inside the decision. The obvious design has
+the wallet fetch the outgoing origin's succession pointer and check it against
+that origin's currently published enrollment keys — which makes succession
+exactly as strong as a domain registration, and a lapsed registration acquired
+by someone else is the case OQ-204 exists for. Checking instead against the key
+set the wallet recorded at that account's last successful enrollment uses state
+the wallet already holds and converts a DNS-strength control into a
+key-strength one. The cost is that a developer who rotates every enrollment key
+between a person's last enrollment and the migration loses that person's
+succession — which fails closed to fresh enrollment, and is the right direction
+to fail.
+
+Both signatures are required for a reason that is easy to lose: the outgoing
+key alone, if it leaked, could nominate an attacker's DID as successor, and the
+incoming key alone could claim any predecessor's history. Requiring both means
+the only party who can produce a statement is the party holding the recovery
+secret from which both keys descend.
+
+The mechanism is deliberately a signed statement rather than a `did:crdt`
+operation, which is worth defending because
+[[SPEC-004-application-scoped-identity#CON-210]] insists that a standalone
+signature revokes nothing. Revocation and succession fail in opposite
+directions: a withheld revocation leaves a dead grant working, so its state
+must be convergent and unsuppressable, whereas a withheld succession simply
+means an old grant is not accepted, which is already the safe outcome.
+Convergent public state is mandatory where unavailability *grants* authority
+and merely convenient where it *withholds* authority. Publishing the statement
+as a delta would additionally announce the successor to everyone who resolves
+the outgoing DID, which is the same objection that rules out `alsoKnownAs`
+below.
+
+Rejected:
+
+- **rotating the key in place** — `did:crdt` has `AddVerificationMethod` and
+  `RevokeVerificationMethod`, so the outgoing DID could simply adopt the key
+  derived under the new `applicationId` and keep its identifier. No succession
+  statement, no overlap, no alias tombstoning. It is also exactly wrong twice
+  over. The retained DID was derived under the *old* application node, so the
+  new application's identity would descend from the old application's
+  namespace, collapsing the correlation boundary
+  [[SPEC-004-application-scoped-identity#ADR-201]] exists to draw; and
+  [[SPEC-004-application-scoped-identity#NFR-202]] requires the home DID to be
+  reproducible from mnemonic, `applicationId`, and `accountScopeId` alone,
+  which a retained predecessor identifier is not. It would buy convenience with
+  the two properties the hierarchy exists for;
+- **a succession Verifiable Credential** — portable and standards-shaped, and
+  it would add terms to the context [[SPEC-004-application-scoped-identity#CON-224]]
+  has just frozen. Portability is worthless here: nothing outside the
+  developer's own two origins consumes it, and publishing it as a credential is
+  precisely what would leak the link;
+- **`alsoKnownAs` on the incoming DID naming the outgoing DID** — the
+  DID-native move, and exactly wrong, because `alsoKnownAs` is resolvable
+  public data and would publish the cross-application link
+  [[SPEC-004-application-scoped-identity#NFR-201]] exists to prevent;
+- **trusting the outgoing origin's currently served keys** — see above;
+- **permitting succession chains** — A→B→C lets a compromised intermediate
+  launder an account into a third identity; version 1 permits one hop and
+  re-enrollment for anything longer;
+- **one developer-signed migration covering every account** — a single artifact
+  is operationally attractive, and it links a population and hands an origin
+  acquirer one lever; and
+- **a new profile member for the overlap window** — CON-201's recognized
+  language is closed at any depth, so a new member is a new `profileVersion`.
+  Bounding the statement by the incoming profile's existing
+  `maxGrantLifetimeSeconds` obtains the same bound for nothing.
 
 ## Contracts
 
@@ -1935,8 +2216,11 @@ Every `enrollment.mobileBindings` entry has a unique `id`. Android package
 names and signing-certificate rotation sets use the platform's canonical
 spellings. Apple entries bind an exact Team ID and bundle ID to a claimed HTTPS
 return URI on the `applicationId` origin. The wallet accepts a binding only
-after the OQ-207 profile-origin mechanism and the platform-specific
-verification in CON-215 authenticate it; field presence is not proof.
+after [[SPEC-004-application-scoped-identity#CON-220]] authenticates the
+profile and the platform-specific verification in
+[[SPEC-004-application-scoped-identity#CON-222]] or
+[[SPEC-004-application-scoped-identity#CON-223]] authenticates the binding;
+field presence is not proof.
 
 Every provider ID MUST match `[a-z0-9][a-z0-9-]{0,62}` and be unique within its
 role. Every provider URL MUST be HTTPS, contain an authority, and contain no
@@ -2012,8 +2296,14 @@ already required for the profile fetch.
 
 `revocation.maxGrantLifetimeSeconds` is REQUIRED, is a positive integer, and
 MUST NOT exceed 2,592,000. It bounds `validUntil - validFrom` under
-[[SPEC-004-application-scoped-identity#REQ-208]] and is enforced at CON-206
-step 11.
+[[SPEC-004-application-scoped-identity#REQ-208]] and is enforced at CON-206 step 11.
+
+`revocation.propagationSlaSeconds` is REQUIRED, a positive integer, and MUST NOT
+exceed 300. `revocation.maxClosureAgeSeconds` is REQUIRED, a positive integer,
+and MUST NOT exceed 3,600. When `revocation.projection` is present its
+`maxAgeSeconds` is REQUIRED, a positive integer, and MUST NOT exceed 3,600. A
+verifier SHALL reject a profile exceeding any ceiling. Defaults and the composed
+revocation-latency bound they produce are recorded in [[SPEC-004-application-scoped-identity#OQ-201]].
 
 `revocation.method` MUST equal `did-crdt-revocations-v1` in profile version 1.
 The `projection` member is OPTIONAL. Its absence disables Bitstring projection
@@ -2273,37 +2563,38 @@ Verified by: [[SPEC-004-application-scoped-identity#TEST-205]], [[SPEC-004-appli
 
 ### CON-205: Selfsame Device Grant Credential
 
-The provisional immutable context identifier is:
+The immutable context identifier is:
 
 ```text
-https://selfsame.dev/credentials/device-grant/v1
+https://anuna.io/selfsame/credentials/device-grant/v1
 ```
 
-Domain ownership, publication, content digest, and long-term governance are
-blocking in OQ-202. Once version 1 ships, the context at this identifier MUST
-be immutable. The logical context defines:
+Ownership, publication, the pinned content digest, and succession are fixed by
+[[SPEC-004-application-scoped-identity#CON-224]], which also states why the
+digest rather than the origin is the authority. The context at this identifier
+is immutable. The logical context defines:
 
 ```json
 {
   "@protected": true,
   "SelfsameDeviceGrantCredential":
-    "https://selfsame.dev/vocab/device-grant/v1#SelfsameDeviceGrantCredential",
+    "https://anuna.io/selfsame/vocab/device-grant/v1#SelfsameDeviceGrantCredential",
   "application": {
-    "@id": "https://selfsame.dev/vocab/device-grant/v1#application",
+    "@id": "https://anuna.io/selfsame/vocab/device-grant/v1#application",
     "@type": "@id"
   },
   "account": {
-    "@id": "https://selfsame.dev/vocab/device-grant/v1#account",
+    "@id": "https://anuna.io/selfsame/vocab/device-grant/v1#account",
     "@type": "@id"
   },
   "permissions": {
-    "@id": "https://selfsame.dev/vocab/device-grant/v1#permissions",
+    "@id": "https://anuna.io/selfsame/vocab/device-grant/v1#permissions",
     "@type": "@id",
     "@container": "@set"
   },
   "SelfsameDidCrdtStatusEntry": {
     "@id":
-      "https://selfsame.dev/vocab/device-grant/v1#SelfsameDidCrdtStatusEntry",
+      "https://anuna.io/selfsame/vocab/device-grant/v1#SelfsameDidCrdtStatusEntry",
     "@context": {
       "@protected": true,
       "id": "@id",
@@ -2311,7 +2602,7 @@ be immutable. The logical context defines:
       "statusPurpose":
         "https://www.w3.org/ns/credentials/status#statusPurpose",
       "credentialId": {
-        "@id": "https://selfsame.dev/vocab/device-grant/v1#credentialId",
+        "@id": "https://anuna.io/selfsame/vocab/device-grant/v1#credentialId",
         "@type": "@id"
       }
     }
@@ -2353,7 +2644,7 @@ A grant payload has this shape:
 {
   "@context": [
     "https://www.w3.org/ns/credentials/v2",
-    "https://selfsame.dev/credentials/device-grant/v1"
+    "https://anuna.io/selfsame/credentials/device-grant/v1"
   ],
   "type": [
     "VerifiableCredential",
@@ -2483,9 +2774,51 @@ Authorization succeeds only if every step succeeds. Diagnostic detail MAY be
 logged locally but externally visible errors SHOULD collapse to a small stable
 set so that attackers do not gain a credential oracle.
 
+#### Freshness tiers at step 10
+
+Step 10's bound is not one number, because the two things a verifier does with
+a grant carry different costs when the answer is stale:
+
+- **Session establishment** — the first acceptance of a given grant ID by this
+  verifier, and any acceptance that begins a new authenticated session — uses
+  `min(maxClosureAgeSeconds, propagationSlaSeconds)`. Where any declared
+  `stateResolvers` entry is reachable, the closure SHALL be resolved from one
+  rather than taken from the CON-219 bundle or a cache.
+- **Continuation** — re-verification inside a session this verifier already
+  established — uses `maxClosureAgeSeconds`.
+- A verifier that cannot determine which case applies SHALL use the
+  session-establishment bound. A verifier whose record of an accepted grant ID
+  is lost or unreadable SHALL treat the next acceptance as establishment.
+
+Both bounds are derived from members `CON-201` already defines, so this
+resolves [[SPEC-004-application-scoped-identity#OQ-201]]'s first narrow
+question without adding a profile member, changing `profileVersion`, or
+invalidating a published vector.
+
+The split is where the cost sits. Session establishment is interactive and
+online by construction — a ceremony just completed or the person just signed
+in — so strictness is nearly free there, and it is exactly the moment a stolen
+device whose grant was revoked minutes ago tries to obtain new authority. A
+revoked device therefore cannot start a new session more than
+`propagationSlaSeconds + min(maxClosureAgeSeconds, propagationSlaSeconds)`
+after the revocation was submitted: 120 seconds at the defaults, 600 at the
+ceilings. Continuation is where a fifteen-minute resolver outage would
+otherwise sever every live session, and where the marginal security of a
+tighter bound is small because the session was already authorized against
+fresh state.
+
+The resolver preference is a separate point and load-bearing. A closure taken
+from the bundle is the **issuer's own account of its own revocations**, and the
+issuer is precisely the party a revocation constrains; an issuer that omits its
+own `RevokeCredential` deltas produces a closure that is internally valid and
+materially incomplete. A verifier MAY rely on the bundle-supplied closure only
+when it is accepting a grant ID for the first time and no declared resolver is
+reachable, and SHALL record that it did so. It is a bootstrap for a first
+ceremony on a degraded network, not a standing arrangement.
+
 Implements: [[SPEC-004-application-scoped-identity#REQ-205]], [[SPEC-004-application-scoped-identity#REQ-207]], [[SPEC-004-application-scoped-identity#REQ-208]].
 
-Verified by: [[SPEC-004-application-scoped-identity#TEST-211]], [[SPEC-004-application-scoped-identity#TEST-212]].
+Verified by: [[SPEC-004-application-scoped-identity#TEST-211]], [[SPEC-004-application-scoped-identity#TEST-212]], [[SPEC-004-application-scoped-identity#TEST-240]].
 
 ### CON-207: Device proof of possession
 
@@ -2671,8 +3004,10 @@ tolerable, and the reasoning SHOULD be re-checked against any future method
 operation that is not grow-only.
 
 Resolver diversity, direct application delivery, and
-`revocation.propagationSlaSeconds` bound availability; OQ-201 must approve the
-final values.
+`revocation.propagationSlaSeconds` bound availability. `CON-201` fixes the
+ceilings, [[SPEC-004-application-scoped-identity#OQ-201]] records the defaults
+and the composed latency they produce, and human ratification of those defaults
+is a Tier-1 gate item rather than an open design question.
 
 If `revocation.projection` is present, issuance MAY additionally obtain a
 random free `(statusListCredential, statusListIndex)` allocation and include a
@@ -2692,8 +3027,35 @@ The projection SHALL satisfy all of these invariants:
 - a bit may be set only after a verified CRDT closure contains the exact grant
   ID mapped to that index, and no later projection may clear a previously set
   bit; and
-- its validity and cache lifetime do not exceed
-  `revocation.projection.maxAgeSeconds`.
+- it carries both `validFrom` and `validUntil`, and `validUntil - validFrom`
+  does not exceed `revocation.projection.maxAgeSeconds`, so its cache lifetime
+  cannot exceed that bound either.
+
+The `validUntil` invariant is what makes the freshness bound enforceable by the
+parties it constrains. A generic consumer applying nothing but W3C VC validity
+rules already rejects an over-age projection, because the publisher was
+forbidden from signing one whose window exceeds `maxAgeSeconds`. Expressing the
+bound as Selfsame-specific policy instead would have made it advisory to
+exactly the consumers it exists for.
+
+**What a generic consumer may infer.** The revocation set is grow-only and no
+method operation clears an entry, so the two bit values are not symmetric and
+must not be read as though they were:
+
+- a **set** bit is permanently true. No later state can unset it, so age never
+  makes it wrong and a consumer MAY act on it whatever the projection's age.
+- an **unset** bit is a claim about the world at `validFrom`, and it decays.
+  Past `validUntil` a consumer SHALL treat the projection as **unavailable**,
+  never as evidence of non-revocation.
+
+There is no third reading for a projection whose age falls between
+`revocation.projection.maxAgeSeconds` and `revocation.maxClosureAgeSeconds`,
+because the two bounds do not govern the same party. `maxAgeSeconds` bounds
+what a generic consumer may rely on; `maxClosureAgeSeconds` bounds a Selfsame
+verifier, which under CON-206 step 10 never relies on the projection at all. A
+consumer that wants the CRDT bound has to resolve CRDT state and become a
+Selfsame verifier. No projection, at any age, can deliver it. This resolves
+[[SPEC-004-application-scoped-identity#OQ-201]]'s second narrow question.
 
 An implementation can therefore create and sign the projection beside the
 revocation delta, then publish it through an untrusted cache or CDN. Failure to
@@ -2708,7 +3070,7 @@ authorization events to the publication host.
 
 Implements: [[SPEC-004-application-scoped-identity#REQ-208]].
 
-Verified by: [[SPEC-004-application-scoped-identity#TEST-212]], [[SPEC-004-application-scoped-identity#TEST-213]], [[SPEC-004-application-scoped-identity#TEST-224]].
+Verified by: [[SPEC-004-application-scoped-identity#TEST-212]], [[SPEC-004-application-scoped-identity#TEST-213]], [[SPEC-004-application-scoped-identity#TEST-224]], [[SPEC-004-application-scoped-identity#TEST-240]].
 
 ### CON-211: Account-scope identifier and lifecycle
 
@@ -2915,8 +3277,11 @@ equal the SHA-256 of the canonical `deviceKeyJwk` in `offer_core`.
 - Apple platforms use `apple:` followed by the Team ID, bundle ID, and the
   origin of an associated HTTPS return URI.
 
-The exact profile-discovery and platform-evidence encodings remain the blocking
-part of OQ-207. This contract fixes the values they must authenticate. A
+This contract fixes the values that must be authenticated;
+[[SPEC-004-application-scoped-identity#CON-220]] fixes how the profile and its
+signing key are obtained, and
+[[SPEC-004-application-scoped-identity#CON-222]] and
+[[SPEC-004-application-scoped-identity#CON-223]] fix the platform evidence. A
 production wallet cannot treat a profile and key delivered only by the caller
 as authenticated.
 
@@ -2927,11 +3292,13 @@ rendezvous plaintext, callback, URL, log, analytics, or consent label.
 
 Before showing consent, Selfsame:
 
-1. obtains the application profile through the authenticated
-   `applicationId`-origin mechanism selected by OQ-207 and verifies the profile
+1. obtains the application profile through
+   [[SPEC-004-application-scoped-identity#CON-220]] and verifies the profile
    digest;
 2. verifies the compact JWS and resolves `kid` only from that authenticated
-   profile;
+   profile, and records the profile's complete
+   `enrollment.requestSigningKeys` set against this application account for the
+   purposes of [[SPEC-004-application-scoped-identity#CON-225]];
 3. compares every statement field to the active offer, provider descriptor,
    device JWK, requested permission set, and OS-observed platform binding;
 4. checks the 120-second window against its local clock;
@@ -3175,7 +3542,7 @@ digest rule that lets a developer backend commit to an offer it does not yet
 hold.
 
 For both roles, the declared nesting bound is 8 and the declared payload bound
-is 69,611 octets. Every base64url value is canonical and unpadded; every
+is 69,607 octets. Every base64url value is canonical and unpadded; every
 timestamp is an XML Schema `dateTimeStamp` normalized to UTC `Z`; every
 inherited value obeys the grammar of the contract that defines it.
 
@@ -3287,11 +3654,11 @@ with no transformation in between.
 The size budget is therefore:
 
 ```text
-payload bound (PROTO-004 CON-502)                        69,611
+payload bound (PROTO-004 CON-502)                        69,607
   grant, at the CON-206 step 1 maximum                  -65,536
   fixed members and JSON syntax                    approx  -250
                                                    ─────────────
-  remaining for issuerClosure                      approx 3,825
+  remaining for issuerClosure                      approx 3,821
 ```
 
 `issuerClosure`, when present, is the closure
@@ -3304,9 +3671,15 @@ the bound is a `PayloadTooLarge` failure under
 
 The 65,536-character ceiling is a defensive bound inherited from CON-206 step 1,
 not an expected size; a conforming grant is on the order of one to two kilobytes,
-so both members fit comfortably in practice. The budget is the reason
-[[PROTO-004-selfsame-ceremony-envelope-v1#OQ-502]] treats bundle length as
-observable metadata.
+so both members fit comfortably in practice.
+
+Bundle length is **not** observable metadata.
+[[PROTO-004-selfsame-ceremony-envelope-v1#CON-502]] pads every sealed record to
+exactly 69,632 octets, so whether this bundle inlines a closure — and how large
+that closure is — is invisible to the rendezvous operator. That matters here
+because closure size tracks a DID's delta history and would otherwise be a
+per-account fingerprint. The four octets missing from the budget above relative
+to the PROTO-002 record bound are the frame's length prefix.
 
 A bundle SHALL NOT contain the account scope, the home key, a DID document, an
 alias, a provider secret, an acceptance decision, or an error description.
@@ -3327,6 +3700,582 @@ Implements: REQ-205, REQ-206, REQ-207, REQ-211, REQ-217, REQ-221, REQ-222,
 REQ-223.
 
 Verified by: TEST-217, TEST-228, TEST-229, TEST-231, TEST-236.
+
+### CON-220: Application profile discovery
+
+This contract closes OQ-207 item 1. It defines how a resolving party obtains an
+application profile and binds it to the `applicationId` origin, so that the
+enrollment-signing key in `CON-214` is never one the caller supplied.
+
+**The identifier is the locator.** The profile is retrieved by dereferencing the
+canonical `applicationId` itself:
+
+```http
+GET /selfsame/application HTTP/1.1
+Host: photos.example
+Accept: application/selfsame-profile+json
+Accept-Encoding: identity
+```
+
+Using the identifier rather than a fixed well-known path is required by
+[[SPEC-004-application-scoped-identity#ADR-201]], which contemplates one
+developer hosting several security boundaries: a single well-known path would
+permit only one application per origin.
+
+A successful response is `200`, `Content-Type:
+application/selfsame-profile+json`, and a body recognized under
+[[SPEC-004-application-scoped-identity#CON-201]] as a closed language. The
+resolving party SHALL:
+
+1. require HTTPS with successful certificate validation;
+2. **reject every redirect**, including same-origin — the `applicationId` is
+   canonical, so a redirect means the identifier is wrong, not that the profile
+   moved;
+3. reject content encoding, a media type other than the one above, and a body
+   over 65,536 octets;
+4. run the complete CON-201 recognition before any semantic action;
+5. require the profile's own `applicationId` member to equal the URI it
+   dereferenced, exact ASCII; and
+6. require its RFC 8785 SHA-256 digest to equal the `profileDigest` in the
+   [[PROTO-003-selfsame-pairing-v1#CON-409]] record for this ceremony.
+
+Step 6 is what makes the fetch trustworthy rather than merely encrypted. TLS
+authenticates the origin; the record digest — asserted by a party holding `C` —
+pins *which* profile that origin served. A host that serves a substituted
+profile fails step 6. The two together are why no key ever comes from the
+caller.
+
+**Ordering under CON-409 tier 3.** When the person supplies an origin because
+every transport tier failed, the profile is fetched before any record exists, so
+step 6 cannot run yet. The resolving party SHALL fetch under steps 1–5, use only
+`pairingRecordRelays` from it, resolve the record, and then apply step 6 against
+the profile it already holds. A mismatch is a fresh-ceremony failure. The
+profile is never used for anything else until step 6 passes.
+
+**Origin enumeration, tier 3 only.** A typed origin is not an `applicationId`.
+To map one to the other:
+
+```http
+GET /.well-known/selfsame/applications HTTP/1.1
+```
+
+returning `{"version": 1, "applications": ["https://photos.example/selfsame/application"]}`
+— exactly two members, at most 32 entries, every entry an absolute HTTPS URI on
+the queried origin and canonical under CON-201. A party SHALL use this endpoint
+only for tier-3 recovery, SHALL present the resulting choice to the person when
+more than one entry is returned, and SHALL NOT consult it on any other path.
+
+**Cache and rotation.** A profile MAY be cached for at most 3,600 seconds and
+SHALL be revalidated after that. `enrollment.requestSigningKeys` is an array, so
+rotation is publication of a profile containing the new key, and revocation is
+publication of one without the old key. The cache bound is therefore the window
+in which a removed key remains usable, and it composes with `CON-214`'s
+120-second evidence window: an attacker holding a revoked enrollment key has at
+most the remaining cache lifetime, never indefinite use. A party SHALL evict a
+cached profile immediately on any digest mismatch and SHALL NOT serve one whose
+`validUntil`-bearing descriptors have all expired.
+
+**Offline.** A cached profile within its bound MAY be used with no network
+request. Beyond it, and with no network, the operation fails closed as
+`UnverifiedApplication`; there is no stale-profile grace period, because the
+enrollment key is exactly what staleness would put at risk.
+
+Implements: [[SPEC-004-application-scoped-identity#REQ-222]],
+[[SPEC-004-application-scoped-identity#REQ-227]].
+
+Verified by: [[SPEC-004-application-scoped-identity#TEST-237]].
+
+### CON-221: First-enrollment issuer confirmation
+
+This contract closes OQ-207 item 4 and the
+[[SPEC-004-application-scoped-identity#NFR-205]] contradiction identified in
+[[SPEC-004-application-scoped-identity#ADR-220]].
+
+**When it applies.** Exactly when the account authority holds no binding for the
+authenticated application account — that account's first enrollment. The
+application SHALL determine this from authority state, not from local cache, and
+SHALL treat an unreachable authority as "unknown" and fail closed rather than
+assume first use.
+
+**What each side displays.** Let `fp = fingerprint_did(home_did)` under
+[[SPEC-002-visual-key-fingerprint]]. The wallet, after deriving the home DID and
+before writing the grant bundle, displays `Fingerprint::hex` of `fp` together
+with its LifeHash. The application, after opening the bundle and before
+provisioning the alias, displays the same two values computed from the grant's
+`issuer`.
+
+The person is asked to compare **the hex**. The LifeHash is a recognition aid
+shown beside it and SHALL NOT be presented as the thing being compared:
+[[SPEC-002-visual-key-fingerprint#REQ-103]] makes the hex the normative
+comparison value, [[SPEC-002-visual-key-fingerprint#REQ-105]] forbids a picture
+being alone on screen, and
+[[SPEC-002-visual-key-fingerprint#ADR-107]] defers promoting the image pending
+evidence about human discrimination.
+
+**What follows.** On confirmation the application provisions the alias under
+`CON-204` and proceeds to `CON-206`. On rejection, or on any timeout, it
+SHALL NOT provision the alias, SHALL NOT accept the grant, SHALL create no
+session, SHALL burn the ceremony under
+[[SPEC-004-application-scoped-identity#REQ-229]], and SHOULD revoke the grant ID
+under `CON-210` if it can reach a controller. Neither side SHALL offer a
+"remember this" or "skip" affordance: the confirmation happens once per account
+ever, and an affordance to skip it is an affordance to reinstate the
+trust-on-first-use this contract removes.
+
+**Subsequent enrollments.** No confirmation. The authority's binding is
+authoritative, and a grant naming a different issuer is rejected under `CON-204`
+before `CON-206` runs. An application SHALL NOT re-enter this contract to
+"re-confirm" an account, because a prompt that can appear twice can be induced
+to appear at an attacker's chosen moment.
+
+**What it does and does not establish.** It establishes that the DID now bound
+to this account is the one the person's wallet derived. It establishes nothing
+about the wallet's provenance, build, or integrity, and it is not an
+authentication of the wallet — see ADR-220 for why that is unavailable without
+a registry.
+
+Implements: [[SPEC-004-application-scoped-identity#REQ-222]],
+[[SPEC-004-application-scoped-identity#REQ-230]].
+
+Verified by: [[SPEC-004-application-scoped-identity#TEST-238]].
+
+### CON-222: Android platform binding
+
+This contract closes OQ-207 item 2. It is the Android instance of the adapter
+[[SPEC-004-application-scoped-identity#CON-215]] requires, and it inherits every
+prohibition there.
+
+Minimum API level 30. Level 30 is the floor because package visibility filtering
+and the maturity of verified App Links below it make both wallet discovery and
+the return path unreliable in ways an application cannot detect.
+
+**Discovering wallets.** The developer application declares a `<queries>` entry
+for the wallet capability action and resolves it with `PackageManager` to obtain
+the set of installed candidates. That query carries **no ceremony material** —
+it names a capability and returns package names, nothing more. Where more than
+one candidate exists the person selects; where none does, the result is
+`WalletUnavailable` and an install action containing no ceremony value.
+
+**Dispatch.** Delivery uses an **explicit** component intent to the selected
+package. An implicit intent SHALL NOT carry ceremony material under any
+circumstance, including when exactly one candidate resolves. Before dispatch the
+adapter reads the target's signing identity with
+`GET_SIGNING_CERTIFICATES` and records it; `hasSigningCertificate` with
+`CERT_INPUT_SHA256` accommodates rotation. That identity is recorded for the
+person's benefit and for post-hoc audit — it is **not** checked against a
+registry, because none exists, which is precisely why
+[[SPEC-004-application-scoped-identity#CON-221]] confirmation is required at
+first enrollment.
+
+**Caller identity.** The wallet obtains the calling package through the
+`PendingIntent` creator, or `getCallingPackage()` where the invocation form
+provides it, and compares it to the `platformBindingId` in the `CON-214`
+evidence. A mismatch is `PlatformBindingMismatch`. A caller-supplied package
+name in the payload is never evidence of anything.
+
+**Return capability.** Any `PendingIntent` handed to the wallet SHALL be
+`FLAG_IMMUTABLE` and `FLAG_ONE_SHOT`. Mutability would let the wallet inject
+fields into the return; multi-use would let it replay one. Neither is permitted
+even though `CON-215`'s return object carries no authority — defence in depth
+costs nothing here.
+
+**Return path.** A non-secret return MAY use a verified App Link on the
+`applicationId` origin, with `android:autoVerify` and a
+`/.well-known/assetlinks.json` entry. Failure to verify is failure: the adapter
+SHALL NOT fall back to a browser, a custom scheme, or an unverified link.
+
+Implements: [[SPEC-004-application-scoped-identity#REQ-220]],
+[[SPEC-004-application-scoped-identity#REQ-223]],
+[[SPEC-004-application-scoped-identity#REQ-225]].
+
+Verified by: [[SPEC-004-application-scoped-identity#TEST-239]].
+
+### CON-223: Apple platform binding
+
+This contract closes OQ-207 item 3, and likewise inherits every `CON-215`
+prohibition.
+
+**Dispatch.** Delivery opens a Selfsame HTTPS Universal Link with
+`UIApplication.OpenExternalURLOptionsKey.universalLinksOnly` set to `true`. When
+no associated installed application can handle it, the completion handler
+receives `false` and **that is the terminal result**. The adapter SHALL NOT then
+open Safari, an embedded web view, an install page, or a custom URL scheme; per
+Apple's own semantics the option exists so that absence is a dispatch failure
+rather than a web navigation, and treating it otherwise would disclose the link
+outside the permitted boundary.
+
+**Association.** The wallet's associated-domain entry and its
+`/.well-known/apple-app-site-association` file bind the Team ID and bundle ID in
+`enrollment.mobileBindings`. The developer application's claimed HTTPS return
+path is validated the same way on its own `applicationId` origin.
+
+**Caller identity is weaker here, and the contract says so.** Apple provides no
+general equivalent of Android's calling-package attribution for a Universal
+Link open. The wallet therefore compares only what the platform genuinely
+authenticates — the association between the return URI's origin and the
+declared binding — and SHALL NOT treat any payload-supplied identifier as
+caller evidence. The residual gap is closed by the `CON-214` backend signature
+and by `CON-221` confirmation, not by the platform.
+
+**Return path.** The optional return uses the claimed HTTPS path on the
+`applicationId` origin, declared in the platform binding, and carries only the
+closed three-member object in `CON-215`.
+
+Implements: [[SPEC-004-application-scoped-identity#REQ-220]],
+[[SPEC-004-application-scoped-identity#REQ-223]],
+[[SPEC-004-application-scoped-identity#REQ-225]].
+
+Verified by: [[SPEC-004-application-scoped-identity#TEST-239]].
+
+### CON-224: Credential vocabulary and context governance
+
+This contract closes [[SPEC-004-application-scoped-identity#OQ-202]]. It fixes
+who owns the Selfsame credential vocabulary, what the normative artifact
+actually is, and what happens when the naming origin changes hands.
+
+**Identifiers.** For profile version 1 these two strings are fixed and appear
+verbatim in every issued grant:
+
+```text
+context IRI     https://anuna.io/selfsame/credentials/device-grant/v1
+vocabulary base https://anuna.io/selfsame/vocab/device-grant/v1#
+```
+
+**The normative artifact is the bytes, not the URL.** The context is the exact
+octet sequence of `contexts/device-grant-v1.jsonld` in the `selfsame`
+repository: UTF-8, no byte-order mark, LF line endings, at most 8,192 octets.
+Define `context_digest = SHA-256(those octets)`. For version 1 the file is
+1,045 octets and:
+
+```text
+context_digest =
+  9dba4d065a9b7f54acbcfe8d75e1f2c8e7fe4ab8a4b87a4ad3f883c45a3d1183
+```
+
+That value is also recorded in the
+[[SPEC-004-application-scoped-identity#CON-226]] corpus and in the changelog
+entry of every amendment that changes it, which for version 1 means never. The
+JSON-LD document wraps the logical context shown in
+[[SPEC-004-application-scoped-identity#CON-205]] in a single `@context` member;
+CON-205 shows the value, this file is the document.
+
+**Nothing dereferences it during verification.**
+[[SPEC-004-application-scoped-identity#ADR-209]] and
+[[SPEC-004-application-scoped-identity#NFR-204]] already forbid
+verification-time context loading, and this contract adds no exception. A party
+that fetches the IRI for any other purpose SHALL compare the retrieved octets
+to `context_digest` and, on mismatch, SHALL fail closed as `UnknownContext`. It
+SHALL NOT use the retrieved bytes, prefer them to the pinned copy, or repair
+the difference. An implementer who adds a fetch "for robustness" has added an
+attack surface and removed none.
+
+**Immutability.** The octets served at that IRI SHALL NEVER change. A change of
+meaning is a new IRI ending `/v2` and a new `profileVersion`. Re-serving
+different bytes at `/v1` is a specification violation regardless of who does
+it, the steward included, because the term IRIs inside already-signed
+credentials would silently acquire new definitions.
+
+**Term IRIs are names, not locations.** A value under the vocabulary base
+identifies a term. It need not resolve, and a party SHALL NOT dereference one
+during verification.
+
+**Stewardship.** The steward is Anuna Research. Transfer of stewardship is a
+Tier-1 amendment recording the new steward, the effective date, and the
+archival location. It SHALL NOT change any IRI: changing an IRI changes what
+already-signed credentials mean, which is the one thing a stewardship transfer
+must not do.
+
+**Loss of the origin.** Because the digest is the authority and the octets are
+archived in the repository and in at least one immutable public archive whose
+content identifier is recorded at the gate, loss of `anuna.io` invalidates no
+issued credential and changes no verification result. It removes a convenience
+mirror. A successor MAY publish byte-identical octets elsewhere and record the
+new mirror; it SHALL NOT mint a second IRI for the same terms.
+
+**Hostile acquisition of the origin.** An acquirer can serve different octets.
+That has no verification-time effect, because nothing fetches, and it is
+detected by the digest comparison for any party that does. This is the whole
+reason the digest rather than the domain is the authority, and it is why the
+choice of origin is a durability and naming question rather than a security
+one.
+
+**Why this origin.** The identifier used through version 0.12.0 pointed at
+`selfsame.dev`, a domain that resolved no NS records — the specification named
+a domain the project did not hold, which is precisely what a durable identifier
+must not be, since an unregistered name in a signed credential is a name
+someone else can register. `anuna.io` is under project control today, so the
+"prove control of a durable origin" half of OQ-202 is satisfied by inspection.
+See [[SPEC-004-application-scoped-identity#ADR-221]] for why naming a
+vocabulary after Anuna does not breach the Infrastructure promise.
+
+**Operational duties**, all Tier-1 gate items rather than runtime requirements:
+a registration of at least five years with expiry monitoring, DNSSEC, a CAA
+record, an immutable public archival copy with a recorded content identifier,
+and publication as `application/ld+json` with `Cache-Control: immutable`.
+
+Implements: [[SPEC-004-application-scoped-identity#REQ-205]],
+[[SPEC-004-application-scoped-identity#REQ-207]].
+
+Verified by: [[SPEC-004-application-scoped-identity#TEST-241]].
+
+### CON-225: Application identifier succession
+
+This contract closes [[SPEC-004-application-scoped-identity#OQ-204]]. It
+defines the only permitted way for an application account's home DID to be
+replaced when the developer's canonical `applicationId` changes — through
+domain loss, acquisition, or application merger.
+[[SPEC-004-application-scoped-identity#ADR-222]] records the reasoning,
+including why the succession is a bearer statement rather than a `did:crdt`
+delta.
+
+Version 1 defines no migration from any earlier derivation scheme; see
+[[SPEC-004-application-scoped-identity#OQ-206]].
+
+**The developer succession pointer.** The **outgoing** origin serves:
+
+```http
+GET /.well-known/selfsame/succession HTTP/1.1
+Host: photos.example
+Accept: application/jose
+```
+
+The body is a compact JWS over the exact RFC 8785 serialization of:
+
+```json
+{
+  "successionVersion": 1,
+  "from": "https://photos.example/selfsame/application",
+  "to": "https://pictura.example/selfsame/application",
+  "issuedAt": "2026-07-30T10:00:00Z",
+  "expiresAt": "2026-10-28T10:00:00Z"
+}
+```
+
+Closed protected header `alg`, `typ`, `kid`; `alg` is exactly `EdDSA` and `typ`
+is exactly `selfsame-application-succession+jws`. `expiresAt - issuedAt` SHALL
+NOT exceed 7,776,000 seconds — ninety days.
+
+`kid` SHALL resolve in the `enrollment.requestSigningKeys` set **the wallet
+recorded at this account's most recent successful enrollment** under CON-214
+step 2, not in a set served now by any origin. This is the load-bearing rule.
+Checking a currently-served key would make succession exactly as strong as a
+domain registration, and a lapsed registration acquired by someone else is the
+case OQ-204 was opened for. Checking a key the wallet pinned before the lapse
+turns a DNS-strength control into a key-strength control using state the wallet
+already holds. If the developer has rotated away every key the wallet pinned,
+succession fails closed and the person enrolls a fresh identity: an
+availability cost, never an authority one.
+
+**The per-account succession statement.** A closed object, recognized exactly
+as CON-201 recognizes a profile — unknown members at any depth are rejections,
+not extension points:
+
+```json
+{
+  "successionVersion": 1,
+  "outgoing": "did:crdt:<outgoing application-account home>",
+  "incoming": "did:crdt:<incoming application-account home>",
+  "outgoingApplication": "https://photos.example/selfsame/application",
+  "incomingApplication": "https://pictura.example/selfsame/application",
+  "accountScopeId": "<canonical private account scope>",
+  "issuedAt": "2026-07-30T10:00:00Z",
+  "expiresAt": "2026-08-06T10:00:00Z"
+}
+```
+
+The physical statement is **two** compact JWS values over byte-identical RFC
+8785 payloads:
+
+- the outgoing signature, `typ` exactly `selfsame-succession+jws`, `kid` the
+  outgoing home DID's `assertionMethod`; and
+- the incoming signature, `typ` exactly `selfsame-succession-countersign+jws`,
+  `kid` the incoming home DID's `assertionMethod`.
+
+Both are REQUIRED. A one-sided statement is rejected: the outgoing key alone,
+if it leaked, could nominate an attacker's DID as successor, and the incoming
+key alone could claim any predecessor's history. A person holding the recovery
+secret can produce both and nobody else can produce either.
+
+`expiresAt - issuedAt` SHALL NOT exceed the **incoming** profile's
+`revocation.maxGrantLifetimeSeconds`. The overlap window is therefore bounded
+by a member CON-201 already defines; version 1 adds no profile member and does
+not change `profileVersion`.
+
+**Order of operations.**
+
+1. The application requests succession and supplies the developer pointer. A
+   wallet SHALL NOT initiate succession.
+2. The wallet verifies the pointer against its pinned key set. On failure it
+   returns `SuccessionRejected` and discloses nothing — in particular, not
+   whether it holds an outgoing identity for that application.
+3. The wallet derives the incoming node and home key by an ordinary CON-202
+   derivation, carrying the `accountScopeId` across unchanged. Only the
+   application node differs, because only the `applicationId` changed.
+4. The wallet displays the outgoing and incoming fingerprints under the
+   [[SPEC-004-application-scoped-identity#CON-221]] display rules — the hex is
+   what is compared, the LifeHash sits beside it — and the person confirms.
+   Rejection or timeout ends the operation with nothing changed.
+5. The wallet produces both signatures.
+6. Ordinary enrollment proceeds for the incoming DID: alias publication,
+   CON-204 provisioning, CON-206 acceptance.
+
+**What a verifier does with it.** During `[issuedAt, expiresAt)` the
+application MAY accept a grant whose `issuer` is `outgoing`, provided that:
+
+1. both JWS verify over byte-identical payloads, with each `kid` resolving in
+   its DID's `assertionMethod` from a closure meeting the CON-206 step 10
+   session-establishment bound;
+2. `incoming` equals the home DID the authority is being asked to bind, and
+   `outgoing` equals the DID the authority currently binds for this account;
+3. the developer pointer verifies as above and its `from`/`to` equal
+   `outgoingApplication`/`incomingApplication`, with the incoming profile's own
+   `applicationId` equal to `to`;
+4. the person confirmed at step 4; and
+5. `CON-206` then runs **unchanged** against the outgoing expectation — the
+   grant's `credentialSubject.account` is the outgoing alias and its
+   `application` and `aud` are the outgoing `applicationId`.
+
+CON-206 is deliberately not amended. Succession changes which expectation a
+verifier feeds the predicate, not the predicate.
+
+**Alias handling.** An account holds exactly one stable alias, and succession
+is the only operation that replaces it. The outgoing alias is tombstoned under
+[[SPEC-004-application-scoped-identity#CON-212]]'s rule and SHALL NOT be
+assigned to another account or DID. An optional human-readable alias MAY move
+to the incoming DID by ordinary CON-212 rename.
+
+**After the window.** The application SHALL accept only the incoming issuer.
+The outgoing controller SHOULD revoke each old grant under CON-210 as its
+device re-enrolls.
+
+**Deactivation is last, and the order is normative.** The outgoing home DID
+SHOULD be deactivated once succession is complete, but a controller SHALL NOT
+deactivate it until every grant it issued has been revoked or has passed its
+`validUntil`. The `did:crdt` deactivation latch is irreversible and rejects
+**all** subsequent mutations, `RevokeCredential` among them, so deactivating
+early strands any still-live grant in a state where it can never be revoked —
+leaving expiry as the only remaining control, which is precisely the degraded
+case [[SPEC-004-application-scoped-identity#REQ-208]] bounds rather than
+accepts. A controller that cannot enumerate its outstanding grants SHALL NOT
+deactivate.
+
+**Prohibitions.**
+
+- No chains. A statement whose `outgoing` is the `incoming` of another
+  unexpired statement is rejected. Version 1 permits one hop; anything longer
+  is re-enrollment. Chaining would let a compromised intermediate launder an
+  account into a third identity.
+- No publication. The statement SHALL NOT appear in `alsoKnownAs`, a WebFinger
+  JRD, a status projection, a state-resolver record, a callback, a log, or
+  analytics. It travels in the CON-219 bundle or the application's
+  authenticated account channel and nowhere else. Publishing it is what would
+  create the cross-application link [[SPEC-004-application-scoped-identity#NFR-201]]
+  exists to prevent.
+- No second source. A verifier SHALL NOT accept a statement received from any
+  party other than the wallet or its own account authority.
+- No silent migration, per [[SPEC-004-application-scoped-identity#REQ-202]],
+  and no succession without the CON-221-shaped confirmation.
+
+**Why this is a signed statement and not a `did:crdt` delta.**
+[[SPEC-004-application-scoped-identity#CON-210]] says plainly that a standalone
+signature does not revoke a grant, and a reader is right to ask why succession
+gets to be one. The answer is that the two operations fail in opposite
+directions:
+
+- a **withheld revocation** means a dead grant keeps working. Withholding is
+  the threat, so the state must be convergent and unsuppressable — hence the
+  G-Set, the resolver diversity, and the freshness bound.
+- a **withheld succession** means an old grant is simply not accepted. That is
+  the fail-closed outcome, so no convergence is required to make it safe.
+
+Convergent public state is mandatory where unavailability grants authority, and
+merely convenient where unavailability withholds it. Publishing succession as a
+delta would also defeat its privacy property: `SetDocumentData` lands in the
+resolvable document, so the outgoing DID would announce its successor to every
+party that resolves it — the same objection that rules out `alsoKnownAs` in
+[[SPEC-004-application-scoped-identity#ADR-222]].
+
+Succession still depends on `did:crdt` for the part that matters: each `kid`
+must resolve in its DID's `assertionMethod` from a verified closure, so the
+method decides which key may speak for either identity.
+
+Every failure returns `SuccessionRejected` and leaves the outgoing identity,
+its alias, its grants, its revocation state, the account scope, and every
+session unchanged.
+
+Implements: [[SPEC-004-application-scoped-identity#REQ-202]],
+[[SPEC-004-application-scoped-identity#REQ-231]].
+
+Verified by: [[SPEC-004-application-scoped-identity#TEST-242]].
+
+### CON-226: Conformance vector corpus
+
+This contract closes [[SPEC-004-application-scoped-identity#OQ-207]] item 5. It
+converts "publish vectors" from an open question into a defined artifact with a
+completeness rule that can fail.
+
+**Location and shape.** The corpus is `test-vectors/spec-004-v1.json`, beside
+the existing `test-vectors/spec-001-v1.json` and `test-vectors/lifehash-v2.json`
+and following their convention: top-level `spec` and `did_crdt_revision`
+members, then one member per contract named `con_2NN_<slug>` whose value is an
+array of cases.
+
+Each case is:
+
+```json
+{
+  "id": "con_206_step10_stale_closure",
+  "description": "closure older than the session-establishment bound",
+  "input": { },
+  "expect": { "reject": "con_206_step_10" }
+}
+```
+
+`expect` is either `{"accept": <value>}` or `{"reject": "<reason>"}`. A reason
+is either the exact closed error token the relevant contract defines — such as
+`EnrollmentReplay` from CON-214 or `SuccessionRejected` from CON-225 — or,
+where the contract defines steps rather than tokens, the identifier
+`con_<nnn>_step_<n>`. Requiring the reason, not merely a failure, is the point:
+two stacks must agree on **which** check fired, or they have not implemented
+the same predicate. CON-206 deliberately collapses its externally visible
+errors so that an attacker gains no credential oracle; the corpus is an
+internal conformance artifact and names the step regardless.
+
+**Canonical form.** UTF-8, no byte-order mark, LF, and RFC 8785 canonical — a
+conforming re-serialization reproduces the file byte for byte. Binary is
+base64url without padding. Numbers are integers; no floats appear.
+
+**Completeness rule.** For every closed error token defined by CON-204,
+CON-211, CON-212, CON-214, CON-215, CON-219, CON-220, CON-221, CON-222,
+CON-223, and CON-225, and for each of CON-206's thirteen numbered steps, the
+corpus SHALL contain at least one case whose `expect.reject` names it. A token
+or step with no case is a gate failure, not a documentation gap.
+
+**Required groups.** One corpus, not two: it carries both the groups the Tier-1
+gate already named — KDF, alias, VC, holder binding, revocation, account scope,
+username — and the seven OQ-207 item 5 groups:
+
+1. canonical JWS, positive and the TEST-208 negative corpus;
+2. profile recognition under CON-201 and discovery under CON-220;
+3. same-device handoff traces, labelled per platform for CON-222 and CON-223;
+4. MITM substitution at each layer of the authorization chain;
+5. replay of every one-time value;
+6. application substitution, including a hostile sibling and a copied public
+   profile; and
+7. callback hijack and forged completion.
+
+Cases outside group 3 SHALL NOT be platform-conditional.
+
+**The corpus is normative.** Where the corpus and this document's prose
+disagree, that is a defect resolved by amendment. The corpus SHALL NOT be
+edited to match an implementation, and a case SHALL NOT be deleted or marked
+skipped to make a suite pass. The file's SHA-256 is recorded in the changelog
+entry of every Tier-1 amendment that changes it.
+
+Implements: [[SPEC-004-application-scoped-identity#REQ-222]],
+[[SPEC-004-application-scoped-identity#REQ-227]].
+
+Verified by: [[SPEC-004-application-scoped-identity#TEST-243]].
 
 ## Test specifications
 
@@ -3478,10 +4427,13 @@ no method operation or merge can make `is_revoked(id)` false.
 
 ### TEST-214: Provider selection
 
-**Validates:** [[SPEC-004-application-scoped-identity#REQ-209]], [[SPEC-004-application-scoped-identity#REQ-219]].
+**Validates:** [[SPEC-004-application-scoped-identity#REQ-209]], [[SPEC-004-application-scoped-identity#REQ-219]], [[SPEC-004-application-scoped-identity#NFR-207]].
 
 Exercise priority, weight, bounded parallel probes, incompatible protocol,
 timeouts, unhealthy endpoints, malformed descriptors, and total failure.
+Require selection to complete within the NFR-207 latency bound with at least
+one healthy declared provider, and require a slow high-priority provider not to
+serially block its fallbacks.
 Against both PROTO-003 and PROTO-002 capability oracles, reject a plain `ok`
 body, unknown or duplicate JSON members, wrong fixed semantics, a 4 KiB
 mailbox maximum, invalid/duplicate pairing routes, redirects, compression,
@@ -3884,6 +4836,232 @@ Extract the `grant` octets from a completed bundle and require byte identity
 with the issued compact JWS and successful verification by an independent
 non-CBCL verifier, confirming that the envelope secured transport only.
 
+### TEST-237: Profile discovery and origin binding
+
+**Validates:** [[SPEC-004-application-scoped-identity#REQ-222]], [[SPEC-004-application-scoped-identity#REQ-227]], [[SPEC-004-application-scoped-identity#CON-201]], [[SPEC-004-application-scoped-identity#CON-220]].
+
+Dereference a canonical `applicationId` and require the CON-201 recognizer to
+accept only a conforming profile whose own `applicationId` equals the URI
+fetched. Reject, individually and with zero semantic action each time: any
+redirect including same-origin, a wrong media type, content encoding, a body
+over 65,536 octets, a profile whose `applicationId` differs from the fetched
+URI, and a profile whose RFC 8785 digest differs from the CON-409 record's
+`profileDigest`.
+
+Serve a substituted profile carrying an attacker's enrollment key from an
+otherwise valid TLS origin and require rejection at the digest step, proving TLS
+alone is not the control. Supply the same profile to the wallet directly from
+the caller and require it never to be used.
+
+Exercise the tier-3 ordering: fetch under steps 1–5, use only
+`pairingRecordRelays`, resolve the record, then apply step 6 — and require a
+digest mismatch discovered at that point to abandon the ceremony with no
+provisioning and no session.
+
+Exercise cache and rotation: accept a cached profile inside 3,600 seconds with
+no network request; require revalidation past it; publish a profile with a
+removed enrollment key and require evidence signed by that key to fail once the
+cache expires; require immediate eviction on any digest mismatch; and require
+`UnverifiedApplication` when the cache is stale and the network is unavailable.
+
+Exercise `/.well-known/selfsame/applications`: accept the closed two-member
+object, reject unknown members, over 32 entries, and any entry off the queried
+origin, and require the endpoint to be consulted on no path other than tier-3
+recovery.
+
+### TEST-238: First-enrollment confirmation and wallet substitution
+
+**Validates:** [[SPEC-004-application-scoped-identity#REQ-222]], [[SPEC-004-application-scoped-identity#REQ-230]], [[SPEC-004-application-scoped-identity#ADR-220]], [[SPEC-004-application-scoped-identity#CON-221]].
+
+For an account with no authority binding, complete a ceremony and require both
+screens to display `Fingerprint::hex` of `fingerprint_did(home_did)` with its
+LifeHash beside it, and require the values to match. Confirm, and require the
+alias to be provisioned and the grant accepted.
+
+Reject the comparison and require: no alias provisioned, no grant accepted, no
+session, the ceremony burned, and a revocation attempted where a controller is
+reachable. Time the prompt out and require the same. Assert no affordance exists
+to skip, suppress, or remember the confirmation.
+
+**Substitution.** Introduce a second wallet holding a different recovery secret
+and give it the bootstrap. Require it to complete SPAKE2 and produce a
+structurally valid grant — it can, since it holds `C` — and require the
+confirmation step to be the control that stops it: the fingerprints differ, the
+person rejects, and no alias is bound. Then repeat with the confirmation
+disabled and require the enrollment to succeed, demonstrating that this contract
+and not some other check is what closes the gap.
+
+For an account the authority already binds, present a grant from a different
+issuer and require rejection under CON-204 **before** CON-206 runs, with no
+confirmation prompt shown. Require that no code path can re-enter the
+confirmation for an already-bound account.
+
+### TEST-239: Platform binding conformance
+
+**Validates:** [[SPEC-004-application-scoped-identity#REQ-220]], [[SPEC-004-application-scoped-identity#REQ-223]], [[SPEC-004-application-scoped-identity#REQ-225]], [[SPEC-004-application-scoped-identity#CON-222]], [[SPEC-004-application-scoped-identity#CON-223]].
+
+On Android at API 30 and above: require wallet discovery to carry no ceremony
+material and to return only package names; require dispatch to be an explicit
+component intent even when exactly one candidate resolves; require any
+`PendingIntent` to be immutable and one-shot, and reject a mutable or replayable
+one; require the wallet to compare the creator package against the CON-214
+`platformBindingId` and return `PlatformBindingMismatch` otherwise; and require
+signing-certificate rotation to be tolerated via `hasSigningCertificate`.
+
+On Apple platforms: require dispatch with `universalLinksOnly` true, and require
+a `false` completion to be terminal — assert no Safari open, no web view, no
+install page, no custom scheme. Corrupt the associated-domain binding and
+require failure. Assert that no payload-supplied identifier is treated as caller
+evidence.
+
+On both: install a hostile sibling registering the same capability and require
+that it receives no ceremony material unless the person explicitly selects it,
+and that selecting it still fails at [[SPEC-004-application-scoped-identity#CON-221]] confirmation.
+
+### TEST-240: Freshness tiers and projection inference
+
+**Validates:** [[SPEC-004-application-scoped-identity#REQ-207]], [[SPEC-004-application-scoped-identity#REQ-208]], [[SPEC-004-application-scoped-identity#CON-206]], [[SPEC-004-application-scoped-identity#CON-210]].
+
+**Tiers.** With a profile at the defaults, accept a grant at session
+establishment against a closure younger than
+`min(maxClosureAgeSeconds, propagationSlaSeconds)` and reject one older,
+including a closure that would pass the continuation bound. Then, inside the
+established session, accept re-verification against a closure between the two
+bounds. Lose the verifier's record of the accepted grant ID and require the
+next acceptance to be treated as establishment. Present a grant whose case is
+indeterminable and require the establishment bound.
+
+**Composed latency.** Submit a revocation, then require that no new session can
+be established with that grant more than
+`propagationSlaSeconds + min(maxClosureAgeSeconds, propagationSlaSeconds)`
+after submission — 120 seconds at the defaults — while an already-established
+session may continue until `maxClosureAgeSeconds`.
+
+**Resolver preference.** With a declared `stateResolvers` entry reachable,
+require the establishment closure to be resolved from it and not taken from the
+CON-219 bundle or a cache. Serve a bundle closure that omits a
+`RevokeCredential` delta the resolver holds and require the grant to be
+rejected. Make every declared resolver unreachable and require the
+bundle-supplied closure to be used only for a first acceptance, and only with a
+record that it was.
+
+**Ceilings.** Reject a profile whose `propagationSlaSeconds` exceeds 300, whose
+`maxClosureAgeSeconds` exceeds 3,600, whose `projection.maxAgeSeconds` exceeds
+3,600, or whose `maxGrantLifetimeSeconds` exceeds 2,592,000, each individually
+and with zero semantic action.
+
+**Projection inference.** Publish a projection whose
+`validUntil - validFrom` exceeds `maxAgeSeconds` and require the publisher path
+to refuse to sign it. Age a valid projection past `validUntil` and require: a
+set bit still rejects the grant, and an unset bit yields *unavailable* rather
+than *not revoked*. Require a Selfsame verifier to reach the same decision with
+the projection removed entirely, proving CON-206 step 10 never relied on it.
+
+### TEST-241: Context digest and non-dereference
+
+**Validates:** [[SPEC-004-application-scoped-identity#REQ-205]], [[SPEC-004-application-scoped-identity#NFR-204]], [[SPEC-004-application-scoped-identity#CON-224]].
+
+Require `SHA-256` of `contexts/device-grant-v1.jsonld` to equal the
+`context_digest` recorded in CON-224 and in the CON-226 corpus, and require the
+file to be UTF-8 with no byte-order mark, LF endings, and at most 8,192 octets.
+Require the document's single `@context` value to be structurally identical to
+the logical context in CON-205, so the two cannot drift.
+
+Verify a grant with all network egress blocked and require success, proving no
+verification path dereferences the context or vocabulary IRIs. Instrument the
+resolver and assert zero requests to the `anuna.io` origin across the complete
+CON-206 predicate.
+
+Serve altered octets at the context IRI and require any party that fetches to
+fail closed as `UnknownContext` — specifically requiring that it does not use
+the retrieved bytes, prefer them to the pinned copy, or merge the difference.
+Serve the correct octets with a different media type or transfer encoding and
+require the digest comparison to be what decides.
+
+Require a credential carrying an unknown context IRI, a `/v2` IRI, or the two
+contexts in the wrong order to be rejected at CON-206 step 8.
+
+### TEST-242: Identity succession
+
+**Validates:** [[SPEC-004-application-scoped-identity#REQ-202]], [[SPEC-004-application-scoped-identity#REQ-231]], [[SPEC-004-application-scoped-identity#ADR-222]], [[SPEC-004-application-scoped-identity#CON-225]].
+
+**Positive.** Complete a succession with a valid developer pointer, both
+signatures, and a confirmed fingerprint comparison; require the incoming alias
+provisioned, the outgoing alias tombstoned, the `accountScopeId` carried across
+unchanged, and grants from both issuers accepted until `expiresAt`.
+
+**Negatives**, each individually and with the outgoing identity, its alias, its
+grants, its revocation state, the account scope, and every session unchanged:
+a one-sided statement with only the outgoing signature; only the countersign;
+two signatures over payloads differing by one byte; a developer pointer signed
+by a key present in the currently served profile but **absent from the set the
+wallet pinned at the last successful enrollment**; a pointer whose
+`expiresAt - issuedAt` exceeds ninety days; a statement past `expiresAt`; a
+statement whose `expiresAt - issuedAt` exceeds the incoming profile's
+`maxGrantLifetimeSeconds`; a statement whose `outgoing` is not the DID the
+authority currently binds; a chained statement whose `outgoing` is another
+unexpired statement's `incoming`; a statement carrying an unknown member at any
+depth; and a wallet-initiated succession.
+
+**Deactivation ordering.** Complete a succession while one grant issued by the
+outgoing DID remains unexpired, and require a deactivation attempt to be
+refused. Then deactivate after every outstanding grant is revoked or expired
+and require it to succeed. Separately, deactivate the outgoing DID directly
+through the method and require a subsequent `RevokeCredential` to be rejected —
+demonstrating that the ordering rule is what prevents an unrevokable grant, not
+a courtesy.
+
+**Lapsed-origin simulation.** Transfer the outgoing origin to an adversary who
+serves a well-formed pointer under a freshly generated enrollment key. Require
+rejection at the pinned-key check, and require the wallet to disclose nothing —
+including whether it holds an outgoing identity for that application. Then
+rotate every pinned key legitimately and require succession to fail closed to
+fresh enrollment rather than fall back to the served set.
+
+**Confirmation.** Reject the fingerprint comparison and require nothing
+provisioned, no session, and no signature produced. Time it out and require the
+same. Assert both fingerprints are displayed as `Fingerprint::hex` with the
+LifeHash beside, never instead.
+
+**Publication.** After a successful succession, assert the statement appears in
+no `alsoKnownAs`, WebFinger JRD, status projection, state-resolver record,
+callback, log, or analytics payload. Require a verifier to reject a statement
+offered by any party other than the wallet or its own account authority.
+
+**After the window.** Past `expiresAt`, require only the incoming issuer
+accepted and the outgoing rejected under CON-206 with
+`credentialSubject.account` equal to the outgoing alias. Require the tombstoned
+outgoing alias to be unassignable to another account or DID.
+
+**Isolation.** Require a third application to be unable to obtain either
+statement, and require its own home DID for the same person to be unchanged by
+the succession. Require the incoming home DID to be reproducible from mnemonic,
+the incoming `applicationId`, and the carried `accountScopeId` alone, so that
+succession produces an ordinary CON-202 identity and not a retained one.
+
+### TEST-243: Corpus completeness and independence
+
+**Validates:** [[SPEC-004-application-scoped-identity#REQ-222]], [[SPEC-004-application-scoped-identity#REQ-227]], [[SPEC-004-application-scoped-identity#CON-226]].
+
+Enumerate every closed error token defined by CON-204, CON-211, CON-212,
+CON-214, CON-215, CON-219, CON-220, CON-221, CON-222, CON-223, and CON-225, and
+each of CON-206's thirteen numbered steps, and require at least one corpus case
+whose `expect.reject` names it. A token or step with no case fails this test —
+it is not reported as a warning.
+
+Require all seven OQ-207 item 5 groups and the KDF, alias, VC, holder-binding,
+revocation, account-scope, and username groups to be present in the one file.
+Require every case outside the handoff group to be platform-independent.
+
+Require RFC 8785 re-serialization of `test-vectors/spec-004-v1.json` to
+reproduce the file byte for byte, all binary to be canonical base64url without
+padding, and every number to be an integer.
+
+Run two independently implemented stacks over the corpus and require identical
+accept/reject reasons for every case — not merely identical pass/fail. Require
+a case that a stack cannot execute to be reported as a failure rather than
+skipped, and assert that no case is marked skipped, pending, or expected-fail.
+
 ## Security and threat model
 
 The threat model is normative. A happy path that succeeds outside these
@@ -3920,8 +5098,9 @@ This profile relies on:
 - conforming clients honouring
   [[PROTO-004-selfsame-ceremony-envelope-v1#REQ-502]], since a reused envelope
   key repeats a keystream and the constant nonce depends on that invariant;
-- the HTTPS `applicationId` origin and a backend enrollment-signing key
-  authenticated through the mechanism that will close OQ-207;
+- the HTTPS `applicationId` origin and a backend enrollment-signing key,
+  obtained through [[SPEC-004-application-scoped-identity#CON-220]] and pinned
+  per account for [[SPEC-004-application-scoped-identity#CON-225]];
 - the mobile OS correctly enforcing application sandboxing, installed-app
   signing identity, explicit/verified dispatch, associated-domain routing, and
   one-shot result capabilities used by CON-215;
@@ -3936,9 +5115,14 @@ This profile relies on:
   predicates.
 
 A production wallet does **not** trust a public profile merely because a caller
-supplied it. Until OQ-207 authenticates profile discovery and platform evidence,
-the embedded-profile assumption is limited to an in-process prototype and this
-specification's Tier-1 gate remains closed.
+supplied it. CON-220 through CON-223 now define profile discovery and platform
+evidence, but until mobile platform reviewers approve them and TEST-237 through
+TEST-239 pass on real devices, the embedded-profile assumption is limited to an
+in-process prototype and this specification's Tier-1 gate remains closed.
+
+A conforming verifier trusts the pinned credential context and **nothing about
+the origin that names it**: CON-224 makes the context digest the authority, so
+`anuna.io` appears in this list nowhere.
 
 The following are explicitly untrusted:
 
@@ -4087,6 +5271,24 @@ mechanism.
 - Correctly authenticated but misleading application content and a person's
   decision to approve an accurately identified request remain social/UX risks;
   the consent requirements reduce but do not eliminate them.
+- CON-221 substitutes a person's one-time hex comparison for wallet
+  attestation, because a registry of acceptable wallet builds is unavailable
+  by design. A person who confirms without comparing reinstates the
+  trust-on-first-use the contract removes, and no protocol control detects it.
+- A CON-225 succession discloses to the incoming application that the outgoing
+  account belongs to the same person. That is inherent to migration, confined
+  to one developer's two identifiers, and never published; no third application
+  learns it. A developer who rotates every pinned enrollment key between a
+  person's last enrollment and a migration loses that person's succession, and
+  the fallback is fresh enrollment.
+- An adversary acquiring a lapsed `applicationId` origin cannot mint a
+  succession, because CON-225 checks the pointer against wallet-pinned keys.
+  They can still stand up an ordinary application at that origin and enroll new
+  identities, which is what registering any domain permits; they gain no access
+  to the previous developer's accounts or to any home key.
+- Loss or hostile acquisition of the `anuna.io` origin changes no verification
+  result, since CON-224 pins the context by digest and nothing dereferences it.
+  It removes a convenience mirror for generic consumers that choose to fetch.
 
 ### Threat-to-control analysis
 
@@ -4097,7 +5299,7 @@ mechanism.
 | Active nameplate guess or pre-claim | The nameplate provides no security and is no longer public: it lives in a record at a 128-bit address, so live ceremonies cannot be enumerated. Atomic single claim, client peer locking, 600-second expiry, rate limiting, and permanent burn bound the residual and make interference a visible restart. |
 | Malicious pairing provider terminates SPAKE2 | CON-217 requires the application and wallet as roles A/B and CON-218 rejects provider-generated frames or a password-verifier mode. Provider compromise yields no password equivalent or accepted key. |
 | A code is tried across applications/providers | A code names no application, so there is nothing to try: routing comes from the signed record at its own 128-bit address, and PROTO-003 CON-409 forbids searching profiles, provider lists, or endpoints for a match. An unresolvable address makes one attempt per available tier and then fails. |
-| Malicious same-device app copies another developer's public profile | A public profile supplies no authority. The attacker lacks the origin-anchored enrollment signature and matching platform binding; CON-214 rejects before branch lookup or consent. |
+| Malicious same-device app copies another developer's public profile | A public profile supplies no authority. The attacker lacks the origin-anchored enrollment signature and matching platform binding; CON-214 rejects before branch lookup or consent, and CON-220 means the signing key never comes from the caller. |
 | Link-handler or custom-scheme interception | CON-215 permits only verified installed-wallet dispatch and forbids browser/custom-scheme fallback. Any ambiguity burns every ceremony value under REQ-225. |
 | Callback interception or forged `completed` result | Callback carries no secret or credential and is outside the authorization chain. Only a verified rendezvous bundle plus CON-206/CON-207 authorizes. |
 | Concurrent application/account/ceremony mix-up | The PAKE binding first commits application/profile/descriptor/route/nameplate; enrollment evidence and the encrypted transcript then bind account scope, device key, permission, offer, request ID, and ceremony ID. Cross-splices fail TEST-229 and TEST-234. |
@@ -4111,13 +5313,19 @@ mechanism.
 | Grant issued before its alias is provisioned | It confers nothing: CON-206 step 9 fails closed on the missing reciprocal binding, and CON-204 requires the application to provision or return `AccountProvisioningFailed` and revoke the grant ID. |
 | Malicious or withholding state resolver | It cannot forge an accepted signed closure or remove a G-Set entry; stale or incomplete state fails closed, and resolver/peer diversity limits withholding. An application that declares its own node receives revocations directly and stops depending on a third party choosing to relay them. |
 | Unauthenticated write to an application's delta endpoint | Revocation is monotone: the set is grow-only, deltas are signed by the home key, and no operation clears an entry. Forgery fails verification, replay is idempotent, and an accepted delta can only reduce authority. |
-| Compromised application profile distribution | Production verification requires the OQ-207 origin-authenticated profile mechanism. Caller-delivered fields alone fail CON-214. |
+| Compromised application profile distribution | CON-220 dereferences the canonical `applicationId` itself, rejects every redirect, and requires the RFC 8785 digest to equal the CON-409 record's `profileDigest`. TLS authenticates the origin; the record digest pins which profile it served. Caller-delivered fields alone fail CON-214. |
 | Stolen VC | It cannot pass CON-207 without the device private key. |
 | Stolen device key | The grant remains usable until its ID appears in fresh verified CRDT state or it expires; the home controller revokes the exact grant ID. |
 | Username squatting or reassignment | Authenticated atomic reservation prevents races; version 1 tombstones released names permanently. |
 | Reused public username | UI warns that voluntary reuse can correlate accounts; authorization continues to use only the opaque alias. |
-| Stale authorization state | Authorization fails after `maxClosureAgeSeconds`; the precise availability tradeoff blocks the gate. |
-| Context host compromise | It has no verification-time effect because contexts are pinned and not fetched. |
+| Stale authorization state | Two tiers under CON-206: session establishment uses `min(maxClosureAgeSeconds, propagationSlaSeconds)` and prefers an independently resolved closure; continuation uses `maxClosureAgeSeconds`. A revoked device cannot start a new session more than 120 s after submission at the defaults. TEST-240 asserts both bounds and the composed latency. |
+| Issuer supplies a closure omitting its own revocations | The bundle closure is the issuer's own account of what it revoked. CON-206 requires an independently resolved closure at session establishment wherever a declared resolver is reachable, and permits the bundle only for a first acceptance on a degraded network, with a record that it happened. |
+| Generic consumer over-reads a stale projection | CON-210 requires `validUntil` inside `maxAgeSeconds`, so ordinary W3C validity rules expire it. A set bit stays true at any age because the G-Set is grow-only; an unset bit past `validUntil` means *unavailable*, never *not revoked*. |
+| Context host compromise | It has no verification-time effect because contexts are pinned and not fetched. CON-224 makes the digest the authority, so an acquirer of the naming origin cannot change any credential's meaning, and a party that does fetch must compare and fail closed. |
+| Whichever wallet answers a first ceremony becomes the account | CON-221 requires the person to compare the home DID fingerprint before the alias is provisioned, with no skip affordance. Every later enrollment is pinned by the authority's binding under CON-204. TEST-238 demonstrates that disabling the confirmation is what lets a substituted wallet succeed. |
+| Adversary acquires a lapsed `applicationId` origin and claims succession | CON-225 checks the succession pointer against enrollment keys the wallet pinned at the account's last successful enrollment, not against keys the origin serves now. A freshly minted key fails; the wallet discloses not even whether it holds an identity for that application. |
+| Succession is used to launder an account | Exactly one hop is permitted: a statement whose `outgoing` is another unexpired statement's `incoming` is rejected. Both home keys must sign, so no single leaked key nominates a successor. |
+| Succession statement leaks a cross-application link | It is never published — not in `alsoKnownAs`, a JRD, a projection, a resolver record, a callback, or a log — and a verifier accepts it only from the wallet or its own authority. Succession is one hop, per account, and confined to one developer's two identifiers. |
 | Algorithm confusion | Exact EdDSA allowlists, protected headers, and key-type checks reject input-selected algorithms. |
 | Identifier normalization attack | Restrictive canonical application IDs and generated ASCII `acct:` localparts remove equivalent spellings; general comparison follows RFC 3986/RFC 7565. |
 | Status-projection correlation | Projection is optional; random indexes, aggregation, stapling, caching, and proxying reduce but do not eliminate observation. |
@@ -4179,13 +5387,34 @@ No implementation task may be marked ready until all boxes are checked:
 - [ ] A human cryptography/security reviewer approves CON-202, CON-205,
       CON-206, CON-207, CON-210, CON-211, CON-212, CON-213, CON-216,
       CON-217, and CON-218.
-- [ ] Mobile platform security reviewers approve CON-214 and CON-215, including
-      the exact Android and Apple target/caller identity checks and the
-      fail-without-web-fallback behavior.
+- [ ] Mobile platform security reviewers approve CON-214, CON-215, CON-220,
+      CON-222, and CON-223, including the exact Android and Apple target/caller
+      identity checks and the fail-without-web-fallback behavior.
+- [ ] A human security reviewer approves CON-221 and ADR-220 — specifically
+      that a person's one-time issuer comparison is an acceptable substitute
+      for wallet attestation, given that a registry is unavailable.
+- [ ] A human security reviewer approves CON-225 and ADR-222, including the
+      pinned-enrollment-key rule and the decision to permit exactly one
+      succession hop.
+- [ ] The human owner ratifies or lowers the four OQ-201 values, and records
+      whether the session-establishment and continuation tiers are accepted as
+      derived rather than declared.
 - [ ] Two independent implementations reproduce the normative KDF and wire
       vectors required by NFR-202.
-- [ ] The `did:crdt` method explicitly defines the `JsonWebKey` projection and
-      `assertionMethod` relationship without changing existing DID derivation.
+- [ ] The `did:crdt` method explicitly defines the `JsonWebKey` projection
+      without changing existing DID derivation. As of the pinned revision
+      `adb5c7ac`, `resolve()` emits `publicKeyMultibase` and the crate contains
+      no `publicKeyJwk`, so the CON-203 document shape and the CON-206 step 6
+      check are **not producible today**. The `assertionMethod` half of this
+      item is already satisfied: verification-method relationships render into
+      the resolved document.
+- [ ] The `did:crdt` method enforces verification relationships in delta
+      authorization, or this profile records that it does not. At the pinned
+      revision `check_authorisation` requires only a known, non-revoked
+      verification method, and never consults the `relationships` field it
+      stores — so any authorized key may sign `RevokeCredential`, whatever
+      relationship it holds. This is inert while an account has exactly one
+      verification method and becomes live the moment it has two.
 - [ ] `did:crdt` SPEC-035 (Causal Commitment Levels) leaves `stub` status with a
       chosen level and normative clauses. CON-206 steps 5 and 10 require a
       "causally valid" and "causally complete" closure, and that definition is
@@ -4194,16 +5423,24 @@ No implementation task may be marked ready until all boxes are checked:
 - [ ] The pinned `did:crdt` version for `did-crdt-service-v1` is recorded, with
       its CON-003 and CON-004 conformance suites passing against a node the
       adopting application operates and a node it does not.
-- [ ] The Selfsame JSON-LD context has an owned durable URL, immutable content,
-      published digest, and archival policy.
+- [ ] The Selfsame JSON-LD context is published at the CON-224 IRI with
+      immutable content, its `context_digest` recorded here and in the corpus,
+      and an archival copy whose content identifier is recorded. The `anuna.io`
+      registration runs at least five years with DNSSEC, a CAA record, and
+      monitored expiry.
 - [ ] A privacy review covers `acct:` harvesting, WebFinger, state lookups,
       optional username reuse, CRDT revocation enumeration, projection
       retrieval, account-scope storage, provider and browser-Origin metadata,
       pairing nameplates/frames/tokens, mobile handoff/callback metadata, and
       cross-application and cross-account correlation.
-- [ ] OQ-201, OQ-202, and OQ-204 through OQ-207 are either resolved
-      normatively or explicitly accepted by the human owner with bounded
-      consequences. OQ-203 is resolved by ADR-210.
+- [ ] Every open question is resolved normatively or explicitly accepted by the
+      human owner with bounded consequences. OQ-203 is resolved by ADR-210,
+      OQ-205 by PROTO-003 ADR-407 and ADR-409, OQ-202 by ADR-221 and CON-224,
+      OQ-204 by ADR-222 and CON-225, and OQ-207 by CON-220 through CON-223 and
+      CON-226. OQ-201's shape is settled and its four values await ratification
+      above. OQ-206 is withdrawn on the owner's finding that no production
+      SPEC-001 identity exists; that finding is re-confirmed at sign-off, and
+      the question reopens if it ever becomes false.
 - [ ] SPEC-001 is explicitly amended or profiles this document without
       contradictory credential and derivation claims.
 - [ ] PROTO-002, PROTO-003, and PROTO-004 pass their own Tier-1 gates and two
@@ -4219,29 +5456,105 @@ No implementation task may be marked ready until all boxes are checked:
 - [ ] TEST-201 through TEST-226 pass against the reference implementation, with
       the normative KDF, alias, VC, holder-binding, revocation, account-scope,
       and username vectors published.
-- [ ] TEST-227 through TEST-236 pass, including real Android and Apple platform
+- [ ] TEST-227 through TEST-239 pass, including real Android and Apple platform
       adapters with hostile sibling apps and alternate link handlers installed.
+- [ ] TEST-240 through TEST-243 pass, and the CON-226 corpus is published with
+      its SHA-256 recorded, satisfying the completeness rule, with two
+      independent stacks agreeing on every case's accept/reject reason.
 - [ ] Human security sign-off records an approval version and commit.
 
 ## Open questions
 
-### OQ-201: How stale may authorization state be? — blocking
+### OQ-201: How stale may authorization state be? — defaults set, ratification outstanding
 
-The profile names `maxClosureAgeSeconds`, `propagationSlaSeconds`, and optional
-projection `maxAgeSeconds`, but no values have been approved. Short windows
-improve revocation and harm offline availability; long windows do the reverse.
-The decision must define when a closure is causally complete enough for
-authorization, how long resolvers may lag a submitted revocation, and what
-generic consumers may infer from a projection. Selfsame authorization always
-fails closed beyond the closure bound.
+Version 1 now carries normative defaults and ceilings rather than named
+parameters with no values. The remaining decision is whether to ratify or lower
+them, not what shape they take.
+
+| Parameter | Default | Ceiling |
+|---|---:|---:|
+| `revocation.propagationSlaSeconds` | 60 | 300 |
+| `revocation.maxClosureAgeSeconds` | 900 | 3,600 |
+| `revocation.projection.maxAgeSeconds` | 900 | 3,600 |
+| `revocation.maxGrantLifetimeSeconds` | 2,592,000 | 2,592,000 |
+
+A profile MAY lower any value and SHALL NOT exceed a ceiling. A verifier SHALL
+reject a profile that does.
+
+These are one question in three costumes, so the useful statement is the
+composed bound — **how long a revoked device keeps working**:
+
+```text
+verifier that can resolve fresh state
+    propagationSlaSeconds + maxClosureAgeSeconds
+    = 960 s at the defaults, 3,900 s at the ceilings
+
+verifier relying on expiry alone, per CON-204
+    maxGrantLifetimeSeconds
+    = 30 days
+```
+
+The second line is the one that matters, and it is why
+[[SPEC-004-application-scoped-identity#REQ-208]] bounds grant lifetime at all: `CON-204` permits an
+application that cannot reach a controller to rely on expiry, so an unbounded
+`validUntil` would make revocation cosmetic in exactly that case. Sixteen
+minutes online is a deliberate trade — short enough that a stolen device is
+contained, long enough that a resolver outage does not sever every session.
+
+Both narrower questions are now answered normatively.
+
+**Does the closure bound differ for a first authorization?** Yes, and the split
+is by what the acceptance creates rather than by how new the grant is. CON-206
+now defines two tiers: session establishment uses
+`min(maxClosureAgeSeconds, propagationSlaSeconds)` and prefers an independently
+resolved closure over the bundle-supplied one; continuation inside an
+established session uses `maxClosureAgeSeconds`. Strictness is nearly free at
+establishment — the person is present and online — and that is where a stolen,
+recently revoked device tries to obtain new authority. The composed bound
+becomes 120 s at the defaults for a new session and 960 s for an existing one.
+
+**What may a generic consumer infer from an over-age projection?** Nothing
+about non-revocation, and everything about revocation. CON-210 now records the
+asymmetry the grow-only G-Set implies: a set bit is permanently true and may be
+acted on at any age; an unset bit decays, and past `validUntil` the projection
+is *unavailable*, not *not revoked*. There is no intermediate reading between
+`maxAgeSeconds` and the CRDT bound, because they govern different parties — a
+Selfsame verifier never relies on the projection at all. The projection is also
+now required to carry a `validUntil` inside `maxAgeSeconds`, so ordinary W3C
+validity rules enforce the bound on the consumers it exists for.
+
+Neither answer adds a profile member or changes `profileVersion`, so no
+published vector is invalidated.
+
+What remains is human ratification of the four values above, which is a Tier-1
+gate item rather than a design question. Selfsame authorization always fails
+closed beyond the closure bound.
 
 Owner: HOC + application security owner.
 
-### OQ-202: Who owns the durable VC vocabulary? — blocking
+### OQ-202: Who owns the durable VC vocabulary? — RESOLVED by ADR-221 and CON-224
 
-`https://selfsame.dev/credentials/device-grant/v1` is provisional. Before use,
-the project must prove control of a durable origin, publish the exact context,
-pin its digest, and define what happens if the project or domain changes hands.
+The identifier moves to `https://anuna.io/selfsame/credentials/device-grant/v1`,
+and the normative artifact becomes the exact context octets and their SHA-256
+rather than whatever the URL serves.
+
+The identifier used through version 0.12.0, `https://selfsame.dev/…`, resolved
+no NS records — the specification named a domain the project did not hold, and
+an unregistered name inside a signed credential is a name an adversary may
+register. `anuna.io` is under project control, which settles the durable-origin
+half of this question by inspection.
+
+Making the digest the authority settles the rest. CON-224 fixes immutability,
+term-IRI semantics, stewardship transfer, behaviour on loss of the origin, and
+behaviour on hostile acquisition; because ADR-209 already forbids
+verification-time dereferencing, none of those events changes a verification
+result. Naming the vocabulary from an Anuna origin creates no runtime
+dependency on Anuna — a conforming verifier never contacts it — and ADR-221
+records why that is not a breach of the Infrastructure promise.
+
+The residual items are operational and sit in the Tier-1 gate: registration
+term, DNSSEC, CAA, expiry monitoring, and an immutable archival copy with a
+recorded content identifier.
 
 Owner: Anuna Research.
 
@@ -4262,13 +5575,33 @@ closed instead of guessing or silently creating another identity.
 
 Owner: application-profile working group.
 
-### OQ-204: Application ID migration — blocking for mutable deployments
+### OQ-204: Application ID migration — RESOLVED by ADR-222 and CON-225
 
 Domain loss, acquisition, or application merger may require a new
-`applicationId`. Version 1 correctly treats that as a new identity. A future
-migration must be explicit, signed by each affected old and new
-application-account home and the developer trust roots, visible to the person,
-and resistant to silent cross-application correlation.
+`applicationId`, and version 1 still treats that as a new identity by default.
+CON-225's `application-id` profile is the one audited path across the boundary:
+a developer succession pointer served by the outgoing origin, a per-account
+statement signed by **both** the outgoing and incoming home keys, a
+fingerprint comparison the person makes, an expiry bounded by the incoming
+profile's `maxGrantLifetimeSeconds`, and a prohibition on publishing the
+statement anywhere resolvable.
+
+The decision that carries the security is the pinned-key rule: the pointer is
+checked against the enrollment keys the wallet recorded at that account's last
+successful enrollment, not against keys an origin serves today. An adversary
+who acquires a lapsed `applicationId` origin therefore cannot mint a
+succession, which was the case this question was opened for. A developer who
+has rotated every pinned key since the person last enrolled loses that person's
+succession and falls back to fresh enrollment — an availability cost, not an
+authority one.
+
+Correlation is bounded by construction: one statement per account rather than
+one per population, delivered only through the CON-219 bundle or the
+application's own authenticated channel, and never in `alsoKnownAs`, a JRD, a
+projection, or a resolver record. No third application learns that a succession
+occurred. The residual — that the incoming application learns the outgoing
+account belongs to the same person — is inherent, confined to one developer's
+two identifiers, and recorded in the residual-risk list.
 
 Owner: application-profile working group.
 
@@ -4296,58 +5629,80 @@ mechanism remains the narrower blocking item in OQ-207.
 
 Owner: application-profile working group.
 
-### OQ-206: Migration of the existing SPEC-001 identity — blocking for existing users
+### OQ-206: Migration of the existing SPEC-001 identity — WITHDRAWN; there is no legacy population
 
-CON-202 intentionally does not reproduce SPEC-001's current
-`anuna-ssi/v1/root-key/<persona>` derivation. An existing CBCL identity therefore
-cannot silently become the new application-account-scoped home DID.
+This question assumed a population of existing CBCL identities that would need
+carrying into the new derivation. There is none: no person holds a SPEC-001
+identity in production, so there is nothing to migrate and no migration is
+specified.
 
-The migration needs a separately reviewed transition in which the incumbent
-SPEC-001 DID authorizes each new CBCL application-account home DID, verifiers
-accept a bounded overlap, and no other application learns the legacy global
-DID. Until that transition exists, this profile is suitable only for new
-application identities or explicit test migrations.
+Version 1 therefore defines **no** transition from
+`anuna-ssi/v1/root-key/<persona>` to
+[[SPEC-004-application-scoped-identity#CON-202]].
+[[SPEC-004-application-scoped-identity#CON-225]] covers `applicationId`
+succession only, and an application adopting this profile enrolls fresh
+identities. The prohibition in
+[[SPEC-004-application-scoped-identity#REQ-202]] stands unqualified: an
+identity derived under a different scheme is a different identity.
 
-Owner: SPEC-001 maintainer + HOC.
+This is a scope decision by the human owner rather than a technical resolution,
+and it is cheap to reverse in one direction only. **It reopens the moment a
+single production SPEC-001 identity exists** — after which withdrawing it again
+would mean stranding that person. A conforming implementation SHALL NOT
+approximate a legacy migration in the meantime, because an unreviewed bridge
+built under time pressure is exactly what this question existed to prevent.
 
-### OQ-207: Exact profile-origin and mobile-platform evidence — blocking
+What does **not** go away is document reconciliation: SPEC-001 ADR-001's claim
+that "`did:crdt` deltas are the credential" and this profile's VC cannot both
+describe the same identity, and the codebase currently implements the former.
+That remains a Tier-1 gate item, unaffected by the absence of users.
 
-CON-214 and CON-215 now fix the security shape: an origin-authenticated,
+[[PROTO-004-selfsame-ceremony-envelope-v1#OQ-501]] rests on the same assumption
+and can likely be withdrawn on the same basis; it is a separate document and
+has not been touched here.
+
+Owner: HOC.
+
+### OQ-207: Exact profile-origin and mobile-platform evidence — RESOLVED normatively; verification outstanding
+
+CON-214 and CON-215 fixed the security shape: an origin-authenticated,
 backend-signed, short-lived enrollment statement; exact
 application/account/device/permission/provider/offer binding; platform
 caller/target evidence; and verified-origin consent. A copied public profile,
-custom scheme, display label, callback, or TLS session alone is explicitly
-insufficient.
+custom scheme, display label, callback, or TLS session alone remains explicitly
+insufficient. All five items now have contracts:
 
-The remaining work is deliberately narrow but still blocks production:
+| Item | Closed by |
+|---|---|
+| 1. HTTPS profile discovery, media type, cache, rotation, redirect, offline | [[SPEC-004-application-scoped-identity#CON-220]] |
+| 2. Android targeting, caller identity, certificate rotation, return capability | [[SPEC-004-application-scoped-identity#CON-222]] |
+| 3. Apple association, `universalLinksOnly`, claimed HTTPS return | [[SPEC-004-application-scoped-identity#CON-223]] |
+| 4. Selecting among independent wallets with no allowlist | [[SPEC-004-application-scoped-identity#CON-221]] and [[SPEC-004-application-scoped-identity#ADR-220]] |
+| 5. Cross-platform vectors | [[SPEC-004-application-scoped-identity#CON-226]] |
 
-1. specify the HTTPS `applicationId`-origin profile discovery, media type,
-   cache, signature, key rotation/revocation, redirect, and offline rules so the
-   wallet never trusts a key obtained only from its caller;
-2. fix the Android minimum API and exact checks for explicit wallet targeting,
-   calling package/UID sharing, signing-certificate rotation, verified App
-   Links, and immutable one-shot return capabilities;
-3. fix the Apple Team-ID/bundle-ID and associated-domain validation, the
-   Selfsame Universal Link invocation origin, `universalLinksOnly` failure
-   behavior, and the claimed HTTPS return path;
-4. decide how multiple independently implemented conforming wallet apps are
-   discovered and selected without a user-managed endpoint or an Anuna-only
-   package allowlist; and
-5. publish cross-platform canonical JWS, profile, handoff, MITM, replay,
-   application-substitution, and callback-hijack vectors.
+Item 4 is the one that changed shape rather than being filled in. Authenticating
+*which wallet* answered cannot be done without a registry of acceptable builds,
+and a registry forecloses the independent implementations
+[[SPEC-004-application-scoped-identity#REQ-214]] exists to protect. ADR-220
+replaces the question with one the person can answer: confirm at an account's
+first enrollment that the **issuer** is the identity their own wallet just
+derived. CON-222 accordingly records the target's signing identity for audit
+and explicitly does not check it against anything.
 
-The Android candidate is an explicit component/result flow whose installed
-signing identity is checked against the authenticated profile; Android verified
-App Links may carry a non-secret return. The Apple candidate is a Universal
-Link opened only when an associated installed Selfsame app can handle it, with
-an associated HTTPS return to the developer app. On both platforms the
-backend-signed CON-214 evidence remains mandatory: link routing authenticates a
-target or return association, not the whole application-account request.
+Item 5 likewise stopped being a question and became an artifact. CON-226 fixes
+the corpus location, case format, canonical form, and — the part that can fail
+— a completeness rule requiring a case for every closed error token and every
+CON-206 step.
+
+What remains is verification rather than design, and it sits in the Tier-1
+gate: mobile platform reviewers must approve CON-220 through CON-223, the
+corpus must be published, TEST-237 through TEST-239 and TEST-243 must pass on
+real Android and Apple devices with hostile siblings and alternate link
+handlers installed, and two independent stacks must agree on every case.
 
 Private-use/custom schemes, clipboard/pasteboard transfer, generic intents,
-embedded browser fallbacks, and a credential in a callback are not candidates.
-Until all five items are normative and TEST-227 through TEST-235 pass,
-including real-platform carrier tests, the profile-authenticity assumption is
+embedded browser fallbacks, and a credential in a callback remain rejected.
+Until those gate items close, the profile-authenticity assumption is still
 limited to an in-process prototype and a wallet service must not accept
 arbitrary application requests.
 
@@ -4374,6 +5729,13 @@ reviewers.
 | Either party may start a pairing | [[SPEC-004-application-scoped-identity#REQ-226]], [[SPEC-004-application-scoped-identity#REQ-227]]; PROTO-003 [[SPEC-004-application-scoped-identity#REQ-409]] | [[SPEC-004-application-scoped-identity#CON-216]]; PROTO-003 [[SPEC-004-application-scoped-identity#CON-402]], [[SPEC-004-application-scoped-identity#CON-409]] | [[SPEC-004-application-scoped-identity#TEST-232]], [[SPEC-004-application-scoped-identity#TEST-234]], [[SPEC-004-application-scoped-identity#TEST-235]]; PROTO-003 [[SPEC-004-application-scoped-identity#TEST-413]] |
 | Cross-application and cross-account privacy | [[SPEC-004-application-scoped-identity#REQ-201]], [[SPEC-004-application-scoped-identity#REQ-203]], [[SPEC-004-application-scoped-identity#REQ-213]], REQ-215–218 | CON-202–205, [[SPEC-004-application-scoped-identity#CON-211]], [[SPEC-004-application-scoped-identity#CON-212]] | [[SPEC-004-application-scoped-identity#TEST-201]], TEST-204–206, [[SPEC-004-application-scoped-identity#TEST-219]], TEST-221–223, [[SPEC-004-application-scoped-identity#TEST-225]] |
 | Compatibility with the `did:crdt` method boundary | [[SPEC-004-application-scoped-identity#REQ-201]], [[SPEC-004-application-scoped-identity#REQ-203]], [[SPEC-004-application-scoped-identity#REQ-205]], [[SPEC-004-application-scoped-identity#REQ-208]] | [[SPEC-004-application-scoped-identity#CON-202]], [[SPEC-004-application-scoped-identity#CON-203]], [[SPEC-004-application-scoped-identity#CON-210]] | [[SPEC-004-application-scoped-identity#TEST-207]], [[SPEC-004-application-scoped-identity#TEST-213]], [[SPEC-004-application-scoped-identity#TEST-224]] |
+| An authenticated profile whose key never comes from the caller | [[SPEC-004-application-scoped-identity#REQ-222]], [[SPEC-004-application-scoped-identity#REQ-227]] | [[SPEC-004-application-scoped-identity#CON-201]], [[SPEC-004-application-scoped-identity#CON-214]], [[SPEC-004-application-scoped-identity#CON-220]] | [[SPEC-004-application-scoped-identity#TEST-237]], [[SPEC-004-application-scoped-identity#TEST-243]] |
+| A first issuer confirmed rather than trusted | [[SPEC-004-application-scoped-identity#REQ-222]], [[SPEC-004-application-scoped-identity#REQ-230]] | [[SPEC-004-application-scoped-identity#CON-204]], [[SPEC-004-application-scoped-identity#CON-221]]; [[SPEC-004-application-scoped-identity#ADR-220]] | [[SPEC-004-application-scoped-identity#TEST-238]], [[SPEC-004-application-scoped-identity#TEST-239]] |
+| Platform dispatch that fails rather than falls back | [[SPEC-004-application-scoped-identity#REQ-220]], [[SPEC-004-application-scoped-identity#REQ-223]], [[SPEC-004-application-scoped-identity#REQ-225]] | [[SPEC-004-application-scoped-identity#CON-215]], [[SPEC-004-application-scoped-identity#CON-222]], [[SPEC-004-application-scoped-identity#CON-223]] | [[SPEC-004-application-scoped-identity#TEST-230]], [[SPEC-004-application-scoped-identity#TEST-239]] |
+| Bounded revocation latency without severing offline sessions | [[SPEC-004-application-scoped-identity#REQ-207]], [[SPEC-004-application-scoped-identity#REQ-208]] | [[SPEC-004-application-scoped-identity#CON-201]], [[SPEC-004-application-scoped-identity#CON-206]], [[SPEC-004-application-scoped-identity#CON-210]] | [[SPEC-004-application-scoped-identity#TEST-213]], [[SPEC-004-application-scoped-identity#TEST-240]] |
+| A vocabulary that survives losing its domain | [[SPEC-004-application-scoped-identity#REQ-205]], [[SPEC-004-application-scoped-identity#REQ-207]] | [[SPEC-004-application-scoped-identity#CON-205]], [[SPEC-004-application-scoped-identity#CON-224]]; [[SPEC-004-application-scoped-identity#ADR-209]], [[SPEC-004-application-scoped-identity#ADR-221]] | [[SPEC-004-application-scoped-identity#TEST-241]] |
+| Carrying an account across an `applicationId` change, once and visibly | [[SPEC-004-application-scoped-identity#REQ-202]], [[SPEC-004-application-scoped-identity#REQ-231]] | [[SPEC-004-application-scoped-identity#CON-212]], [[SPEC-004-application-scoped-identity#CON-221]], [[SPEC-004-application-scoped-identity#CON-225]]; [[SPEC-004-application-scoped-identity#ADR-222]] | [[SPEC-004-application-scoped-identity#TEST-242]] |
+| One conformance corpus two stacks must agree on | [[SPEC-004-application-scoped-identity#REQ-222]], [[SPEC-004-application-scoped-identity#REQ-227]] | [[SPEC-004-application-scoped-identity#CON-226]] | [[SPEC-004-application-scoped-identity#TEST-243]] |
 
 ## Amendment Channels
 
@@ -4393,11 +5755,16 @@ Any change to application-ID or account-scope canonicalization, account-scope
 lifecycle, key derivation, DID construction, JWK representation, accepted
 algorithms, signed bytes, holder proof, closure/projection freshness,
 revocation semantics, alias comparison, rendezvous eligibility, provider-hint
-binding, application enrollment evidence, mobile caller/wallet identity,
-same-device dispatch, pairing grammar/entropy/routing, SPAKE2 suite/transcript,
-confirmation/burn behavior, callback authority, threat-model boundary, or the
-PROTO-002/PROTO-003 version is a Tier-1 normative amendment and requires new
-vectors plus renewed security sign-off.
+binding, application enrollment evidence, profile discovery, first-enrollment
+confirmation, mobile caller/wallet identity, same-device dispatch, pairing
+grammar/entropy/routing, SPAKE2 suite/transcript, confirmation/burn behavior,
+callback authority, credential context IRI or digest, identity succession,
+threat-model boundary, or the PROTO-002/PROTO-003 version is a Tier-1 normative
+amendment and requires new vectors plus renewed security sign-off.
+
+A change to the [[SPEC-004-application-scoped-identity#CON-226]] corpus is such
+an amendment, and its new SHA-256 is recorded in the changelog entry. The
+corpus is never edited to match an implementation.
 
 ## Normative and informative sources
 
@@ -4505,6 +5872,106 @@ combination; that is an engineering conclusion, not a legal novelty claim.
 
 ## Changelog
 
+- **0.13.0 — 2026-07-31 — draft, normative.** Closes the remaining open
+  questions. Every OQ now has a normative resolution; what blocks the gate is
+  review, ratification, and evidence rather than design.
+
+  *OQ-207 items 1–4 were already answered in the working tree by CON-220
+  through CON-223, ADR-220, REQ-230, and TEST-237 through TEST-239.* This
+  version finishes item 5 with [[SPEC-004-application-scoped-identity#CON-226]],
+  which turns "publish vectors" into `test-vectors/spec-004-v1.json` with a
+  case format, a canonical form, and a completeness rule that can fail: a case
+  for every closed error token and every CON-206 step, or the gate does not
+  close. TEST-243 asserts it and requires two stacks to agree on the *reason*,
+  not merely the outcome. The OQ-207 entry is rewritten as a five-row table
+  from item to contract, and the stale "blocking OQ-207" references in CON-201,
+  CON-214, and the trust-boundary list are retired.
+
+  *OQ-201 was three parameters and two unanswered questions.* Both are now
+  answered without a profile member, so `profileVersion` is unchanged and no
+  published vector is invalidated. CON-206 gains freshness tiers: establishing
+  a session uses `min(maxClosureAgeSeconds, propagationSlaSeconds)` and prefers
+  an independently resolved closure over the bundle-supplied one; continuing an
+  established session uses `maxClosureAgeSeconds`. A revoked device therefore
+  cannot start a new session more than 120 s after submission at the defaults,
+  while a resolver outage does not sever live sessions for fifteen minutes. The
+  resolver preference matters on its own: a bundle closure is the issuer's own
+  account of its own revocations. CON-210 records the grow-only asymmetry a
+  generic consumer may rely on — a set bit is true at any age, an unset one
+  past `validUntil` means unavailable — and now requires the projection to
+  carry a `validUntil` inside `maxAgeSeconds` so ordinary W3C validity rules
+  enforce the bound on the consumers it exists for.
+
+  *OQ-202's provisional origin did not resolve.* `selfsame.dev` had no NS
+  records, so the document named a domain the project did not hold, and an
+  unregistered name inside a signed credential is one an adversary may
+  register. The context and vocabulary IRIs move to `anuna.io`, an origin under
+  project control, and ADR-221 plus CON-224 make the SHA-256 of the context
+  octets the authority so the origin is a name and a mirror rather than a
+  dependency. Nothing dereferences it — ADR-209 already forbade that — so loss
+  or hostile acquisition of the domain changes no verification result. Naming a
+  vocabulary is not hosting infrastructure, and TEST-241 verifies a grant with
+  all network egress blocked.
+
+  *OQ-204 gets ADR-222, CON-225, REQ-231, and TEST-242.* When a developer's
+  canonical `applicationId` changes, one audited path carries an account
+  across: a pointer served by the outgoing origin, a per-account statement
+  signed by both the outgoing and incoming home keys, a fingerprint comparison
+  the person makes, a bounded expiry, and no publication anywhere resolvable.
+  Two signatures are required, so no single leaked key nominates a successor.
+  One hop is permitted, so a compromised intermediate cannot launder an
+  account.
+
+  The load-bearing decision is the pinned-key rule. A succession pointer is
+  checked against the enrollment keys the wallet recorded at that account's
+  last successful enrollment, not against keys the outgoing origin serves now,
+  which converts a DNS-strength control into a key-strength one and closes the
+  lapsed-domain case OQ-204 was opened for. CON-214 step 2 accordingly gains
+  the duty to record that key set.
+
+  *OQ-206 is withdrawn rather than resolved.* No person holds a SPEC-001
+  identity, so there is no population to migrate and version 1 specifies no
+  transition from the legacy derivation. This is a scope decision by the human
+  owner, reversible in one direction only: it reopens the moment a single
+  production legacy identity exists. Reconciling SPEC-001 with this document
+  remains a gate item, since the codebase still implements it.
+
+  ADR-222 records why succession is a signed statement rather than a `did:crdt`
+  delta — revocation fails unsafe when withheld and so needs convergent state,
+  while succession fails closed and does not — and rejects rotating the key in
+  place, which would descend the new application's identity from the old
+  application's node and break NFR-202's reproducibility. CON-225 also fixes an
+  ordering that would otherwise strand grants: `Deactivate` is an irreversible
+  latch that rejects every later mutation including `RevokeCredential`, so the
+  outgoing DID is deactivated only after its grants are revoked or expired.
+
+  Two upstream `did:crdt` findings are recorded at the gate, both verified
+  against the pinned revision `adb5c7ac`. `publicKeyJwk` does not exist in the
+  crate — `resolve()` emits `publicKeyMultibase` — so the CON-203 document
+  shape and the CON-206 step 6 check are not producible today, though the
+  `assertionMethod` half of that item is already satisfied. And
+  `check_authorisation` never consults the `relationships` field it stores, so
+  any authorized verification method may sign `RevokeCredential`; that is inert
+  at one key per account and live at two.
+
+  Also: CON-222 and CON-223 gain the Implements/Verified-by footers the
+  bidirectional traceability discipline requires; TEST-214 now validates
+  NFR-207 and asserts its latency bound, so no artefact is left unreferenced by
+  every other; the gate goes from eighteen items to twenty-three and loses
+  none; the threat table gains nine rows; and the residual-risk list
+  records what CON-221 and CON-225 do not cover — including that a person who
+  confirms without comparing reinstates the trust-on-first-use CON-221 removes,
+  and no protocol control detects it.
+
+  No key hierarchy, DID construction, VC payload shape, revocation semantics,
+  pairing grammar, SPAKE2 suite, envelope, or acceptance predicate changed. The
+  credential context IRI did change, which is a Tier-1 amendment requiring new
+  vectors.
+
+  Versions 0.8.0 and 0.10.0 through 0.12.0 bumped the frontmatter without
+  changelog entries; that gap is recorded here rather than reconstructed, and
+  the commits `1c092b3`, `2cc3b42`, `4852541`, and `4bec117` carry those
+  descriptions in full.
 - **0.9.0 — 2026-07-31 — draft, normative.** Follows
   [[PROTO-003-selfsame-pairing-v1]] 0.3.0, which replaces the human pairing code
   and its routing. The code becomes twelve BIP-39 words rendering a 128-bit `C`;

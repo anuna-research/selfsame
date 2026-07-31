@@ -3,7 +3,7 @@ id: PROTO-004
 title: Selfsame Ceremony Envelope v1 — the sealed offer and grant record
 status: draft
 tier: 1
-version: 0.1.0
+version: 0.2.0
 audience: application developer, SDK implementer, wallet implementer, security reviewer
 author: Anuna Research (drafted with Claude, 2026-07-31)
 last-updated: 2026-07-31
@@ -122,9 +122,10 @@ Artefacts in this document use the `5##` number band so they cannot collide
 with SPEC-004's `2##`, PROTO-002's `3##`, or PROTO-003's `4##` band.
 
 This document does not describe the legacy CBCL ceremony envelope referenced by
-SPEC-001. Whether that envelope is migrated to this contract, and on what
-schedule, is
-[[PROTO-004-selfsame-ceremony-envelope-v1#OQ-501]].
+SPEC-001, and version 1 does not interoperate with it. No production ceremony
+uses it, so `SSE1` is the only record a conforming client accepts and no
+compatibility branch exists to carry. See
+[[PROTO-004-selfsame-ceremony-envelope-v1#OQ-501]], withdrawn.
 
 ## Context
 
@@ -289,9 +290,19 @@ digest, timestamp, length-revealing padding marker, or error description to the
 rendezvous operator. The header SHALL contain only the fixed magic, the version
 octet, and the role octet.
 
-An implementation MAY pad a payload to obscure its exact length. Padding, when
-used, SHALL be inside the sealed plaintext and SHALL be defined by the
-enclosing profile, never by an unauthenticated record field.
+**Record length is not metadata, because there is only one length.** Every
+sealed record SHALL be exactly 69,632 octets, achieved by the fixed-length
+frame in [[PROTO-004-selfsame-ceremony-envelope-v1#CON-502]]. Padding is
+REQUIRED, is inside the sealed plaintext, is zero octets, and is verified on
+opening. An implementation SHALL NOT emit a short record, negotiate a length,
+or make padding conditional on payload content.
+
+This closes the last cleartext channel the envelope controls. Payload length
+otherwise correlates with whether a bundle inlines an issuer closure, and a
+closure's size is a **stable per-account quantity** that grows with a DID's
+delta history — so length was not merely a one-bit leak about verifier
+behaviour but a fingerprint that could link ceremonies which 128-bit addressing
+had deliberately made unlinkable.
 
 Trace: [[PROTO-004-selfsame-ceremony-envelope-v1#TEST-505]]
 
@@ -406,6 +417,67 @@ compact, but the ecosystem around this ceremony — JWS grants, JCS profile
 digests, JRD account records — is already canonical JSON, and a second
 canonicalization discipline would be a second class of parser-differential bug.
 
+### ADR-504: One record length, not a ladder of buckets
+
+**Status:** PROPOSED.
+
+Every sealed record is padded to exactly 69,632 octets. This closes
+[[PROTO-004-selfsame-ceremony-envelope-v1#OQ-502]], which asked whether padding
+is required, at what granularity, and at what cost.
+
+The leak is worse than "a bundle with an inline closure is bigger." A closure's
+size tracks a DID's delta history, so it is roughly stable for one account and
+grows slowly over that account's life. An operator observing many ceremonies
+therefore sees a per-account length fingerprint — and length was the only
+channel left that could relink ceremonies which
+[[PROTO-003-selfsame-pairing-v1#CON-409]]'s 128-bit addressing had already
+separated. Everything else the operator sees is opaque and uncorrelated by
+construction; leaving length variable would have made the addressing work
+pointless for exactly the users with the longest histories.
+
+Granularity is the interesting part of the question, and the answer is that any
+bucketing scheme fails in the same direction. Bucketing to, say, 8 KiB would
+hide the ordinary range — a conforming grant is one to two kilobytes and the
+closure remainder is under four — at roughly an eighth of the bandwidth. But
+the accounts that overflow a bucket are the ones with the longest delta
+histories, which is to say the heaviest, longest-standing users. A bucketed
+scheme protects the median and fingerprints the tail, and the tail is precisely
+who wants protecting. A single length has no tail.
+
+It is also the only option with nothing to tune. There is no bucket boundary to
+argue about at review, no profile-specific parameter, no negotiation, and no
+second code path — which matches how
+[[PROTO-004-selfsame-ceremony-envelope-v1#REQ-501]] treats the format
+generally. Fixed-length records additionally make
+[[PROTO-004-selfsame-ceremony-envelope-v1#NFR-501]]'s bounded allocation
+trivial: the buffer size is a constant.
+
+The cost is stated rather than minimised. A ceremony writes two records, so it
+moves about 139 KiB instead of about 5 KiB — roughly a 28-fold increase, and
+about eleven seconds on a poor mobile link, against a 600-second ceremony
+expiry. Absolute cost is what matters here, not the ratio: a device-linking
+ceremony happens a handful of times in a person's life, and 139 KiB is one
+medium photograph. Operators are already required to accept 69,632-octet
+records under [[PROTO-002-selfsame-rendezvous-v1#CON-304]], so no operator must
+provision anything new; they lose the option of provisioning for less.
+
+Rejected:
+
+- **no padding, as in version 0.1.0** — leaves a per-account fingerprint in the
+  one place the envelope fully controls;
+- **bucketed lengths** — protects the median and exposes the tail, as above;
+- **a `pad` member in each payload** — would put padding inside closed member
+  sets owned by another document, inside their RFC 8785 canonicalization, and
+  inside the digest rules that commit to them; the frame keeps padding entirely
+  within this protocol's boundary;
+- **padding with random rather than zero octets** — indistinguishable to an
+  observer, since both are encrypted, but it breaks the byte-identity
+  [[PROTO-004-selfsame-ceremony-envelope-v1#TEST-506]] requires and opens a
+  covert channel between endpoints; and
+- **leaving it to the enclosing profile**, which version 0.1.0 did — a privacy
+  control that each profile may decline is one that fails wherever it is most
+  needed.
+
 ## Contracts
 
 ### CON-501: Envelope key schedule
@@ -476,6 +548,30 @@ The version is carried by the fourth octet of `MAGIC`, which is the ASCII digit
 `1`. A record whose first four octets are not exactly `SSE1` is rejected; there
 is no separate version field to parse.
 
+The plaintext is a **fixed-length frame**, not the bare JSON:
+
+```text
+json        = RFC8785(payload_object) as UTF-8     ; 1..69,607 octets
+pad_len     = 69,607 - len(json)
+
+plaintext   = U32BE(len(json)) || json || (0x00 * pad_len)
+            ; exactly 69,611 octets, for every record, always
+```
+
+`U32BE(n)` is the four-octet unsigned big-endian encoding of `n`. Padding
+octets SHALL be `0x00`; no other value is permitted, so identical inputs
+produce identical plaintexts and the byte-identity
+[[PROTO-004-selfsame-ceremony-envelope-v1#TEST-506]] requires still holds.
+
+The frame lives inside the sealed plaintext, so the length prefix is never
+visible to an operator and is not the "length-revealing padding marker"
+[[PROTO-004-selfsame-ceremony-envelope-v1#REQ-505]] forbids. It exists because
+[[PROTO-004-selfsame-ceremony-envelope-v1#CON-503]] requires the payload to
+re-serialize byte-for-byte with no trailing content, which bare trailing
+padding would break, and because the payload member sets are closed languages
+owned by the enclosing profile — a `pad` member would have to be added to each
+of them and would then fall inside their canonicalization and digest rules.
+
 Sealing:
 
 ```text
@@ -486,7 +582,7 @@ ct_and_tag  = ChaCha20-Poly1305-Seal(
                 key   = key,
                 nonce = nonce_12,
                 aad   = aad,
-                plaintext = RFC8785(payload_object) as UTF-8)
+                plaintext = plaintext)
 
 sealed_record = header || ct_and_tag
 ```
@@ -501,24 +597,42 @@ OCTET         = %x00-FF
 magic         = %x53 %x53 %x45 %x31          ; "SSE1"
 role          = %x01 / %x02
 header        = magic role
-ct-and-tag    = 17*69627OCTET                ; >= 1 octet plaintext + 16 tag
+ct-and-tag    = 69627OCTET                   ; 69,611 plaintext + 16 tag
 sealed-record = header ct-and-tag
 ```
 
-A sealed record is therefore 22 to 69,632 octets inclusive, and the plaintext
-it carries is 1 to 69,611 octets inclusive. The upper bound is exactly the
-[[PROTO-002-selfsame-rendezvous-v1#CON-304]] record bound of 69,632 octets less
-the 5-octet header and the 16-octet tag.
+**Every sealed record is exactly 69,632 octets**, which is exactly the
+[[PROTO-002-selfsame-rendezvous-v1#CON-304]] record bound, and the JSON it
+carries is 1 to 69,607 octets. There is no valid record of any other length: a
+record shorter or longer than 69,632 octets is rejected before any AEAD
+operation. [[PROTO-004-selfsame-ceremony-envelope-v1#ADR-504]] records why the
+length is fixed rather than bucketed.
 
 Opening:
 
 ```text
-payload_octets = ChaCha20-Poly1305-Open(
-                   key   = key,
-                   nonce = nonce_12,
-                   aad   = aad,
-                   ciphertext = ct_and_tag)
+require len(sealed_record) == 69,632           ; before allocating or opening
+
+plaintext = ChaCha20-Poly1305-Open(
+              key   = key,
+              nonce = nonce_12,
+              aad   = aad,
+              ciphertext = ct_and_tag)
+
+n = U32BE-decode(plaintext[0..4])
+require 1 <= n <= 69,607
+require every octet of plaintext[4+n .. 69,611] == 0x00
+
+payload_octets = plaintext[4 .. 4+n]
 ```
+
+The padding check is REQUIRED, not advisory. Unverified padding is a covert
+channel between the endpoints and a source of implementation divergence that
+would break byte-identity. A frame whose length prefix is out of range, or
+whose padding is non-zero, SHALL be reported as exactly `EnvelopeMalformed`
+under [[PROTO-004-selfsame-ceremony-envelope-v1#CON-504]] — the frame is
+authenticated by the tag at that point, so distinguishing it from an auth
+failure discloses nothing to an attacker who did not already hold the key.
 
 Tag verification SHALL be constant-time. A failed open SHALL be reported as
 exactly `EnvelopeAuthFailed` under
@@ -533,8 +647,10 @@ opposite role's key on failure.
 
 ### CON-503: Payload recognition
 
-The decrypted octets SHALL be recognized in this order, and a failure at any
-step SHALL stop processing:
+The `payload_octets` slice that [[PROTO-004-selfsame-ceremony-envelope-v1#CON-502]]
+extracts from the frame — the JSON alone, with the length prefix and padding
+already removed and the padding already verified — SHALL be recognized in this
+order, and a failure at any step SHALL stop processing:
 
 1. require valid UTF-8 with no byte-order mark;
 2. parse as JSON with no duplicate member names, no trailing content, and a
@@ -545,13 +661,17 @@ step SHALL stop processing:
 5. validate every member value against the profile's declared grammar for it;
    and
 6. re-serialize the recognized object with RFC 8785 and require byte-for-byte
-   equality with the decrypted octets.
+   equality with `payload_octets`.
 
 Step 6 is the canonicality check. It makes the payload's octets a function of
 its meaning, which is what lets a profile commit to a payload by digest. An
 implementation SHALL NOT skip it on the grounds that the AEAD already
 authenticated the octets; the AEAD authenticates that the octets came from the
 peer, not that the peer serialized them canonically.
+
+Canonicality is checked against the JSON slice and never against the framed
+plaintext, since the padding is not part of the payload's meaning. Padding
+integrity is CON-502's business and is already settled before step 1 runs.
 
 The output of recognition is a typed value. Downstream code SHALL consume that
 typed value and SHALL NOT re-read the raw octets.
@@ -576,10 +696,10 @@ The closed error set is:
 
 | Error | Trigger |
 |---|---|
-| `EnvelopeMalformed` | Header, role octet, or record length fails the CON-502 grammar. |
+| `EnvelopeMalformed` | Header, role octet, or record length fails the CON-502 grammar, or the opened frame has an out-of-range length prefix or non-zero padding. |
 | `EnvelopeAuthFailed` | The AEAD tag does not verify, for any reason. |
 | `PayloadMalformed` | UTF-8, JSON, member set, member grammar, or canonicality check fails. |
-| `PayloadTooLarge` | The plaintext exceeds the enclosing profile's declared bound. |
+| `PayloadTooLarge` | The JSON exceeds the enclosing profile's declared bound. |
 | `EnvelopeKeyUnavailable` | Mutual PROTO-003 confirmation has not succeeded. |
 | `EnvelopeReseal` | A second distinct plaintext was offered for a used key. |
 
@@ -682,6 +802,22 @@ identifier, application identifier, account scope, DID, alias, device public
 key, permission URI, provider identifier, offer digest, or timestamp present in
 either payload.
 
+**Fixed length.** Require every sealed record a conforming ceremony emits to be
+exactly 69,632 octets, for both roles, across payloads spanning the full JSON
+range from 1 to 69,607 octets — including a minimal bundle, a bundle with an
+inline issuer closure, and one without. Require the emitted records to be
+indistinguishable by length, and require two ceremonies whose bundles differ in
+closure size by any amount to produce records of identical size.
+
+Reject a record of any other length before any AEAD operation, and assert the
+rejection happens before buffer allocation. Open a frame whose length prefix is
+0, whose prefix exceeds 69,607, and whose padding contains a single non-zero
+octet; require `EnvelopeMalformed` for each, and require the padding check to
+run on every open rather than only when a prefix looks suspicious.
+
+Seal identical inputs twice and require byte-identical records, so padding
+cannot become a covert channel or a source of divergence.
+
 Fuzz the recogniser with at least 10^6 random and structurally mutated records,
 including records of every length from 0 to 69,633. Require no panic, no
 unbounded allocation, no non-termination, and only closed CON-504 errors.
@@ -742,12 +878,15 @@ an endpoint process, or obtain the pairing words before ceremony expiry.
 
 ### Residual risks
 
-- Record length is visible to the operator and correlates with payload
-  content — notably whether a bundle carries an inline issuer closure. Padding
-  is permitted but not required in version 1, and the profile that needs it
-  must define it.
 - Timing between the offer write and the bundle write reveals how long the
-  person spent at the consent screen. The envelope cannot conceal this.
+  person spent at the consent screen. The envelope cannot conceal this, and it
+  is now the **only** remaining envelope-layer channel: with every record fixed
+  at 69,632 octets under CON-502, length carries nothing. Concealing timing
+  would require cover traffic or delay, both of which fight the 600-second
+  ceremony expiry and neither of which this protocol attempts.
+- Fixed-length records cost roughly 139 KiB per ceremony against roughly 5 KiB
+  unpadded. This is a deliberate trade recorded in ADR-504, not an oversight;
+  an operator already had to accept records of this size.
 - A constant nonce is safe only under REQ-502. An implementation that persists
   and later reuses an envelope key across ceremonies breaks the construction
   catastrophically and silently. TEST-503 is the only mechanical defence, and
@@ -779,39 +918,80 @@ No implementation task may be marked ready until all boxes are checked:
 - [ ] [[SPEC-004-application-scoped-identity#CON-219]] declares a payload
       member set, nesting bound, and payload size bound for both roles.
 - [ ] PROTO-002 and PROTO-003 pass their own Tier-1 gates.
-- [ ] OQ-501 and OQ-502 are resolved normatively or explicitly accepted by the
-      human owner with bounded consequences.
+- [ ] OQ-501's withdrawal is re-confirmed at sign-off: no production SPEC-001
+      ceremony exists, so no legacy envelope compatibility is required.
+- [ ] A privacy reviewer approves ADR-504 — specifically that one fixed record
+      length is the right granularity, and that roughly 139 KiB per ceremony is
+      an acceptable price for removing the per-account length fingerprint.
+- [ ] Two independently operated PROTO-002 providers accept sustained
+      69,632-octet records at both roles without rate-limiting a conforming
+      ceremony, confirming that the fixed length costs availability nothing.
 - [ ] Human security sign-off records an approval version and commit.
 
 ## Open questions
 
-### OQ-501: Does the legacy SPEC-001 envelope migrate? — blocking for existing users
+### OQ-501: Does the legacy SPEC-001 envelope migrate? — WITHDRAWN; there is no legacy population
 
-The CBCL ceremony predating this document has its own record format and key
-derivation, evidenced by the `channel_key_hex` entries in
-`test-vectors/spec-001-v1.json`. SPEC-001 is not present in this vault, so this
-document neither describes nor amends it.
+This question assumed ceremonies in flight under the older CBCL envelope,
+evidenced by the `channel_key_hex` entries in `test-vectors/spec-001-v1.json`.
+There are none: no person holds a SPEC-001 identity in production, so no
+ceremony needs to interoperate across the two formats.
 
-The decision needs the legacy format on record, a statement of whether a
-version-1 client must interoperate with it, and — if so — how a recogniser
-distinguishes the two without creating the downgrade surface REQ-501 exists to
-prevent. Until then, `SSE1` is the only record a conforming version-1 client
-accepts.
+The conclusion the question was heading toward therefore becomes the rule
+outright. `SSE1` is the only record a conforming version-1 client accepts, and
+[[PROTO-004-selfsame-ceremony-envelope-v1#REQ-501]] already says so without
+qualification: one envelope format, one AEAD, one key schedule, no algorithm
+identifier read from a record, no second format accepted. Nothing in this
+document needs amending — what changes is that the exception is no longer
+pending.
 
-Owner: SPEC-001 maintainer + HOC.
+That is the substantive win. A recogniser that must distinguish two envelope
+formats has to decide which one it is looking at *before* it has authenticated
+anything, and that decision is a downgrade surface by construction. Withdrawing
+this question removes the only thing that would have required one, so
+[[PROTO-004-selfsame-ceremony-envelope-v1#REQ-504]]'s recognition-before-
+interpretation ordering keeps a single path through it.
 
-### OQ-502: Is padding required, and who defines it? — blocking for the privacy review
+This is a scope decision by the human owner rather than a technical resolution,
+and it reverses in one direction only: **it reopens the moment a single
+production SPEC-001 ceremony exists.** Until then an implementation SHALL NOT
+carry a compatibility branch for the legacy envelope, since an unexercised
+second parser is a liability with no counterparty.
 
-REQ-505 permits padding inside the sealed plaintext and requires the enclosing
-profile to define it, but version 1 mandates none. A bundle that inlines an
-issuer closure is visibly larger than one that does not, which leaks a
-verifier-relevant fact to the operator.
+The parallel decision for identity is
+[[SPEC-004-application-scoped-identity#OQ-206]], withdrawn on the same finding.
 
-The decision must fix whether padding is REQUIRED, what granularity is
-sufficient against an operator observing many ceremonies, and whether the cost
-against the 69,632-octet record bound is acceptable.
+Owner: HOC.
 
-Owner: application-profile working group + privacy reviewer.
+### OQ-502: Is padding required, and who defines it? — RESOLVED by ADR-504 and CON-502
+
+Padding is **REQUIRED**, the granularity is **one length for every record**,
+and this protocol defines it rather than delegating to the enclosing profile.
+Every sealed record is exactly 69,632 octets, produced by a fixed-length
+plaintext frame of a four-octet length prefix, the canonical JSON, and verified
+zero padding.
+
+Framing the question as "how much does length leak about one bundle"
+understated it. A closure's size tracks a DID's delta history, so it is stable
+for one account and grows slowly over that account's life — meaning length was
+a per-account fingerprint, and the one channel capable of relinking ceremonies
+that CON-409's 128-bit addressing had separated. That reframing is what ruled
+out bucketing: any bucket protects the median and exposes whoever overflows it,
+and the accounts that overflow are the longest-standing ones.
+
+Delegation to the profile is also withdrawn. A privacy control each profile may
+decline is one that fails wherever it is most needed, and the padding sits in
+the plaintext this protocol owns, not in the member sets a profile owns.
+
+The cost is about 139 KiB per ceremony against about 5 KiB, accepted on the
+grounds that the absolute figure is trivial for an operation a person performs
+a handful of times and that PROTO-002 operators are already obliged to accept
+records of this size. It is recorded in the residual risks rather than buried.
+
+Timing between the two writes remains observable and is now the only
+envelope-layer channel left.
+
+Owner: privacy reviewer.
 
 ## Traceability
 
@@ -880,6 +1060,49 @@ Standards constraints that are easy to miss:
 
 ## Changelog
 
+- **0.2.0 — 2026-07-31 — draft, normative.** Closes both open questions. This
+  is a **wire-format change**: a version-0.1.0 record and a version-0.2.0
+  record are not interchangeable, and no vectors had been published yet, which
+  is why the format changes rather than the version negotiating.
+
+  *OQ-502 — padding is now REQUIRED, fixed, and owned here.* CON-502's
+  plaintext becomes a fixed-length frame — a four-octet big-endian JSON length,
+  the canonical JSON, then verified zero padding — so every sealed record is
+  exactly 69,632 octets and the JSON it carries is 1 to 69,607. The question
+  asked about granularity and cost; the answer to granularity is that there is
+  one length, because a closure's size tracks a DID's delta history and is
+  therefore a per-account fingerprint, so any bucketing scheme would protect
+  the median and expose the longest-standing accounts. Length was also the only
+  channel still capable of relinking ceremonies that PROTO-003's 128-bit
+  addressing had separated. ADR-504 records the reasoning and the rejected
+  alternatives, including a `pad` payload member, which would have put padding
+  inside member sets and digest rules owned by another document.
+
+  The cost is about 139 KiB per ceremony rather than about 5 KiB, stated in the
+  residual risks rather than buried, and cheap in absolute terms for something
+  a person does a handful of times. Operators were already obliged to accept
+  69,632-octet records under PROTO-002 CON-304.
+
+  Affects REQ-505, CON-502, CON-503, CON-504, TEST-505, the residual risks, and
+  the gate, which gains a privacy-reviewer item and a sustained-throughput item
+  and loses the OQ-502 placeholder. The four-octet frame prefix reduces the
+  JSON budget by four octets, so
+  [[SPEC-004-application-scoped-identity#CON-219]]'s payload bound moves from
+  69,611 to 69,607.
+
+  *OQ-501 — withdrawn, not resolved.* No person holds a SPEC-001 identity, so
+  no ceremony needs to interoperate with the legacy CBCL envelope. REQ-501
+  already said one format and no negotiation; what changes is that the
+  exception is no longer pending. The win is structural: a recogniser that must
+  distinguish two envelope formats has to decide which it is looking at before
+  authenticating anything, which is a downgrade surface by construction, so
+  withdrawal keeps a single path through REQ-504's recognition ordering. It
+  reopens if a production legacy ceremony ever exists. Affects Conformance and
+  status and the gate. The parallel identity decision is
+  [[SPEC-004-application-scoped-identity#OQ-206]].
+
+  No key schedule, AEAD, role separation, transcript binding, digest rule, or
+  error set changed.
 - **0.1.0 — 2026-07-31 — draft, normative.** First protocol draft, created to
   close a gap in which [[PROTO-002-selfsame-rendezvous-v1]] declared the
   offer/grant/AEAD contract out of scope while
