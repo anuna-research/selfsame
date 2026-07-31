@@ -149,7 +149,7 @@ fn the_alias_is_absent_until_the_update_is_applied() {
     // is nameable by the controller and asserted by nobody.
     let h = home(APPLICATION_ID, 1);
     let document = h.document.resolve().unwrap().did_document.unwrap();
-    assert!(document.extra.get("alsoKnownAs").is_none());
+    assert!(!document.extra.contains_key("alsoKnownAs"));
 }
 
 #[test]

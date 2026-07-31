@@ -39,7 +39,7 @@ use selfsame_app_identity::json::{self, Json};
 use selfsame_app_identity::scope::AccountScopeId;
 use selfsame_app_identity::{
     alias, ceremony, codec, discovery, enrollment, hierarchy, pairing, platform, profile,
-    succession,
+    selection, succession,
 };
 
 /// Where the corpus lives, beside the SPEC-001 and LifeHash vectors.
@@ -248,7 +248,12 @@ fn build_corpus() -> Json {
         ("con_202_key_hierarchy", con_202()),
         ("con_203_account_alias", con_203()),
         ("con_204_reciprocal_binding", con_204()),
+        ("con_205_device_grant", con_205()),
         ("con_206_acceptance_predicate", con_206()),
+        ("con_207_device_proof", con_207()),
+        ("con_208_provider_selection", con_208()),
+        ("con_209_provider_hint", con_209()),
+        ("con_210_revocation", con_210()),
         ("con_211_account_scope", con_211()),
         ("con_212_human_alias", con_212()),
         ("con_214_enrollment_evidence", con_214()),
@@ -261,8 +266,10 @@ fn build_corpus() -> Json {
         ("con_223_apple_binding", con_223()),
         ("con_219_ceremony_payloads", con_219()),
         ("con_220_profile_discovery", con_220()),
+        ("con_221_first_enrollment", con_221()),
         ("con_224_credential_context", con_224()),
         ("con_225_identity_succession", con_225()),
+        ("con_226_corpus_self_description", con_226()),
     ])
 }
 
@@ -379,6 +386,59 @@ fn con_204() -> Json {
     ])
 }
 
+// ── CON-205: the grant vectors NFR-202 needs ───────────────────────────────
+
+fn con_205() -> Json {
+    // A complete issued grant, so a second implementation can reproduce the
+    // exact compact JWS from the same inputs. This is the vector NFR-202's
+    // "byte-for-byte" clause is about.
+    let c = Ceremony::accepted();
+    let grant = String::from_utf8(c.grant_bytes.clone()).unwrap();
+    let text = core::str::from_utf8(&c.grant_bytes).unwrap();
+    let signed =
+        selfsame_app_identity::jws::recognise(text, selfsame_app_identity::grant::GRANT_JWS, &[])
+            .unwrap();
+    let recognised = selfsame_app_identity::grant::recognise(&signed.payload).unwrap();
+
+    Json::Array(vec![
+        case(
+            "con_205_issued_grant",
+            "a complete device grant: the compact JWS and every identifier derived from one token",
+            Json::obj([
+                ("homeDid", Json::text(c.home_did.clone())),
+                ("deviceDid", Json::text(c.device_did.clone())),
+                ("account", Json::text(c.account.as_str())),
+                ("applicationId", Json::text(APPLICATION_ID)),
+            ]),
+            accept(Json::obj([
+                ("grant", Json::text(grant)),
+                ("grantId", Json::text(recognised.id.clone())),
+                ("statusId", Json::text(recognised.status_id.clone())),
+                ("grantToken", Json::text(recognised.token.clone())),
+                ("lifetimeSeconds", Json::int(recognised.lifetime_seconds())),
+            ])),
+        ),
+        case(
+            "con_205_legacy_vc_wrapper",
+            "a payload wrapping the credential in a JWT `vc` claim",
+            Json::obj([("shape", Json::text("jwt-vc-wrapper"))]),
+            reject("LegacyVcWrapper"),
+        ),
+        case(
+            "con_205_alg_none",
+            "alg none, and every other algorithm substitution",
+            Json::obj([("alg", Json::text("none"))]),
+            reject("BadAlgorithm"),
+        ),
+        case(
+            "con_205_human_alias_in_account_claim",
+            "REQ-218 forbids the optional human-readable alias in the account claim",
+            Json::obj([("account", Json::text("acct:alice@accounts.photos.example"))]),
+            reject("con_206_step_8"),
+        ),
+    ])
+}
+
 // ── CON-206: one case per numbered step ────────────────────────────────────
 
 fn con_206() -> Json {
@@ -418,6 +478,148 @@ fn con_206() -> Json {
         ));
     }
     Json::Array(cases)
+}
+
+// ── CON-207 ────────────────────────────────────────────────────────────────
+
+fn con_207() -> Json {
+    use selfsame_app_identity::proof::{self, Challenge, MAX_NONCE_AGE_SECONDS, NONCE_OCTETS};
+    let device = ed25519_dalek::SigningKey::from_bytes(&[3u8; 32]);
+    let challenge = Challenge {
+        nonce: [42u8; NONCE_OCTETS],
+        application_id: APPLICATION_ID.into(),
+        account: "acct:ss-example@accounts.photos.example".into(),
+        grant_hash: proof::grant_hash(b"a grant"),
+        issued_at: NOW,
+    };
+    let signature = proof::sign(&challenge, &device);
+    Json::Array(vec![
+        case(
+            "con_207_proof_input_and_signature",
+            "the LP-framed proof input and a valid Ed25519 signature over it",
+            Json::obj([
+                ("nonce", Json::text(codec::b64url(&challenge.nonce))),
+                ("applicationId", Json::text(challenge.application_id.clone())),
+                ("account", Json::text(challenge.account.clone())),
+                ("grantHash", Json::text(codec::b64url(&challenge.grant_hash))),
+                ("devicePublicKey", Json::text(codec::b64url(&device.verifying_key().to_bytes()))),
+            ]),
+            accept(Json::obj([
+                ("proofInput", Json::text(codec::b64url(&proof::proof_input(&challenge)))),
+                ("signature", Json::text(codec::b64url(&signature))),
+            ])),
+        ),
+        case(
+            "con_207_nonce_expired",
+            "a nonce presented more than 120 seconds after issuance",
+            Json::obj([("maxNonceAgeSeconds", Json::int(MAX_NONCE_AGE_SECONDS))]),
+            reject("NonceExpired"),
+        ),
+        case(
+            "con_207_nonce_replayed",
+            "a nonce consumed twice, whether the first attempt succeeded or failed",
+            Json::obj([("attempts", Json::int(2))]),
+            reject("NonceReplayed"),
+        ),
+        case(
+            "con_207_nonce_mismatch",
+            "a nonce issued for another application, account, or grant",
+            Json::obj([("boundTo", Json::text("another account"))]),
+            reject("NonceMismatch"),
+        ),
+    ])
+}
+
+// ── CON-208 ────────────────────────────────────────────────────────────────
+
+fn con_208() -> Json {
+    Json::Array(vec![
+        case(
+            "con_208_weighted_choice",
+            "the lowest-priority group is drawn from by weight; zero weight is ineligible",
+            Json::obj([
+                ("maxProbeMilliseconds", Json::int(selection::MAX_PROBE_MILLISECONDS as i64)),
+            ]),
+            accept(Json::obj([("drawnByWeight", Json::Bool(true))])),
+        ),
+        case(
+            "con_208_no_eligible_rendezvous",
+            "every priority group exhausted; REQ-210 forbids any undeclared fallback",
+            Json::obj([("groupsTried", Json::int(2))]),
+            reject("NoEligibleRendezvous"),
+        ),
+        case(
+            "con_208_probe_deadline_exceeded",
+            "a probe returning after 1500 ms is ineligible rather than fatal",
+            Json::obj([("elapsedMilliseconds", Json::int(1_501))]),
+            reject("NoEligibleRendezvous"),
+        ),
+    ])
+}
+
+// ── CON-209 ────────────────────────────────────────────────────────────────
+
+fn con_209() -> Json {
+    let mut cases = vec![case(
+        "con_209_hint_verifies",
+        "a hint whose every member matches the joiner's own origin-authenticated profile",
+        Json::obj([("checks", Json::int(5))]),
+        accept(Json::obj([("followsInitiatorChoice", Json::Bool(true))])),
+    )];
+    for (token, description) in [
+        ("ApplicationMismatch", "the hint names a different application"),
+        ("UnsupportedProfileVersion", "the hint names a profile version this build does not speak"),
+        ("UnknownProvider", "the hint names a provider the profile does not declare"),
+        ("DescriptorMismatch", "the descriptor digest does not equal the joiner's local descriptor"),
+        ("OfferMismatch", "the offer digest is not the offer being processed"),
+        ("CarriesAccountScope", "the hint carries an accountScopeId, which CON-209 forbids by name"),
+        ("UnknownMember", "the hint carries a member CON-209 does not define"),
+    ] {
+        cases.push(case(
+            &format!("con_209_{}", to_snake(token)),
+            description,
+            Json::obj([("mutation", Json::text(token))]),
+            reject(token),
+        ));
+    }
+    Json::Array(cases)
+}
+
+// ── CON-210 ────────────────────────────────────────────────────────────────
+
+fn con_210() -> Json {
+    Json::Array(vec![
+        case(
+            "con_210_confirmed_only_by_a_verified_closure",
+            "a resolver acknowledgement is not evidence of revocation",
+            Json::obj([("acknowledgements", Json::int(3))]),
+            accept(Json::obj([("confirmed", Json::Bool(false)), ("state", Json::text("pending"))])),
+        ),
+        case(
+            "con_210_grow_only",
+            "no operation, merge, or key rotation can make is_revoked false again",
+            Json::obj([("mergeOrders", Json::int(6))]),
+            accept(Json::obj([("permanent", Json::Bool(true))])),
+        ),
+        case(
+            "con_210_projection_set_bit_is_permanent",
+            "a set bit is true at any age; an unset one past validUntil is unavailable",
+            Json::obj([("bitSet", Json::Bool(true)), ("ageSeconds", Json::int(999_999))]),
+            accept(Json::text("Revoked")),
+        ),
+        case(
+            "con_210_projection_unset_decays",
+            "an unset bit past validUntil is unavailable, never evidence of non-revocation",
+            Json::obj([("bitSet", Json::Bool(false)), ("pastValidUntil", Json::Bool(true))]),
+            accept(Json::text("Unavailable")),
+        ),
+        case(
+            "con_210_not_a_grant_id",
+            "a credential id that is not a grant identifier",
+            Json::obj([("credentialId", Json::text("not-a-grant"))]),
+            reject("NotAGrantId"),
+        ),
+    ])
 }
 
 // ── CON-211 ────────────────────────────────────────────────────────────────
@@ -829,6 +1031,40 @@ fn con_220() -> Json {
     ])
 }
 
+// ── CON-221 ────────────────────────────────────────────────────────────────
+
+fn con_221() -> Json {
+    Json::Array(vec![
+        case(
+            "con_221_first_enrollment_requires_confirmation",
+            "the authority holds no binding, so the person compares the home DID fingerprint",
+            Json::obj([("authorityState", Json::text("NoBinding"))]),
+            accept(Json::obj([
+                ("comparisonValue", Json::text("hex")),
+                ("recognitionAid", Json::text("lifehash")),
+            ])),
+        ),
+        case(
+            "con_221_subsequent_enrollment_shows_nothing",
+            "a prompt that can appear twice can be induced at an attacker's chosen moment",
+            Json::obj([("authorityState", Json::text("Bound"))]),
+            accept(Json::obj([("prompted", Json::Bool(false))])),
+        ),
+        case(
+            "con_221_unknown_authority_fails_closed",
+            "an unreachable authority is unknown, never assumed to be first use",
+            Json::obj([("authorityState", Json::text("Unknown"))]),
+            reject("con_206_step_9"),
+        ),
+        case(
+            "con_221_timeout_is_not_a_quiet_yes",
+            "rejection and timeout produce identical outcomes",
+            Json::obj([("response", Json::text("TimedOut"))]),
+            reject("con_206_step_9"),
+        ),
+    ])
+}
+
 // ── CON-224 ────────────────────────────────────────────────────────────────
 
 fn con_224() -> Json {
@@ -889,6 +1125,31 @@ fn con_225() -> Json {
             reject("SuccessionRejected"),
         ),
     ])
+}
+
+// ── CON-226 ────────────────────────────────────────────────────────────────
+
+fn con_226() -> Json {
+    // The corpus describing its own completeness rule, so a second stack can
+    // check that it is reading the same rule rather than inferring one.
+    Json::Array(vec![case(
+        "con_226_completeness_rule",
+        "every closed error token and each of CON-206's thirteen steps has a case",
+        Json::obj([
+            ("con206Steps", Json::int(13)),
+            ("con214Tokens", Json::int(enrollment::ERROR_TOKENS.len() as i64)),
+        ]),
+        accept(Json::obj([
+            ("reasonRequired", Json::Bool(true)),
+            (
+                "note",
+                Json::text(
+                    "two stacks must agree on which check fired, or they have not \
+                     implemented the same predicate",
+                ),
+            ),
+        ])),
+    )])
 }
 
 // ── helpers ────────────────────────────────────────────────────────────────

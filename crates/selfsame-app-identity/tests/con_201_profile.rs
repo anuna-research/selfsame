@@ -248,11 +248,8 @@ fn rejects_input_that_does_not_re_serialise_byte_for_byte() {
     for mutated in [
         format!(" {text}"),
         text.replacen(r#""profileVersion":1"#, r#""profileVersion" : 1"#, 1),
-        text.replacen(r#""accountAuthority""#, r#""accountAuthority""#, 1).replacen(
-            "accounts.photos.example",
-            "accounts.photos.example",
-            1,
-        ),
+        // A tab where the canonical form has nothing at all.
+        text.replacen(r#"{"#, "{\t", 1),
     ] {
         if mutated == text {
             continue;

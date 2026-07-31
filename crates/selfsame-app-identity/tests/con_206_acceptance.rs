@@ -144,7 +144,7 @@ fn step_3_rejects_alg_none_a_relative_kid_and_a_key_discovery_parameter() {
 fn step_4_rejects_when_no_issuer_closure_is_available() {
     let c = Ceremony::accepted();
     let evidence = Evidence { issuer: None, ..c.evidence() };
-    refused_at(&c, c.expectation(), evidence.clone(), AcceptStep::Closure);
+    refused_at(&c, c.expectation(), evidence, AcceptStep::Closure);
     // The one failure that is the verifier's problem rather than the
     // presenter's, so it is distinguishable outward.
     let err = accept_grant(&c.grant_bytes, &c.expectation(), &evidence).unwrap_err();

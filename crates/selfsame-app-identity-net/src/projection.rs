@@ -185,8 +185,16 @@ mod tests {
 
     #[test]
     fn the_bound_is_generous_enough_for_the_minimum_bitstring() {
-        // CON-210 requires at least 131,072 entries uncompressed.
-        assert!(MAX_PROJECTION_OCTETS > 131_072 / 8);
+        // CON-210 requires at least 131,072 entries uncompressed, which is
+        // 16 KiB of bits before any encoding. The bound has to clear that with
+        // room for base64 expansion and the surrounding credential.
+        let minimum_bits = selfsame_app_identity::revocation::MIN_PROJECTION_ENTRIES;
+        let raw_octets = minimum_bits / 8;
+        let base64_expanded = raw_octets * 4 / 3;
+        assert!(
+            MAX_PROJECTION_OCTETS > base64_expanded,
+            "{MAX_PROJECTION_OCTETS} does not clear {base64_expanded} octets of encoded bitstring"
+        );
     }
 
     #[test]

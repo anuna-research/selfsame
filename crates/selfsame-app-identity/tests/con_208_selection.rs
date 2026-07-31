@@ -21,7 +21,7 @@ mod common;
 
 use common::*;
 use selfsame_app_identity::codec;
-use selfsame_app_identity::json::{self, Json};
+use selfsame_app_identity::json::Json;
 use selfsame_app_identity::profile::ApplicationProfile;
 use selfsame_app_identity::selection::{
     self, HintError, ProbeOutcome, ProviderHint, SelectionError, MAX_PROBE_MILLISECONDS,

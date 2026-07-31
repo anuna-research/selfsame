@@ -72,7 +72,7 @@ the one JSON recogniser and RFC 8785 canonicaliser, canonical base64url /
 base32 / base58btc, the restricted HTTPS URI grammar, the `dateTimeStamp`
 recogniser, the compact JWS layer, and `did:key`.
 
-**386 tests, all passing. `cargo clippy --all-targets` clean. The purity gate
+**395 tests in the core, 565 across the workspace, all passing. `cargo clippy --all-targets` clean. The purity gate
 passes: no network-capable crate is in the dependency graph.**
 
 Every `REQ-###`, `NFR-###`, and `CON-###` the specification defines is cited by
@@ -387,9 +387,9 @@ gates:
   - gate: "Tests derived from requirements (REQ → TEST)"
     mechanism: "cargo test -p selfsame-app-identity"
     result: pass
-    evidence: "386 passed, 12 suites; every test file names the TEST-2NN it
-      derives from. Artefact coverage: 31/31 REQ, 8/8 NFR, 26/26 CON, 41/43
-      TEST cited by name."
+    evidence: "565 passed across the workspace, 12 suites in the core; every
+      test file names the TEST-2NN it derives from. Artefact coverage: 31/31
+      REQ, 8/8 NFR, 26/26 CON, 41/43 TEST cited by name."
 
   - gate: "Test-First / Red Gate"
     mechanism: "commit order for the json recogniser; mutation testing elsewhere"
@@ -428,11 +428,13 @@ gates:
   - gate: "CON-226 corpus published and complete"
     mechanism: "cargo test -p selfsame-app-identity --test con_226_corpus"
     result: pass
-    evidence: "test-vectors/spec-004-v1.json — 28,671 octets, 19 groups, 98
-      cases, sha256 a75ca4ff23b90fd2a7c883016dde6543698184577bf2e144ae9fc8328a558f6a.
-      The completeness rule is a test: every closed error token — including
-      CON-218's nine version-1 downgrades — and each of CON-206's thirteen steps
-      has a case."
+    evidence: "test-vectors/spec-004-v1.json — 37,893 octets, 26 groups (one
+      per contract), 127 cases, sha256
+      09f16b91ecbfd54f0413a515e2bf942d2332b5fbfb0a4f54ba22a1c1491dddc4. The
+      completeness rule is a test: every closed error token — including CON-218's
+      nine version-1 downgrades — and each of CON-206's thirteen steps has a
+      case. The seven contracts that had no group were found by the SPL theory,
+      not by inspection; see the process observations."
 
   - gate: "Two independent implementations reproduce the normative vectors (NFR-202)"
     mechanism: "none available"
@@ -472,6 +474,38 @@ gates:
       table would gain; adopting it needs a Tier-1 amendment through the
       declared channel, which this experiment cannot perform."
     owner: "the human owner"
+
+  - gate: "Phase 1 user profiles and happy paths exist"
+    mechanism: "path existence: users/{person,developer,provider}/"
+    result: pass
+    evidence: "users/person/user.md, users/person/happy-paths.md,
+      users/developer/user.md, users/developer/happy-paths.md,
+      users/provider/user.md. The happy paths restate SPEC-004's inline prose in
+      PROTO-001 Phase 1 form, which is what surfaced the failure modes the
+      simulation then found."
+
+  - gate: "Synthetic user simulation run and findings recorded"
+    mechanism: "docs/EXP-001-synthetic-user-run.md"
+    result: unverified
+    evidence: "Eight findings recorded. But PROTO-001 requires the synthetic
+      user to be a sub-agent working from the specification and profile only,
+      and this run was performed by the session that wrote the implementation.
+      That breaches the Principle 12 separation, so the findings stand and the
+      gate does not."
+    owner: "the human owner"
+
+  - gate: "Vault hygiene: dead links authored or explicitly deferred"
+    mechanism: "zetl check --dead-links -d specs"
+    result: pass
+    evidence: "65 dead links, of which 7 are this experiment's and all 7 point
+      at PROTO-001-usdd-agent-protocol, which lives in the anuna-dev skill
+      rather than the vault. Recorded as an explicit deferral with an owner in
+      EXP-001, per PROTO-001's own rule that a dead link is visible debt to be
+      authored or deferred, never deleted. The other 58 are pre-existing —
+      SPEC-001, SCREEN-001/002, and concept pages the specs already carry.
+      The USDD artefacts were moved from docs/ into specs/ so they join the
+      vault the specs live in; before that move their links were unresolvable
+      because they sat outside it."
 
   - gate: "Full contract coverage"
     mechanism: "inspection against SPEC-004 §Contracts"
@@ -524,6 +558,15 @@ Three, offered for Phase 4 rather than as findings against the specification.
   Neither is visible from the specification text alone, which is an argument for
   the Tier-1 gate's insistence on a reference implementation rather than review
   by inspection.
+- **The SPL theory found a corpus gap that inspection had not.** Encoding
+  "implemented and has a corpus case" as a defeasible rule and asking the theory
+  which contracts were ready surfaced seven with no corpus group — including
+  `CON-205` and `CON-207`, whose grant and proof vectors are exactly what
+  `NFR-202` needs a second implementation to reproduce. The corpus had satisfied
+  `CON-226`'s completeness rule, which is stated over *error tokens and steps*
+  rather than over contracts, so nothing was failing. That is the argument for
+  writing the plan as a theory rather than a checklist: a checklist confirms what
+  its author thought to list.
 - **"It depends on PROTO-003" was too quick an answer.** Four contracts were
   initially deferred on that ground and all four turned out to be implementable:
   their obligations are about ordering, binding, and closure, and none of them

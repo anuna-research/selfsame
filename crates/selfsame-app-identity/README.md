@@ -204,5 +204,5 @@ without running the suite. `CON-226`'s completeness rule is a test: a closed
 error token or a `CON-206` step with no case fails the build.
 
 [SPEC-004]: ../../specs/SPEC-004-application-scoped-identity.md
-[EXP-001]: ../../docs/EXP-001-spec-004-reference-implementation.md
-[CONFLICT-001]: ../../docs/CONFLICT-001-spec-004-tier1-gate.md
+[EXP-001]: ../../specs/EXP-001-spec-004-reference-implementation.md
+[CONFLICT-001]: ../../specs/CONFLICT-001-spec-004-tier1-gate.md

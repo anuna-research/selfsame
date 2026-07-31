@@ -39,6 +39,23 @@ brief that PROTO-001 requires before such work begins.
 The full conflict analysis, including the four resolutions offered and the
 clauses quoted with line numbers, is `CONFLICT-001`.
 
+## A recorded deferral
+
+This document and its siblings link to [[PROTO-001-usdd-agent-protocol]] six
+times, and that page is not in this vault — it lives in the `anuna-dev` skill,
+which is tooling rather than project content. Those six are dead links.
+
+They are recorded here rather than deleted, per the discipline PROTO-001 itself
+sets: *"A dead `[[link]]` is **visible** debt … Do not delete a dead link to
+clean up the report. Either author the target page or record an explicit
+deferral."* [[SPEC-004-application-scoped-identity]] already links to the same
+target ten times on the same basis.
+
+**Deferral.** Mirroring the protocol into the vault is the SPEC-001 maintainer's
+call, not this experiment's — it would make a tooling document into project
+content and put a copy under version control that could drift from the skill.
+Owner: the human owner.
+
 ## Hypothesis
 
 The pure, deterministic core of SPEC-004 — key hierarchy, closed-language

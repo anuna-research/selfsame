@@ -1,0 +1,3298 @@
+{
+  "version": 2,
+  "files": {
+    "CONFLICT-001-spec-004-tier1-gate.md": {
+      "path": "CONFLICT-001-spec-004-tier1-gate.md",
+      "page_name": "CONFLICT-001-spec-004-tier1-gate",
+      "links": [],
+      "spl_blocks": [],
+      "diagnostics": [],
+      "mtime": 1785480118.4311996,
+      "merkle_leaves": [
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 1
+          },
+          "start_line": 1,
+          "end_line": 1,
+          "hash": "4fdd846d2a42bdb1e868641c0891126c6464f307287fa8d1713f90d3c7b51305",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 3,
+          "end_line": 6,
+          "hash": "95076aa217cb79c534923da84832885262e0e647fd615094860b3d97782ae433",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 2
+          },
+          "start_line": 8,
+          "end_line": 8,
+          "hash": "856c3a7dac4e2f2098976c6eef1a31d39d358aae9c2cc2296af8fca0f34f0ef3",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "BlockQuote"
+          },
+          "start_line": 10,
+          "end_line": 11,
+          "hash": "27dc86f9349a4f8e40eb99415f3b115f80b4ebc641bdcb40fe717687dccf1b20",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 2
+          },
+          "start_line": 13,
+          "end_line": 13,
+          "hash": "9a8adb124960a04ef85672d6d3717f61092ae7bc5ab9f73b5b0c1492a9810e22",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 15,
+          "end_line": 15,
+          "hash": "c04bfa87791907aa7631d5f82e4669e805297f87b62436a4ea2331d273099c19",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "List",
+            "ordered": true
+          },
+          "start_line": 17,
+          "end_line": 49,
+          "hash": "c8fb44b049561f22e85425d004c7136d0c9cc6d64bb0a45f9afdacfbd87a301c",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 2
+          },
+          "start_line": 50,
+          "end_line": 50,
+          "hash": "873fbca717af78aa1f2fa5983a7c6629e353874a09e30523cc83e63a4850543f",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "List",
+            "ordered": false
+          },
+          "start_line": 52,
+          "end_line": 64,
+          "hash": "2de43ec2b6eedc3011963a7eb7e7f5e1f047dc8ec6aca4612ce44def62ef9118",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 2
+          },
+          "start_line": 65,
+          "end_line": 65,
+          "hash": "1360af179e282c669d778280101326f40d519543bb1721114bcdd77fae33be00",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 67,
+          "end_line": 67,
+          "hash": "53f6ffad4ba7d9f6da00e6a259ca83821fc852f8e63d52f76ff2dde08dfe5ded",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "List",
+            "ordered": false
+          },
+          "start_line": 69,
+          "end_line": 74,
+          "hash": "14ddd55e87323a1dc6a194c3ed6892299d87c5d20dbfa16a8dcd57b1c5e6ca82",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 75,
+          "end_line": 80,
+          "hash": "6562d82927c6309c07f44eeb35480735bb590403ecbf071fd1c2390a09ef6171",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 2
+          },
+          "start_line": 82,
+          "end_line": 82,
+          "hash": "9a97914870ff194b89dc7e4b7cb587f1a061836c1184429a21241c54173c2bc0",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 84,
+          "end_line": 90,
+          "hash": "31b4a0463cbe6bf5244d152283bd5884efaa6f4e40e36762614fe79b07a545d4",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 92,
+          "end_line": 96,
+          "hash": "1d32cdbe7478e30b0dcfce4501ab9914f24c33db08c58fe98827ee8886374623",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 98,
+          "end_line": 102,
+          "hash": "d5b78c6325299342af5e5f46d6bee7ba2e7a25f91cd6de932b1e404f576dbbee",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 104,
+          "end_line": 108,
+          "hash": "f1a31509fa7a63f9b5f1ab1f407ecb7b54724a273037d1a91811f3610416d4bc",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 2
+          },
+          "start_line": 110,
+          "end_line": 110,
+          "hash": "616ddad36a110719d8a30dd62a0c35e2152fda6afc8b7f1fddc25a350f14652b",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 112,
+          "end_line": 113,
+          "hash": "444503551490f2fbc67f29a367c8cd3f41e8e4d35ab32074c38a39bb5da2f4ea",
+          "spl_hashes": null
+        }
+      ],
+      "file_merkle": {
+        "root_hash": "ff2c17f14487c20f1fcd7673e3bd9a142fef4c50965ed01142ce8326758d0e80",
+        "sections": [],
+        "spl_leaves": []
+      }
+    },
+    "using-selfsame.md": {
+      "path": "using-selfsame.md",
+      "page_name": "using-selfsame",
+      "links": [],
+      "spl_blocks": [],
+      "diagnostics": [],
+      "mtime": 1785479750.5613544,
+      "merkle_leaves": [
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 1
+          },
+          "start_line": 1,
+          "end_line": 1,
+          "hash": "9a023e4e9d415f5d809946e0487013af05a10edbed90b912779b25dfcde80e6a",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 2
+          },
+          "start_line": 3,
+          "end_line": 3,
+          "hash": "fb16d9894c17448cedf6ed6a23303023c4545909029ab47ba1a51e8d98e03d5d",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 5,
+          "end_line": 5,
+          "hash": "e4359a38bb461d57279a53f906c8bac09b8734905513526443691942d8d4d053",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 7,
+          "end_line": 11,
+          "hash": "107383205fb4d5b381cbcdaebac1c49ff67350672c161ee1fcd8fc0c4cf4e306",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 13,
+          "end_line": 15,
+          "hash": "e6a28f7f906f0dd9baf7ea13a2a894d85d05d9b9f9330d0154ebbd6ad3143697",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 17,
+          "end_line": 21,
+          "hash": "99dc06c5572de6f97faa523025bd5480db8cb95f1bd65edfe125c17071bea78f",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "BlockQuote"
+          },
+          "start_line": 23,
+          "end_line": 24,
+          "hash": "975283a0dcd6fd4619a99b6d05d02fcf42f5908c1c4a6c45d1989c39eab62406",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 2
+          },
+          "start_line": 26,
+          "end_line": 26,
+          "hash": "a59faf6b9e4c4c4302e68cf3905eb53a0caa02b7191c542149544aa4d5480f03",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 3
+          },
+          "start_line": 28,
+          "end_line": 28,
+          "hash": "7eda84f3b577e014c6a1e8b3ae814032aea6bc13e7f86288a31e979b780e13e3",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 30,
+          "end_line": 30,
+          "hash": "2af414f4350f7e332f9be19579c4b058a20753bbdf723d86a2aa52e30e88d7bc",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 32,
+          "end_line": 35,
+          "hash": "8fbc56041ed743d964d485942f0f5c131331f6b1b6ea9967673a17180c24ea38",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 3
+          },
+          "start_line": 37,
+          "end_line": 37,
+          "hash": "c5fe958dffbb642d4abd4d4bdbf85b83f3920071d29fb9a8f1195333ac81d422",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 39,
+          "end_line": 39,
+          "hash": "8f510488d6387015ddd40ad3a88315607f79fb811ffd3ed07e97af29809ed0a4",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 41,
+          "end_line": 42,
+          "hash": "c2082517389a5231a3946baf372dad5156644385d68ce5ec6e69b2e8d82f7025",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "List",
+            "ordered": false
+          },
+          "start_line": 44,
+          "end_line": 47,
+          "hash": "9801aa12d96649dfd5e078ca786d4cd03fca732c00ab4b6a1065c9d5d7f256b0",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 48,
+          "end_line": 49,
+          "hash": "82814e6c669437fb9e3cd34a89518980c08128b2cae9837d1735f53b235b69d6",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 3
+          },
+          "start_line": 51,
+          "end_line": 51,
+          "hash": "db7112073e013c7cc08d5d8e47fd124e963ce9c04177a523b11466f9ce24eb8f",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 53,
+          "end_line": 54,
+          "hash": "c573d240409ebafcd75a456b36c90603532f2d7ab3e3d104b2bc8fea59a49531",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 56,
+          "end_line": 58,
+          "hash": "0a10126e8dc8e768f86f94e62600bc6a859233c4f1bae679daba733f94ff6a92",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 3
+          },
+          "start_line": 60,
+          "end_line": 60,
+          "hash": "ac6b60bd6d7e5d19db9bd8e09d73fd5ae209558a90696f0de3dd7aa0c39af084",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 62,
+          "end_line": 62,
+          "hash": "861a628e80087607066a2bd1b022bf7e477002c13ff0665b2741d534ecb687df",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "CodeBlock",
+            "language": null
+          },
+          "start_line": 64,
+          "end_line": 66,
+          "hash": "20afe0c59f77acec61a1db0fce1549cdb39f3bec9051a71191b9f731c6c41dc9",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 68,
+          "end_line": 70,
+          "hash": "f3d38ef5600dbcab96f8c4b8700a11cd56874d599a495049e8d1910274e0b472",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 72,
+          "end_line": 72,
+          "hash": "8373fd7c904df7b54fb11d25fc82ca45cbfaf2663f928fb454623b7c10a1b2d5",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 74,
+          "end_line": 77,
+          "hash": "206218c95504a09f499f6335044d4d14491568764d2ea356100f09ddd306623a",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 79,
+          "end_line": 82,
+          "hash": "15243789e0dacac6a6d6689d523dc482529bbf3969c0453283adef8573b91bf1",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 84,
+          "end_line": 85,
+          "hash": "ee145018d2d8260587b632a4a801105530d5b2c228c6d6c81aecccaa11971afe",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 2
+          },
+          "start_line": 87,
+          "end_line": 87,
+          "hash": "f546be98a0f00609580862705c1f494cced3bb4c14f668304fd9b8d7959e7328",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 3
+          },
+          "start_line": 89,
+          "end_line": 89,
+          "hash": "dd41ece994f14a22ffb0d29c662529233ae70ed577dd065389edbd72cbc7e549",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 91,
+          "end_line": 91,
+          "hash": "f1e53f082d5c166a315252f75691a7be5ad3c29bc738ad944c4951ea6852c908",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 93,
+          "end_line": 94,
+          "hash": "c58c487a4d4e5ed52c44d452d36843037a92bf1508810ec1b393f23fe8f8b694",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "List",
+            "ordered": true
+          },
+          "start_line": 96,
+          "end_line": 120,
+          "hash": "0ed37fa6718af0b1331c320af2f9e3d86b55abb6f3d50f532f5613b92fb5bcc6",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 121,
+          "end_line": 123,
+          "hash": "df9db272c040fcd54eae98834ccf5fdfae357f490a633910fcd298c75f8ba470",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 125,
+          "end_line": 125,
+          "hash": "98ca6594591d2a75b3fea0e40b2886f83c6ff7730d89db2d6f7c14aa44f2b964",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 3
+          },
+          "start_line": 127,
+          "end_line": 127,
+          "hash": "0642d29cfcee3b31c11640c8315cc01e904ad7bff63ae45c01caa20db5b6f032",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 129,
+          "end_line": 130,
+          "hash": "0ed6eb6b4d92a50034e57b84df3fe769735c34c30807b90609fbfff21a067aeb",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 132,
+          "end_line": 136,
+          "hash": "37589309ff793afdc07fdea695e463eb1997e80efc9dc242e6b211908e286978",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 138,
+          "end_line": 140,
+          "hash": "869819cf7b8d638b6891e4096300411fd58b9af9bb9cc760e384949d32dff893",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 3
+          },
+          "start_line": 142,
+          "end_line": 142,
+          "hash": "e2b3a5c7df1d5f9b8bb1639558595ca72b880aae3dd26d0833c93342b4ff2639",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 144,
+          "end_line": 144,
+          "hash": "5c02555e62edb8d67abcf78ae1311d52abc976435efae7aa4a481ffbb00c7500",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "List",
+            "ordered": true
+          },
+          "start_line": 146,
+          "end_line": 147,
+          "hash": "0103129ae4b4cc50b683d51f5a59ec1a5b573fab6d605ab4b091c3489b5582c5",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 148,
+          "end_line": 149,
+          "hash": "9824eab1218f7ae96200307e45d662dbe852b9a1ff2f91d31ef97b33c51047c8",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 151,
+          "end_line": 152,
+          "hash": "e2f47ce1de19b6e0c1dc51cff31ff2f632172a8f361c73a9d20745569cebac01",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 154,
+          "end_line": 157,
+          "hash": "aa25f6204186e6b387e0a2e1e9e791bbcffaca7c1820b5a2d6b24de667effb67",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 3
+          },
+          "start_line": 159,
+          "end_line": 159,
+          "hash": "6c212af32054f29be88db09bb54034c6edb3169c0eca0f5885ae13cab2061dc8",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "List",
+            "ordered": true
+          },
+          "start_line": 161,
+          "end_line": 163,
+          "hash": "ed2e188f698e38a642d7bba046093db6bb5c7cac31ecbcb8eab85292b3d646c8",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 164,
+          "end_line": 166,
+          "hash": "4f3f9479cc1555440e050f60b9a12f44f6551a5ce9d71d43e6c7d21153f0c6ea",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 168,
+          "end_line": 169,
+          "hash": "a9da7d146f86b857d23fd427cafb0421917475e407b7b7f91e8e7acce0b95f96",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 2
+          },
+          "start_line": 171,
+          "end_line": 171,
+          "hash": "3ced849f68877ea132cc75ae628ff5a3b8db2c6ff3f98b78c408c26a49eb1027",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Table"
+          },
+          "start_line": 173,
+          "end_line": 181,
+          "hash": "757d26d3a55324b599fb696979375eb9d9de788528c7f5a096b1f9679ed931a8",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 183,
+          "end_line": 184,
+          "hash": "f884563bb120b6dc982b73793b0c4794545703204e56a264b1a52c10691f24a3",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 186,
+          "end_line": 187,
+          "hash": "d9dc68837ecf0e6da2510f29a73994ea85eb4a29d4ed82852968c0fb91ecfcfc",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 2
+          },
+          "start_line": 189,
+          "end_line": 189,
+          "hash": "9ee4a9ecf3335d753072dc5961b1563eb6314468cc384a4cf31eb46ba5441f36",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 191,
+          "end_line": 195,
+          "hash": "f36e09f7cf5ec75c1f700c858fc37a5bda2b3406c41880f67bc5c1ecac68d0ab",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 197,
+          "end_line": 198,
+          "hash": "f7f08fde92a25940380de1eed0a2a1cf5befc7f5e10205f7f12cc767a8c2e3f1",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 200,
+          "end_line": 203,
+          "hash": "f8cc83c9d390fc5d0d169e1b7b4cb24a9dc0ba850e316294cd4c3fc4f2683ac0",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 205,
+          "end_line": 209,
+          "hash": "fe264b4a7e7675923cc7d51854e5ea5a34d84c10074136c64012da831bcd15c3",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 211,
+          "end_line": 215,
+          "hash": "fc20a6b63ef442a9072facd237830cb7f44ff25bd8ec50d03a956e16fd9f41d5",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 217,
+          "end_line": 221,
+          "hash": "9001ba859d6c7ea11a3978014345a15e2530c1909519fd467e9109f03a32e5b6",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 223,
+          "end_line": 226,
+          "hash": "351259fd18ba145d811d66bedf91bbffa66b363651126aa34400554b66f458b1",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 228,
+          "end_line": 230,
+          "hash": "35c6bf3991fd99e0ce232109d29b2b06421176540884d43992a90ac5d43771b4",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 232,
+          "end_line": 237,
+          "hash": "b3c4ead53ae41eb6df9a227d5e84352e1704f7c0927d0119617f19f8a7355ce0",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 239,
+          "end_line": 242,
+          "hash": "067680c93fb011aefe189424a9dce54f2f29dd59a4770d622ca69292926c0ac1",
+          "spl_hashes": null
+        }
+      ],
+      "file_merkle": {
+        "root_hash": "5a127d679c2eae2845badf947860c7b7f884d369f68dd098c596b0b5d92a0c04",
+        "sections": [],
+        "spl_leaves": []
+      }
+    },
+    "EXP-001-findings.md": {
+      "path": "EXP-001-findings.md",
+      "page_name": "EXP-001-findings",
+      "links": [
+        {
+          "target_page": "EXP-001-spec-004-reference-implementation",
+          "raw_target": "EXP-001-spec-004-reference-implementation",
+          "heading": null,
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 6,
+          "column": 11,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "CONFLICT-001-spec-004-tier1-gate",
+          "raw_target": "CONFLICT-001-spec-004-tier1-gate",
+          "heading": null,
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 7,
+          "column": 21,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-004-application-scoped-identity",
+          "raw_target": "SPEC-004-application-scoped-identity",
+          "heading": null,
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 15,
+          "column": 18,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "EXP-001-proposed-obs",
+          "raw_target": "EXP-001-proposed-obs",
+          "heading": null,
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 24,
+          "column": 1,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "PROTO-001-usdd-agent-protocol",
+          "raw_target": "PROTO-001-usdd-agent-protocol",
+          "heading": null,
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 87,
+          "column": 12,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "EXP-001-proposed-obs",
+          "raw_target": "EXP-001-proposed-obs",
+          "heading": null,
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 363,
+          "column": 26,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "PROTO-001-usdd-agent-protocol",
+          "raw_target": "PROTO-001-usdd-agent-protocol",
+          "heading": null,
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 380,
+          "column": 5,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-004-application-scoped-identity",
+          "raw_target": "SPEC-004-application-scoped-identity",
+          "heading": null,
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 502,
+          "column": 1,
+          "predicates": [],
+          "annotation": null
+        }
+      ],
+      "spl_blocks": [],
+      "diagnostics": [],
+      "mtime": 1785491472.788725,
+      "merkle_leaves": [
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 1
+          },
+          "start_line": 1,
+          "end_line": 1,
+          "hash": "aaea01238f5ca51cd754ab0bc7096e0ab031d6ae1ee05bb1d9a0b440a6af3626",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Table"
+          },
+          "start_line": 3,
+          "end_line": 11,
+          "hash": "7c2bb4c204fcff77845cf68f1301df83f9d35e276c80b6869aa08a8689e0b946",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 2
+          },
+          "start_line": 13,
+          "end_line": 13,
+          "hash": "43ac6c17361ac6128d9cd16f42e113a5345ddac21306bdc00192acfd04a3c972",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 15,
+          "end_line": 24,
+          "hash": "0f46522055b0046658c9ad492c985e963d3c9177d827f9f57ecd0e9afe1404f6",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 26,
+          "end_line": 31,
+          "hash": "a6cb528a1be61b3712f4e1df76a7f544d04a1ed3b1107edfd775d35a0b24c898",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 33,
+          "end_line": 39,
+          "hash": "4cc6aa262d66ecf3f5683e10f95ef78d0817538aceb8a977aa1af1a6c3dc9cf7",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 2
+          },
+          "start_line": 41,
+          "end_line": 41,
+          "hash": "d4d5d2b3aedfced3855c4a6bc170a259b6c6e375be49350dabb5894840f638dd",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Table"
+          },
+          "start_line": 43,
+          "end_line": 68,
+          "hash": "842bb67eb0a2c91626dfafa2ebaf99f1ca7bc9da404cefb807cb3596368520b4",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 70,
+          "end_line": 73,
+          "hash": "13c7f8ff9052d5185373899fd0dd5f7e48b0df121064e13ea6586de7b275f544",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 75,
+          "end_line": 76,
+          "hash": "63fd607868ea570de1e8064653fc57277c6d036d1be0e28ff64e968aa02c10ce",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 78,
+          "end_line": 82,
+          "hash": "1816f57457cb98e40c8ced1206bcd6169517f274a2218ef0dd9f2d777c7fcd2a",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 2
+          },
+          "start_line": 84,
+          "end_line": 84,
+          "hash": "3862d48cd5a613448255c4dfd215ae91d09b419ce2bb5cc61c857b8baca56425",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 86,
+          "end_line": 87,
+          "hash": "b58cc689abf7a7d7ac32e22a9352bb87026f1f81d00e4e5eeca15de616989750",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 89,
+          "end_line": 92,
+          "hash": "90541af3e8a8cdc608b465fa3550db73ce3eefa677c2d298e6fc54b55d4ce18a",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Table"
+          },
+          "start_line": 94,
+          "end_line": 100,
+          "hash": "465399e08a9f4d246ae11f582898cfa90146664a96b4023d8e45013936165105",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 102,
+          "end_line": 103,
+          "hash": "baf3ba4d2a90efa00cae7ff748ddab165927ea68dae6dbba1acf0f3428b32fe8",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 2
+          },
+          "start_line": 105,
+          "end_line": 105,
+          "hash": "33efff7ba638d63949b667e253c16e7b01c980b5c9b1fa322b35eb30505eda26",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 3
+          },
+          "start_line": 107,
+          "end_line": 107,
+          "hash": "1ca519c9975ec4c84972e58ceeaf3d8bdf5b2fb6d00d4541ed84d513102811cd",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 109,
+          "end_line": 111,
+          "hash": "2daa594f62a132889ec0a0d47571d34d6377b8945e775df6658566fcfdc583dd",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 113,
+          "end_line": 116,
+          "hash": "3feb1ea41819bf411f9f0debd5b56fa165e809ebc0010aa78b0741267e3fa4a9",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 3
+          },
+          "start_line": 118,
+          "end_line": 118,
+          "hash": "3b5fc81d9d29b28dee722ef1a4cb6695d91d4a134bf33601cdd256df6e7724f4",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 120,
+          "end_line": 122,
+          "hash": "a7e50dc31a5df887a0e411971946cb8d5beacf8619597801f7036c3a8669f687",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 124,
+          "end_line": 128,
+          "hash": "c687674164c7cd209230ab4951469f9b255ac2818ad5df1a8761be7e88b5fb0b",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 3
+          },
+          "start_line": 130,
+          "end_line": 130,
+          "hash": "89785b33884f1da56a9d6395b0e2d9b9d2b2f54ba64b93489fa69cc7faf7146b",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 132,
+          "end_line": 136,
+          "hash": "b7ab0b331371e2e70bf55a75e08129189cd37901b9167e7273ef49082390c214",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 138,
+          "end_line": 139,
+          "hash": "655128329b1da67cd2a706f6351e99bfcb23ba87845b41bb3ed1d2b6946683d3",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 141,
+          "end_line": 145,
+          "hash": "aac2e6b31eab3abb6714934687016c8a560be0011d423d8f5c5f4fdadfcb0ff5",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 3
+          },
+          "start_line": 147,
+          "end_line": 147,
+          "hash": "d9c31273fa4e5bb4fd13ca8acd33740f72beaf6b6f8dc48254a64a3598e16eb1",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 149,
+          "end_line": 150,
+          "hash": "2858710dc49b9cde135cde4c8532aa607a406c19dbe6215dad001a24eaefada1",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "CodeBlock",
+            "language": "text"
+          },
+          "start_line": 152,
+          "end_line": 154,
+          "hash": "77f0d75482c3aee985351540a07a75b1491895399baeb0e31742642a4de4b555",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 156,
+          "end_line": 158,
+          "hash": "812a68853d4e241933c3ec2b8dbe338a1c4fa3869fdc57e908274597d9eff749",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 160,
+          "end_line": 165,
+          "hash": "67491e400864e68ca4316d85c5b8588790fbf646cebd6c8c0f988f71ce7c8c73",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 167,
+          "end_line": 172,
+          "hash": "93aab2fc8a9c89c7c5e55fedefb33bc50467e040e3d8e92affe3eadc3c0c19c1",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 3
+          },
+          "start_line": 174,
+          "end_line": 174,
+          "hash": "b9737dd881099e0c0feb178e4f23d441d466230c4c9dddb239acb17e2918001b",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 176,
+          "end_line": 176,
+          "hash": "bd8e9bce46c5d21be13856a7182f9b1812d7cf7a31172ecb004fcf506ffe8434",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 178,
+          "end_line": 181,
+          "hash": "8aacd1bba58f794d4c6eaf45e8c6ab6366b7b825df6ae3cb7bebee958b080e06",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 183,
+          "end_line": 184,
+          "hash": "0636ec0c57a7f4b543a6d15abed2fd3608d9da17b9cda2a995205c8a3ffbb619",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "BlockQuote"
+          },
+          "start_line": 186,
+          "end_line": 188,
+          "hash": "313984207456c7fde35d25646d2c1b0458cdd9de620863e0a572ba308aa68e28",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 190,
+          "end_line": 194,
+          "hash": "5f7aae5736036b9b8270e4bd07a618a404923f0d851c2fdfece7ac2ef0b72a8e",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 196,
+          "end_line": 198,
+          "hash": "fa18c5d5feb6fad1565e0a9e91d352d75ca6f3bb137b4c606536e12bb22cbb68",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 200,
+          "end_line": 202,
+          "hash": "f9a0f422638508bdf42a319a03832c157fa457b962be21c617ace81e88662587",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 204,
+          "end_line": 209,
+          "hash": "5c05cae134cb39a15c764f3d22fb6af8b4ff2fc929102e89890d6967b9f7433b",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 3
+          },
+          "start_line": 211,
+          "end_line": 211,
+          "hash": "4b2fbc7959284bdba543fbbfa09ee6d40ab784b1fdef76963db23d67ebcb8809",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 213,
+          "end_line": 215,
+          "hash": "0b66c12330f542c6618c1667235fc4b912a8f6cbb2f0fd6863806698b39391da",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 217,
+          "end_line": 218,
+          "hash": "92d5ea74ba49a50c404662d624919dc865e84d1bba55d90c49955c87d2503861",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 3
+          },
+          "start_line": 220,
+          "end_line": 220,
+          "hash": "6d9fad0968a4052beed97e63efca62b491d69ffcfa36f02f0d68b051458fec4d",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 222,
+          "end_line": 225,
+          "hash": "6d6270a204a2339927912144773969ac6cbb79b824ddc91bfe216ed908cc10b6",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 227,
+          "end_line": 231,
+          "hash": "028c1fa21af048a87169597d3e7c4f0506dbb3d817edfe122484c59184857779",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 3
+          },
+          "start_line": 233,
+          "end_line": 233,
+          "hash": "953e075971e4f945f9caa9ba2a1eb3115cf587c9aa017d4849d59230a7ef2e67",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 235,
+          "end_line": 239,
+          "hash": "08c0d7e744bc7404c61f5e46344a2b9ae6d7484e34fbaaac6bdcea47290389f5",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 241,
+          "end_line": 242,
+          "hash": "1faba22e70cf892674b4305136464a41aaba83e4107f29684974ce305815aa29",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 244,
+          "end_line": 248,
+          "hash": "ca1822e28e48dbe6aa43c6ac1d1340a93b4cf24ce020027653013867b595b35e",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 3
+          },
+          "start_line": 250,
+          "end_line": 250,
+          "hash": "28fbf3a64a79701d7a43471beadea39a31b2309cb471eba1ac3bd166a41ec6e8",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 252,
+          "end_line": 254,
+          "hash": "f682ea3afa4625c2481547f3b9a029a3ef305123498b20a35bb6e8f0dae628e6",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 256,
+          "end_line": 258,
+          "hash": "ef2c9167555b001a2bfda4038c8ba8b8f20cf342ded7301a768954feee6e7fba",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 3
+          },
+          "start_line": 260,
+          "end_line": 260,
+          "hash": "cdab14f8fdddc8f60abd2508fdcd334b0f86de242eec57da16a70e7b21fb8722",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 262,
+          "end_line": 266,
+          "hash": "301d25f52fa4650934f5a09a946f00e15f5df3b3a807299b13796abec97ab89e",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 268,
+          "end_line": 271,
+          "hash": "4d6e9d777d9e811f11927406327911a6a3b16a4a0b702e596e47794e80501139",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 3
+          },
+          "start_line": 273,
+          "end_line": 273,
+          "hash": "1d50baf928c31268eaeabc991c485d703c63d112ae08df19142d61181bfc9a99",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "BlockQuote"
+          },
+          "start_line": 275,
+          "end_line": 276,
+          "hash": "aa979d90b618cc6f1cb40297cff78412273f0cca672b2b6941865e60d088c20c",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 278,
+          "end_line": 282,
+          "hash": "b307c2004f87c3bf91d3efb96fff5e38456cf74304f451d23aadee5c1ea7f0ec",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 284,
+          "end_line": 289,
+          "hash": "f21a439ba68962a61660f51cd1d9181a99d4b2609ae418d513f3a7015181c14f",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 3
+          },
+          "start_line": 291,
+          "end_line": 291,
+          "hash": "15135b5a14c19dfa02e82a624fc88874619a7a21a6016a4aadae787aff3d67ad",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "BlockQuote"
+          },
+          "start_line": 293,
+          "end_line": 294,
+          "hash": "6d154da7d3f765a2077168961c936b6c8276bc4c1037f740cc30b6dfaf9d7864",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 296,
+          "end_line": 301,
+          "hash": "9573545b02051d9d6bb9fb25697e4b421999af82b776002301f811d2ff3f10fd",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 303,
+          "end_line": 307,
+          "hash": "31200bb24bb4a1a11002ee979d11b19b47194167ba7d81267142dfb61d982e32",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 3
+          },
+          "start_line": 309,
+          "end_line": 309,
+          "hash": "140c1f0622974ce95b2f64f4e04a2ed01197c73bac9ada0e346a5216a4c7b8fa",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 311,
+          "end_line": 311,
+          "hash": "1a96ae29c2f9dbbe4f98bfbac29e2a806119e84258dba627ec93ec8bd5647cd0",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "BlockQuote"
+          },
+          "start_line": 313,
+          "end_line": 315,
+          "hash": "c15eadc4138f3a5533e7f8b4e6d93beb749dd5aeb767916a9fcb05011bf601bd",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 317,
+          "end_line": 318,
+          "hash": "720f1132bee1fbb762cf413d36bf62e1c3eb98fd3e29af7ff162d7e15f0605b2",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "BlockQuote"
+          },
+          "start_line": 320,
+          "end_line": 321,
+          "hash": "455058f7cb881e367fdabad44bb2298512586465255b38fd781090df73d2a612",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 323,
+          "end_line": 327,
+          "hash": "d0109b6aa46a4e1659a746cc0470708a8edd21c095c7052ada73b268797ef34e",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 329,
+          "end_line": 337,
+          "hash": "5c7c8be277163eab137aaee1775cfe79d023f337e9da5a3817643ccbed643042",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 339,
+          "end_line": 344,
+          "hash": "3bb5ff62f051ccba393c86e5b25d1bbc174f80d863d434c144a7b564fb4f0525",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 3
+          },
+          "start_line": 346,
+          "end_line": 346,
+          "hash": "01c97a638228db16e979109e4bfc39892f3998ee9dce191315dba89220173e20",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 348,
+          "end_line": 352,
+          "hash": "52c7077248d38919d89a5a5213cb460d98a08e869f7de5e714d3c774cdddb293",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 354,
+          "end_line": 357,
+          "hash": "b76737ecbb77342de50d46d1f8d53364b5ffc77f0e928dbcb30d9109e4ed533b",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 359,
+          "end_line": 361,
+          "hash": "dc4986a4dc0203acd228f23aa6610ac6a9b63bceec5dad57a4f2beac518da26a",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 363,
+          "end_line": 368,
+          "hash": "9d4a2fafbba7b8f9da7b36a356b168eed300f023254deb7bcc1fb3bfbb1d0cd1",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 370,
+          "end_line": 376,
+          "hash": "284ebb1b6879d646d1c64b1a35c0d294ed9b98444f01d236b5af9c6294d0c5fa",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 2
+          },
+          "start_line": 378,
+          "end_line": 378,
+          "hash": "2eb93a277ee969af647ece8bc7e7877f32ddb973c3195e70bc3eeb3c45d2f4cf",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 380,
+          "end_line": 381,
+          "hash": "5bbf0c035acd161e0553627b581134065bac2bebe0afc07ad8256fa8dfb7e877",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "CodeBlock",
+            "language": "yaml"
+          },
+          "start_line": 383,
+          "end_line": 499,
+          "hash": "1c93311a0d27c71bd16c06d318346d2efbe1719728db25a7efc174f47772cd65",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 501,
+          "end_line": 504,
+          "hash": "32818a9a67f5cbe986fc7646f12cdad0cb3a94748be386f8172131637d103e3e",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 2
+          },
+          "start_line": 506,
+          "end_line": 506,
+          "hash": "f4e5933476479ae264f7a912fc8d916ee9738f370ef55a56617ac2a9bce58b4d",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 508,
+          "end_line": 508,
+          "hash": "fc7582b522befb122998ad9e124847e59b317c23bd81fc3574fd286f9c01f0f3",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "List",
+            "ordered": false
+          },
+          "start_line": 510,
+          "end_line": 534,
+          "hash": "98b5d9aafdf1352445888d8dc6bc5318a41bceffa61b1644fd947031deed3e75",
+          "spl_hashes": null
+        }
+      ],
+      "file_merkle": {
+        "root_hash": "d9389f8fbd4b56cde6c10d38e55dedb456d13e8301d5195e01ea165124b43b4a",
+        "sections": [],
+        "spl_leaves": []
+      }
+    },
+    "EXP-001-proposed-obs.md": {
+      "path": "EXP-001-proposed-obs.md",
+      "page_name": "EXP-001-proposed-obs",
+      "links": [
+        {
+          "target_page": "EXP-001-spec-004-reference-implementation",
+          "raw_target": "EXP-001-spec-004-reference-implementation",
+          "heading": null,
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 7,
+          "column": 11,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "EXP-001-findings",
+          "raw_target": "EXP-001-findings",
+          "heading": null,
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 8,
+          "column": 14,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-004-application-scoped-identity",
+          "raw_target": "SPEC-004-application-scoped-identity",
+          "heading": null,
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 9,
+          "column": 12,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-004-application-scoped-identity",
+          "raw_target": "SPEC-004-application-scoped-identity",
+          "heading": null,
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 14,
+          "column": 1,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-004-application-scoped-identity",
+          "raw_target": "SPEC-004-application-scoped-identity#REQ-207",
+          "heading": "REQ-207",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 66,
+          "column": 13,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-004-application-scoped-identity",
+          "raw_target": "SPEC-004-application-scoped-identity#NFR-205",
+          "heading": "NFR-205",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 67,
+          "column": 1,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-004-application-scoped-identity",
+          "raw_target": "SPEC-004-application-scoped-identity#REQ-208",
+          "heading": "REQ-208",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 81,
+          "column": 13,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-004-application-scoped-identity",
+          "raw_target": "SPEC-004-application-scoped-identity#OQ-201",
+          "heading": "OQ-201",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 82,
+          "column": 1,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-004-application-scoped-identity",
+          "raw_target": "SPEC-004-application-scoped-identity#REQ-208",
+          "heading": "REQ-208",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 93,
+          "column": 13,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-004-application-scoped-identity",
+          "raw_target": "SPEC-004-application-scoped-identity#REQ-208",
+          "heading": "REQ-208",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 105,
+          "column": 13,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-004-application-scoped-identity",
+          "raw_target": "SPEC-004-application-scoped-identity#OQ-201",
+          "heading": "OQ-201",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 106,
+          "column": 1,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-004-application-scoped-identity",
+          "raw_target": "SPEC-004-application-scoped-identity#REQ-208",
+          "heading": "REQ-208",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 127,
+          "column": 13,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-004-application-scoped-identity",
+          "raw_target": "SPEC-004-application-scoped-identity#REQ-209",
+          "heading": "REQ-209",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 139,
+          "column": 13,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-004-application-scoped-identity",
+          "raw_target": "SPEC-004-application-scoped-identity#NFR-207",
+          "heading": "NFR-207",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 140,
+          "column": 1,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-004-application-scoped-identity",
+          "raw_target": "SPEC-004-application-scoped-identity#REQ-219",
+          "heading": "REQ-219",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 160,
+          "column": 13,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-004-application-scoped-identity",
+          "raw_target": "SPEC-004-application-scoped-identity#NFR-207",
+          "heading": "NFR-207",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 161,
+          "column": 1,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-004-application-scoped-identity",
+          "raw_target": "SPEC-004-application-scoped-identity#REQ-222",
+          "heading": "REQ-222",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 173,
+          "column": 13,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-004-application-scoped-identity",
+          "raw_target": "SPEC-004-application-scoped-identity#REQ-223",
+          "heading": "REQ-223",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 174,
+          "column": 1,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-004-application-scoped-identity",
+          "raw_target": "SPEC-004-application-scoped-identity#REQ-206",
+          "heading": "REQ-206",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 187,
+          "column": 13,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-004-application-scoped-identity",
+          "raw_target": "SPEC-004-application-scoped-identity#REQ-225",
+          "heading": "REQ-225",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 199,
+          "column": 13,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-004-application-scoped-identity",
+          "raw_target": "SPEC-004-application-scoped-identity#REQ-229",
+          "heading": "REQ-229",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 200,
+          "column": 1,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-004-application-scoped-identity",
+          "raw_target": "SPEC-004-application-scoped-identity#REQ-220",
+          "heading": "REQ-220",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 212,
+          "column": 13,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-004-application-scoped-identity",
+          "raw_target": "SPEC-004-application-scoped-identity#REQ-225",
+          "heading": "REQ-225",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 213,
+          "column": 1,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-004-application-scoped-identity",
+          "raw_target": "SPEC-004-application-scoped-identity#REQ-230",
+          "heading": "REQ-230",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 224,
+          "column": 13,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-004-application-scoped-identity",
+          "raw_target": "SPEC-004-application-scoped-identity#NFR-205",
+          "heading": "NFR-205",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 225,
+          "column": 1,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-004-application-scoped-identity",
+          "raw_target": "SPEC-004-application-scoped-identity#REQ-204",
+          "heading": "REQ-204",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 236,
+          "column": 13,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-004-application-scoped-identity",
+          "raw_target": "SPEC-004-application-scoped-identity#REQ-231",
+          "heading": "REQ-231",
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 247,
+          "column": 13,
+          "predicates": [],
+          "annotation": null
+        }
+      ],
+      "spl_blocks": [],
+      "diagnostics": [],
+      "mtime": 1785491442.8003547,
+      "merkle_leaves": [
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 1
+          },
+          "start_line": 1,
+          "end_line": 1,
+          "hash": "962ae6407a6b9b8700d9bfded09c01686ef0e4c007e32ac821c762464cd324bc",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Table"
+          },
+          "start_line": 3,
+          "end_line": 10,
+          "hash": "5874efd80ca312b1b645231913ca654408cbf25e761f47e7cac5a811b16e9612",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 2
+          },
+          "start_line": 12,
+          "end_line": 12,
+          "hash": "e6b3c736cd6b09e03b9c9251fef50cae381863412330beb3188a287f96ad915e",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 14,
+          "end_line": 19,
+          "hash": "93616169f3b7f51793aedc2dfc86c0fe578ed560f0d59446cd8eeba8d24e4460",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 21,
+          "end_line": 22,
+          "hash": "deca1ac31ab22a8346617de65401a101c5a94d44e2f050d2fe730e190180fbd5",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "BlockQuote"
+          },
+          "start_line": 24,
+          "end_line": 26,
+          "hash": "ab45d7d9ad9dab7b45f64a0d65efde2cf563fa23b15a799ccc63ea425bf02fcd",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 28,
+          "end_line": 31,
+          "hash": "5c2203c1e12d042e27586f3bbaa37d2165747ab8261b9a45578320473190af31",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 2
+          },
+          "start_line": 33,
+          "end_line": 33,
+          "hash": "a92adc7081e3dbb6c4fdd4604f1f7a8035961d05cebc0bbd95c5b30108bfea28",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 35,
+          "end_line": 37,
+          "hash": "5dde061745948e201aa278a86c86478b0c24fca9a26597de6f76ff49f2c25dcb",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Table"
+          },
+          "start_line": 39,
+          "end_line": 45,
+          "hash": "9ea3769e8c7c5f362f2cb9791e1cfa1ea4ad095f08026aefbaa905f07bad4a53",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 47,
+          "end_line": 50,
+          "hash": "e48fe9a39d7a5192d51e289dbe665cbebb92c4b0801e67c0af3899945742eef7",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 52,
+          "end_line": 55,
+          "hash": "69262d34db5428d92e06b914313b3876a8d8272106c6a15e1c5315e0657ecbd0",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 2
+          },
+          "start_line": 57,
+          "end_line": 57,
+          "hash": "a0e0ff521544b221f014a8ab020d6913eb308e08a18fe7d97f069d254fcc182e",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 3
+          },
+          "start_line": 59,
+          "end_line": 59,
+          "hash": "06525176d378c462e682e6673051512b7a5a154a08a602ad9734e338f5132260",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 61,
+          "end_line": 62,
+          "hash": "b7b93bf6932e1731327bb58b6a295003255d5b8d534a4d9f861f9711e8ba690d",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 64,
+          "end_line": 67,
+          "hash": "74702e8ad0d9a0d0f71ad4901b130064826b3510eaa71bc2c3cb112c9a02434d",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 69,
+          "end_line": 73,
+          "hash": "f792c44fbc227b79714947a94abac1ccb47e30ba09cbb5c2ae55eb3648416cf0",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 3
+          },
+          "start_line": 75,
+          "end_line": 75,
+          "hash": "018ea779f7ad6805562f97a2d96e961f4144d61446b416f89f15454a5fce9577",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 77,
+          "end_line": 79,
+          "hash": "ef2367869db4c179ed47eb3d918afb521256e30a71b0050e385d02e5822afe33",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 81,
+          "end_line": 82,
+          "hash": "168092092629b28672fe0501b71787cec5546c154e6ef84f175fad9f08773a86",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 84,
+          "end_line": 86,
+          "hash": "582b9fbffeb7a22be4b4115c707ea9522f60ee70879b41baffedfbdd7c96add4",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 3
+          },
+          "start_line": 88,
+          "end_line": 88,
+          "hash": "4bf190edefb49e5b48260ea9a8ed5096a21e584404e98002de7e674fa0342bed",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 90,
+          "end_line": 91,
+          "hash": "0fb9c360b0fe12c65ff7975f0ba02cbbfa4ccf6b0bff06754cb559923f65738e",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 93,
+          "end_line": 93,
+          "hash": "519ac8a499dcc5b02fc638b36476b001794251770cbb97a493741b8a514b5c72",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 95,
+          "end_line": 98,
+          "hash": "b4d82ec0f08a23deeba7c833aa067a2ad1094237f1c249eb3c6867edd602c377",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 3
+          },
+          "start_line": 100,
+          "end_line": 100,
+          "hash": "68dbdcd17500ccdf0800290308bbf23dfd89698a63106b8f0ce5771f49d20258",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 102,
+          "end_line": 103,
+          "hash": "548b0b92144162691cc7e42a58586e9079848989c1a6e05ea8334c058ca458e2",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 105,
+          "end_line": 106,
+          "hash": "168092092629b28672fe0501b71787cec5546c154e6ef84f175fad9f08773a86",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 108,
+          "end_line": 108,
+          "hash": "65ca389735462016b3134bf1ac503928ff92fb9c7b9a3e3229bf248dc89a3b36",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "CodeBlock",
+            "language": "text"
+          },
+          "start_line": 110,
+          "end_line": 115,
+          "hash": "31a00fb92bd6f01f1ad01609953beb0fdfdd5ec55d2d88f5725a0b81ffac5688",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 117,
+          "end_line": 120,
+          "hash": "d605ced7bd049662d4c80d7c52e983e80716a947ae4984f563ab2fddd99ed120",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 3
+          },
+          "start_line": 122,
+          "end_line": 122,
+          "hash": "06781c2a53631faac03ad6f5f8cd965acfc3dc95adf274dc860e7c80dce560db",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 124,
+          "end_line": 125,
+          "hash": "84d3090427fca5a6bd2e01167434b0af0383244c9563298e864176a8571b6cb7",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 127,
+          "end_line": 127,
+          "hash": "519ac8a499dcc5b02fc638b36476b001794251770cbb97a493741b8a514b5c72",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 129,
+          "end_line": 131,
+          "hash": "804cf120a5bfea155c4cd7935e9e76ebe98bc8273b3c6ee8dfe90ca918e7c67c",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 3
+          },
+          "start_line": 133,
+          "end_line": 133,
+          "hash": "45f2561489a5eab6292fa7564ce6958b7fd950ce93261f4603709f353938c9b5",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 135,
+          "end_line": 137,
+          "hash": "8b5c5fdbb05a1ee16541f6e5466324f21502195669a63494ab7d9c0c09afbf83",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 139,
+          "end_line": 140,
+          "hash": "34bf9e17edd817139f6ecec3567a90bae6aa647bfaf47d1da6461ae08154a299",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 142,
+          "end_line": 142,
+          "hash": "b8fa9d80652e0f56de6fcbfd190067352ceb81631c085490538791907a079d5a",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "CodeBlock",
+            "language": "text"
+          },
+          "start_line": 144,
+          "end_line": 146,
+          "hash": "f72c3bb4c3edc0213f3806f6c585caaf1d6f63a7d17ca08ced068bec54e15d02",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 148,
+          "end_line": 149,
+          "hash": "c8654c8a1b6f14e1f23620474adae3644b05c9df9ce02572d773e199fa22cec9",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 151,
+          "end_line": 153,
+          "hash": "910aa1db28c84a515f4f2571004a9fa9870829f5a503f84462e5e598783980ec",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 3
+          },
+          "start_line": 155,
+          "end_line": 155,
+          "hash": "579131ef2708094f13cac70ed3c98ae72224aac174309c4e8bd575f658ecb40d",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 157,
+          "end_line": 158,
+          "hash": "643f30ed28a4c242d714a30186229fe361f85d5dff1487ffdc2197c5f0051471",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 160,
+          "end_line": 161,
+          "hash": "e4d42bc03e822a0ced0a05be7197895533d71f44ed1f54f9bcc71e1022d7a136",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 163,
+          "end_line": 165,
+          "hash": "162b55da1d3511d4e86d3408205dc4270101634e420e5e89861ea0b2ae9a8c9a",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 3
+          },
+          "start_line": 167,
+          "end_line": 167,
+          "hash": "97425afa05e3728601d8e7a3bfaa5e7e000b40fa8fcb0f05c6adb09d0248a1b8",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 169,
+          "end_line": 170,
+          "hash": "1f7b9cd630eee2308709ffa4c2d575d515658ab41ff1bc6d4b73e897c3b31dd8",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 172,
+          "end_line": 174,
+          "hash": "6fe590a40379b9e74b169e3961a7beb3481ba99cd3fde5442e047d17e7ce7757",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 176,
+          "end_line": 179,
+          "hash": "38cb7022821826a7a666c22ec9501773df1e86762d06245d38a49d8a128efc2e",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 3
+          },
+          "start_line": 181,
+          "end_line": 181,
+          "hash": "a04239af65f718e8b7dc481f28e6b7e17adc0c9305f06f9541bbf7c2779aa742",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 183,
+          "end_line": 185,
+          "hash": "71bdbc0db3ad7df11fc5d1a2d639f65cc9a35f2b7c240756b31e7da59bc30cbf",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 187,
+          "end_line": 187,
+          "hash": "f3e5034491bbe44c220ed5d62f54a6a2e8a8b76e5c4a8175d74bcde9dec4bd21",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 189,
+          "end_line": 191,
+          "hash": "19e79b51b940d5140a37fd8b508d3a5e8c82a65b0e14716e07affdd9c96cd4f2",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 3
+          },
+          "start_line": 193,
+          "end_line": 193,
+          "hash": "f00c9c8c9716e4af935a73127d8678b05370a17b1cf40b73097109a05a19f189",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 195,
+          "end_line": 197,
+          "hash": "6cc3f07f9eec95d6768ed0d80d222b21bb01b9158f89da0e50da4f2fce39b436",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 199,
+          "end_line": 200,
+          "hash": "4854c0c6f688b376432feadd68cd9bab0b43f518a837b23d103efb611561f878",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 202,
+          "end_line": 205,
+          "hash": "065d4dfcd1e355c0aa240e78434d01d77537c2d5f9b453cccb7c399ba0446313",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 3
+          },
+          "start_line": 207,
+          "end_line": 207,
+          "hash": "7aa741a04e7281b507781565acd502f7184fe1d08ec92a0d45f995419ad94e29",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 209,
+          "end_line": 210,
+          "hash": "c38fdfc9a3a00d2442e992cde7c5672c6c70b8633137473ba5c9f2cbff46c08a",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 212,
+          "end_line": 213,
+          "hash": "b17724431bf94b35ab6aee082691d80e3187ee4792253fff65a2a326b573149e",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 215,
+          "end_line": 216,
+          "hash": "26ba205cef301a4e78c64286078feb5f556f3dd9892a636852e5b35469ed462d",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 3
+          },
+          "start_line": 218,
+          "end_line": 218,
+          "hash": "bb4b6f8e2d2e0afda3140f00f272744328fa62e5a0cb6ef3c4be395d6cd87227",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 220,
+          "end_line": 222,
+          "hash": "87716ad723fa42677340889659ded2efeb7dac139df9d8d041e0c273cf4a3478",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 224,
+          "end_line": 225,
+          "hash": "2bfad2a5cc088e495a8cb0cd44574a7df0b394a84525bffb375f6c28a1a9fad0",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 227,
+          "end_line": 229,
+          "hash": "37c2b265d98ec4f00d10858e9a29d2a13d2217ca334850787a0fe54e2cbaf203",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 3
+          },
+          "start_line": 231,
+          "end_line": 231,
+          "hash": "0d076564cc014ae36ceed58348f4fb520a6292aa95912c438728c336e8a89c19",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 233,
+          "end_line": 234,
+          "hash": "584f24a2ab78fb7197f384f8b95300d13b55ed9cf7278719e6a0ead0cc75ea7a",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 236,
+          "end_line": 236,
+          "hash": "c5fed9b75ae44c3dcdbd66ceb08815dd10fce80ca2940b326ff71f61cbdc54bd",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 238,
+          "end_line": 241,
+          "hash": "49d03056b818670645e221ea51d74f94d162d8c0980681c19a3231a4295fffc9",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 3
+          },
+          "start_line": 243,
+          "end_line": 243,
+          "hash": "b29b4818a742f6a4fb9ffa48300b4cd8c4aa27295cdb40dd9b8260cf85e39d80",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 245,
+          "end_line": 245,
+          "hash": "7678d254cceb6fc4aa3c759ee4c52987ea4938b5807bda540b7d4ea62fd41181",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 247,
+          "end_line": 247,
+          "hash": "dde6554fdf3d20407e9ae112fb548d70c5660e9df2f0ab1b59b192c3b337f054",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 249,
+          "end_line": 252,
+          "hash": "66002eb04970af2610b66e0df0716e0351b74396acda60432ff47aee6c68970c",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 2
+          },
+          "start_line": 254,
+          "end_line": 254,
+          "hash": "477b3d473d4d0d155937a1d2a14ca7bf69eb9603e7d10d4a9c15ff47dd2cea3b",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 256,
+          "end_line": 257,
+          "hash": "cbdd09f2d5736ffdfce045e44f7300c854db81ee48f2c27c8ca255efb250778e",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Table"
+          },
+          "start_line": 259,
+          "end_line": 273,
+          "hash": "ac80a17e6c9db160e3f42577498ea58f71db3a0573a0e69c302e887a5430492f",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 275,
+          "end_line": 276,
+          "hash": "288b2349af0e9639bd5e8f07af2351798b071929cdd1f390fab3367e4faefd20",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Table"
+          },
+          "start_line": 278,
+          "end_line": 285,
+          "hash": "ba3fb0dab4c68fab88dce9fe02ad3222231f76779bdc779793b854da862fd25a",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 2
+          },
+          "start_line": 287,
+          "end_line": 287,
+          "hash": "dbf1fdc82d0e59866ed69999a09bdee630dd7658aa7810133ef9d0cbd6a437e5",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 289,
+          "end_line": 293,
+          "hash": "9d955b9b9e5f461e67d2421e0326fcf23d9e32f0efb6d80523abd8f782c06c78",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 295,
+          "end_line": 298,
+          "hash": "ba826e3aba2716f52d5c664acb8aff2888d5f369d566fb1af1b6b0bf3e2bd154",
+          "spl_hashes": null
+        }
+      ],
+      "file_merkle": {
+        "root_hash": "d949e138e6b18bc1d39751b10964a665373cd7314cb93bc73ffcf7e663368887",
+        "sections": [],
+        "spl_leaves": []
+      }
+    },
+    "selfsame-functional-prior-art.md": {
+      "path": "selfsame-functional-prior-art.md",
+      "page_name": "selfsame-functional-prior-art",
+      "links": [],
+      "spl_blocks": [],
+      "diagnostics": [],
+      "mtime": 1785479750.561041,
+      "merkle_leaves": [
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 1
+          },
+          "start_line": 1,
+          "end_line": 1,
+          "hash": "73be9c812f19dbb7f8e20246e5e8a4559c6f28013aef21901fd063423f82d9d7",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 3,
+          "end_line": 3,
+          "hash": "c640da64d8e287bee1104271c268bf2bf1813d9e64a334bdd20a245d1b904333",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 5,
+          "end_line": 6,
+          "hash": "6ded0bcf893b349a92b2db690c7383023bc72434410271f0300c2134f326c749",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 8,
+          "end_line": 8,
+          "hash": "20e7f47943f66d18ec9a7911805dbe69f7c6dc3d07b3ef276f5fbcd6d24c9a51",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 2
+          },
+          "start_line": 10,
+          "end_line": 10,
+          "hash": "39e9afc6cd2ba78b58c0e3c712497c73a1916169a821adae8cd4df401e99b03a",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 12,
+          "end_line": 12,
+          "hash": "fb04b1a4f61bd817801a203ec4674f2622055d8bf03b23dd40582dcb2a720e59",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "List",
+            "ordered": true
+          },
+          "start_line": 14,
+          "end_line": 22,
+          "hash": "23a039681be4391cb3d2f45b78748765aaa8f0e644af382a0cf5c7921c1e7012",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 23,
+          "end_line": 28,
+          "hash": "e71112937a8ba848c061efcb83a7c519bfe2b0f6064e18b7960385b873c1fb3c",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 30,
+          "end_line": 31,
+          "hash": "188d38bbd80c2b3f0f463da25860cb7123b2ee8d0177d4f422b41c727cbf8945",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 2
+          },
+          "start_line": 33,
+          "end_line": 33,
+          "hash": "32eb3425348e1fbcb809888801276056ba485138de5264f3f68d4d8b4725e2c0",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Table"
+          },
+          "start_line": 35,
+          "end_line": 46,
+          "hash": "ee5307cdfc3b22b4ade0d712a4ca5edca69c88c800c0b7a3311d97726c951657",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 2
+          },
+          "start_line": 48,
+          "end_line": 48,
+          "hash": "7b18301f5e1bf7209160d8072f178d490437fee11a7936d7a210d2f3303ebdfd",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "List",
+            "ordered": false
+          },
+          "start_line": 50,
+          "end_line": 68,
+          "hash": "983bbede6431c6bf33567bdc4e0b41c0d6414c062ae8b23a1a7b62214a606969",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 2
+          },
+          "start_line": 69,
+          "end_line": 69,
+          "hash": "d745ddeb4033c27d630c487a6ff57a3ee467b0c1044e2d919e6ef9df2846a513",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "List",
+            "ordered": false
+          },
+          "start_line": 71,
+          "end_line": 82,
+          "hash": "4e1797ab29be54fca01bc298fbb1ef7640bece3780a4824d7c4a5090a357b673",
+          "spl_hashes": null
+        }
+      ],
+      "file_merkle": {
+        "root_hash": "495c1715ab4a47a7edfe172ef98c514883c198e22e14fd6d648b749b5dfa74c1",
+        "sections": [],
+        "spl_leaves": []
+      }
+    },
+    "EXP-001-spec-004-reference-implementation.md": {
+      "path": "EXP-001-spec-004-reference-implementation.md",
+      "page_name": "EXP-001-spec-004-reference-implementation",
+      "links": [
+        {
+          "target_page": "SPEC-004-application-scoped-identity",
+          "raw_target": "SPEC-004-application-scoped-identity",
+          "heading": null,
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 6,
+          "column": 39,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "PROTO-001-usdd-agent-protocol",
+          "raw_target": "PROTO-001-usdd-agent-protocol",
+          "heading": null,
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 11,
+          "column": 13,
+          "predicates": [],
+          "annotation": null
+        },
+        {
+          "target_page": "SPEC-004-application-scoped-identity",
+          "raw_target": "SPEC-004-application-scoped-identity",
+          "heading": null,
+          "block_ref": null,
+          "alias": null,
+          "is_embed": false,
+          "line": 15,
+          "column": 1,
+          "predicates": [],
+          "annotation": null
+        }
+      ],
+      "spl_blocks": [],
+      "diagnostics": [],
+      "mtime": 1785480112.1435828,
+      "merkle_leaves": [
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 1
+          },
+          "start_line": 1,
+          "end_line": 1,
+          "hash": "561f98f73808f5c2fe31a956093df94702117632222130b057fa135b794773d9",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Table"
+          },
+          "start_line": 3,
+          "end_line": 11,
+          "hash": "f2464c0f55fd8c73c221e731a07c4359692bb7be72724ebd25196def48997a31",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 2
+          },
+          "start_line": 13,
+          "end_line": 13,
+          "hash": "6c62876d48aacb74a1b0e6a61596e7038a806bfb855c815fc518e4c93939943d",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 15,
+          "end_line": 17,
+          "hash": "f18f6cb61c3b0684448d85f1a31e9f93202e4aadbc01516298701905cb6d2dbc",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "List",
+            "ordered": false
+          },
+          "start_line": 19,
+          "end_line": 24,
+          "hash": "42200f90d4ec409c7b99a0d84fba767ec8d2022b16156f5aad413c3da2fa7f73",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 25,
+          "end_line": 25,
+          "hash": "62b80be282ed50038a86ce8a7866b89c2e257d38de0836ba47dd440ab1b44524",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "List",
+            "ordered": false
+          },
+          "start_line": 27,
+          "end_line": 32,
+          "hash": "ed1b9898777e831ba686ff2c633d1312abe30090a0fbf75be1b65432c0efbd72",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 33,
+          "end_line": 37,
+          "hash": "e3f3eccae92190b9f5b2feca58601a94c79bed3965a0e5906c0d92f2e7159691",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 39,
+          "end_line": 40,
+          "hash": "aa98723179e3a0c301d3b5eeb54581868c07eb76309b080575b241ba3a2f0be9",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 2
+          },
+          "start_line": 42,
+          "end_line": 42,
+          "hash": "076c178bf79b2fff8536a49b0f8e2f327241f418b207e9ccbf6a282c1eba797e",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 44,
+          "end_line": 49,
+          "hash": "5a0b61b8d58082a0339919b4ea3ea1adc3250f1de8962f6abc52af4dad586732",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 51,
+          "end_line": 54,
+          "hash": "b694fa83cf119539c245e866c543b88b0f75d52254352f73d62f6bf4fd2e812e",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 2
+          },
+          "start_line": 56,
+          "end_line": 56,
+          "hash": "ac9a856b6b58e67cfaeeacd67c2bc3eb02c7590c6cf88067d86cd6ed02815aa5",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "List",
+            "ordered": true
+          },
+          "start_line": 58,
+          "end_line": 75,
+          "hash": "f3fb24653fcbcf0f0e71c85c68268f0a4fe03f892cbd60fff140d3e7b2a04d75",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 2
+          },
+          "start_line": 76,
+          "end_line": 76,
+          "hash": "fc03ba402d20b34022a8bdcf9cf4105fcd1b6dd3d9bfb131b0e64b5a55277238",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "List",
+            "ordered": false
+          },
+          "start_line": 78,
+          "end_line": 88,
+          "hash": "afee2a1cff4d5915fd6ebc46db226b681322c05ebe6b67554f2ae319954ebada",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 2
+          },
+          "start_line": 89,
+          "end_line": 89,
+          "hash": "3e8285e35a772fbb1e1ea055f3f7ee796be89170b1438297c7dc155d9c6dc3f7",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Table"
+          },
+          "start_line": 91,
+          "end_line": 97,
+          "hash": "0b65515734e9ffd8795ad97534baaa8d1906df5ef09d94bb4933e47f1653f03f",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 2
+          },
+          "start_line": 99,
+          "end_line": 99,
+          "hash": "eb661e5842153499c92db0b1b6cd61050fe463055b0883b9cde8303885d46655",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 101,
+          "end_line": 101,
+          "hash": "2afa4dc6d93f6ae9d826448122a44d7b79c2cf6c02d254ec7d7b8d867918931f",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "List",
+            "ordered": false
+          },
+          "start_line": 103,
+          "end_line": 110,
+          "hash": "b09e7127ff8401973e09d503b8b4b2aca3a6f12f938b5530d7468d81854b0675",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 111,
+          "end_line": 113,
+          "hash": "12c1e14661d0d9a67c050a2934557ce34c18753f1dd571913526cc0e1f031048",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 2
+          },
+          "start_line": 115,
+          "end_line": 115,
+          "hash": "0b352e85cade7532c5b160f3af8a34171efe7f3f0e0ca6d4a663118c65401070",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 117,
+          "end_line": 118,
+          "hash": "7310bced3abdfab17b3ba76021e7152258632d29de6cfad6ced69e8642a216a1",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Heading",
+            "level": 2
+          },
+          "start_line": 120,
+          "end_line": 120,
+          "hash": "7d3b78d9c45af6411c30a8a12c077599ae6d2307874a9b32d78c96de69fd88f6",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Table"
+          },
+          "start_line": 122,
+          "end_line": 127,
+          "hash": "e5c8943508a4aa1faf12a8e7897c007cd7a62593af5a32a6272a782e167538d5",
+          "spl_hashes": null
+        },
+        {
+          "node_type": {
+            "type": "Paragraph"
+          },
+          "start_line": 129,
+          "end_line": 131,
+          "hash": "6659ef0f6af58f0644e1dada4476224df535eaa5fe4b8837c7f6ae4d2be2a8c1",
+          "spl_hashes": null
+        }
+      ],
+      "file_merkle": {
+        "root_hash": "cf51e77c6a9853215fd4b2816bcb45271c1a0c4ee52a069d733768a9c68d99d8",
+        "sections": [],
+        "spl_leaves": []
+      }
+    }
+  },
+  "vault_root_hash": "b2fe2ce64f9cc26c9dd7a0f92e0684ad98a6b7be20b1ff854a34313539c2b140"
+}

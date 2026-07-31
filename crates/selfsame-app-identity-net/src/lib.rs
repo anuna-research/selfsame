@@ -49,7 +49,7 @@
 //! not met.
 //!
 //! [SPEC-004]: ../../../../specs/SPEC-004-application-scoped-identity.md
-//! [EXP-001]: ../../../../docs/EXP-001-spec-004-reference-implementation.md
+//! [EXP-001]: ../../../../specs/EXP-001-spec-004-reference-implementation.md
 
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
@@ -177,7 +177,9 @@ mod tests {
     #[test]
     fn a_deadline_is_always_supplied() {
         // There is no `client()` overload without one, so a hung connection is
-        // a failure rather than a hang at every call site in this crate.
-        assert!(client(Duration::from_millis(1)).is_ok());
+        // a failure rather than a hang at every call site in this crate. The
+        // signature is the guarantee; this pins that it stays required.
+        let built = client(Duration::from_millis(1));
+        assert!(built.is_ok(), "a one-millisecond deadline is still a valid client");
     }
 }
