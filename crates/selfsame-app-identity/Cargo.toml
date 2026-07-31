@@ -1,0 +1,44 @@
+[package]
+name = "selfsame-app-identity"
+description = "SPEC-004 pure core: application/account key hierarchy, closed-language profile recognition, acct aliases, W3C VC device grants, the acceptance predicate, provider selection, ceremony payloads, and identity succession"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# ── Purity gate (SPEC-001 §13, inherited) ────────────────────────────────────
+#
+# This crate is a pure core. It MUST NOT acquire `tokio`, `reqwest`, `std::fs`,
+# `std::net`, or `std::time` anywhere in its dependency graph. `tests/purity.rs`
+# enforces the dependency half with `cargo tree` and the source half with a scan.
+#
+# The reason is SPEC-004's own: CON-206 is one authorization predicate that a
+# phone, a CLI, an application backend, and a wasm verifier must each apply
+# identically. Four implementations of one predicate is the parser-differential
+# failure LangSec Principle 5 prohibits, so it is written once and linked
+# everywhere — which is only possible if it drags in no I/O.
+#
+# `serde_json` is deliberately absent. This crate carries exactly one JSON
+# recogniser (`json`), because SPEC-004 requires duplicate-member rejection,
+# a depth bound, integer-only numbers, and RFC 8785 round-trip byte equality —
+# none of which `serde_json` decides. Linking a second, more permissive parser
+# beside the strict one is the shotgun-parser shape LangSec Principle 5 rules
+# out, whatever the convention about which one is "the real" one.
+[dependencies]
+did-crdt = { workspace = true }
+selfsame-core = { workspace = true }
+
+base64ct = { workspace = true }
+bip39 = { version = "2", default-features = false, features = ["std"] }
+ed25519-dalek = { workspace = true, features = ["std"] }
+hkdf = { version = "0.12", default-features = false }
+sha2 = { version = "0.10", default-features = false }
+thiserror = { workspace = true }
+zeroize = { version = "1", default-features = false, features = ["alloc"] }
+
+[dev-dependencies]
+sha2 = { version = "0.10", default-features = false }
+hex = "0.4"
+proptest = "1"
+rand = "0.8"

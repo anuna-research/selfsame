@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/selfsame-core",
+    "crates/selfsame-app-identity",
     "crates/selfsame-rendezvous",
     "crates/selfsame-cli",
     "src-tauri",
