@@ -51,11 +51,30 @@ pub const ALG: &str = "EdDSA";
 /// of them would let the input choose what verifies it.
 const FORBIDDEN_HEADER_MEMBERS: &[&str] = &["jku", "x5u", "x5c", "x5t", "x5t#S256", "jwk", "epk"];
 
+/// What shape of `kid` a contract requires.
+///
+/// The two differ because the two key sources differ, and neither would be safe
+/// under the other's rule. A grant's key is resolved from a `did:crdt` closure,
+/// so its `kid` is an absolute DID URL. An enrollment statement's key is
+/// resolved from the origin-authenticated profile, so its `kid` is an HTTPS URI
+/// on the `applicationId` origin with a fragment. Accepting an HTTPS `kid` on a
+/// grant would reintroduce exactly the remote key URL `CON-206` step 3 forbids.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum KidRule {
+    /// An absolute DID URL with a fragment (`CON-205`, `CON-225` per-account).
+    DidUrl,
+    /// An absolute HTTPS URI with a non-empty fragment (`CON-214`, `CON-225`
+    /// developer pointer).
+    HttpsFragment,
+}
+
 /// What one contract requires of a compact JWS.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct JwsPolicy {
     /// The exact `typ` value.
     pub typ: &'static str,
+    /// What shape of `kid` this contract requires.
+    pub kid: KidRule,
     /// The exact `cty` value, when the contract fixes one.
     pub cty: Option<&'static str>,
     /// Octet bound on the whole compact serialisation.
@@ -243,11 +262,24 @@ fn recognise_header(
     }
 
     let kid = protected.get("kid").and_then(Json::as_str).ok_or(JwsError::BadKid)?;
-    // `CON-206` step 3: "an absolute DID URL `kid`; reject remote key URLs".
-    // A relative fragment would be resolved against something, and whatever it
-    // was resolved against would be choosing the key.
-    if !kid.starts_with("did:") || !kid.contains('#') {
-        return Err(JwsError::BadKid);
+    match policy.kid {
+        // `CON-206` step 3: "an absolute DID URL `kid`; reject remote key URLs".
+        // A relative fragment would be resolved against something, and whatever
+        // it was resolved against would be choosing the key.
+        KidRule::DidUrl => {
+            if !kid.starts_with("did:") || !kid.contains('#') {
+                return Err(JwsError::BadKid);
+            }
+        }
+        // `CON-201`: each `kid` "MUST be an absolute HTTPS URI on the
+        // `applicationId` origin with a non-empty fragment". The origin check
+        // belongs to the profile recogniser, which has the origin; here the
+        // shape is checked so a `did:` or relative value cannot slip through.
+        KidRule::HttpsFragment => {
+            if crate::uri::recognise(kid, crate::uri::UriPolicy::FRAGMENT_ID).is_err() {
+                return Err(JwsError::BadKid);
+            }
+        }
     }
     Ok(())
 }
@@ -290,8 +322,13 @@ pub fn sign(header: &Json, payload: &Json, key: &ed25519_dalek::SigningKey) -> S
 mod tests {
     use super::*;
 
-    const POLICY: JwsPolicy =
-        JwsPolicy { typ: "vc+jwt", cty: Some("vc"), max_octets: 65_536, max_payload_depth: 8 };
+    const POLICY: JwsPolicy = JwsPolicy {
+        typ: "vc+jwt",
+        kid: KidRule::DidUrl,
+        cty: Some("vc"),
+        max_octets: 65_536,
+        max_payload_depth: 8,
+    };
 
     fn key() -> ed25519_dalek::SigningKey {
         ed25519_dalek::SigningKey::from_bytes(&[7u8; 32])
@@ -346,7 +383,7 @@ mod tests {
 
     #[test]
     fn rejects_a_missing_relative_or_wrong_kid() {
-        for kid in ["#jwk-0", "jwk-0", "https://photos.example/key", "did:crdt:abc"] {
+        for kid in ["#jwk-0", "jwk-0", "https://photos.example/key#k", "did:crdt:abc"] {
             let mut h = header();
             let Json::Object(members) = &mut h else { unreachable!() };
             members.iter_mut().find(|(k, _)| k == "kid").unwrap().1 = Json::text(kid);
@@ -356,6 +393,51 @@ mod tests {
         // Absent entirely.
         let h = Json::obj([
             ("alg", Json::text("EdDSA")),
+            ("typ", Json::text("vc+jwt")),
+            ("cty", Json::text("vc")),
+        ]);
+        let text = sign(&h, &payload(), &key());
+        assert_eq!(recognise(&text, POLICY, &[]), Err(JwsError::BadKid));
+    }
+
+    #[test]
+    fn the_two_kid_rules_do_not_admit_each_others_shapes() {
+        // A grant's key comes from a did:crdt closure and an enrollment
+        // statement's from the authenticated profile. Accepting an HTTPS `kid`
+        // on a grant would reintroduce the remote key URL CON-206 step 3
+        // forbids; accepting a DID URL on an enrollment statement would name a
+        // key the profile cannot resolve.
+        const HTTPS_POLICY: JwsPolicy = JwsPolicy {
+            typ: "selfsame-enrollment+jws",
+            kid: KidRule::HttpsFragment,
+            cty: None,
+            max_octets: 8_192,
+            max_payload_depth: 4,
+        };
+        let https_kid = "https://photos.example/selfsame/application#enrollment-2026-01";
+
+        let h = Json::obj([
+            ("alg", Json::text("EdDSA")),
+            ("typ", Json::text("selfsame-enrollment+jws")),
+            ("kid", Json::text(https_kid)),
+        ]);
+        let text = sign(&h, &payload(), &key());
+        assert!(recognise(&text, HTTPS_POLICY, &[]).is_ok(), "an HTTPS kid is the enrollment shape");
+
+        let h = Json::obj([
+            ("alg", Json::text("EdDSA")),
+            ("typ", Json::text("selfsame-enrollment+jws")),
+            ("kid", Json::text("did:crdt:abc#jwk-0")),
+        ]);
+        let text = sign(&h, &payload(), &key());
+        assert_eq!(recognise(&text, HTTPS_POLICY, &[]), Err(JwsError::BadKid));
+
+        // …and an HTTPS kid on a grant.
+        let text = sign(&header(), &payload(), &key());
+        let _ = text;
+        let h = Json::obj([
+            ("alg", Json::text("EdDSA")),
+            ("kid", Json::text(https_kid)),
             ("typ", Json::text("vc+jwt")),
             ("cty", Json::text("vc")),
         ]);

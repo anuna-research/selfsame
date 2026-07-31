@@ -57,6 +57,7 @@ pub const MAX_GRANT_OCTETS: usize = 65_536;
 /// The JWS policy `CON-205` fixes for a grant.
 pub const GRANT_JWS: JwsPolicy = JwsPolicy {
     typ: "vc+jwt",
+    kid: crate::jws::KidRule::DidUrl,
     cty: Some("vc"),
     max_octets: MAX_GRANT_OCTETS,
     max_payload_depth: 8,

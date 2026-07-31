@@ -73,16 +73,23 @@
 
 pub mod accept;
 pub mod alias;
+pub mod ceremony;
 pub mod codec;
+pub mod confirm;
 pub mod context;
+pub mod discovery;
 pub mod didkey;
+pub mod enrollment;
 pub mod grant;
 pub mod hierarchy;
 pub mod json;
 pub mod jws;
 pub mod profile;
 pub mod proof;
+pub mod revocation;
 pub mod scope;
+pub mod selection;
+pub mod succession;
 pub mod time;
 pub mod uri;
 
