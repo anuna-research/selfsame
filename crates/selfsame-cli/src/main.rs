@@ -22,6 +22,7 @@
 //!
 //! [SCREEN-002]: ../../../../anuna-ssi/specs/SCREEN-002-link-panel.md
 
+mod app_identity;
 mod store;
 
 use std::io::Write;
@@ -62,6 +63,7 @@ fn main() -> Result<()> {
         Some("status") => status(),
         Some("verify") => verify(&args[1..]),
         Some("unlink") => unlink(),
+        Some("app-identity") => app_identity::run(&args[1..]),
         Some("--help") | Some("-h") | None => {
             print_usage();
             Ok(())

@@ -3801,18 +3801,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "selfsame-app-identity-net"
+version = "0.1.0"
+dependencies = [
+ "did-crdt",
+ "ed25519-dalek",
+ "reqwest 0.12.28",
+ "selfsame-app-identity",
+ "selfsame-core",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+]
+
+[[package]]
 name = "selfsame-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bip39",
  "did-crdt",
  "ed25519-dalek",
  "qrcode",
  "rand 0.8.7",
  "reqwest 0.12.28",
+ "selfsame-app-identity",
+ "selfsame-app-identity-net",
  "selfsame-core",
  "serde",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]
