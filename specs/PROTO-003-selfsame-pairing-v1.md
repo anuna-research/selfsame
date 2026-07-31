@@ -198,7 +198,9 @@ routing, not a mandatory Selfsame directory.
 
 ### In scope
 
-- the canonical `number-word-word` grammar and BIP-39 index encoding;
+- the canonical twelve-word grammar and its 128-bit rendering;
+- routing resolved from a code-derived record rather than carried by the code;
+- initiation from either party;
 - profile-local routing across many applications and providers;
 - the QR/bootstrap logical value and carrier-independent acceptance rules;
 - an exact SPAKE2 ristretto255 construction and role assignment;
@@ -1465,18 +1467,20 @@ fails confirmation. Blocking the selected provider fails the ceremony and
 creates completely fresh material at a newly selected provider. No request
 reaches a global or undeclared fallback.
 
-### TEST-409: QR, manual, and same-device convergence
+### TEST-409: QR, spoken, and same-device convergence
 
-**Validates:** REQ-408, CON-402, CON-407, CON-408.
+**Validates:** REQ-408, REQ-409, CON-402, CON-407, CON-408, CON-409.
 
-Deliver one logical bootstrap by canonical QR, by exact application context
-plus manually entered code, and by the verified same-device platform adapter.
-Each path produces the same binding and protocol state for its fixture and
-continues through the same encrypted offer/grant predicate.
+Deliver one logical bootstrap by canonical QR, by manually entered words, and by
+the verified same-device platform adapter — each in both initiation directions.
+Every path produces the same binding and protocol state for its fixture and
+continues through the same sealed offer/grant predicate.
 
-Give a wallet only the bare code and require `MissingApplicationContext` with
-zero network requests. Tamper the QR prefix, JSON canonical form, application
-ID, profile digest, or code and require a fresh-ceremony failure.
+Give a party a well-formed code whose address resolves nothing and require
+`PairingRecordUnavailable` after exactly one resolution attempt and no further
+network request. Tamper the QR prefix, the JSON canonical form, or `c` and
+require a fresh-ceremony failure. Require a machine carrier transporting words
+rather than `c` to be rejected.
 
 ### TEST-410: Downgrade and cross-protocol isolation
 
@@ -1672,8 +1676,8 @@ No implementation task may be marked ready until all boxes are checked:
       implementations, including the hostile-record and transport-race cases.
 - [ ] OQ-401, OQ-402, and OQ-403 are resolved normatively or explicitly
       accepted by the human owner with bounded consequences.
-- [ ] SPEC-004 ADR-215, ADR-216, CON-209, CON-216, and REQ-226–227 are
-      reconciled with ADR-406 through ADR-409, or this protocol is reverted.
+- [ ] SPEC-004 0.9.0 or later records the completed reconciliation with
+      ADR-406 through ADR-409, or this protocol is reverted.
 - [ ] SPEC-004's profile-origin and mobile-platform evidence gate closes.
 - [ ] Human security sign-off records an approved version and commit.
 
@@ -1747,7 +1751,7 @@ Owner: HOC.
 
 | Outcome | Requirements | Decisions/contracts | Tests |
 |---|---|---|---|
-| Human `number-word-word` code | REQ-402 | ADR-402, CON-402, CON-403 | TEST-402 |
+| Human twelve-word code | REQ-402 | ADR-406, CON-402, CON-403 | TEST-402, TEST-413 |
 | Many apps and providers without a global directory | REQ-403 | ADR-401, ADR-402, CON-401–403 | TEST-408, TEST-409 |
 | Provider is not a PAKE trust anchor | REQ-404 | ADR-403, CON-404–407 | TEST-405, TEST-407 |
 | Mutual confirmation and N=1 guessing | REQ-405, REQ-406 | ADR-404, CON-404, CON-407 | TEST-403, TEST-406, TEST-411 |
