@@ -3,7 +3,7 @@ id: SPEC-004
 title: Application- and Account-Scoped Identity — deterministic home keys, acct aliases, portable device grants, and provider discovery
 status: draft
 tier: 1
-version: 0.9.0
+version: 0.10.0
 audience: agent, human, application developer, infrastructure provider
 author: Anuna Research (drafted with Codex, 2026-07-30; amended with Claude, 2026-07-31)
 last-updated: 2026-07-31
@@ -197,6 +197,9 @@ the Tier-1 gate in
 - Application context is resolved from a signed, ephemeral record at that
   address, not carried by the code and never spoken by a person. A code that
   resolves no record is never broadcast to candidate applications or providers.
+- Records resolve through a three-tier ladder — relays already authenticated
+  from a profile, a public distributed hash table, then the person supplying the
+  application's origin. Selfsame ships no relay and Anuna operates none.
 - Either party may generate and display the code; the application always
   selects the provider, publishes the record, and is SPAKE2 role A.
 - A same-device pairing bootstrap is delivered only to an installed,
@@ -737,6 +740,13 @@ operated by Selfsame, Anuna, or a prior application.
 
 A loopback development profile MAY be supplied by developer tooling, but it
 MUST be rejected by release builds.
+
+[[PROTO-003-selfsame-pairing-v1#CON-409]] record resolution conforms to this
+requirement rather than excepting it. Its tier-1 relays arrive only inside
+profiles the resolving party authenticated, its tier-3 path is the application's
+own origin — already required for the profile fetch — and its tier-2 distributed
+hash table has no operator. No Selfsame or Anuna endpoint is consulted when a
+profile is missing or unhealthy.
 
 Trace: [[SPEC-004-application-scoped-identity#TEST-216]],
 [[SPEC-004-application-scoped-identity#TEST-226]]
@@ -1693,6 +1703,10 @@ shape:
       "validUntil": "2027-07-30T00:00:00Z"
     }
   ],
+  "pairingRecordRelays": [
+    "https://records-au.provider.example",
+    "https://records.example.net"
+  ],
   "stateResolvers": [
     {
       "id": "state-1",
@@ -1769,6 +1783,22 @@ Every rendezvous descriptor additionally MUST contain `pairingUrl`,
 origin grammar. Pairing routes are exactly two ASCII digits and unique within
 the profile; their numeric value has no global meaning. `pairingUrl` and `url`
 MAY have different origins and MAY be operated by different organizations.
+
+`pairingRecordRelays` is an OPTIONAL array of canonical HTTPS origins serving
+[[PROTO-003-selfsame-pairing-v1#CON-409]] records. Each entry uses the canonical
+origin grammar in [[PROTO-002-selfsame-rendezvous-v1#CON-301]] and MUST be
+unique. A production application SHOULD declare at least two independently
+operated entries.
+
+These are tier-1 and tier-3 transports under
+[[PROTO-003-selfsame-pairing-v1#ADR-410]], not trust anchors: a relay serves
+self-authenticating signed records, so it can withhold one but never substitute
+one, and CON-409's checks do not weaken when a record arrives from any of them.
+A resolving party MAY cache these origins across ceremonies and query the
+accumulated set on a later first encounter with an unrelated application. Their
+absence does not disable pairing — the ladder degrades to the distributed hash
+table and then to the person supplying this application's origin, which is
+already required for the profile fetch.
 
 `revocation.method` MUST equal `did-crdt-revocations-v1` in profile version 1.
 The `projection` member is OPTIONAL. Its absence disables Bitstring projection
@@ -3740,10 +3770,9 @@ No implementation task may be marked ready until all boxes are checked:
       [[PROTO-004-selfsame-ceremony-envelope-v1#CON-501]] and
       [[PROTO-004-selfsame-ceremony-envelope-v1#CON-502]], and explicitly
       accepts or rejects the constant-nonce construction.
-- [ ] [[PROTO-003-selfsame-pairing-v1#OQ-401]] is resolved: no transport for
-      the CON-409 record is yet permitted by
-      [[SPEC-004-application-scoped-identity#REQ-210]], so no conforming
-      production client can route a first-encounter pairing.
+- [ ] Every production profile declares `pairingRecordRelays` per CON-201, or
+      documents why it relies on the
+      [[PROTO-003-selfsame-pairing-v1#ADR-410]] tier-2 and tier-3 path alone.
 - [ ] TEST-201 through TEST-226 pass against the reference implementation, with
       the normative KDF, alias, VC, holder-binding, revocation, account-scope,
       and username vectors published.

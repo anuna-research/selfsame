@@ -3,7 +3,7 @@ id: PROTO-003
 title: Selfsame Pairing Protocol v1 — routable num-word-word SPAKE2
 status: draft
 tier: 1
-version: 0.3.0
+version: 0.4.0
 audience: application developer, SDK implementer, wallet implementer, infrastructure operator, security reviewer
 author: Anuna Research (drafted with Codex, 2026-07-30; amended with Claude, 2026-07-31)
 last-updated: 2026-07-31
@@ -88,7 +88,9 @@ words ·
 code-derived meeting point ·
 [[PROTO-003-selfsame-pairing-v1#ADR-408]] let either party initiate, with the
 application always role A ·
-[[PROTO-003-selfsame-pairing-v1#ADR-409]] take routing out of the human code.
+[[PROTO-003-selfsame-pairing-v1#ADR-409]] take routing out of the human code ·
+[[PROTO-003-selfsame-pairing-v1#ADR-410]] resolve records through a transport
+ladder with no shipped Selfsame endpoint.
 
 **Load-bearing.**
 [[PROTO-003-selfsame-pairing-v1#REQ-401]] any independent provider and two
@@ -712,6 +714,70 @@ resolution. Two sources for one routing decision is a parser-differential
 invitation, and a resolution failure should be a typed error and a fresh
 ceremony, not a fallback path with different security properties.
 
+### ADR-410: A transport ladder with no shipped Selfsame endpoint
+
+**Status:** PROPOSED.
+
+[[PROTO-003-selfsame-pairing-v1#CON-409]] resolves through three tiers in order —
+relays the resolving party has already authenticated, a public distributed hash
+table, and, failing both, the person supplying the application's domain. Selfsame
+ships no relay of its own and Anuna operates none by default.
+
+The framing that makes this tractable is that **the resolving party is always the
+wallet, and it lacks context only on first encounter with a given application**.
+This is not "who runs discovery infrastructure for the ecosystem"; it is "what
+does a wallet do the first time it meets an application, ever." Once per
+application, forever.
+
+That reframing makes tier 3 the baseline rather than the embarrassment. The
+resolving party must fetch the application's profile from its canonical origin
+in CON-409 step 6 no matter which tier answered, so that origin is **already a
+hard dependency of every ceremony**. Letting it also name the relays that serve
+its own records adds nothing new, and it means discovery succeeds whenever the
+application itself is reachable. Tiers 1 and 2 are then pure optimisation over a
+guaranteed baseline: they exist to avoid asking the person for a domain, not to
+make the ceremony possible.
+
+Tier 1 grows without anyone shipping a default. A wallet accumulates relays from
+profiles it has authenticated, so a fresh install has only tiers 2 and 3 while an
+established wallet has a fast path it acquired through ordinary use. Records are
+self-authenticating, so querying an unrelated application's relay is harmless.
+
+The tiers were chosen because they fail in **uncorrelated** ways. Tier 1 is HTTPS
+on 443 and reaches managed networks that filter UDP on ephemeral ports — the
+common posture of enterprise, university, and guest networks, some of which
+additionally filter mainline by signature. Tier 2 has no operator to withhold,
+rate-limit, or shut down. Tier 3 depends only on infrastructure the ceremony
+already requires. Racing tiers 1 and 2 is therefore reachability insurance as
+much as latency insurance.
+
+This satisfies [[SPEC-004-application-scoped-identity#REQ-210]] without amending
+it. There is no Selfsame or Anuna endpoint consulted when a profile is missing;
+every tier-1 relay arrived inside a profile the wallet authenticated, and tier 3
+is the application's own origin.
+
+Two limits are recorded rather than argued away. A DHT client ships bootstrap
+hostnames, so tier 2 is not literally endpoint-free — but a bootstrap node can
+decline to introduce a client and can neither forge nor alter a signed record,
+and a client that caches live nodes stops needing it. And tier 2 may be
+unavailable for platform or distribution reasons, notably where shipping a
+BitTorrent-derived DHT client attracts review friction; the ladder degrades
+rather than failing.
+
+Rejected:
+
+- **a shipped Selfsame or Anuna relay list** — the operator dependency `REQ-210`
+  and the Infrastructure promise exist to prevent, and unnecessary once tier 3 is
+  recognised as a guaranteed baseline;
+- **amending `REQ-210` to carve out a discovery role** — defensible on the
+  merits, since a signed record means withhold-not-substitute, but it spends a
+  stated commitment to buy something the ladder already provides, and the next
+  role would want the same carve-out;
+- **a distributed hash table alone** — unreachable on exactly the managed
+  networks where a person is most likely to be pairing a work laptop; and
+- **relays alone** — either someone ships a default list, or a cold wallet has
+  nothing, which returns to the operator dependency this ADR avoids.
+
 ## Contracts
 
 ### CON-401: Pairing-capable provider descriptor and probe
@@ -1329,21 +1395,59 @@ from this record.
 
 #### Transport
 
-A conforming implementation MAY resolve through any transport that returns the
-signed record intact — a signed-record relay over HTTPS, a distributed hash
-table, or both raced concurrently. Racing is safe precisely because the record
-is self-authenticating: no trust decision depends on which transport answered,
-so latency is the faster arm and availability is the more resilient one.
+Any transport that returns the signed record intact is acceptable, because the
+record is self-authenticating: no trust decision depends on which transport
+answered. A transport SHALL NOT be treated as a trust anchor, SHALL NOT be
+permitted to substitute a record, and SHALL NOT be consulted for anything other
+than the exact derived address.
 
-A transport SHALL NOT be treated as a trust anchor, SHALL NOT be permitted to
-substitute a record, and SHALL NOT be consulted for anything other than the
-exact derived address. Errors are `PairingRecordUnavailable`,
-`PairingRecordMalformed`, `PairingRecordBadSignature`, `PairingRecordExpired`,
-or `PairingRecordConflict`; every one abandons the ceremony under
-[[PROTO-003-selfsame-pairing-v1#REQ-406]].
+The application SHALL publish to every tier available to it. The resolving party
+SHALL attempt the tiers in this order, racing tiers 1 and 2 concurrently, and
+SHALL accept the first record that passes the checks above:
 
-Which transports a conforming client ships, and who operates them, is
-[[PROTO-003-selfsame-pairing-v1#OQ-401]] and is unresolved.
+**Tier 1 — relays this party has already authenticated.** A resolving party MAY
+cache the `pairingRecordRelays` of every application profile it has
+authenticated, and MAY query that accumulated set. A relay holding no record for
+an address returns nothing, so querying an unrelated application's relay is
+harmless and discloses only the address. A party SHALL NOT add a relay to this
+cache from any source other than a profile it authenticated through the
+[[SPEC-004-application-scoped-identity#OQ-207]] origin mechanism — never from a
+caller, a bootstrap, a record, or another relay.
+
+**Tier 2 — a public distributed hash table.** Mainline BEP-44 mutable items are
+the version-2 default. This tier has no operator, and it reaches networks where
+tier 1 is unavailable.
+
+**Tier 3 — the person supplies the application's domain.** On failure of both,
+and only then, the party MAY ask the person for the application's origin, fetch
+the profile there, and resolve through that application's own
+`pairingRecordRelays`. This tier introduces no new dependency: the resolving
+party MUST fetch that profile in step 6 regardless, so the application's origin
+is already a hard requirement of the ceremony. It is a UX cost, not a trust or
+availability cost, and it succeeds whenever the application itself is reachable.
+
+Tiers 1 and 2 exist solely to avoid asking the person for a domain. Tier 3 is
+the guaranteed baseline, and an implementation SHALL NOT present it as a failure.
+
+The tiers fail in uncorrelated ways, which is why the ladder is specified rather
+than left to implementers: tier 1 is HTTPS on 443 and passes managed networks
+that filter UDP; tier 2 has no operator to withhold or disappear; tier 3 depends
+only on infrastructure the ceremony already requires.
+
+Two honest limits. A DHT client needs bootstrap nodes, so tier 2 does ship a
+list of hostnames — a far weaker dependency than
+[[SPEC-004-application-scoped-identity#REQ-210]] forbids, since a bootstrap node
+can decline to introduce a client but can neither forge nor alter a signed
+record, and a client that caches live nodes stops needing them. And a client
+SHALL degrade to the next tier rather than fail when a tier is unavailable for
+platform, policy, or distribution reasons; tier 2 in particular may be absent on
+platforms where shipping a DHT client is impractical.
+
+Errors are `PairingRecordUnavailable`, `PairingRecordMalformed`,
+`PairingRecordBadSignature`, `PairingRecordExpired`, or
+`PairingRecordConflict`. `PairingRecordUnavailable` is returned only after every
+available tier has been attempted; the others abandon the ceremony immediately
+under [[PROTO-003-selfsame-pairing-v1#REQ-406]].
 
 Implements: REQ-402, REQ-403, REQ-408, REQ-409.
 
@@ -1674,8 +1778,11 @@ No implementation task may be marked ready until all boxes are checked:
       record.
 - [ ] TEST-413 passes in both initiation directions against two independent
       implementations, including the hostile-record and transport-race cases.
-- [ ] OQ-401, OQ-402, and OQ-403 are resolved normatively or explicitly
-      accepted by the human owner with bounded consequences.
+- [ ] Field measurement of tier-2 reachability under
+      [[PROTO-003-selfsame-pairing-v1#ADR-410]], on mobile and on managed
+      networks, with a recorded fallback rate to tier 3.
+- [ ] OQ-402 and OQ-403 are resolved normatively or explicitly accepted by the
+      human owner with bounded consequences. OQ-401 is resolved by ADR-410.
 - [ ] SPEC-004 0.9.0 or later records the completed reconciliation with
       ADR-406 through ADR-409, or this protocol is reverted.
 - [ ] SPEC-004's profile-origin and mobile-platform evidence gate closes.
@@ -1683,28 +1790,29 @@ No implementation task may be marked ready until all boxes are checked:
 
 ## Open questions
 
-### OQ-401: Who operates the meeting-point transport? — blocking
+### OQ-401: Who operates the meeting-point transport? — RESOLVED by ADR-410
 
-[[PROTO-003-selfsame-pairing-v1#CON-409]] requires a transport that returns a
-signed record, but does not say who runs one or how a client finds it. The
-resolving party is by definition the one without the application profile, so the
-profile cannot name it — which leaves a shipped list, a distributed hash table,
-or both.
+Nobody operates it by default. [[PROTO-003-selfsame-pairing-v1#ADR-410]] fixes
+a three-tier ladder — relays already authenticated from an application profile,
+a public distributed hash table, and the person supplying the application's
+domain — and Selfsame ships no relay of its own.
 
-A shipped relay list brushes against
-[[SPEC-004-application-scoped-identity#REQ-210]] and the Infrastructure promise.
-The tension is narrower than it first appears, because a signed record means such
-a host can **withhold but never substitute**, making it a liveness dependency
-rather than a trust anchor — the same "hints, not trust anchors" line CON-409
-already draws. But `REQ-210` and the Infrastructure promise are anti-lock-in
-commitments about operator *power*, not privacy commitments, and a default
-transport is exactly the operator dependency they were written to prevent.
+The question dissolved once the resolving party's position was stated precisely:
+it is always the wallet, and it lacks context only on **first encounter with a
+given application**. Because the wallet must fetch that application's profile
+from its canonical origin regardless, the application's own origin is already a
+hard dependency of every ceremony and can therefore serve as the guaranteed
+discovery baseline. The other two tiers are optimisations that avoid asking a
+person for a domain, not prerequisites for the ceremony to work.
 
-The decision must fix: whether a version-2 client ships a relay list, whether at
-least two independent operators are required before the gate closes, whether a
-DHT is mandatory as the correctness arm, and what a client does when every
-declared transport fails. Racing several is permitted by CON-409 and does not by
-itself resolve who runs them.
+`REQ-210` is satisfied without amendment: no Selfsame or Anuna endpoint is
+consulted when a profile is missing. The two residual limits — DHT bootstrap
+hostnames, and platforms where a DHT client is impractical to ship — are
+recorded in ADR-410 and handled by tier degradation.
+
+What remains for the gate is empirical, not architectural: field measurement of
+tier-2 reachability, and a decision on the minimum number of tier-1 relays an
+application SHOULD declare.
 
 Owner: HOC + application-profile working group.
 
@@ -1759,6 +1867,7 @@ Owner: HOC.
 | QR/manual/same-device equivalence | REQ-408 | CON-402, CON-407, CON-408 | TEST-409, TEST-410 |
 | A code a person can say, with room for discovery | REQ-402 | ADR-406, CON-402 | TEST-402, TEST-403, TEST-413 |
 | First-encounter routing without a spoken identity | REQ-402, REQ-403 | ADR-407, ADR-409, CON-409 | TEST-408, TEST-413 |
+| Discovery with no Selfsame-operated infrastructure | REQ-403 | ADR-410, CON-409 | TEST-413 |
 | Either party may start the ceremony | REQ-408, REQ-409 | ADR-408, CON-402, CON-409 | TEST-409, TEST-413 |
 | One value, many renderings | REQ-402 | ADR-406, CON-402 | TEST-402, TEST-413 |
 
@@ -1830,6 +1939,31 @@ Standards constraints that are easy to miss:
 
 ## Changelog
 
+- **0.4.0 — 2026-07-31 — draft, normative.** Resolves OQ-401. Adds ADR-410 and
+  rewrites CON-409's transport section into a three-tier ladder: relays the
+  resolving party has already authenticated from an application profile, a
+  public distributed hash table, then the person supplying the application's
+  origin.
+
+  The question dissolved once the resolving party's position was stated
+  precisely — it is always the wallet, and it lacks context only on first
+  encounter with a given application. Because the wallet must fetch that
+  application's profile from its canonical origin regardless, that origin is
+  already a hard dependency of every ceremony and can serve as the guaranteed
+  discovery baseline. The other two tiers are optimisations that avoid asking a
+  person for a domain, not prerequisites.
+
+  Selfsame therefore ships no relay and Anuna operates none, and
+  [[SPEC-004-application-scoped-identity#REQ-210]] needs no amendment. The tiers
+  were chosen to fail in uncorrelated ways: HTTPS on 443 reaches managed networks
+  that filter UDP, a DHT has no operator to withhold, and the third depends only
+  on infrastructure already required. Two limits are recorded rather than argued
+  away — a DHT client ships bootstrap hostnames, and tier 2 may be impractical to
+  ship on some platforms; the ladder degrades rather than failing.
+
+  What remains for the gate is empirical: field measurement of tier-2
+  reachability and a minimum relay count. Adds a traceability row and a gate
+  item; amends the Orientation decisions list.
 - **0.3.0 — 2026-07-31 — draft, normative.** Replaces the code and its routing.
   Adds ADR-406 through ADR-409, REQ-409, CON-409, TEST-413, and OQ-401–403;
   rewrites CON-402; amends REQ-402, REQ-403, REQ-408, CON-403, CON-404, the
