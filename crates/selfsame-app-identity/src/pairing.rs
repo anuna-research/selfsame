@@ -1,5 +1,5 @@
 //! The pairing ceremony's obligations — `CON-213`, `CON-216`, `CON-217`,
-//! `CON-218`.
+//! `CON-218`, `REQ-226`, `REQ-228`, `REQ-229`.
 //!
 //! These four contracts are one capability: **what an adopting application owes
 //! around the [[PROTO-003]] pairing ceremony**. Routing itself is PROTO-003's;
@@ -125,9 +125,11 @@ pub enum PairingDowngrade {
     /// Deriving an AEAD or mailbox secret directly from `C`, `wib`, or any
     /// rendering of the human code, bypassing SPAKE2.
     ///
-    /// The one that matters most: a 128-bit code used directly as a key is a
-    /// key an eavesdropper can grind offline, which is the whole reason
-    /// `ADR-215` replaced the direct-secret construction.
+    /// The one that matters most, and the negative form of `REQ-226`: "No
+    /// client SHALL treat the short code as a bearer key, feed it to the former
+    /// direct-secret HKDF, omit SPAKE2, or accept a provider-generated peer
+    /// confirmation." A 128-bit code used directly as a key is a key an
+    /// eavesdropper can grind offline.
     #[error("secret derived from the human code, bypassing SPAKE2")]
     SecretFromCode,
     /// Carrying a route, nameplate, provider, or application identifier inside
@@ -141,6 +143,11 @@ pub enum PairingDowngrade {
     #[error("a confirmation MAC was omitted")]
     MissingConfirmation,
     /// Making the provider a SPAKE2 responder or password-verifier holder.
+    ///
+    /// The negative form of `REQ-228`: "The application and wallet SHALL be the
+    /// two SPAKE2 endpoints", and the selected provider "SHALL receive no word,
+    /// word index, password-equivalent verifier, PAKE key, mailbox key,
+    /// offer/grant plaintext, DID, account scope, or authorization decision."
     #[error("the provider was made a SPAKE2 endpoint")]
     ProviderAsPakeEndpoint,
     /// Using Hark or cbcl-bus transcript labels without Selfsame binding.
@@ -274,6 +281,10 @@ pub enum Conveyable {
 }
 
 /// Whether a value may be conveyed, given how far the transport ladder has got.
+///
+/// `TEST-232`'s grammar half. Its routing half — "require a twelve-word code to
+/// resolve exactly one CON-409 record" — needs a live record transport and is
+/// not covered here.
 ///
 /// `CON-216`: a party "SHALL attempt tiers 1 and 2 first and SHALL NOT offer
 /// origin entry as an alternative to resolution, a shortcut past it, or a
@@ -425,8 +436,12 @@ impl BoundOrigins {
     }
 }
 
-/// `CON-213`: "A pairing/rendezvous descriptor supplies no DID-state,
-/// account-authority, or status-projection endpoint."
+/// `CON-213` and `REQ-228`: "A pairing/rendezvous descriptor supplies no
+/// DID-state, account-authority, or status-projection endpoint."
+///
+/// `REQ-228` states the same boundary from the operator's side: "A provider may
+/// operate both pairing and PROTO-002 services, but co-location confers no
+/// application, account, DID-state, credential, or PAKE authority."
 ///
 /// Those roles require their own profile descriptors and protocols **even when
 /// one operator or DNS origin implements several roles**. Co-location is the
@@ -1013,6 +1028,9 @@ mod tests {
         assert!(recognise_transport_response(&plain, 4_096, &[200, 404]).is_ok());
     }
 
+    /// `TEST-233` and `TEST-235`, in the part that needs no SPAKE2: the relay
+    /// boundary. The confirmation and mailbox-secret halves of those tests need
+    /// a live PROTO-003 stack and are not covered here.
     #[test]
     fn the_two_bound_origins_are_separate_and_neither_admits_the_other() {
         // NFR-206: no wire identifier may assume the roles share a DNS origin.

@@ -16,7 +16,7 @@ mandatory infrastructure operator anywhere in the picture.
 ## Quick start
 
 ```bash
-cargo test -p selfsame-app-identity          # 338 tests
+cargo test -p selfsame-app-identity          # 386 tests
 SELFSAME_REGEN_CORPUS=1 cargo test -p selfsame-app-identity --test con_226_corpus
 ```
 

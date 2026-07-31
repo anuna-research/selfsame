@@ -15,23 +15,25 @@
 The pure core of [[SPEC-004-application-scoped-identity]] is implementable from
 the specification text. **All twenty-six contracts** are now implemented and
 tested against the specification's own `TEST-2NN` criteria, with a published
-conformance corpus. **Thirteen findings** are recorded below. Three deserve a
+conformance corpus. **Fourteen findings** are recorded below. Three deserve a
 reviewer's attention ahead of the rest: `FINDING-005` is a security defect in a
 pinned dependency, `FINDING-004` is an unpublishable digest, and `FINDING-013` is
 a contradiction between two contracts whose failure mode is that an implementer
-manufactures the evidence one of them forbids.
+manufactures the evidence one of them forbids. `FINDING-014` is the largest in
+scope — the specification defines no observability signals at all — and
+[[EXP-001-proposed-obs]] drafts the set it needs.
 
 The specification is unusually implementable for its size. Where it was
 ambiguous it was ambiguous in small, local ways, and in every case the
 fail-closed reading was available. That is the substantive result: a 6,100-line
 Tier-1 specification governing cryptography, authorization, and revocation
-produced thirteen findings, of which exactly one — `FINDING-013` — is an
-internal contradiction rather than an underspecification.
+produced fourteen findings, of which exactly one — `FINDING-013` — is an
+internal contradiction rather than an underspecification or an omission.
 
 **Confidence:** high on the covered surface, and it is worth being precise about
 why. Every obligation implemented here was read from the specification and
 tested against the specification's own criteria, seven hand-run mutants were
-killed by the tests written for them, and the whole is 338 tests. But
+killed by the tests written for them, and the whole is 386 tests. But
 Constitutional Principle 12 forbids this session from validating its own output,
 so "high confidence" here means *the author believes it correct*, which the
 protocol correctly treats as inadmissible evidence.
@@ -70,8 +72,14 @@ the one JSON recogniser and RFC 8785 canonicaliser, canonical base64url /
 base32 / base58btc, the restricted HTTPS URI grammar, the `dateTimeStamp`
 recogniser, the compact JWS layer, and `did:key`.
 
-**338 tests, all passing. `cargo clippy --all-targets` clean. The purity gate
+**386 tests, all passing. `cargo clippy --all-targets` clean. The purity gate
 passes: no network-capable crate is in the dependency graph.**
+
+Every `REQ-###`, `NFR-###`, and `CON-###` the specification defines is cited by
+name in the implementation or its tests, and 41 of 43 `TEST-2NN` are covered at
+least in part. The two that are not — `TEST-220`'s live third-party flow and
+`TEST-234`'s many-application spoken routing — need provider stacks that do not
+exist yet.
 
 ## What was NOT implemented, and why
 
@@ -335,6 +343,38 @@ gives none, and **manufactures one** from a payload-supplied identifier. `CON-22
 already forbids exactly that: "A caller-supplied package name in the payload is
 never evidence of anything."
 
+### FINDING-014 — SPEC-004 defines no `OBS-###`, so Principle 7 is unsatisfiable as written
+
+Constitutional Principle 7 requires that "every `REQ-###` carries at least one
+`OBS-###` link post-release", and PROTO-001's traceability chain is
+`REQ → CON → TEST → CODE → OBS`. SPEC-004 defines **zero** observability
+artefacts, and its Traceability table has no OBS column, so the chain terminates
+at TEST.
+
+The consequence is not only bookkeeping. `NFR-207` states a numeric latency
+threshold — 2 seconds at p95 — with no signal to evaluate it against, and
+`OQ-201` asks the human owner to ratify four freshness values that nobody has
+measured, because there is nothing measuring them.
+
+**Taken as:** a spec-level gap this experiment cannot close. Amendment Channels
+name chat instructions as a request rather than an amendment, so a draft is
+supplied instead of an edit.
+
+**Proposed resolution:** [[EXP-001-proposed-obs]] drafts fourteen signals,
+`OBS-201` through `OBS-214`, each traced to the requirements it serves, with the
+REQ → OBS mapping the Traceability table would gain and an explicit account of
+the requirements that get **no** signal and why. Two carry temporal properties in
+the notation PROTO-001 §Temporal Properties fixes, so `NFR-207` and `REQ-208`'s
+propagation bound become monitorable rather than asserted.
+
+The draft's shape is dictated by an interaction worth flagging to the reviewer:
+the dimensions a designer reaches for first — account scope, home DID, grant ID,
+device DID — are each forbidden by `REQ-217`, `NFR-201`, `NFR-203`, or `REQ-215`.
+So every proposed signal is a counter or a latency distribution dimensioned only
+by values already public to the party emitting them. A metric that let an
+operator reconstruct which accounts a person holds would defeat `NFR-201` more
+thoroughly than any protocol flaw, because it would do so quietly and at scale.
+
 ## Gate Evidence Record
 
 Per [[PROTO-001-usdd-agent-protocol]] §Gate Evidence Record. `unverified` is a
@@ -347,7 +387,9 @@ gates:
   - gate: "Tests derived from requirements (REQ → TEST)"
     mechanism: "cargo test -p selfsame-app-identity"
     result: pass
-    evidence: "338 passed, 9 suites; every test file names the TEST-2NN it derives from"
+    evidence: "386 passed, 12 suites; every test file names the TEST-2NN it
+      derives from. Artefact coverage: 31/31 REQ, 8/8 NFR, 26/26 CON, 41/43
+      TEST cited by name."
 
   - gate: "Test-First / Red Gate"
     mechanism: "commit order for the json recogniser; mutation testing elsewhere"
@@ -361,7 +403,10 @@ gates:
       authentication half of the consent gate, making burn() a no-op, permitting
       an implicit intent to carry ceremony material, and treating an
       unattributed caller as a mismatch. Each was killed by the test written for
-      it. A full mutation run was NOT performed."
+      it. Three more against the provider hint — dropping the descriptor-digest
+      check, the offer-digest check, and the account-scope prohibition — were
+      likewise killed, which matters because that verifier had shipped untested.
+      A full mutation run was NOT performed."
 
   - gate: "Purity: no I/O in the core"
     mechanism: "cargo test -p selfsame-app-identity --test purity"
@@ -416,6 +461,16 @@ gates:
     mechanism: "none run"
     result: unverified
     evidence: "Tier-1 gate item, outstanding"
+    owner: "the human owner"
+
+  - gate: "Observability: every REQ links to an OBS post-release (Principle 7)"
+    mechanism: "REQ → OBS traceability audit"
+    result: fail
+    evidence: "SPEC-004 defines zero OBS-### artefacts and its Traceability
+      table has no OBS column, so the chain terminates at TEST. FINDING-014.
+      docs/EXP-001-proposed-obs.md drafts OBS-201..OBS-214 with the mapping the
+      table would gain; adopting it needs a Tier-1 amendment through the
+      declared channel, which this experiment cannot perform."
     owner: "the human owner"
 
   - gate: "Full contract coverage"

@@ -1,6 +1,17 @@
 //! Ceremony payloads and the same-device handoff — `CON-219`, `CON-215`,
 //! `REQ-211`, `REQ-220` to `REQ-225`.
 //!
+//! `REQ-221` is why there is one payload module rather than two. The same-device
+//! path "SHALL use the same fresh offer, application evidence, provider
+//! selection, SPAKE2 roles and confirmation, derived rendezvous slots, encrypted
+//! grant bundle, acceptance predicate, device proof, and state-publication path
+//! as the cross-device ceremony; only delivery of the logical pairing bootstrap
+//! to Selfsame and an optional non-authoritative UI return differ." So
+//! [`Handoff`] and [`HandoffReturn`] are the *only* same-device types in this
+//! crate — everything else on that path is the cross-device type, which is what
+//! stops a platform adapter becoming "a second grant protocol with a different
+//! security state machine".
+//!
 //! PROTO-004 seals and recognises the envelope; this contract declares the two
 //! payload member sets that PROTO-004 leaves to the enclosing profile, and the
 //! digest rule that lets a developer backend commit to an offer it does not yet

@@ -20,6 +20,13 @@
 //! the other side: no Anuna or Selfsame production endpoint appears as a literal
 //! anywhere in the crate's sources, so there is nothing for a degraded profile
 //! to fall back *to*.
+//!
+//! That is also `TEST-220`'s "block all Anuna domains" half, discharged
+//! statically rather than by a firewall: the core cannot reach a blocked domain
+//! because it links nothing that can reach any domain, and names none. The rest
+//! of `TEST-220` — a complete issue-link-verify-revoke flow over third-party
+//! account, pairing, rendezvous, and state services — needs those services to
+//! exist and remains a gate item.
 
 use std::process::Command;
 
