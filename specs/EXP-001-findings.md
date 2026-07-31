@@ -406,7 +406,12 @@ gates:
       it. Three more against the provider hint — dropping the descriptor-digest
       check, the offer-digest check, and the account-scope prohibition — were
       likewise killed, which matters because that verifier had shipped untested.
-      A full mutation run was NOT performed."
+      Four against the shell's response policy found one SURVIVING mutant:
+      removing `bounded_body`'s post-read octet check left every test passing,
+      because `reqwest` derives an honest Content-Length from any in-memory
+      response, so no constructed response can reach that branch. Closed with a
+      real chunked-encoding server, which declares no length at all. A full
+      mutation run was NOT performed."
 
   - gate: "Purity: no I/O in the core"
     mechanism: "cargo test -p selfsame-app-identity --test purity"
@@ -558,6 +563,15 @@ Three, offered for Phase 4 rather than as findings against the specification.
   Neither is visible from the specification text alone, which is an argument for
   the Tier-1 gate's insistence on a reference implementation rather than review
   by inspection.
+- **A surviving mutant found an untestable branch, not just an untested one.**
+  `bounded_body` checks its bound twice: once against `Content-Length` before
+  transfer, once against the octets actually read. Removing the second check
+  broke nothing, because every response built in memory carries an honest
+  length — the branch was unreachable by construction from any unit test.
+  Reaching it needed a real server sending `Transfer-Encoding: chunked`. The
+  lesson is that "add a test for the uncovered line" is sometimes the wrong
+  question; the right one is "what would have to be true for this line to run",
+  and occasionally the answer is a different kind of test entirely.
 - **The SPL theory found a corpus gap that inspection had not.** Encoding
   "implemented and has a corpus case" as a defeasible rule and asking the theory
   which contracts were ready surfaced seven with no corpus group — including

@@ -3806,6 +3806,7 @@ version = "0.1.0"
 dependencies = [
  "did-crdt",
  "ed25519-dalek",
+ "http",
  "reqwest 0.12.28",
  "selfsame-app-identity",
  "selfsame-core",

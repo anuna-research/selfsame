@@ -115,10 +115,14 @@ pub(crate) fn client(deadline: Duration) -> Result<reqwest::Client, NetError> {
 
 /// Read a response body, refusing rather than truncating past the bound.
 ///
+/// Public because an adopting application adding a fetch of its own needs the
+/// same bound, and because a bound that is easy to reach for is a bound that
+/// gets used.
+///
 /// The distinction matters: a truncated body is a *different document*, and a
 /// recogniser handed one would either refuse it for the wrong reason or, worse,
 /// accept a prefix that happens to parse.
-pub(crate) async fn bounded_body(
+pub async fn bounded_body(
     response: reqwest::Response,
     max_octets: usize,
 ) -> Result<Vec<u8>, NetError> {
@@ -135,7 +139,7 @@ pub(crate) async fn bounded_body(
 }
 
 /// Whether a response carries a content encoding other than `identity`.
-pub(crate) fn has_content_encoding(response: &reqwest::Response) -> bool {
+pub fn has_content_encoding(response: &reqwest::Response) -> bool {
     response
         .headers()
         .get(reqwest::header::CONTENT_ENCODING)
@@ -144,7 +148,7 @@ pub(crate) fn has_content_encoding(response: &reqwest::Response) -> bool {
 }
 
 /// The `Content-Type` without parameters, lower-cased.
-pub(crate) fn media_type(response: &reqwest::Response) -> String {
+pub fn media_type(response: &reqwest::Response) -> String {
     response
         .headers()
         .get(reqwest::header::CONTENT_TYPE)
@@ -158,8 +162,23 @@ pub(crate) fn media_type(response: &reqwest::Response) -> String {
 }
 
 /// Whether the response set or expects cookies (`CON-213`).
-pub(crate) fn carried_cookies(response: &reqwest::Response) -> bool {
+pub fn carried_cookies(response: &reqwest::Response) -> bool {
     response.headers().contains_key(reqwest::header::SET_COOKIE)
+}
+
+/// The response-inspection helpers under their testing alias.
+///
+/// They are public in their own right — an adopting application implementing a
+/// sixth fetch needs the same bounds — and re-exported here so that
+/// `tests/response_policy.rs` reads as what it is: a test of the code that
+/// turns an HTTP response into the input `CON-220`'s and `CON-213`'s predicates
+/// decide on.
+///
+/// That code was the last untested thing in this crate. Every claim it makes
+/// about refusing compression, cookies, and oversized bodies runs through these
+/// four functions.
+pub mod testing {
+    pub use super::{bounded_body, carried_cookies, has_content_encoding, media_type};
 }
 
 #[cfg(test)]

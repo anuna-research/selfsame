@@ -54,3 +54,8 @@ The Infrastructure promise, and `REQ-210` enforcing it: an Anuna node a develope
 because a profile failed to name one is exactly what the requirement forbids. An
 implementation must not special-case any operator, and `tests/purity.rs` checks
 that no such endpoint is compiled into the core at all.
+
+## Related
+
+- [[provider-happy-paths]]
+- [[SPEC-004-application-scoped-identity#REQ-228]]
