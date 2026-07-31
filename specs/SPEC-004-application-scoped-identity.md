@@ -3,7 +3,7 @@ id: SPEC-004
 title: Application- and Account-Scoped Identity — deterministic home keys, acct aliases, portable device grants, and provider discovery
 status: draft
 tier: 1
-version: 0.11.1
+version: 0.12.0
 audience: agent, human, application developer, infrastructure provider
 author: Anuna Research (drafted with Codex, 2026-07-30; amended with Claude, 2026-07-31)
 last-updated: 2026-07-31
@@ -197,8 +197,11 @@ the Tier-1 gate in
   the seed for the [[PROTO-003-selfsame-pairing-v1#CON-409]] meeting-point
   address.
 - Application context is resolved from a signed, ephemeral record at that
-  address, not carried by the code and never spoken by a person. A code that
-  resolves no record is never broadcast to candidate applications or providers.
+  address, not carried by the code. A code that resolves no record is never
+  broadcast to candidate applications or providers.
+- A person is asked for the application's origin only as CON-409 tier 3, after
+  every other transport has failed. It is a lookup key, never an authorization
+  input: the canonical `applicationId` still comes from the fetched profile.
 - Records resolve through a three-tier ladder — relays already authenticated
   from a profile, a public distributed hash table, then the person supplying the
   application's origin. Selfsame ships no relay and Anuna operates none.
@@ -235,6 +238,15 @@ key derivation, identity correlation boundaries, and revocation. Every
 `ADR-2##` is PROPOSED. This document is suitable for requirements review and
 prototype planning only. It does not authorize implementation or shipment
 until the gate in [[SPEC-004-application-scoped-identity#Tier-1 Gate]] closes.
+
+[[SPEC-001-device-key-provisioning]] is deliberately an unresolved link. That
+document is not present in this vault, and per the dead-link discipline it is
+recorded here as visible debt rather than deleted to quiet the report: it is
+required by [[SPEC-004-application-scoped-identity#OQ-206]], by the Tier-1 gate
+item covering SPEC-001 amendment, and by
+[[PROTO-004-selfsame-ceremony-envelope-v1#OQ-501]]. Locating or reconstructing
+it is owned by the SPEC-001 maintainer and blocks those items, not this
+document's other content.
 
 This specification is the second-application trigger anticipated by
 [[SPEC-001-device-key-provisioning]] ADR-011 and ADR-012. It proposes the
@@ -398,7 +410,9 @@ person to edit a URI, domain, DID document, or provider configuration.
    and verifies the record, authenticates that application's profile against
    the record's digest, selects the named descriptor, and runs SPAKE2 as role B
    through the selected blind relay; it never runs an independent provider
-   election and is never asked for an application identity.
+   election. On the normal path it is never asked for an application identity;
+   only if every [[PROTO-003-selfsame-pairing-v1#CON-409]] transport tier fails
+   does it fall back to asking the person for the application's origin.
 4. After both sides verify explicit confirmation MACs, they derive the
    128-bit PROTO-002 mailbox secret from the PAKE key. The application writes
    the encrypted offer and the wallet reads it.
@@ -685,6 +699,24 @@ Trace: [[SPEC-004-application-scoped-identity#TEST-211]]
 Every grant SHALL contain a globally unique `id`, `validFrom`, `validUntil`,
 and one `SelfsameDidCrdtStatusEntry` whose `statusPurpose` is `revocation` and
 whose `credentialId` exactly equals the grant `id`.
+
+`validUntil` SHALL be later than `validFrom` by no more than the profile's
+`maxGrantLifetimeSeconds`, which SHALL NOT exceed 2,592,000 seconds — thirty
+days. An issuer SHALL NOT mint a longer grant and a verifier SHALL reject one
+under [[SPEC-004-application-scoped-identity#CON-206]] step 11, whatever the
+current time.
+
+This bound is load-bearing rather than hygienic. Revocation depends on a
+verifier obtaining fresh issuer state, and
+[[SPEC-004-application-scoped-identity#CON-204]] permits an application that
+cannot reach the home controller to rely on expiry alone when provisioning
+fails. Grant lifetime is therefore the outer bound on how long a revoked or
+unprovisionable device keeps working, and an unbounded `validUntil` would make
+revocation cosmetic in exactly the cases where it matters most. Choosing the
+final ceiling alongside `maxClosureAgeSeconds` and `propagationSlaSeconds` is
+[[SPEC-004-application-scoped-identity#OQ-201]]; the thirty-day value above is
+a normative default that OQ-201 may lower but SHALL NOT raise without a Tier-1
+amendment.
 
 Unlinking a device SHALL create a signed `did:crdt`
 `RevokeCredential { credential_id }` delta, where `credential_id` is the exact
@@ -1068,8 +1100,16 @@ Trace: [[SPEC-004-application-scoped-identity#TEST-232]],
 Every carrier SHALL convey the logical bootstrap in
 [[PROTO-003-selfsame-pairing-v1#CON-402]]. Machine carriers convey the sixteen
 octets of `C` directly; a person conveys its twelve-word rendering. No carrier
-conveys a canonical `applicationId`, profile digest, route, or nameplate, and no
-person is asked to say an HTTPS identity.
+conveys a canonical `applicationId`, profile digest, route, or nameplate.
+
+On the normal path no person is asked to say an HTTPS identity. The single
+exception is tier 3 of [[PROTO-003-selfsame-pairing-v1#CON-409]], reached only
+after every other transport has failed, where the person supplies the
+application's origin as a lookup key. That path exists because no
+non-user-supplied discovery transport can be guaranteed on every network, and
+because the resolving party must fetch the profile from that origin regardless —
+so it introduces no new dependency and no new trust. It SHALL NOT be offered
+before the other tiers are attempted.
 
 Application context SHALL be resolved from the signed record in
 [[PROTO-003-selfsame-pairing-v1#CON-409]], whose contents re-enter the
@@ -1135,6 +1175,8 @@ An application may still correlate a person through non-Selfsame data such as
 email, payment, IP address, or browser fingerprinting. This requirement makes
 no claim about those channels.
 
+Trace: [[SPEC-004-application-scoped-identity#TEST-201]], [[SPEC-004-application-scoped-identity#TEST-206]], [[SPEC-004-application-scoped-identity#TEST-221]], [[SPEC-004-application-scoped-identity#TEST-222]]
+
 ### NFR-202: Deterministic portability
 
 At least two independent implementations SHALL reproduce every normative KDF,
@@ -1148,6 +1190,8 @@ envelope key schedule, sealed record, and rejection vectors are part of this
 portability gate. The `offerDigest` and payload vectors in
 [[SPEC-004-application-scoped-identity#CON-219]] are included.
 
+Trace: [[SPEC-004-application-scoped-identity#TEST-202]], [[SPEC-004-application-scoped-identity#TEST-207]], [[SPEC-004-application-scoped-identity#TEST-226]], [[SPEC-004-application-scoped-identity#TEST-236]]
+
 ### NFR-203: Data minimization
 
 The VC SHALL contain only its random ID, the application ID, opaque account
@@ -1157,6 +1201,8 @@ the optional human-readable alias, another application's identifier, a display
 name, email address, mnemonic fingerprint, `accountScopeId`, or
 provider-selection history.
 
+Trace: [[SPEC-004-application-scoped-identity#TEST-206]]
+
 ### NFR-204: No verification-time code or context loading
 
 VC verification SHALL perform no arbitrary remote JSON-LD context fetch, schema
@@ -1165,6 +1211,8 @@ code execution, dynamic algorithm loading, or plugin discovery.
 The exact base and Selfsame contexts SHALL be pinned by digest in the SDK.
 Unknown context entries SHALL be rejected before signature-dependent
 authorization decisions are made.
+
+Trace: [[SPEC-004-application-scoped-identity#TEST-207]], [[SPEC-004-application-scoped-identity#TEST-208]], [[SPEC-004-application-scoped-identity#TEST-211]]
 
 ### NFR-205: Fail closed
 
@@ -1179,12 +1227,16 @@ authenticated session.
 There SHALL be no TOFU path for issuer keys, projection issuers, account
 authorities, or provider descriptors.
 
+Trace: [[SPEC-004-application-scoped-identity#TEST-208]], [[SPEC-004-application-scoped-identity#TEST-211]], [[SPEC-004-application-scoped-identity#TEST-229]]
+
 ### NFR-206: Provider diversity
 
 The protocol SHALL permit the account, pairing, rendezvous, state, and optional
 status-projection roles to be operated by different organizations. A selected
 descriptor may bind separate pairing and mailbox origins, but no wire
 identifier SHALL assume any other roles share a DNS origin or deployment stack.
+
+Trace: [[SPEC-004-application-scoped-identity#TEST-220]], [[SPEC-004-application-scoped-identity#TEST-226]]
 
 ### NFR-207: Selection latency
 
@@ -1194,6 +1246,8 @@ excluding captive portals and complete network loss.
 
 Health probes SHALL be bounded and parallel. A slow high-priority provider
 SHALL NOT serially block all fallbacks.
+
+Trace: [[SPEC-004-application-scoped-identity#TEST-214]]
 
 ### NFR-208: Algorithm confinement
 
@@ -1207,6 +1261,8 @@ appears in a sealed record, so there is nothing for untrusted input to select.
 
 Algorithm agility SHALL occur by a new profile version and explicit migration,
 never by accepting an algorithm named by untrusted input.
+
+Trace: [[SPEC-004-application-scoped-identity#TEST-208]], [[SPEC-004-application-scoped-identity#TEST-236]]
 
 ## Architecture decisions
 
@@ -1785,6 +1841,7 @@ shape:
   ],
   "revocation": {
     "method": "did-crdt-revocations-v1",
+    "maxGrantLifetimeSeconds": 2592000,
     "maxClosureAgeSeconds": 900,
     "propagationSlaSeconds": 60,
     "projection": {
@@ -1799,9 +1856,51 @@ shape:
 }
 ```
 
-The physical encoding and remote update mechanism are deliberately outside
-version 1. The application MUST embed an authenticated copy; it MAY update the
-profile through its own authenticated release/configuration channel.
+#### Encoding and recognition
+
+The physical encoding is **UTF-8 JSON**, and this is normative rather than a
+convenience. Later contracts sign and compare `SHA-256(RFC8785(profile))` —
+[[SPEC-004-application-scoped-identity#CON-214]] binds it,
+[[PROTO-003-selfsame-pairing-v1#CON-403]] puts it in the PAKE transcript, and
+[[PROTO-003-selfsame-pairing-v1#CON-409]] requires a resolving party to
+recompute it — none of which is well-defined without fixing the serialization.
+Earlier drafts placed the encoding outside version 1 while relying on that
+digest, which let two conforming recognizers disagree about which profiles are
+valid even when they computed the same digest.
+
+The profile is therefore a closed recognized language:
+
+1. the document is valid UTF-8 with no byte-order mark and at most 65,536
+   octets;
+2. it parses as JSON with no duplicate member names, no trailing content, and a
+   nesting depth of at most 8;
+3. the top-level value is an object whose member set is exactly the ten names
+   below — `profileVersion`, `applicationId`, `accountAuthority`,
+   `verifierAudience`, `allowedPermissions`, `enrollment`, `rendezvous`,
+   `stateResolvers`, `revocation`, and the OPTIONAL `pairingRecordRelays`;
+4. every member value satisfies its grammar in this contract; and
+5. re-serializing the recognized object with RFC 8785 reproduces the input
+   byte-for-byte.
+
+**An unknown member at any depth is a rejection, not an extension point.** There
+is no forward-compatibility affordance inside a profile; a new field is a new
+`profileVersion`. A party SHALL complete all five steps before any semantic
+action, and SHALL NOT extract a field by regular expression or act on a partial
+parse.
+
+`profileVersion` is exactly the integer `1`. `allowedPermissions` is a non-empty
+array of at most 64 absolute HTTPS URIs, each on the `applicationId` origin with
+a non-empty fragment, sorted by Unicode code point, without duplicates, and
+compared as exact ASCII after the same canonicalization `applicationId` uses —
+[[SPEC-004-application-scoped-identity#CON-206]] step 12 and
+[[SPEC-004-application-scoped-identity#CON-214]] both compare against this array,
+so an unnormalized permission would otherwise be a comparison hazard.
+`rendezvous` and `stateResolvers` are non-empty arrays of at most 64 entries;
+`pairingRecordRelays` at most 16.
+
+The remote update mechanism remains outside version 1. The application MUST
+embed an authenticated copy; it MAY update the profile through its own
+authenticated release/configuration channel.
 
 `accountScopeId` is authenticated per-account runtime input, not an application
 profile property. A profile containing an account scope MUST be rejected; doing
@@ -1841,7 +1940,14 @@ verification in CON-215 authenticate it; field presence is not proof.
 
 Every provider ID MUST match `[a-z0-9][a-z0-9-]{0,62}` and be unique within its
 role. Every provider URL MUST be HTTPS, contain an authority, and contain no
-user information or fragment. A rendezvous `validUntil` value MUST be a UTC
+user information or fragment.
+
+`priority` and `weight` MUST each be integers in `[0, 65535]`. `priority`
+groups descriptors in ascending order under
+[[SPEC-004-application-scoped-identity#CON-208]] step 3; `weight` is the
+selection weight in step 6, where zero means ineligible. At least one descriptor
+in the lowest-priority group MUST have a non-zero weight, or that group can
+never be selected from. A rendezvous `validUntil` value MUST be a UTC
 XML Schema `dateTimeStamp`; an expired descriptor is ineligible. Rendezvous
 `url` values have the stricter canonical-origin grammar in
 [[PROTO-002-selfsame-rendezvous-v1#CON-301]] and MUST conform to it.
@@ -1904,6 +2010,11 @@ absence does not disable pairing — the ladder degrades to the distributed hash
 table and then to the person supplying this application's origin, which is
 already required for the profile fetch.
 
+`revocation.maxGrantLifetimeSeconds` is REQUIRED, is a positive integer, and
+MUST NOT exceed 2,592,000. It bounds `validUntil - validFrom` under
+[[SPEC-004-application-scoped-identity#REQ-208]] and is enforced at CON-206
+step 11.
+
 `revocation.method` MUST equal `did-crdt-revocations-v1` in profile version 1.
 The `projection` member is OPTIONAL. Its absence disables Bitstring projection
 without disabling issuance or revocation. If present, its URLs identify only
@@ -1913,6 +2024,10 @@ status-list credential issuer and authority under CON-210.
 For hashing in CON-209 and PROTO-003, the canonical descriptor bytes are the
 RFC 8785 JSON Canonicalization Scheme serialization of the complete rendezvous
 descriptor, including all three pairing fields.
+
+Implements: [[SPEC-004-application-scoped-identity#REQ-202]], [[SPEC-004-application-scoped-identity#REQ-209]], [[SPEC-004-application-scoped-identity#REQ-210]], [[SPEC-004-application-scoped-identity#REQ-214]].
+
+Verified by: [[SPEC-004-application-scoped-identity#TEST-203]], [[SPEC-004-application-scoped-identity#TEST-214]], [[SPEC-004-application-scoped-identity#TEST-216]], [[SPEC-004-application-scoped-identity#TEST-220]].
 
 ### CON-202: Application and account key hierarchy
 
@@ -1982,6 +2097,10 @@ The Tier-1 gate requires normative vectors for:
 - a one-byte account-scope change;
 - Unicode mnemonic normalization; and
 - rejection of non-canonical application IDs and account scopes.
+
+Implements: [[SPEC-004-application-scoped-identity#REQ-201]], [[SPEC-004-application-scoped-identity#REQ-213]], [[SPEC-004-application-scoped-identity#REQ-216]].
+
+Verified by: [[SPEC-004-application-scoped-identity#TEST-201]], [[SPEC-004-application-scoped-identity#TEST-202]], [[SPEC-004-application-scoped-identity#TEST-219]], [[SPEC-004-application-scoped-identity#TEST-222]].
 
 ### CON-203: DID Document and RFC 7565 account alias
 
@@ -2060,6 +2179,10 @@ Tier-1-gated dependency.
 For generated aliases, comparison is exact ASCII after validation. A general
 `acct:` parser MUST follow RFC 7565 and RFC 3986 case and percent-encoding
 normalization and MUST NOT assume that arbitrary userparts are case-insensitive.
+
+Implements: [[SPEC-004-application-scoped-identity#REQ-203]].
+
+Verified by: [[SPEC-004-application-scoped-identity#TEST-204]], [[SPEC-004-application-scoped-identity#TEST-205]], [[SPEC-004-application-scoped-identity#TEST-224]].
 
 ### CON-204: Account provisioning and reciprocal binding
 
@@ -2144,6 +2267,10 @@ The response proves the account authority's reciprocal assertion. It does not
 prove that the provider's internal mapping to a human is correct, and no
 Selfsame verifier may infer such a claim.
 
+Implements: [[SPEC-004-application-scoped-identity#REQ-203]], [[SPEC-004-application-scoped-identity#REQ-204]].
+
+Verified by: [[SPEC-004-application-scoped-identity#TEST-205]], [[SPEC-004-application-scoped-identity#TEST-206]].
+
 ### CON-205: Selfsame Device Grant Credential
 
 The provisional immutable context identifier is:
@@ -2174,14 +2301,37 @@ be immutable. The logical context defines:
     "@type": "@id",
     "@container": "@set"
   },
-  "SelfsameDidCrdtStatusEntry":
-    "https://selfsame.dev/vocab/device-grant/v1#SelfsameDidCrdtStatusEntry",
-  "credentialId": {
-    "@id": "https://selfsame.dev/vocab/device-grant/v1#credentialId",
-    "@type": "@id"
+  "SelfsameDidCrdtStatusEntry": {
+    "@id":
+      "https://selfsame.dev/vocab/device-grant/v1#SelfsameDidCrdtStatusEntry",
+    "@context": {
+      "@protected": true,
+      "id": "@id",
+      "type": "@type",
+      "statusPurpose":
+        "https://www.w3.org/ns/credentials/status#statusPurpose",
+      "credentialId": {
+        "@id": "https://selfsame.dev/vocab/device-grant/v1#credentialId",
+        "@type": "@id"
+      }
+    }
   }
 }
 ```
+
+`statusPurpose` and `credentialId` are scoped inside
+`SelfsameDidCrdtStatusEntry` rather than declared at the top level. The scoping
+is required, not stylistic: the W3C v2 context defines `statusPurpose` only
+inside `BitstringStatusListEntry` and `BitstringStatusList`, so a
+`SelfsameDidCrdtStatusEntry` carrying that member would otherwise use an
+undefined term and fail the conformance REQ-205 asserts and the unknown-entry
+rejection NFR-204 requires. `statusPurpose` deliberately reuses the W3C status
+IRI so the two entry types agree on what the term means.
+
+`aud` and `cnf` need no declaration here. Both are defined at the top level of
+`https://www.w3.org/ns/credentials/v2`, `cnf` with its own scoped context
+covering `kid` and `jwk`, so the payload members in CON-205 are already
+context-defined by the base context this credential includes first.
 
 At issuance, generate 32 CSPRNG bytes and encode them as canonical base64url
 without padding:
@@ -2284,6 +2434,10 @@ The credential:
 - MUST use XML Schema `dateTimeStamp` values normalized to UTC `Z`; and
 - MUST make the `cnf.jwk` key equal the Ed25519 key encoded by the device DID.
 
+Implements: [[SPEC-004-application-scoped-identity#REQ-205]], [[SPEC-004-application-scoped-identity#REQ-206]], [[SPEC-004-application-scoped-identity#REQ-208]].
+
+Verified by: [[SPEC-004-application-scoped-identity#TEST-207]], [[SPEC-004-application-scoped-identity#TEST-208]], [[SPEC-004-application-scoped-identity#TEST-212]].
+
 ### CON-206: Grant acceptance predicate
 
 Given `grant_bytes`, an embedded `application_profile`, the exact RFC 7565
@@ -2317,7 +2471,10 @@ order:
     grant; an unset, stale, invalid, or unavailable projection never bypasses
     the CRDT check.
 11. Require current time to be within `[validFrom, validUntil)`, allowing only
-    the application's explicitly configured clock-skew bound.
+    the application's explicitly configured clock-skew bound, and independently
+    require `validUntil - validFrom` not to exceed the profile's
+    `maxGrantLifetimeSeconds`. A grant whose lifetime exceeds the bound is
+    rejected even while it is otherwise within its validity window.
 12. Require every permission to be declared by the embedded profile and by the
     local operation being attempted.
 13. Run the device proof-of-possession challenge in CON-207.
@@ -2325,6 +2482,10 @@ order:
 Authorization succeeds only if every step succeeds. Diagnostic detail MAY be
 logged locally but externally visible errors SHOULD collapse to a small stable
 set so that attackers do not gain a credential oracle.
+
+Implements: [[SPEC-004-application-scoped-identity#REQ-205]], [[SPEC-004-application-scoped-identity#REQ-207]], [[SPEC-004-application-scoped-identity#REQ-208]].
+
+Verified by: [[SPEC-004-application-scoped-identity#TEST-211]], [[SPEC-004-application-scoped-identity#TEST-212]].
 
 ### CON-207: Device proof of possession
 
@@ -2351,6 +2512,10 @@ signature over `proof_input`. The verifier validates it with `cnf.jwk`.
 The verifier SHALL atomically mark the nonce used whether verification succeeds
 or fails. It SHALL reject a nonce issued for another application, account,
 grant, verifier session, or time window.
+
+Implements: [[SPEC-004-application-scoped-identity#REQ-206]].
+
+Verified by: [[SPEC-004-application-scoped-identity#TEST-209]], [[SPEC-004-application-scoped-identity#TEST-210]].
 
 ### CON-208: Pairing-capable rendezvous provider selection
 
@@ -2380,6 +2545,10 @@ authenticity remain end-to-end.
 Selection MUST NOT use a stable user identifier, home DID, `acct:` URI, device
 key, or recovery-derived value as the random input. Doing so would create
 provider-visible cohorts.
+
+Implements: [[SPEC-004-application-scoped-identity#REQ-209]], [[SPEC-004-application-scoped-identity#REQ-219]].
+
+Verified by: [[SPEC-004-application-scoped-identity#TEST-214]], [[SPEC-004-application-scoped-identity#TEST-215]], [[SPEC-004-application-scoped-identity#TEST-226]].
 
 ### CON-209: Authenticated provider hint
 
@@ -2434,6 +2603,10 @@ The joiner verifies:
 - descriptor digest equal to its local descriptor;
 - offer digest equal to the offer it is processing; and
 - PROTO-003 binding and confirmation before deriving or using a mailbox slot.
+
+Implements: [[SPEC-004-application-scoped-identity#REQ-212]].
+
+Verified by: [[SPEC-004-application-scoped-identity#TEST-218]], [[SPEC-004-application-scoped-identity#TEST-226]].
 
 ### CON-210: CRDT revocation and optional status projection
 
@@ -2533,6 +2706,10 @@ Status credentials SHOULD be stapled where practical. Fetchers SHOULD use
 privacy-preserving caches or proxies rather than reveal individual
 authorization events to the publication host.
 
+Implements: [[SPEC-004-application-scoped-identity#REQ-208]].
+
+Verified by: [[SPEC-004-application-scoped-identity#TEST-212]], [[SPEC-004-application-scoped-identity#TEST-213]], [[SPEC-004-application-scoped-identity#TEST-224]].
+
 ### CON-211: Account-scope identifier and lifecycle
 
 The canonical textual form is base64url without padding of exactly 32 random
@@ -2566,6 +2743,10 @@ The application passes the canonical string through an authenticated,
 in-process SDK boundary. Selfsame uses it only as KDF context and private
 storage namespace. Providers and public protocols receive the resulting DID,
 alias, or credential identifiers, never the scope itself.
+
+Implements: [[SPEC-004-application-scoped-identity#REQ-216]], [[SPEC-004-application-scoped-identity#REQ-217]].
+
+Verified by: [[SPEC-004-application-scoped-identity#TEST-222]], [[SPEC-004-application-scoped-identity#TEST-223]].
 
 ### CON-212: Human-readable alias grammar and lifecycle
 
@@ -2617,6 +2798,10 @@ appearing to transfer identity.
 No set, rename, removal, reservation, or tombstone operation changes
 `accountScopeId`, the home DID, any key, the stable alias, existing grant IDs,
 VCs, device proofs, revocation G-Set entries, or provider selection.
+
+Implements: [[SPEC-004-application-scoped-identity#REQ-218]].
+
+Verified by: [[SPEC-004-application-scoped-identity#TEST-225]].
 
 ### CON-213: Pairing and rendezvous protocol binding
 
@@ -2876,8 +3061,19 @@ adopting application owes around it.
    digest, `providerId`, and nameplate.
 
 The application SHALL NOT render, or ask a person to convey, a pairing URL, a
-mailbox URL, a route, a nameplate, an application identity, or any value other
-than the twelve-word rendering of `C`. Where the application displays the code,
+mailbox URL, a route, a nameplate, or any value other than the twelve-word
+rendering of `C`.
+
+There is exactly one exception, and it is a last resort rather than a mode. When
+every [[PROTO-003-selfsame-pairing-v1#CON-409]] transport tier has failed, the
+resolving party MAY ask the person for the application's origin as tier 3, and
+the application MAY display that origin to support it. A party SHALL attempt
+tiers 1 and 2 first and SHALL NOT offer origin entry as an alternative to
+resolution, a shortcut past it, or a default. Origin entry supplies only a
+lookup key: the canonical `applicationId` still comes from the profile fetched
+at that origin, and every CON-409 check applies unchanged.
+
+Where the application displays the code,
 it SHOULD also show its own authenticated origin as context for the person —
 that display is a courtesy to the reader, never a protocol input, and the
 resolving party ignores it.
@@ -3070,24 +3266,45 @@ The wallet seals this object under `K_bundle`:
   "ceremonyId": "<the exact ceremonyId from the offer>",
   "requestId": "<the exact requestId from the offer>",
   "grantMediaType": "application/vc+jwt",
-  "grant": "<base64url of the compact JWS octets>",
+  "grant": "<the compact JWS verbatim, as an ASCII string>",
   "issuerClosure": "<base64url of a signed did:crdt closure, OPTIONAL>"
 }
 ```
 
 The member set is exactly those seven names, of which `issuerClosure` is the
 only OPTIONAL one. `grantMediaType` is exactly `application/vc+jwt`.
-`grant` decodes to the compact JWS octets required by
-[[SPEC-004-application-scoped-identity#REQ-205]], at most 65,536 octets, and is
-carried without translation as
-[[SPEC-004-application-scoped-identity#REQ-211]] requires.
+
+`grant` carries the compact JWS **verbatim**, as the ASCII string it already is,
+at most 65,536 characters. It is not re-encoded. A compact JWS under RFC 7515 is
+three base64url segments separated by `.`, so every character is already
+JSON-string-safe and requires no escaping; base64url-encoding it a second time
+would expand 65,536 octets to 87,382 and exceed the payload bound by 17,771 —
+which is why this contract says verbatim rather than encoded. That also
+satisfies [[SPEC-004-application-scoped-identity#REQ-211]] more directly: the
+bytes a verifier extracts are byte-identical to the bytes the issuer signed,
+with no transformation in between.
+
+The size budget is therefore:
+
+```text
+payload bound (PROTO-004 CON-502)                        69,611
+  grant, at the CON-206 step 1 maximum                  -65,536
+  fixed members and JSON syntax                    approx  -250
+                                                   ─────────────
+  remaining for issuerClosure                      approx 3,825
+```
 
 `issuerClosure`, when present, is the closure
 [[SPEC-004-application-scoped-identity#CON-206]] step 4 may consume without a
-state-resolver round trip. It is OPTIONAL because the 69,611-octet payload
-bound must also hold a 65,536-octet grant: an implementation that cannot fit
-both SHALL omit the closure and let the verifier resolve it, and SHALL NOT
-truncate either value. The size budget is the reason
+state-resolver round trip. It is OPTIONAL precisely because that remainder is
+small: an implementation whose closure does not fit SHALL omit it and let the
+verifier resolve one, and SHALL NOT truncate either value. A payload exceeding
+the bound is a `PayloadTooLarge` failure under
+[[PROTO-004-selfsame-ceremony-envelope-v1#CON-504]], never a silent truncation.
+
+The 65,536-character ceiling is a defensive bound inherited from CON-206 step 1,
+not an expected size; a conforming grant is on the order of one to two kilobytes,
+so both members fit comfortably in practice. The budget is the reason
 [[PROTO-004-selfsame-ceremony-envelope-v1#OQ-502]] treats bundle length as
 observable metadata.
 
@@ -3115,27 +3332,50 @@ Verified by: TEST-217, TEST-228, TEST-229, TEST-231, TEST-236.
 
 ### TEST-201: Application separation
 
+**Validates:** [[SPEC-004-application-scoped-identity#REQ-201]].
+
 For one fixed recovery seed, one fixed canonical account scope, and 10,000
 distinct canonical application IDs, derive 10,000 unique application nodes,
 account nodes, home seeds, public keys, and DIDs. No pair is equal.
 
 ### TEST-202: Deterministic restore
 
+**Validates:** [[SPEC-004-application-scoped-identity#REQ-201]].
+
 Two independent implementations derive byte-identical application nodes,
 account nodes, and home seeds from every normative vector.
 
-### TEST-203: Application ID canonicality
+### TEST-203: Application ID and profile canonicality
+
+**Validates:** [[SPEC-004-application-scoped-identity#REQ-202]],
+[[SPEC-004-application-scoped-identity#REQ-209]].
 
 Accept the normative canonical URI corpus. Reject variants with upper-case
 host, default port, user information, query, fragment, dot segment, Unicode
 host, lower-case percent hex, or percent-encoded unreserved character.
 
+Exercise the CON-201 profile recognizer as a closed language. Accept the
+normative profile corpus and require `SHA-256(RFC8785(profile))` to agree across
+two independent implementations. Reject: an unknown member at top level and at
+each nested depth, a missing required member, a duplicate member name, a
+byte-order mark, invalid UTF-8, a document over 65,536 octets, nesting past
+depth 8, `profileVersion` other than `1`, an empty or over-length
+`allowedPermissions`, a permission that is unsorted, duplicated, off-origin, or
+lacking a fragment, `priority` or `weight` outside `[0, 65535]`, a
+lowest-priority group whose weights are all zero, and any input that does not
+re-serialize byte-for-byte. Assert zero semantic action on every rejection —
+no probe, no derivation, no network request.
+
 ### TEST-204: `acct:` construction
+
+**Validates:** [[SPEC-004-application-scoped-identity#REQ-203]].
 
 For every home DID vector, reproduce the exact lower-case unpadded base32
 localpart and complete RFC 7565 URI.
 
 ### TEST-205: Reciprocal alias
+
+**Validates:** [[SPEC-004-application-scoped-identity#REQ-203]], [[SPEC-004-application-scoped-identity#REQ-204]].
 
 Accept only when DID `alsoKnownAs`, WebFinger `subject`, WebFinger `aliases`,
 the application profile authority, and VC account all match. Break each edge
@@ -3158,16 +3398,22 @@ acceptance.
 
 ### TEST-206: Account privacy
 
+**Validates:** [[SPEC-004-application-scoped-identity#REQ-204]].
+
 Generated DID, account, WebFinger, VC, status, and provider-hint fixtures
 contain none of the fixture user's email, display name, phone number, global
 account ID, `accountScopeId`, sibling scope, or application-A identifier.
 
 ### TEST-207: W3C VC positive vectors
 
+**Validates:** [[SPEC-004-application-scoped-identity#REQ-205]].
+
 Validate all W3C VC Data Model 2.0 and VC JOSE/COSE requirements exercised by
 the profile, then verify the normative Selfsame grant vectors.
 
 ### TEST-208: JWS negative corpus
+
+**Validates:** [[SPEC-004-application-scoped-identity#REQ-205]].
 
 Reject `alg:none`, algorithm substitution, missing/relative/wrong `kid`,
 unprotected algorithm parameters, embedded remote keys, duplicate JSON names,
@@ -3176,32 +3422,49 @@ and non-canonical base64url.
 
 ### TEST-209: Holder binding
 
+**Validates:** [[SPEC-004-application-scoped-identity#REQ-206]].
+
 Accept a valid challenge signature from the `cnf` key. Reject a signature by
 the issuer, another device, another application device, another account's
 device, or a key whose public bytes differ from the subject DID.
 
 ### TEST-210: Challenge replay
 
+**Validates:** [[SPEC-004-application-scoped-identity#REQ-206]].
+
 Reject reuse after success, reuse after failure, use after 120 seconds, use
 with another grant, another application ID, or another RFC 7565 account.
 
 ### TEST-211: Authorization predicate
+
+**Validates:** [[SPEC-004-application-scoped-identity#REQ-207]].
 
 Mutate each of CON-206's thirteen checks independently. No mutation may leave
 the result authorized.
 
 ### TEST-212: Grant validity and status
 
+**Validates:** REQ-207, REQ-208, CON-205, CON-206, CON-210.
+
 Test before `validFrom`, at `validFrom`, immediately before `validUntil`, at
 `validUntil`, present and absent grant IDs in a valid revocation G-Set, stale
 closure, incomplete causal closure, invalid delta signature, unauthorized
 signer, and deactivated issuer.
+
+Test the lifetime bound independently of the validity window: accept a grant
+whose `validUntil - validFrom` equals `maxGrantLifetimeSeconds` exactly, and
+reject one exceeding it by a single second **while the current time sits inside
+its window**, proving the check is on the interval rather than on the instant.
+Reject a profile declaring `maxGrantLifetimeSeconds` above 2,592,000, absent, or
+non-positive.
 
 With projection enabled, test valid set and unset bits, invalid proof, wrong
 issuer, cleared-bit rollback, stale projection, and unavailable projection. A
 set bit rejects early; no other projection condition may bypass the CRDT check.
 
 ### TEST-213: Revocation convergence and propagation
+
+**Validates:** [[SPEC-004-application-scoped-identity#REQ-208]].
 
 Submit a valid signed `RevokeCredential` delta and observe the exact grant ID
 in a newly resolved verified closure within `propagationSlaSeconds`. Reject
@@ -3215,6 +3478,8 @@ no method operation or merge can make `is_revoked(id)` false.
 
 ### TEST-214: Provider selection
 
+**Validates:** [[SPEC-004-application-scoped-identity#REQ-209]], [[SPEC-004-application-scoped-identity#REQ-219]].
+
 Exercise priority, weight, bounded parallel probes, incompatible protocol,
 timeouts, unhealthy endpoints, malformed descriptors, and total failure.
 Against both PROTO-003 and PROTO-002 capability oracles, reject a plain `ok`
@@ -3225,12 +3490,16 @@ No descriptor failing either service may enter the weighted choice.
 
 ### TEST-215: One initiator, one selection
 
+**Validates:** [[SPEC-004-application-scoped-identity#REQ-209]].
+
 Give two devices different health observations and profile revisions. Confirm
 that the joiner follows only the route and descriptor bound by the valid
 initiator bootstrap/hint and never starts a second election for the same
 ceremony.
 
 ### TEST-216: No global fallback
+
+**Validates:** [[SPEC-004-application-scoped-identity#REQ-210]].
 
 Build a release client with an empty or wholly unhealthy profile. Assert that
 no DNS lookup or connection targets an Anuna/Selfsame endpoint and that the
@@ -3240,11 +3509,15 @@ network fan-out.
 
 ### TEST-217: Opaque transport
 
+**Validates:** [[SPEC-004-application-scoped-identity#REQ-211]].
+
 Issue one compact JWS, transport it through every supported ceremony encoding,
 extract it, and require byte identity and successful verification by an
 independent non-CBCL verifier.
 
 ### TEST-218: Provider-hint integrity
+
+**Validates:** [[SPEC-004-application-scoped-identity#REQ-212]].
 
 Alter application ID, profile version/digest, provider ID, pairing route,
 nameplate, descriptor digest, offer digest, SPAKE2 binding/confirmation,
@@ -3253,11 +3526,15 @@ before grant retrieval.
 
 ### TEST-219: Provider-independent recovery
 
+**Validates:** [[SPEC-004-application-scoped-identity#REQ-213]].
+
 Change every provider and account endpoint in the profile without changing
 `applicationId` or `accountScopeId`; confirm that the application node, account
 node, and home key do not change.
 
 ### TEST-220: Independent developer conformance
+
+**Validates:** [[SPEC-004-application-scoped-identity#REQ-214]].
 
 Run a complete issue-link-verify-revoke flow using only third-party account,
 pairing, rendezvous, and state services. The pairing/rendezvous pair first
@@ -3268,6 +3545,8 @@ projection host and require identical Selfsame authorization results.
 
 ### TEST-221: Device-key separation
 
+**Validates:** [[SPEC-004-application-scoped-identity#REQ-215]].
+
 On one installation, enroll the same recovery principal into 100 distinct
 application IDs with 100 account scopes each. No device public key or DID may
 repeat. Deliberately reuse one device key across applications and then across
@@ -3275,6 +3554,8 @@ two accounts in one application; require the second enrollment to be rejected
 in both cases.
 
 ### TEST-222: Multiple-account isolation and switching
+
+**Validates:** [[SPEC-004-application-scoped-identity#REQ-216]].
 
 For one fixed recovery seed and application ID, derive 10,000 distinct valid
 account scopes. Require unique account nodes, home seeds, public keys, DIDs,
@@ -3287,6 +3568,8 @@ device proof, status entry, revocation delta, and optional projection to the
 other account in turn; every cross-account presentation must fail.
 
 ### TEST-223: Account-scope lifecycle and recovery
+
+**Validates:** [[SPEC-004-application-scoped-identity#REQ-217]].
 
 Accept canonical 43-character encodings that decode to exactly 32 bytes.
 Reject wrong length, padding, whitespace, non-ASCII, invalid alphabet,
@@ -3302,6 +3585,8 @@ Inspect public artifacts, logs, analytics, and rendezvous traffic and require
 the raw and encoded scope to be absent.
 
 ### TEST-224: `did:crdt` method-boundary compatibility
+
+**Validates:** [[SPEC-004-application-scoped-identity#REQ-201]], [[SPEC-004-application-scoped-identity#REQ-203]], [[SPEC-004-application-scoped-identity#REQ-205]], [[SPEC-004-application-scoped-identity#REQ-208]].
 
 Use two account-derived Ed25519 public keys to create two ordinary independent
 `did:crdt` genesis documents. Apply a root-signed `SetDocumentData` update for
@@ -3320,6 +3605,8 @@ operation is already part of the inspected method and requires no new
 `did:crdt` amendment.
 
 ### TEST-225: Human-readable alias lifecycle
+
+**Validates:** [[SPEC-004-application-scoped-identity#REQ-218]].
 
 Accept boundary-length and representative valid localparts. Reject empty,
 overlength, upper-case, Unicode, percent-encoded, reserved `ss-`, leading or
@@ -3525,7 +3812,16 @@ Substitute a validly signed record naming another application's `applicationId`,
 `profileDigest`, `providerId`, or nameplate. Every substitution reaches
 confirmation and fails there, proving the record is a hint the binding catches
 rather than a trusted routing decision. Assert the wallet never searches another
-application, profile, or provider, and never asks the person for context.
+application, profile, or provider.
+
+Then exercise the CON-409 tier-3 fallback explicitly. With every tier-1 relay
+removed and the tier-2 transport unreachable, require the wallet to attempt both
+before offering origin entry, to reach the same descriptor and the same binding
+once the person supplies the origin, and to complete pairing identically. Require
+that origin entry is never offered while a tier remains untried, that a mistyped
+origin resolving a different application fails at confirmation rather than
+producing a grant, and that the canonical `applicationId` used in the binding
+comes from the fetched profile and not from what the person typed.
 
 ### TEST-235: Carrier equivalence and full authorization chain
 
@@ -3559,8 +3855,16 @@ Accept the normative offer and bundle payload vectors. For each role, reject a
 payload with an unknown member, a missing required member, a member whose value
 violates its inherited grammar, a `requestedPermissions` array that is empty,
 unsorted, duplicated, or not a subset of `allowedPermissions`, a `grant`
-exceeding 65,536 octets, a `grantMediaType` other than `application/vc+jwt`,
+exceeding 65,536 characters, a `grantMediaType` other than `application/vc+jwt`,
 and a bundle whose `ceremonyId` or `requestId` differs from the offer's.
+
+Assert the grant encoding and the size budget directly. A bundle carrying a
+65,536-character grant verbatim, with `issuerClosure` omitted, MUST seal inside
+the PROTO-004 payload bound. A bundle whose `grant` has been base64url-encoded
+rather than carried verbatim MUST be rejected — as `PayloadTooLarge` at the
+maximum size, and as a malformed compact JWS at any size. Extract `grant` from a
+completed bundle and require byte identity with the issued JWS with no decode
+step between.
 
 Compute `offerDigest` over `offer_core` for every vector and require two
 independent implementations to agree byte-for-byte. Assert the exclusion rule
@@ -3792,7 +4096,7 @@ mechanism.
 | Passive provider attempts an offline word dictionary | SPAKE2 frames and confirmation do not expose a password verifier. TEST-233 captures complete provider state and requires no offline guess predicate. |
 | Active nameplate guess or pre-claim | The nameplate provides no security and is no longer public: it lives in a record at a 128-bit address, so live ceremonies cannot be enumerated. Atomic single claim, client peer locking, 600-second expiry, rate limiting, and permanent burn bound the residual and make interference a visible restart. |
 | Malicious pairing provider terminates SPAKE2 | CON-217 requires the application and wallet as roles A/B and CON-218 rejects provider-generated frames or a password-verifier mode. Provider compromise yields no password equivalent or accepted key. |
-| Bare code is tried across applications/providers | CON-216 requires origin-authenticated application context before routing and confines the two-digit route to that exact profile. Missing context makes zero network requests. |
+| A code is tried across applications/providers | A code names no application, so there is nothing to try: routing comes from the signed record at its own 128-bit address, and PROTO-003 CON-409 forbids searching profiles, provider lists, or endpoints for a match. An unresolvable address makes one attempt per available tier and then fails. |
 | Malicious same-device app copies another developer's public profile | A public profile supplies no authority. The attacker lacks the origin-anchored enrollment signature and matching platform binding; CON-214 rejects before branch lookup or consent. |
 | Link-handler or custom-scheme interception | CON-215 permits only verified installed-wallet dispatch and forbids browser/custom-scheme fallback. Any ambiguity burns every ceremony value under REQ-225. |
 | Callback interception or forged `completed` result | Callback carries no secret or credential and is outside the authorization chain. Only a verified rendezvous bundle plus CON-206/CON-207 authorizes. |
@@ -3968,20 +4272,27 @@ and resistant to silent cross-application correlation.
 
 Owner: application-profile working group.
 
-### OQ-205: Exact discovery carrier — RESOLVED by ADR-216
+### OQ-205: Exact discovery carrier — RESOLVED by PROTO-003 ADR-407 and ADR-409
 
-PROTO-003 and CON-216 now separate routing from password authentication. QR
-and verified same-device carriers contain the canonical application ID,
-profile digest, and short code. A manual path supplies the application context
-beside the code unless it already arrived through an origin-authenticated
-channel. The first two digits select one descriptor only inside that profile;
-the remaining six locate the provider session.
+Every carrier conveys `C` and nothing else — machine carriers as sixteen octets,
+a person as twelve words. Routing is resolved afterwards from the signed
+ephemeral record at the `C`-derived address defined by
+[[PROTO-003-selfsame-pairing-v1#CON-409]], which supplies the canonical
+`applicationId`, profile digest, provider, and nameplate. Record transports
+follow the [[PROTO-003-selfsame-pairing-v1#ADR-410]] ladder.
 
-The provider hint itself travels inside the post-PAKE encrypted offer under
-CON-209. A secret-derived DHT record, global provider directory, code
-broadcast, and an endpoint embedded in the code itself are not carriers.
-The exact profile-origin retrieval mechanism remains the narrower blocking
-item in OQ-207.
+This supersedes the resolution originally recorded here, which had QR and
+same-device carriers carry application context while a manual path required a
+person to convey an HTTPS identity, and which split an eight-digit number into a
+two-digit profile route and a six-digit provider nameplate. No carrier now
+conveys a route, a nameplate, or an application identifier.
+
+The provider hint still travels inside the sealed offer under CON-209. A global
+provider directory, code broadcast, and an endpoint embedded in the code itself
+remain rejected. A **secret-derived discovery record is no longer rejected**:
+that rejection was correct for a 22-bit code and does not hold at 128 bits,
+where the derived address is unenumerable. The exact profile-origin retrieval
+mechanism remains the narrower blocking item in OQ-207.
 
 Owner: application-profile working group.
 
@@ -4047,22 +4358,22 @@ reviewers.
 
 | User outcome | Requirements | Contracts | Tests |
 |---|---|---|---|
-| Different home identity per application account | REQ-201, REQ-202, REQ-213 | CON-201, CON-202, CON-211 | TEST-201–203, TEST-219, TEST-222, TEST-223 |
-| Multiple accounts switch without Selfsame configuration | REQ-216, REQ-217 | CON-202, CON-211 | TEST-222, TEST-223 |
-| RFC 7565 stable alias and optional username | REQ-203, REQ-204, REQ-218 | CON-203, CON-204, CON-212 | TEST-204–206, TEST-225 |
-| Portable VC device grant | REQ-205–208, REQ-211 | CON-205–210, CON-219 | TEST-207–213, TEST-217, TEST-236 |
-| A defined, sealed ceremony envelope and payload | REQ-205, REQ-211, REQ-222, REQ-223 | ADR-218, CON-217, CON-219; PROTO-004 CON-501–504 | TEST-236; PROTO-004 TEST-501–506 |
-| An alias usable only once reciprocally bound | REQ-203, REQ-204 | CON-203, CON-204, CON-206 | TEST-205, TEST-206 |
-| Controller-owned convergent revocation | REQ-207, REQ-208 | CON-205, CON-206, CON-210 | TEST-211–213, TEST-224 |
-| No user endpoint configuration | REQ-209, REQ-212, REQ-219, REQ-227 | CON-208, CON-209, CON-213, CON-216 | TEST-214, TEST-215, TEST-218, TEST-226, TEST-232, TEST-234 |
-| No mandatory Anuna infrastructure | REQ-210, REQ-214, REQ-219, REQ-227 | CON-201, CON-208, CON-213, CON-216 | TEST-216, TEST-220, TEST-226, TEST-234 |
-| Human twelve-word pairing code with SPAKE2 | REQ-226, REQ-229; PROTO-003 REQ-401–409 | CON-217, CON-218; PROTO-003 CON-401–409 | TEST-232, TEST-233, TEST-235; PROTO-003 TEST-401–413 |
-| Many applications and providers route without a global directory | REQ-209, REQ-210, REQ-212, REQ-227 | CON-201, CON-208, CON-213, CON-216; PROTO-003 CON-409 | TEST-214–216, TEST-218, TEST-226, TEST-232, TEST-234; PROTO-003 TEST-413 |
-| Replaceable blind pairing and rendezvous | REQ-209, REQ-212, REQ-219, REQ-228; PROTO-002 REQ-301–308; PROTO-003 REQ-401–409 | CON-208, CON-209, CON-213, CON-216–218; PROTO-002 CON-301–308; PROTO-003 CON-401–409 | TEST-214–216, TEST-218, TEST-220, TEST-226, TEST-233; PROTO-002 TEST-301–310; PROTO-003 TEST-401–413 |
-| MITM-resistant same-device mobile authorization without self-scan | REQ-220–229 | CON-206, CON-207, CON-209, CON-214–219 | TEST-227–236 |
-| Either party may start a pairing | REQ-226, REQ-227; PROTO-003 REQ-409 | CON-216; PROTO-003 CON-402, CON-409 | TEST-232, TEST-234, TEST-235; PROTO-003 TEST-413 |
-| Cross-application and cross-account privacy | REQ-201, REQ-203, REQ-213, REQ-215–218 | CON-202–205, CON-211, CON-212 | TEST-201, TEST-204–206, TEST-219, TEST-221–223, TEST-225 |
-| Compatibility with the `did:crdt` method boundary | REQ-201, REQ-203, REQ-205, REQ-208 | CON-202, CON-203, CON-210 | TEST-207, TEST-213, TEST-224 |
+| Different home identity per application account | [[SPEC-004-application-scoped-identity#REQ-201]], [[SPEC-004-application-scoped-identity#REQ-202]], [[SPEC-004-application-scoped-identity#REQ-213]] | [[SPEC-004-application-scoped-identity#CON-201]], [[SPEC-004-application-scoped-identity#CON-202]], [[SPEC-004-application-scoped-identity#CON-211]] | TEST-201–203, [[SPEC-004-application-scoped-identity#TEST-219]], [[SPEC-004-application-scoped-identity#TEST-222]], [[SPEC-004-application-scoped-identity#TEST-223]] |
+| Multiple accounts switch without Selfsame configuration | [[SPEC-004-application-scoped-identity#REQ-216]], [[SPEC-004-application-scoped-identity#REQ-217]] | [[SPEC-004-application-scoped-identity#CON-202]], [[SPEC-004-application-scoped-identity#CON-211]] | [[SPEC-004-application-scoped-identity#TEST-222]], [[SPEC-004-application-scoped-identity#TEST-223]] |
+| RFC 7565 stable alias and optional username | [[SPEC-004-application-scoped-identity#REQ-203]], [[SPEC-004-application-scoped-identity#REQ-204]], [[SPEC-004-application-scoped-identity#REQ-218]] | [[SPEC-004-application-scoped-identity#CON-203]], [[SPEC-004-application-scoped-identity#CON-204]], [[SPEC-004-application-scoped-identity#CON-212]] | TEST-204–206, [[SPEC-004-application-scoped-identity#TEST-225]] |
+| Portable VC device grant | REQ-205–208, [[SPEC-004-application-scoped-identity#REQ-211]] | CON-205–210, [[SPEC-004-application-scoped-identity#CON-219]] | TEST-207–213, [[SPEC-004-application-scoped-identity#TEST-217]], [[SPEC-004-application-scoped-identity#TEST-236]] |
+| A defined, sealed ceremony envelope and payload | [[SPEC-004-application-scoped-identity#REQ-205]], [[SPEC-004-application-scoped-identity#REQ-211]], [[SPEC-004-application-scoped-identity#REQ-222]], [[SPEC-004-application-scoped-identity#REQ-223]] | [[SPEC-004-application-scoped-identity#ADR-218]], [[SPEC-004-application-scoped-identity#CON-217]], [[SPEC-004-application-scoped-identity#CON-219]]; PROTO-004 CON-501–504 | [[SPEC-004-application-scoped-identity#TEST-236]]; PROTO-004 TEST-501–506 |
+| An alias usable only once reciprocally bound | [[SPEC-004-application-scoped-identity#REQ-203]], [[SPEC-004-application-scoped-identity#REQ-204]] | [[SPEC-004-application-scoped-identity#CON-203]], [[SPEC-004-application-scoped-identity#CON-204]], [[SPEC-004-application-scoped-identity#CON-206]] | [[SPEC-004-application-scoped-identity#TEST-205]], [[SPEC-004-application-scoped-identity#TEST-206]] |
+| Controller-owned convergent revocation | [[SPEC-004-application-scoped-identity#REQ-207]], [[SPEC-004-application-scoped-identity#REQ-208]] | [[SPEC-004-application-scoped-identity#CON-205]], [[SPEC-004-application-scoped-identity#CON-206]], [[SPEC-004-application-scoped-identity#CON-210]] | TEST-211–213, [[SPEC-004-application-scoped-identity#TEST-224]] |
+| No user endpoint configuration | [[SPEC-004-application-scoped-identity#REQ-209]], [[SPEC-004-application-scoped-identity#REQ-212]], [[SPEC-004-application-scoped-identity#REQ-219]], [[SPEC-004-application-scoped-identity#REQ-227]] | [[SPEC-004-application-scoped-identity#CON-208]], [[SPEC-004-application-scoped-identity#CON-209]], [[SPEC-004-application-scoped-identity#CON-213]], [[SPEC-004-application-scoped-identity#CON-216]] | [[SPEC-004-application-scoped-identity#TEST-214]], [[SPEC-004-application-scoped-identity#TEST-215]], [[SPEC-004-application-scoped-identity#TEST-218]], [[SPEC-004-application-scoped-identity#TEST-226]], [[SPEC-004-application-scoped-identity#TEST-232]], [[SPEC-004-application-scoped-identity#TEST-234]] |
+| No mandatory Anuna infrastructure | [[SPEC-004-application-scoped-identity#REQ-210]], [[SPEC-004-application-scoped-identity#REQ-214]], [[SPEC-004-application-scoped-identity#REQ-219]], [[SPEC-004-application-scoped-identity#REQ-227]] | [[SPEC-004-application-scoped-identity#CON-201]], [[SPEC-004-application-scoped-identity#CON-208]], [[SPEC-004-application-scoped-identity#CON-213]], [[SPEC-004-application-scoped-identity#CON-216]] | [[SPEC-004-application-scoped-identity#TEST-216]], [[SPEC-004-application-scoped-identity#TEST-220]], [[SPEC-004-application-scoped-identity#TEST-226]], [[SPEC-004-application-scoped-identity#TEST-234]] |
+| Human twelve-word pairing code with SPAKE2 | [[SPEC-004-application-scoped-identity#REQ-226]], [[SPEC-004-application-scoped-identity#REQ-229]]; PROTO-003 REQ-401–409 | [[SPEC-004-application-scoped-identity#CON-217]], [[SPEC-004-application-scoped-identity#CON-218]]; PROTO-003 CON-401–409 | [[SPEC-004-application-scoped-identity#TEST-232]], [[SPEC-004-application-scoped-identity#TEST-233]], [[SPEC-004-application-scoped-identity#TEST-235]]; PROTO-003 TEST-401–413 |
+| Many applications and providers route without a global directory | [[SPEC-004-application-scoped-identity#REQ-209]], [[SPEC-004-application-scoped-identity#REQ-210]], [[SPEC-004-application-scoped-identity#REQ-212]], [[SPEC-004-application-scoped-identity#REQ-227]] | [[SPEC-004-application-scoped-identity#CON-201]], [[SPEC-004-application-scoped-identity#CON-208]], [[SPEC-004-application-scoped-identity#CON-213]], [[SPEC-004-application-scoped-identity#CON-216]]; PROTO-003 [[SPEC-004-application-scoped-identity#CON-409]] | TEST-214–216, [[SPEC-004-application-scoped-identity#TEST-218]], [[SPEC-004-application-scoped-identity#TEST-226]], [[SPEC-004-application-scoped-identity#TEST-232]], [[SPEC-004-application-scoped-identity#TEST-234]]; PROTO-003 [[SPEC-004-application-scoped-identity#TEST-413]] |
+| Replaceable blind pairing and rendezvous | [[SPEC-004-application-scoped-identity#REQ-209]], [[SPEC-004-application-scoped-identity#REQ-212]], [[SPEC-004-application-scoped-identity#REQ-219]], [[SPEC-004-application-scoped-identity#REQ-228]]; PROTO-002 REQ-301–308; PROTO-003 REQ-401–409 | [[SPEC-004-application-scoped-identity#CON-208]], [[SPEC-004-application-scoped-identity#CON-209]], [[SPEC-004-application-scoped-identity#CON-213]], CON-216–218; PROTO-002 CON-301–308; PROTO-003 CON-401–409 | TEST-214–216, [[SPEC-004-application-scoped-identity#TEST-218]], [[SPEC-004-application-scoped-identity#TEST-220]], [[SPEC-004-application-scoped-identity#TEST-226]], [[SPEC-004-application-scoped-identity#TEST-233]]; PROTO-002 TEST-301–310; PROTO-003 TEST-401–413 |
+| MITM-resistant same-device mobile authorization without self-scan | REQ-220–229 | [[SPEC-004-application-scoped-identity#CON-206]], [[SPEC-004-application-scoped-identity#CON-207]], [[SPEC-004-application-scoped-identity#CON-209]], CON-214–219 | TEST-227–236 |
+| Either party may start a pairing | [[SPEC-004-application-scoped-identity#REQ-226]], [[SPEC-004-application-scoped-identity#REQ-227]]; PROTO-003 [[SPEC-004-application-scoped-identity#REQ-409]] | [[SPEC-004-application-scoped-identity#CON-216]]; PROTO-003 [[SPEC-004-application-scoped-identity#CON-402]], [[SPEC-004-application-scoped-identity#CON-409]] | [[SPEC-004-application-scoped-identity#TEST-232]], [[SPEC-004-application-scoped-identity#TEST-234]], [[SPEC-004-application-scoped-identity#TEST-235]]; PROTO-003 [[SPEC-004-application-scoped-identity#TEST-413]] |
+| Cross-application and cross-account privacy | [[SPEC-004-application-scoped-identity#REQ-201]], [[SPEC-004-application-scoped-identity#REQ-203]], [[SPEC-004-application-scoped-identity#REQ-213]], REQ-215–218 | CON-202–205, [[SPEC-004-application-scoped-identity#CON-211]], [[SPEC-004-application-scoped-identity#CON-212]] | [[SPEC-004-application-scoped-identity#TEST-201]], TEST-204–206, [[SPEC-004-application-scoped-identity#TEST-219]], TEST-221–223, [[SPEC-004-application-scoped-identity#TEST-225]] |
+| Compatibility with the `did:crdt` method boundary | [[SPEC-004-application-scoped-identity#REQ-201]], [[SPEC-004-application-scoped-identity#REQ-203]], [[SPEC-004-application-scoped-identity#REQ-205]], [[SPEC-004-application-scoped-identity#REQ-208]] | [[SPEC-004-application-scoped-identity#CON-202]], [[SPEC-004-application-scoped-identity#CON-203]], [[SPEC-004-application-scoped-identity#CON-210]] | [[SPEC-004-application-scoped-identity#TEST-207]], [[SPEC-004-application-scoped-identity#TEST-213]], [[SPEC-004-application-scoped-identity#TEST-224]] |
 
 ## Amendment Channels
 
