@@ -3,7 +3,7 @@ id: SPEC-004
 title: Application- and Account-Scoped Identity — deterministic home keys, acct aliases, portable device grants, and provider discovery
 status: draft
 tier: 1
-version: 0.10.0
+version: 0.11.0
 audience: agent, human, application developer, infrastructure provider
 author: Anuna Research (drafted with Codex, 2026-07-30; amended with Claude, 2026-07-31)
 last-updated: 2026-07-31
@@ -114,6 +114,8 @@ routing from the human PAKE password, partially superseded by
 [[PROTO-003-selfsame-pairing-v1#ADR-407]] ·
 [[SPEC-004-application-scoped-identity#ADR-217]] compose the confirmed PAKE key
 with the existing blind mailbox ·
+[[SPEC-004-application-scoped-identity#ADR-219]] bind state transport to
+`did:crdt` and let the application be its own replica ·
 [[SPEC-004-application-scoped-identity#ADR-218]] own the ceremony envelope in a
 protocol and its payload here.
 
@@ -200,6 +202,9 @@ the Tier-1 gate in
 - Records resolve through a three-tier ladder — relays already authenticated
   from a profile, a public distributed hash table, then the person supplying the
   application's origin. Selfsame ships no relay and Anuna operates none.
+- `did:crdt` deltas are published to every declared state resolver, including
+  the application's own node where it declares one. Delivery is best-effort and
+  never evidence; only a re-resolved verified closure confirms a revocation.
 - Either party may generate and display the code; the application always
   selects the provider, publishes the record, and is SPAKE2 role A.
 - A same-device pairing bootstrap is delivered only to an installed,
@@ -818,8 +823,10 @@ needs only:
 6. one or more providers conforming to both
    [[PROTO-003-selfsame-pairing-v1]] and
    [[PROTO-002-selfsame-rendezvous-v1]];
-7. one or more state resolvers or peer paths that exchange complete,
-   causally valid `did:crdt` signed closures and revocation deltas;
+7. one or more `did:crdt` service nodes or peer paths conforming to that
+   method's `CON-003` and `CON-004`, which the application MAY satisfy by
+   embedding the method library in the backend it already runs for CON-214
+   rather than by contracting a third party;
 8. application permission URIs and verifier policy; and
 9. the Selfsame issuer/holder SDK or an independent conforming implementation.
 
@@ -1634,6 +1641,58 @@ Rejected:
   is not in this vault, this specification explicitly declines to amend it, and
   an unstated inheritance is how the gap arose.
 
+### ADR-219: Bind state transport to `did:crdt`, and let the application be its own replica
+
+**Status:** PROPOSED.
+
+`stateResolvers` entries name nodes conforming to the `did:crdt` method's own
+`CON-003` HTTP Resolution API and `CON-004` Sync Protocol. An adopting
+application SHOULD list its own origin among them.
+
+Through version 0.10.0 this profile declared the token
+`did-crdt-signed-closure-v1` and defined it nowhere — the exact defect
+[[SPEC-004-application-scoped-identity#ADR-212]] rejected for the rendezvous,
+where an undocumented label "makes the reference implementation the accidental
+standard and prevents a third party from knowing what to implement." The remedy
+there was to write PROTO-002. Here no new document is needed, because the
+upstream method already specifies both a service API and a sync protocol with
+their own conformance tests. Naming them is strictly better than restating them.
+
+`CON-004` carries a property this profile depends on and should cite rather than
+re-derive: only signed deltas cross the wire, and there is deliberately no
+message shipping a materialised document, because state-based convergence is a
+local primitive not reachable from the untrusted network. That is what lets
+[[SPEC-004-application-scoped-identity#CON-206]] step 5 recompute and verify
+everything locally.
+
+The second half — the application as its own replica — follows from noticing
+that the application **is** the verifier. Publishing the revocation directly to
+the party that enforces it is the strongest available answer to a withholding
+resolver, because that party stops depending on a third party choosing to tell
+it. It costs nothing: `CON-214` already obliges every adopting application to run
+a backend, and the method ships as a library with a service feature, so this is
+an embedded dependency rather than a fourth piece of infrastructure to procure.
+
+It is safe because revocation is **monotone**. The set is grow-only, deltas are
+signed by the home key, and no operation clears an entry — so a forged delta
+fails verification, a replayed one is idempotent, and an accepted one can only
+reduce authority. Delivery to an application node therefore adds no way to
+grant, only ways to revoke.
+
+Rejected:
+
+- **writing a Selfsame state-transport protocol** — it would duplicate `CON-003`
+  and `CON-004` and immediately risk diverging from the method it profiles;
+- **making the application's node authoritative** — `CON-210` is explicit that
+  the controller's signed state, not a provider database, decides; an
+  application node is a replica that verifies like any other;
+- **delivering only to the application's node** — a grant may be verified by a
+  peer or another device, so the other declared resolvers still receive the
+  delta; and
+- **treating a delivery acknowledgement as success** — unchanged from CON-210:
+  only a re-resolved verified closure containing the exact grant ID confirms a
+  revocation.
+
 ## Contracts
 
 ### CON-201: Canonical application profile
@@ -1709,9 +1768,14 @@ shape:
   ],
   "stateResolvers": [
     {
+      "id": "app-own",
+      "url": "https://api.photos.example",
+      "protocol": "did-crdt-service-v1"
+    },
+    {
       "id": "state-1",
       "url": "https://state.provider.example",
-      "protocol": "did-crdt-signed-closure-v1"
+      "protocol": "did-crdt-service-v1"
     }
   ],
   "revocation": {
@@ -1783,6 +1847,18 @@ Every rendezvous descriptor additionally MUST contain `pairingUrl`,
 origin grammar. Pairing routes are exactly two ASCII digits and unique within
 the profile; their numeric value has no global meaning. `pairingUrl` and `url`
 MAY have different origins and MAY be operated by different organizations.
+
+`stateResolvers` entries name nodes conforming to the `did:crdt` method's own
+service contract — `CON-003` HTTP Resolution API and, where the node
+participates in peer sync, `CON-004` Sync Protocol — at the version pinned by
+this profile. `protocol` is exactly `did-crdt-service-v1`. This replaces the
+`did-crdt-signed-closure-v1` token used through version 0.10.0, which named no
+contract and made the reference implementation the accidental standard —
+precisely the defect [[SPEC-004-application-scoped-identity#ADR-212]] rejected
+for the rendezvous.
+
+An adopting application MAY list **its own origin** as a resolver, and doing so
+is RECOMMENDED. See [[SPEC-004-application-scoped-identity#ADR-219]].
 
 `pairingRecordRelays` is an OPTIONAL array of canonical HTTPS origins serving
 [[PROTO-003-selfsame-pairing-v1#CON-409]] records. Each entry uses the canonical
@@ -2347,7 +2423,15 @@ To revoke it, a controller:
 4. signs the method-defined canonical delta input with a known, non-revoked
    verification method authorized in the operation's causal past; and
 5. submits the complete signed delta to every reachable profile-declared state
-   resolver and directly connected peer.
+   resolver — including the application's own node where it declares one — and
+   to every directly connected peer.
+
+Submission is best-effort and parallel. A failed or unacknowledged submission to
+any one resolver SHALL NOT abandon the revocation, discard the delta, or cause
+the controller to report success; the delta is retained and retried until a
+verified closure confirms it. A controller SHALL NOT treat delivery to the
+application's own node as a substitute for submission to the other declared
+resolvers, because a grant may be verified by a peer or by another device.
 
 This specification does not redefine `SignedDelta`, its proof, canonical
 signing bytes, causal-admission rules, or hash. Implementations SHALL use the
@@ -2367,7 +2451,25 @@ The initiating application reports **pending** until a newly resolved,
 cryptographically verified closure includes `grant_id`. It reports success
 only then. A resolver's acknowledgement is not evidence of revocation. A
 resolver MAY withhold or lag state, but cannot forge, clear, or override a
-valid G-Set entry. Resolver diversity and
+valid G-Set entry.
+
+Where the application declares its own node, submission delivers the delta
+directly to the party that enforces it, which is the strongest available answer
+to withholding: the verifier no longer depends on a third party choosing to
+tell it. This does not make that node authoritative — the controller's signed
+state remains the source of truth, and the node admits the delta only after the
+same `did:crdt` checks any replica performs.
+
+Accepting deltas at an application endpoint is safe because the operation is
+**monotone**: the revocation set is grow-only, deltas are signed by the home
+key, and no method operation can clear an entry. A forged delta fails the
+signature check, a replayed delta is idempotent, and the worst an accepted
+delta can do is revoke — which reduces authority and therefore fails safe. This
+is one of the few endpoints in the profile where an unauthenticated write is
+tolerable, and the reasoning SHOULD be re-checked against any future method
+operation that is not grow-only.
+
+Resolver diversity, direct application delivery, and
 `revocation.propagationSlaSeconds` bound availability; OQ-201 must approve the
 final values.
 
@@ -3675,7 +3777,8 @@ mechanism.
 | Sealed record spliced between ceremonies, roles, or applications | PROTO-004 additional authenticated data covers the role octet and PROTO-003 `binding_hash`, so a spliced record fails the tag check before payload recognition. TEST-236 and PROTO-004 TEST-504 assert rejection with zero side effects. |
 | Envelope key reused across two plaintexts | PROTO-004 REQ-502 makes each role key single-use; PROTO-002 slot immutability and PROTO-003 burn semantics enforce it from two independent directions, and PROTO-004 TEST-503 asserts at most one ciphertext per key per ceremony. |
 | Grant issued before its alias is provisioned | It confers nothing: CON-206 step 9 fails closed on the missing reciprocal binding, and CON-204 requires the application to provision or return `AccountProvisioningFailed` and revoke the grant ID. |
-| Malicious or withholding state resolver | It cannot forge an accepted signed closure or remove a G-Set entry; stale or incomplete state fails closed and resolver/peer diversity limits withholding. |
+| Malicious or withholding state resolver | It cannot forge an accepted signed closure or remove a G-Set entry; stale or incomplete state fails closed, and resolver/peer diversity limits withholding. An application that declares its own node receives revocations directly and stops depending on a third party choosing to relay them. |
+| Unauthenticated write to an application's delta endpoint | Revocation is monotone: the set is grow-only, deltas are signed by the home key, and no operation clears an entry. Forgery fails verification, replay is idempotent, and an accepted delta can only reduce authority. |
 | Compromised application profile distribution | Production verification requires the OQ-207 origin-authenticated profile mechanism. Caller-delivered fields alone fail CON-214. |
 | Stolen VC | It cannot pass CON-207 without the device private key. |
 | Stolen device key | The grant remains usable until its ID appears in fresh verified CRDT state or it expires; the home controller revokes the exact grant ID. |
@@ -3751,6 +3854,14 @@ No implementation task may be marked ready until all boxes are checked:
       vectors required by NFR-202.
 - [ ] The `did:crdt` method explicitly defines the `JsonWebKey` projection and
       `assertionMethod` relationship without changing existing DID derivation.
+- [ ] `did:crdt` SPEC-035 (Causal Commitment Levels) leaves `stub` status with a
+      chosen level and normative clauses. CON-206 steps 5 and 10 require a
+      "causally valid" and "causally complete" closure, and that definition is
+      currently deferred upstream — the most security-critical check in this
+      profile rests on it.
+- [ ] The pinned `did:crdt` version for `did-crdt-service-v1` is recorded, with
+      its CON-003 and CON-004 conformance suites passing against a node the
+      adopting application operates and a node it does not.
 - [ ] The Selfsame JSON-LD context has an owned durable URL, immutable content,
       published digest, and archival policy.
 - [ ] A privacy review covers `acct:` harvesting, WebFinger, state lookups,
