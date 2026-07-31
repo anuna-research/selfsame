@@ -3,7 +3,7 @@ id: SPEC-004
 title: Application- and Account-Scoped Identity — deterministic home keys, acct aliases, portable device grants, and provider discovery
 status: draft
 tier: 1
-version: 0.11.0
+version: 0.11.1
 audience: agent, human, application developer, infrastructure provider
 author: Anuna Research (drafted with Codex, 2026-07-30; amended with Claude, 2026-07-31)
 last-updated: 2026-07-31
@@ -1776,6 +1776,11 @@ shape:
       "id": "state-1",
       "url": "https://state.provider.example",
       "protocol": "did-crdt-service-v1"
+    },
+    {
+      "id": "anuna-public",
+      "url": "https://state.anuna.io",
+      "protocol": "did-crdt-service-v1"
     }
   ],
   "revocation": {
@@ -1859,6 +1864,29 @@ for the rendezvous.
 
 An adopting application MAY list **its own origin** as a resolver, and doing so
 is RECOMMENDED. See [[SPEC-004-application-scoped-identity#ADR-219]].
+
+The example lists three entries to show that the roster is heterogeneous by
+design: the application's own node, an unrelated commercial operator, and
+`anuna-public`, a `did:crdt` node Anuna Research intends to operate as a public
+good for developers who want no operational burden. All three are ordinary
+declared resolvers with identical standing. `anuna-public` receives no special
+trust, is not required, is not a default, and an application that omits it is
+fully conforming.
+
+That distinction is normative rather than editorial.
+[[SPEC-004-application-scoped-identity#REQ-210]] names `state` explicitly among
+the roles for which the SDK SHALL NOT carry an Anuna endpoint "consulted when
+the application profile is missing or unhealthy." An Anuna node a developer
+*chooses and declares* is permitted by the Infrastructure promise; the same node
+reached because a profile failed to name one is exactly what that requirement
+forbids. Implementations SHALL NOT special-case this or any other operator, and
+SHALL NOT substitute it when a declared resolver is unreachable.
+
+Listing several resolvers costs nothing beyond the requests themselves.
+`CON-210` submission is parallel and best-effort, and `did:crdt` merge is
+commutative, associative, and idempotent, so the same delta arriving at one node
+by several paths converges to the same state. Redundant delivery is the intended
+behaviour, not an overhead to minimise.
 
 `pairingRecordRelays` is an OPTIONAL array of canonical HTTPS origins serving
 [[PROTO-003-selfsame-pairing-v1#CON-409]] records. Each entry uses the canonical
