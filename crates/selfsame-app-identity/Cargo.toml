@@ -38,6 +38,8 @@ thiserror = { workspace = true }
 zeroize = { version = "1", default-features = false, features = ["alloc"] }
 
 [dev-dependencies]
+bip39 = { version = "2", default-features = false, features = ["std"] }
+ed25519-dalek = { workspace = true, features = ["std"] }
 sha2 = { version = "0.10", default-features = false }
 hex = "0.4"
 proptest = "1"

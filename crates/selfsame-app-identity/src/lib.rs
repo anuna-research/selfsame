@@ -71,11 +71,17 @@
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
+pub mod accept;
 pub mod alias;
 pub mod codec;
+pub mod context;
+pub mod didkey;
+pub mod grant;
 pub mod hierarchy;
 pub mod json;
+pub mod jws;
 pub mod profile;
+pub mod proof;
 pub mod scope;
 pub mod time;
 pub mod uri;

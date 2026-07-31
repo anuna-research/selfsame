@@ -120,9 +120,105 @@ pub fn base32_lower_nopad(bytes: &[u8]) -> String {
     out
 }
 
+/// The Bitcoin base58 alphabet, as `did:key` uses it via multibase `z`.
+const BASE58: &[u8; 58] = b"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+
+/// Encode octets as base58btc.
+///
+/// Used by exactly one value in SPEC-004: the `did:key` device identifier of
+/// `CON-205`'s `credentialSubject.id`. The alphabet omits `0`, `O`, `I`, and
+/// `l` so that a person transcribing one cannot produce a second spelling.
+pub fn base58btc(bytes: &[u8]) -> String {
+    // Leading zero octets carry no magnitude, so they are encoded positionally
+    // as `1` rather than being absorbed by the base conversion.
+    let leading_zeros = bytes.iter().take_while(|b| **b == 0).count();
+    let mut digits: Vec<u8> = Vec::with_capacity(bytes.len() * 138 / 100 + 1);
+    for &byte in bytes {
+        let mut carry = u32::from(byte);
+        for digit in digits.iter_mut() {
+            carry += u32::from(*digit) << 8;
+            *digit = (carry % 58) as u8;
+            carry /= 58;
+        }
+        while carry > 0 {
+            digits.push((carry % 58) as u8);
+            carry /= 58;
+        }
+    }
+    let mut out = String::with_capacity(leading_zeros + digits.len());
+    out.extend(core::iter::repeat_n('1', leading_zeros));
+    out.extend(digits.iter().rev().map(|d| BASE58[*d as usize] as char));
+    out
+}
+
+/// Decode a base58btc string.
+pub fn decode_base58btc(text: &str) -> Result<Vec<u8>, CodecError> {
+    if text.is_empty() {
+        return Err(CodecError::WrongLength);
+    }
+    let leading_ones = text.bytes().take_while(|b| *b == b'1').count();
+    let mut bytes: Vec<u8> = Vec::with_capacity(text.len());
+    for c in text.bytes() {
+        let value = BASE58.iter().position(|a| *a == c).ok_or(CodecError::BadAlphabet)? as u32;
+        let mut carry = value;
+        for byte in bytes.iter_mut() {
+            carry += u32::from(*byte) * 58;
+            *byte = (carry & 0xFF) as u8;
+            carry >>= 8;
+        }
+        while carry > 0 {
+            bytes.push((carry & 0xFF) as u8);
+            carry >>= 8;
+        }
+    }
+    let mut out = vec![0u8; leading_ones];
+    out.extend(bytes.iter().rev());
+    // Base58 has no padding and no length field, so canonicality is decided by
+    // re-encoding — the same discipline CON-211 applies to base64url.
+    if base58btc(&out) != text {
+        return Err(CodecError::NotCanonical);
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+
+    #[test]
+    fn base58_matches_the_published_vectors() {
+        // The vectors every base58btc implementation is checked against.
+        for (input, expected) in [
+            (vec![], ""),
+            (vec![0x00], "1"),
+            (vec![0x00, 0x00], "11"),
+            (b"hello world".to_vec(), "StV1DL6CwTryKyV"),
+            (vec![0x61], "2g"),
+            (vec![0x62, 0x62, 0x62], "a3gV"),
+            (vec![0x63, 0x63, 0x63], "aPEr"),
+        ] {
+            assert_eq!(base58btc(&input), expected, "{input:?}");
+        }
+    }
+
+    #[test]
+    fn base58_round_trips_and_preserves_leading_zeros() {
+        // The empty string is deliberately not in this list: `base58btc(&[])`
+        // is `""`, and an empty `did:key` suffix is a malformed identifier
+        // rather than a zero-length key, so the decoder refuses it outright.
+        for bytes in [vec![0u8; 5], vec![0, 0, 1, 2, 3], (0u8..64).collect::<Vec<_>>()] {
+            assert_eq!(decode_base58btc(&base58btc(&bytes)).unwrap(), bytes, "{bytes:?}");
+        }
+    }
+
+    #[test]
+    fn base58_rejects_the_omitted_characters_and_non_canonical_input() {
+        for c in ['0', 'O', 'I', 'l'] {
+            assert_eq!(decode_base58btc(&format!("2g{c}")), Err(CodecError::BadAlphabet), "{c}");
+        }
+        assert_eq!(decode_base58btc(""), Err(CodecError::WrongLength));
+    }
 
     #[test]
     fn base32_matches_the_rfc_4648_vectors_lower_cased() {

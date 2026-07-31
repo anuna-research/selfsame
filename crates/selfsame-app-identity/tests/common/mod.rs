@@ -222,3 +222,154 @@ fn set_path(node: &mut Json, path: &[&str], value: Json) {
         set_path(child, rest, value);
     }
 }
+
+// ── a complete, accepted ceremony, for CON-206 and CON-207 ─────────────────
+
+use selfsame_app_identity::accept::{
+    ClosureSource, Evidence, Expectation, Freshness, IssuerState, VerificationMethod,
+};
+use selfsame_app_identity::alias::{self, AcctUri, Jrd};
+use selfsame_app_identity::hierarchy::{self, Mnemonic};
+use selfsame_app_identity::profile::{ApplicationId, ApplicationProfile, Ed25519Jwk};
+use selfsame_app_identity::proof::{self, Challenge};
+use selfsame_app_identity::scope::AccountScopeId;
+use selfsame_app_identity::{didkey, grant};
+
+/// Every value one accepted grant needs, so a test can mutate exactly one.
+pub struct Ceremony {
+    pub profile: ApplicationProfile,
+    pub home_did: String,
+    pub home_key: ed25519_dalek::SigningKey,
+    pub account: AcctUri,
+    pub device_key: ed25519_dalek::SigningKey,
+    pub device_did: String,
+    pub grant_bytes: Vec<u8>,
+    pub issuer: IssuerState,
+    pub jrd: Jrd,
+    pub challenge: Challenge,
+    pub signature: [u8; 64],
+    pub now: i64,
+}
+
+/// The instant every fixture is built around: `2026-07-30T12:00:00Z`.
+pub const NOW: i64 = 1_785_412_800;
+
+pub fn mnemonic(entropy: u8) -> Mnemonic {
+    Mnemonic::from_entropy_in(bip39::Language::English, &[entropy; 16])
+        .expect("128 bits is a valid BIP-39 entropy length")
+}
+
+impl Ceremony {
+    /// A ceremony that CON-206 accepts at every step.
+    pub fn accepted() -> Self {
+        Self::build(0, 1, 3, APPLICATION_ID)
+    }
+
+    pub fn build(
+        entropy: u8,
+        scope_byte: u8,
+        device_seed: u8,
+        application_id: &str,
+    ) -> Self {
+        let profile = ApplicationProfile::recognise(&profile_octets())
+            .expect("the example profile is recognised");
+        let app = ApplicationId::parse(application_id).expect("canonical");
+        let scope = AccountScopeId::from_octets([scope_byte; 32]);
+        let home = hierarchy::derive(&mnemonic(entropy), &app, &scope);
+        let home_did = home.home_did().expect("did:crdt derivation");
+        let home_key = home.signing_key().clone();
+
+        let account = AcctUri::parse(&alias::stable_acct_uri(&home_did, ACCOUNT_AUTHORITY))
+            .expect("the generated alias is well formed");
+
+        let device_key = ed25519_dalek::SigningKey::from_bytes(&[device_seed; 32]);
+        let device_public = device_key.verifying_key().to_bytes();
+        let device_did = didkey::encode(&device_public);
+
+        let valid_from = NOW - 3_600;
+        let valid_until = valid_from + 2_592_000;
+        let grant_bytes = grant::issue(
+            &home_key,
+            &home_did,
+            &[device_seed.wrapping_add(9); 32],
+            &device_did,
+            &device_public,
+            &app,
+            &account,
+            &[PERMISSION.to_string()],
+            valid_from,
+            valid_until,
+        )
+        .into_bytes();
+
+        let issuer = IssuerState {
+            did: home_did.clone(),
+            did_recomputed_ok: true,
+            deltas_verified: true,
+            causally_complete: true,
+            deactivated: false,
+            assertion_methods: vec![VerificationMethod {
+                id: format!("{home_did}#jwk-0"),
+                kind: "JsonWebKey".into(),
+                jwk: Ed25519Jwk {
+                    public_key: home.public_key(),
+                    x: selfsame_app_identity::codec::b64url(&home.public_key()),
+                },
+                has_private_component: false,
+            }],
+            revoked_credential_ids: vec![],
+            closure_age_seconds: 10,
+            source: ClosureSource::StateResolver,
+            also_known_as: vec![account.as_str().to_string()],
+        };
+
+        let jrd = Jrd {
+            subject: account.as_str().to_string(),
+            aliases: vec![home_did.clone()],
+        };
+
+        let challenge = Challenge {
+            nonce: [42u8; 32],
+            application_id: application_id.to_string(),
+            account: account.as_str().to_string(),
+            grant_hash: proof::grant_hash(&grant_bytes),
+            issued_at: NOW - 5,
+        };
+        let signature = proof::sign(&challenge, &device_key);
+
+        Self {
+            profile,
+            home_did,
+            home_key,
+            account,
+            device_key,
+            device_did,
+            grant_bytes,
+            issuer,
+            jrd,
+            challenge,
+            signature,
+            now: NOW,
+        }
+    }
+
+    pub fn expectation(&self) -> Expectation<'_> {
+        Expectation {
+            profile: &self.profile,
+            account: &self.account,
+            operation_permissions: &[],
+            now: self.now,
+            clock_skew_seconds: 0,
+            freshness: Freshness::SessionEstablishment,
+        }
+    }
+
+    pub fn evidence(&self) -> Evidence<'_> {
+        Evidence {
+            issuer: Some(&self.issuer),
+            jrd: Some(&self.jrd),
+            projection: None,
+            proof: Some((&self.challenge, &self.signature)),
+        }
+    }
+}
