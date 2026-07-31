@@ -190,9 +190,15 @@ cargo test -p selfsame-core --test vectors -- --ignored regenerate
 
 ## Specification
 
-The governing documents live in the [`anuna-ssi`][spec] vault: SPEC-001 for the
-design, IMPL-001 for what was built and the five places the implementation had
-to diverge from the spec, and SCREEN-001/002 for the two screens that matter.
+The original device-provisioning design lives in the
+[`anuna-ssi`][spec] vault. This repository now also owns:
+
+- [SPEC-004](specs/SPEC-004-application-scoped-identity.md), the
+  application/account identity and grant profile;
+- [PROTO-002](specs/PROTO-002-selfsame-rendezvous-v1.md), the blind encrypted
+  offer/grant mailbox; and
+- [PROTO-003](specs/PROTO-003-selfsame-pairing-v1.md), the routable
+  `number-word-word` SPAKE2 pairing ceremony.
 
 [spec]: ../anuna-ssi/specs/SPEC-001-device-key-provisioning.md
 
