@@ -3,7 +3,7 @@ id: PROTO-003
 title: Selfsame Pairing Protocol v1 — routable num-word-word SPAKE2
 status: draft
 tier: 1
-version: 0.2.0
+version: 0.3.0
 audience: application developer, SDK implementer, wallet implementer, infrastructure operator, security reviewer
 author: Anuna Research (drafted with Codex, 2026-07-30; amended with Claude, 2026-07-31)
 last-updated: 2026-07-31
@@ -17,63 +17,58 @@ depends-on: SPEC-004; PROTO-002; PROTO-004; RFC 2104; RFC 2119; RFC 3986; RFC 46
 
 ## Orientation
 
-**Intent.** Define an independently implementable pairing ceremony whose
-human-facing code is:
+**Intent.** Define an independently implementable pairing ceremony carried by
+one human-sayable value:
 
 ```text
-<number>-<word>-<word>
+C — sixteen octets, rendered for people as twelve BIP-39 words
 ```
 
 The same ceremony SHALL work across unrelated applications and independently
-operated rendezvous services without a user-managed server setting or a
-mandatory Selfsame directory.
+operated rendezvous services without a user-managed server setting, a spoken
+HTTPS identity, or a mandatory Selfsame directory.
 
-**User promise.** The normal cross-device path is one QR scan. The accessible
-fallback shows the application's authenticated HTTPS identity and one short
-code such as `03482715-rocket-anchor`; the person never types or selects a
-rendezvous endpoint. Same-device mobile passes the same bootstrap through a
-verified OS channel without a self-scan.
+**User promise.** Either side may start. The person carries one code — scanned,
+spoken, typed, or handed over by the OS — and never says a domain, types a
+route, or picks an endpoint. Whichever device has the better keyboard does the
+typing.
 
-**Security promise.** The two words are a 22-bit BIP-39 password used only by
-SPAKE2. They are never treated as a high-entropy bearer key or passed directly
-to the mailbox HKDF. The application and wallet perform SPAKE2 end to end,
-including explicit key confirmation. The pairing operator relays four opaque
-32-byte values and never receives the words, their indices, a password
+**Security promise.** `C` is a 128-bit password used only by SPAKE2, never as a
+bearer key and never passed directly to the mailbox HKDF. The application and
+wallet perform SPAKE2 end to end with explicit key confirmation. The pairing
+operator relays four opaque 32-byte values and never receives `C`, a password
 verifier, the agreed key, an offer, a grant, a DID, or an account identifier.
 
-**Routing promise.** A code is intentionally not a global endpoint name. The
-application identity selects an authenticated application profile; the first
-two digits select one descriptor within that profile; the remaining six digits
-locate one short-lived session at that provider. QR and verified OS handoff
-carry the application context. A manual flow supplies the application identity
-beside the code. No client broadcasts a bare code to candidate services.
+**Routing promise.** A code is still not a global endpoint name. It is the
+address of a short-lived signed record the application publishes, naming the
+application and the exact session it chose from its own profile. Because the
+address is a 128-bit function of `C`, no observer can enumerate live ceremonies;
+because the record is signed and its contents re-enter the PAKE transcript, no
+host can redirect one. No client broadcasts a code to candidate services.
 
 **Structure.**
 
 ```text
- application A profile                     application B profile
- routes 00..99                             routes 00..99
-       |                                         |
-       | app-selected route 03                   | independent namespace
-       v                                         v
- pairing provider P                         pairing provider Q
- nameplate 482715                           nameplate 482715
-       |                                         |
-  03482715-rocket-anchor                    03482715-ocean-table
-       |
-       | QR / verified OS handoff:
-       | applicationId + profileDigest + code
-       v
- application (SPAKE2 A) <---- opaque relay ----> wallet (SPAKE2 B)
-       |                     pA,pB,cA,cB                 |
-       +---------------- mutual confirmation ------------+
+        C  ── rendered as twelve words ──▶ person ──▶ other device
+        │
+        ├──▶ meet_addr = Ed25519(HKDF(C))        application publishes:
+        │                                          applicationId, profileDigest
+        │        ┌──────────────────────┐          providerId, nameplate
+        │        │  signed record       │◀── unenumerable · ephemeral
+        │        │  hint, not authority │─── resolved by the other party
+        │        └──────────────────────┘
+        │                  │
+        │                  ▼
+        └──▶ SPAKE2 password        application (role A) ◀──▶ wallet (role B)
+                                          opaque relay: pA, pB, cA, cB
+                                    ───── mutual confirmation ─────
                              |
                     32-byte ceremony key
                              |
                     derive 16-byte mailbox secret
                              |
-                 [[PROTO-002-selfsame-rendezvous-v1]]
-                    encrypted offer / grant only
+                 [[PROTO-002-selfsame-rendezvous-v1]] slots
+                 [[PROTO-004-selfsame-ceremony-envelope-v1]] sealed offer/grant
 ```
 
 **Decisions.**
@@ -86,7 +81,14 @@ and wallet, not between a client and provider ·
 [[PROTO-003-selfsame-pairing-v1#ADR-404]] burn on the first peer claim or
 failed confirmation ·
 [[PROTO-003-selfsame-pairing-v1#ADR-405]] derive the existing blind mailbox
-secret from the confirmed PAKE key.
+secret from the confirmed PAKE key ·
+[[PROTO-003-selfsame-pairing-v1#ADR-406]] carry 128 bits as twelve BIP-39
+words ·
+[[PROTO-003-selfsame-pairing-v1#ADR-407]] resolve routing through a
+code-derived meeting point ·
+[[PROTO-003-selfsame-pairing-v1#ADR-408]] let either party initiate, with the
+application always role A ·
+[[PROTO-003-selfsame-pairing-v1#ADR-409]] take routing out of the human code.
 
 **Load-bearing.**
 [[PROTO-003-selfsame-pairing-v1#REQ-401]] any independent provider and two
@@ -101,33 +103,42 @@ a SPAKE2 endpoint ·
 [[PROTO-003-selfsame-pairing-v1#REQ-406]] one failed attempt burns the ceremony ·
 [[PROTO-003-selfsame-pairing-v1#REQ-407]] only a confirmed PAKE key enters the
 mailbox derivation ·
-[[PROTO-003-selfsame-pairing-v1#REQ-408]] QR, manual, and same-device carriers
-cannot create a downgrade.
+[[PROTO-003-selfsame-pairing-v1#REQ-408]] QR, spoken, and same-device carriers
+cannot create a downgrade ·
+[[PROTO-003-selfsame-pairing-v1#REQ-409]] either party may initiate.
 
 **Controls digest.**
 
-- The canonical code is eight ASCII digits, a hyphen, and exactly two
-  lower-case words from the BIP-39 English list.
-- The first two digits are a profile-local provider route. The last six are a
-  provider-local active-session nameplate. Neither is secret.
-- The two word indices carry exactly 22 bits. Their security depends on SPAKE2,
-  explicit confirmation, a 600-second lifetime, one peer claim, and permanent
-  local burn after the first failed confirmation.
-- A QR bootstrap contains an application ID, profile digest, and the same
-  human code. It contains no provider URL selected by an untrusted caller.
-- A bare code without authenticated application context is rejected. Clients
-  never query all known applications or providers looking for a match.
+- The protocol value is `C`, sixteen octets. Twelve BIP-39 English words and the
+  base64url bootstrap are renderings of it; no rendering is the value.
+- `C` carries 128 bits and is used only as the SPAKE2 password and as the
+  meeting-point address seed. It is never a bearer key, a mailbox secret, or an
+  AEAD key.
+- The human code contains no route, nameplate, provider, endpoint, or
+  application identifier. Machine carriers transport `C` directly and never
+  words.
+- Routing is one signed, ephemeral record at an address derived from `C`. It is
+  an unauthenticated hint: its contents re-enter the PAKE transcript, so a host
+  can withhold but cannot redirect.
+- The address space is 128 bits, so live ceremonies cannot be enumerated. The
+  record is signed, not encrypted, and its `applicationId` is visible to anyone
+  already holding `C`.
+- Either party may generate and display the code. The application always selects
+  the provider, allocates the nameplate, publishes the record, and is SPAKE2
+  role A; the wallet is always role B.
+- A wallet-generated code has no intended recipient. Its lifetime is bounded and
+  the resolved origin is shown before consent.
 - The pairing provider stores no password-equivalent verifier and performs no
   group operation, MAC verification, grant decision, or application lookup.
-- The application is SPAKE2 role A; the Selfsame wallet is role B. Both reject
-  invalid ristretto255 encodings and require the opposite confirmation MAC.
 - The PAKE transcript binds the application, complete provider descriptor,
-  profile, route, nameplate, protocol version, and roles.
+  profile, route, nameplate, protocol version, and roles — reconstructed from the
+  record rather than parsed from the code.
 - Only after mutual confirmation do clients derive the 16-byte secret used by
-  [[PROTO-002-selfsame-rendezvous-v1]].
+  [[PROTO-002-selfsame-rendezvous-v1]] and
+  [[PROTO-004-selfsame-ceremony-envelope-v1]].
 - Every retry after ambiguity, collision, wrong input, invalid point, failed
-  MAC, timeout, provider change, or carrier mismatch creates a fresh code,
-  nameplate, SPAKE2 ephemerals, mailbox secret, and offer.
+  MAC, timeout, provider change, record failure, or carrier mismatch creates a
+  fresh code, address, nameplate, SPAKE2 ephemerals, mailbox secret, and offer.
 
 ---
 
@@ -174,7 +185,9 @@ only meaningful at a known hub. This protocol therefore separates:
 2. **route**, which selects one pairing-capable rendezvous descriptor in that
    profile;
 3. **nameplate**, which locates one active provider session; and
-4. **two words**, which authenticate the end-to-end PAKE.
+4. **the code `C`**, which authenticates the end-to-end PAKE and, via
+   [[PROTO-003-selfsame-pairing-v1#CON-409]], addresses the record that
+   supplies the first three.
 
 That separation is necessary: a short code cannot encode and authenticate an
 arbitrary HTTPS endpoint without either more human input or a shared global
@@ -223,16 +236,17 @@ routing, not a mandatory Selfsame directory.
 2. It filters and probes descriptors supporting both
    `selfsame-pairing-v1` and `selfsame-rendezvous-v1`, then selects one without
    user input.
-3. It generates two uniformly random BIP-39 English word indices and a fresh
-   SPAKE2 role-A ephemeral. The selected pairing provider allocates a
-   six-digit nameplate and returns an initiator capability token.
-4. The application combines the descriptor's two-digit route with the
-   nameplate, computes `pA`, stores it, and only then displays the QR and
-   `number-word-word` fallback.
-5. The wallet receives the QR/bootstrap, or receives the application identity
-   and code through a conforming manual or same-device carrier. It obtains the
-   origin-authenticated profile, requires the profile digest to match, uses
-   the route to select the exact descriptor, and claims the nameplate once.
+3. Either party generates `C` — sixteen CSPRNG octets — and renders it as
+   twelve BIP-39 English words. If the wallet generated it, the person carries
+   it to the application before step 2. The selected pairing provider allocates
+   a six-digit nameplate and returns an initiator capability token.
+4. The application computes `pA` from `C`, stores it, and only then publishes
+   the [[PROTO-003-selfsame-pairing-v1#CON-409]] record naming its
+   `applicationId`, profile digest, provider, and nameplate.
+5. The other party derives the meeting-point address from the same `C`,
+   resolves and verifies the record, fetches the profile named by it, requires
+   the profile digest to match, selects the exact descriptor, and claims the
+   nameplate once.
 6. The clients exchange `pA`, `pB`, `cA`, and `cB` through the provider. Each
    client locks the first peer frame it processes and requires the opposite
    confirmation MAC.
@@ -266,14 +280,19 @@ Trace:
 
 ### REQ-402: The short code has one closed meaning
 
-Every version-1 human pairing code SHALL conform to
-[[PROTO-003-selfsame-pairing-v1#CON-402]]. Its eight-digit number SHALL contain
-only a two-digit profile route and a six-digit provider nameplate. Its two
+Every human pairing code SHALL conform to
+[[PROTO-003-selfsame-pairing-v1#CON-402]]: exactly twelve BIP-39 English words
+encoding 128 bits of entropy and a four-bit checksum, and nothing else. Those
 words SHALL encode the SPAKE2 password according to
 [[PROTO-003-selfsame-pairing-v1#CON-403]].
 
-No digit or word SHALL encode an application account, DID, device key,
-permission, endpoint URL, provider-global identity, or derivation index.
+No word SHALL encode a route, nameplate, provider, endpoint URL, application
+identifier, application account, DID, device key, permission, or derivation
+index. Every one of those values SHALL be obtained by resolving
+[[PROTO-003-selfsame-pairing-v1#CON-409]].
+
+A recogniser SHALL reject a failing checksum before any network request or key
+derivation.
 
 Trace:
 [[PROTO-003-selfsame-pairing-v1#TEST-402]]
@@ -285,11 +304,18 @@ descriptors with distinct routes `00` through `99`. Routes are scoped to the
 exact application ID and profile digest and MAY be reused by every other
 application.
 
-The initiating application SHALL select a descriptor. The wallet SHALL follow
-the route only within the matching origin-authenticated profile. It SHALL NOT
-interpret the route globally, use an operator allowlist as a substitute for
-the profile, query unrelated profiles, broadcast a code, or consult an
-undeclared Selfsame/Anuna fallback.
+The application SHALL select the descriptor, in both initiation directions, from
+its own authenticated profile. The wallet SHALL adopt that selection by
+resolving [[PROTO-003-selfsame-pairing-v1#CON-409]] and SHALL NOT substitute a
+descriptor, apply its own operator preference, interpret a route outside the
+resolved profile, use an operator allowlist as a substitute for the profile,
+query unrelated profiles, broadcast a code, or consult an undeclared
+Selfsame/Anuna fallback.
+
+Routes and nameplates no longer appear in the human code, but they remain
+members of the [[PROTO-003-selfsame-pairing-v1#CON-403]] binding object. Two
+applications reusing one route and nameplate therefore still produce different
+transcripts, keys, and confirmation MACs.
 
 Trace:
 [[PROTO-003-selfsame-pairing-v1#TEST-408]]
@@ -363,30 +389,54 @@ Trace:
 
 ### REQ-408: Every carrier converges on one ceremony
 
-QR, manual, and same-device carriers SHALL deliver the same logical bootstrap
-defined by [[PROTO-003-selfsame-pairing-v1#CON-402]]. They may differ only in
-physical transport and whether the person types the code.
+QR, spoken or typed, and same-device carriers SHALL deliver the same logical
+bootstrap defined by [[PROTO-003-selfsame-pairing-v1#CON-402]], in either
+initiation direction. They may differ only in physical transport, which party
+displays the code, and whether the person types it.
 
-No carrier may change the SPAKE2 roles, ciphersuite, transcript binding,
-provider, confirmation rules, mailbox derivation, encrypted offer/grant,
-application evidence, consent, or acceptance predicate. A carrier or peer that
-claims a direct-secret, no-confirmation, provider-terminated, or unknown mode
-causes a fresh-ceremony failure; there is no version negotiation inside a
-version-1 session.
+No carrier and no direction may change the SPAKE2 roles, ciphersuite, transcript
+binding, routing resolution, provider selection, confirmation rules, mailbox
+derivation, sealed offer/grant, application evidence, consent, or acceptance
+predicate. A carrier or peer that claims a direct-secret, no-confirmation,
+provider-terminated, route-in-the-code, or unknown mode causes a fresh-ceremony
+failure; there is no version negotiation inside a session.
 
 Trace:
 [[PROTO-003-selfsame-pairing-v1#TEST-409]],
 [[PROTO-003-selfsame-pairing-v1#TEST-410]]
 
+### REQ-409: Either party may initiate
+
+The application or the Selfsame wallet MAY generate and display the pairing
+code. A conforming implementation SHALL support both directions and SHALL apply
+[[PROTO-003-selfsame-pairing-v1#CON-402]] identically to each.
+
+Whichever party displays the code, the application SHALL select the provider,
+allocate the nameplate, write `pA`, publish the
+[[PROTO-003-selfsame-pairing-v1#CON-409]] record, and act as SPAKE2 role A; the
+wallet SHALL act as role B. Initiation direction SHALL NOT change role
+assignment, transcript identities, frame order, or any derived key.
+
+A wallet-generated code has no intended recipient and is therefore a bearer
+capability. A wallet SHALL bound its lifetime to at most 600 seconds, SHALL
+evaluate at most one resolved record per code, and SHALL display the
+authenticated `applicationId` resolved under CON-409 before the person is asked
+to approve anything. An application-generated code carries the person's own
+session context; a wallet-generated one does not, and consent is its only
+signal.
+
+Trace:
+[[PROTO-003-selfsame-pairing-v1#TEST-409]],
+[[PROTO-003-selfsame-pairing-v1#TEST-413]]
+
 ## Non-functional requirements
 
 ### NFR-401: Human entry remains bounded
 
-The canonical code contains 8 digits, 2 hyphens, and 2 BIP-39 English words.
+The canonical code contains twelve BIP-39 English words and eleven hyphens.
 It is case-insensitive at the presentation parser but always canonicalized to
-lower-case ASCII with hyphens before use. A UI SHALL display the numeric part
-as one uninterrupted value and MAY visually group its two-digit route from its
-six-digit nameplate without adding a parsed character.
+lower-case ASCII with hyphens before use. A UI SHALL display all twelve words
+in full and MAY group them visually without adding a parsed character.
 
 The application identity shown beside a manual code is ceremony context, not a
 rendezvous configuration field. The UI SHALL show the authenticated
@@ -427,7 +477,13 @@ authentication entropy.
 
 ### ADR-402: Use a two-digit route and six-digit nameplate
 
-**Status:** PROPOSED.
+**Status:** PARTIALLY SUPERSEDED by
+[[PROTO-003-selfsame-pairing-v1#ADR-409]]. Routes and nameplates retain exactly
+the roles and widths below, and remain members of the
+[[PROTO-003-selfsame-pairing-v1#CON-403]] binding object. What changed is that
+they are resolved from the CON-409 record rather than parsed from the human
+code, so their widths are now chosen for allocation headroom alone and carry no
+usability cost.
 
 The eight-digit numeric component is `route || nameplate`. Two digits allow
 100 independently operated descriptors per application profile. Six digits
@@ -484,6 +540,175 @@ because PAKE authenticates a key exchange, not the application enrollment
 statement, consent, VC, holder key, or grant acceptance predicate. Feeding the
 two-word password into the old direct-secret HKDF is rejected because 22 bits
 cannot satisfy the old 128-bit secret assumption.
+
+### ADR-406: Carry 128 bits as twelve BIP-39 words
+
+**Status:** PROPOSED.
+
+The human code is twelve BIP-39 English words encoding 128 bits of entropy plus
+a four-bit checksum. It contains no digits.
+
+[[SPEC-004-application-scoped-identity#ADR-215]] reduced the code from 128 bits
+to 22 because the previous form "made the accessibility fallback impractical."
+That diagnosis was of the **encoding**, not the entropy — the rejected artefact
+was 41 Bech32m characters. Changing the encoding fixes the accessibility defect
+without paying the entropy:
+
+```text
+41 Bech32m characters      41 spoken tokens    128 bits
+03482715-account-clinic    10 spoken tokens     48 bits
+twelve BIP-39 words        12 spoken tokens    128 bits
+```
+
+Twelve words costs two spoken tokens against the current code and returns 80
+bits. It is also the only one of the three that self-checks: BIP-39 words are
+unique in their first four letters and the mnemonic carries a checksum, so most
+transcription errors fail locally instead of surfacing as an indistinguishable
+`cA` failure after a network round trip.
+
+The entropy is load-bearing beyond usability. At 22 bits no discovery record can
+be confidential — an address derived from the code is enumerable, and a payload
+encrypted under the code is recoverable offline, which would hand an attacker
+the SPAKE2 password itself rather than merely the record.
+[[PROTO-003-selfsame-pairing-v1#ADR-407]] depends on this decision.
+
+Rejected:
+
+- the former 41-character Bech32m code — correct entropy, unsayable;
+- `<8 digits>-<word>-<word>` — its 22-bit password forces routing into the human
+  code and makes every discovery shape either enumerable or impossible;
+- a memory-hard KDF over 22 bits — buys time against offline attack but replaces
+  a structural guarantee with an economic one that moves with hardware; and
+- more words for routing plus two for the password — a split that only exists to
+  work around a small password, and disappears once the password is large.
+
+### ADR-407: Resolve routing through a code-derived meeting point
+
+**Status:** PROPOSED.
+
+The application publishes a short-lived signed record at an address derived from
+the code. The wallet, which generated or received the same code, computes the
+same address and resolves it. The record names the application and the exact
+pairing session; see
+[[PROTO-003-selfsame-pairing-v1#CON-409]].
+
+The problem this solves is first-encounter routing. The wallet needs the
+canonical `applicationId` before SPAKE2, because
+[[PROTO-003-selfsame-pairing-v1#CON-403]] binds it into the transcript — but on
+a first encounter the wallet has never heard of the application, and version
+0.2.0 could close that gap only by having the person say an HTTPS URI aloud
+beside the code.
+
+A code-derived address is not a directory. It holds no list, cannot be queried
+for what exists, and stores one ephemeral write per ceremony at a location only
+the two parties can compute. Because [[PROTO-003-selfsame-pairing-v1#ADR-406]]
+makes the code 128 bits, the address space is unenumerable: an observer cannot
+sweep it to build an index of live pairings, which is the attack that makes the
+same construction unacceptable at 22 bits. Because the record is signed, a host
+can withhold it but cannot substitute it — and a substituted `applicationId`
+would in any case diverge `binding_hash` and fail confirmation.
+
+Rejected:
+
+- the person says the canonical `applicationId` — the identity is the larger half
+  of what a human must convey, and nothing bounds its length;
+- domain entry plus a `.well-known` lookup — smaller, but still puts an origin in
+  the person's mouth and makes discovery depend on DNS and the CA system for
+  authenticity, where a code-derived address is self-certifying;
+- a published global provider table — it routes to a provider but cannot carry
+  the `applicationId`, so it does not close the gap, and it requires a central
+  allocator that [[SPEC-004-application-scoped-identity#REQ-214]] promises
+  developers they never need; and
+- a low-entropy record as rejected by
+  [[SPEC-004-application-scoped-identity#CON-209]] — that rejection was correct
+  for a 22-bit code and is reopened only because ADR-406 changes its premise.
+
+Two consequences are recorded as open rather than resolved:
+[[PROTO-003-selfsame-pairing-v1#OQ-401]] on shared infrastructure and
+[[PROTO-003-selfsame-pairing-v1#OQ-402]] on observer aggregation.
+
+### ADR-408: Either party may initiate; the application is always role A
+
+**Status:** PROPOSED.
+
+The code may be generated and displayed by the application or by the wallet.
+Whichever displays it, the **application** selects the provider from its own
+profile, allocates the nameplate, writes `pA`, publishes the
+[[PROTO-003-selfsame-pairing-v1#CON-409]] record, and is SPAKE2 role A. The
+wallet is always role B.
+
+Once the code is high-entropy and routing is resolved through a code-derived
+address, the direction of the code stops being a protocol property. Trace both
+directions and only three lines differ — who generates the code, who displays
+it, and who types it. Provider selection, nameplate allocation, record
+publication, frame order, and role assignment are identical, so this is a fourth
+bootstrap carrier under the pattern
+[[PROTO-003-selfsame-pairing-v1#REQ-408]] already establishes, not a second
+state machine.
+
+The gain is ergonomic and mostly accessible: the typing lands on whichever
+device has the better input method rather than always on the wallet.
+
+```text
+application on a TV or console   application displays, person types into phone
+application on a laptop          wallet displays, person types into laptop
+both on one phone                OS handoff, nobody types
+camera available                 QR, nobody types
+```
+
+Fixing the application as role A regardless of who initiated is deliberate. Role
+A and role B are not symmetric — they use different group elements and different
+transcript identities — so letting the role follow the initiator would fork the
+transcript, double the vector set, and create a downgrade surface between two
+otherwise identical ceremonies.
+
+The residual risk is asymmetric and is recorded here rather than mitigated away.
+An application-displayed code is scoped by the session the person is looking at.
+A **wallet-displayed code has no intended recipient** and is therefore a bearer
+capability a person can be talked into reading aloud. An attacker who obtains it
+can complete SPAKE2, because the code is the password. What they cannot do is
+forge [[SPEC-004-application-scoped-identity#CON-214]] enrollment evidence for
+another developer's application, so they can only present themselves as their
+own application and obtain a grant in that application's own branch. The harm
+ceiling is enrolling in an application the person did not intend, and consent is
+the entire defence. Because that consent screen is the only signal — where an
+application-initiated flow also has the person's own context to confirm against —
+a wallet-issued code SHOULD carry a shorter lifetime and the wallet SHOULD name
+the resolved, authenticated origin before the person commits.
+
+Rejected: making the initiator role A. It forks the transcript for no protocol
+gain. Rejected: letting the wallet select the provider when it initiates. It
+would override the application's operator policy, which
+[[SPEC-004-application-scoped-identity#REQ-212]] and
+[[SPEC-004-application-scoped-identity#ADR-207]] make authoritative.
+
+### ADR-409: Routing leaves the human code
+
+**Status:** PROPOSED.
+
+The two-digit route and six-digit nameplate are removed from the human code.
+They travel in the [[PROTO-003-selfsame-pairing-v1#CON-409]] record. The human
+code is the twelve words and nothing else.
+
+The binding object in [[PROTO-003-selfsame-pairing-v1#CON-403]] keeps every
+member it has today. `route`, `nameplate`, `number`, `providerId`, and
+`descriptorDigest` are reconstructed by the wallet from the resolved record and
+the authenticated profile rather than parsed out of what the person said. The
+cross-application separation argued in
+[[PROTO-003-selfsame-pairing-v1#ADR-401]] and
+[[PROTO-003-selfsame-pairing-v1#ADR-402]] therefore survives unchanged —
+different applications reusing one route and nameplate still produce different
+transcripts, keys, and confirmation MACs — while the eight digits stop being
+something a person has to say.
+
+This also unbinds nameplate width from usability. Nameplate size can now be
+chosen purely for allocation headroom and claim-contention resistance, which is
+the only thing it was ever really sized against.
+
+Rejected: keeping the route in the human code as redundancy against a failed
+resolution. Two sources for one routing decision is a parser-differential
+invitation, and a resolution failure should be a typed error and a fresh
+ceremony, not a fallback path with different security properties.
 
 ## Contracts
 
@@ -543,82 +768,148 @@ The selected descriptor is eligible only when this probe and the
 application's bounded selection window. A probe establishes current
 compatibility, not operator honesty.
 
-### CON-402: Pairing code, application context, and QR bootstrap
+### CON-402: Pairing code, its encodings, and the bootstrap
 
-Normative ABNF:
+The protocol value is **`C`: sixteen octets of entropy**. Everything else in
+this contract is a rendering of `C`, and no rendering is the value.
 
-```abnf
-DIGIT         = %x30-39
-lower         = %x61-7A
-route         = 2DIGIT
-nameplate     = 6DIGIT
-number        = route nameplate
-word-token    = 3*8lower
-pairing-code  = number "-" word-token "-" word-token
+```text
+            C  (16 octets)          ← the protocol value
+            │
+   ┌────────┼────────┐
+   ▼        ▼        ▼
+ twelve   base64url  future
+ BIP-39   in the     renderings
+ words    bootstrap
+ (human)  (machine)
 ```
 
-Each `word-token` additionally MUST be an exact member of the 2,048-word
-BIP-39 English word list. Both words MAY be equal. The canonical code uses
-lower-case ASCII and hyphens. A presentation parser MAY accept ASCII upper-case
-letters and one or more ASCII spaces around or in place of a hyphen, but it
-MUST reject non-ASCII confusables, extra tokens, missing leading zeroes, and
-every value that cannot be re-encoded to one canonical code.
+This separation is normative and load-bearing. Every derivation in this
+protocol — the SPAKE2 password in
+[[PROTO-003-selfsame-pairing-v1#CON-404]], the meeting-point address in
+[[PROTO-003-selfsame-pairing-v1#CON-409]] — consumes `C` directly and never a
+spelling of it. A rendering that cannot round-trip to the exact octets of `C` is
+invalid, and two renderings of one `C` are the same code.
 
-The logical bootstrap is:
+The consequence worth stating: the wordlist is a **presentation choice, not a
+protocol constant**. Version 2 fixes the BIP-39 English list as the interoperable
+default, and every conforming implementation MUST accept it. An implementation
+MAY additionally offer another rendering — a localised BIP-39 wordlist, or a
+different alphabet — provided it renders the same `C`, round-trips exactly, and
+never becomes the only form the implementation accepts. Accessibility and
+localisation therefore live at the presentation layer and require no amendment
+to this protocol.
+
+Normative ABNF for the English rendering:
+
+```abnf
+lower         = %x61-7A
+word-token    = 3*8lower
+pairing-code  = 11(word-token "-") word-token
+```
+
+The code is exactly twelve word tokens separated by single hyphens. Each
+`word-token` MUST be an exact member of the 2,048-word BIP-39 English word
+list. Tokens MAY repeat.
+
+The twelve words encode 128 bits of entropy plus a four-bit checksum, exactly as
+BIP-39 specifies for a 128-bit mnemonic. A recogniser MUST verify that checksum
+and reject a failing code before any network request or key derivation. Define:
+
+```text
+C = the 16 octets of entropy recovered from the twelve words
+```
+
+`C` is the only secret the human carries. It encodes no route, nameplate,
+provider, endpoint, application account, DID, device key, permission, or
+derivation index. It is not a BIP-39 wallet seed and is never used as one.
+
+The canonical code uses lower-case ASCII and hyphens. A presentation parser MAY
+accept ASCII upper-case letters and one or more ASCII spaces around or in place
+of a hyphen, but it MUST reject non-ASCII confusables, extra or missing tokens,
+words absent from the list, and every value that cannot be re-encoded to one
+canonical code.
+
+Abbreviated entry — accepting a four-character prefix per word, which the BIP-39
+English list makes unambiguous — is deliberately **not** specified. It would add
+a second accepted input form, and therefore a second way for two recognisers to
+disagree, in exchange for shortening only the typed path. The machine carriers
+already transport `C` directly, so nothing else benefits. One value, one
+recogniser, one accepted spelling.
+
+#### Bootstrap
+
+The logical bootstrap carries the entropy, not its spelling:
 
 ```json
 {
-  "version": 1,
-  "applicationId": "https://photos.example/selfsame/application",
-  "profileDigest": "<base64url SHA-256 of the authenticated profile>",
-  "code": "03482715-rocket-anchor"
+  "version": 2,
+  "c": "<base64url of the 16 octets of C>"
 }
 ```
 
-The object has exactly those four members. `applicationId` is canonical under
-[[SPEC-004-application-scoped-identity#CON-201]]. `profileDigest` is canonical
-unpadded RFC 4648 base64url decoding to exactly 32 bytes. `code` passes the
-grammar above.
+The object has exactly those two members. `c` is canonical unpadded RFC 4648
+base64url decoding to exactly 16 octets, and MUST pass the same decode and
+re-encode canonicality check applied elsewhere in this profile.
+
+Machine carriers — the QR payload and the same-device handoff — carry this
+object and never carry words. Twelve words are a **human presentation** of `C`,
+so encoding them into a machine carrier would ship roughly seventy characters
+where twenty-two suffice, and would put a second parser for the same value on
+the wire. A carrier that transports words instead of `c` MUST be rejected.
+
+`applicationId` and `profileDigest` are no longer carried by any bootstrap. A
+resolving party obtains them from
+[[PROTO-003-selfsame-pairing-v1#CON-409]], which is the single routing path for
+every carrier. This removes the former asymmetry in which a QR could carry
+application context that a spoken code could not, and with it the requirement
+that a person convey an HTTPS identity aloud.
 
 The canonical QR payload is:
 
 ```text
-ASCII("selfsame-pairing-v1:")
+ASCII("selfsame-pairing-v2:")
 || BASE64URL-NOPAD(RFC8785(logical_bootstrap))
 ```
 
-It is data consumed inside a conforming Selfsame wallet, not an OS navigation
-URL. It MUST NOT be opened by a browser, emitted as an HTTP query, placed in a
-referrer, or registered as an authoritative private-use URL scheme.
+It is data consumed inside a conforming Selfsame wallet or application, not an
+OS navigation URL. It MUST NOT be opened by a browser, emitted as an HTTP query,
+placed in a referrer, or registered as an authoritative private-use URL scheme.
 
-The QR and verified same-device carriers deliver the complete bootstrap. A
-manual carrier MAY deliver the code alone only when the wallet already has the
-exact origin-authenticated `applicationId` and profile digest for that
-ceremony. Otherwise the UI SHALL supply the exact application ID beside the
-code, and the wallet SHALL retrieve and authenticate that application's
-profile before routing. Supplying an application identity is ceremony
-bootstrap, not a user-selected provider setting.
+Under [[PROTO-003-selfsame-pairing-v1#ADR-408]] either party may generate and
+display the code, and every carrier — QR, spoken or typed words, and verified
+same-device handoff — delivers exactly this bootstrap in either direction.
 
-A bare code with no application context returns
-`MissingApplicationContext`. The wallet SHALL NOT search installed apps,
-historic profiles, provider lists, DNS guesses, or network endpoints for a
-matching nameplate.
+A code that resolves no record returns `PairingRecordUnavailable`. A resolving
+party SHALL NOT search installed applications, historic profiles, provider
+lists, DNS guesses, or any other endpoint for a match, and SHALL NOT retry with
+a mutated code.
 
 ### CON-403: Word-index and transcript binding inputs
 
-Let `i1` and `i2` be the zero-based BIP-39 English indices of the two words.
-The password input bytes are:
+The password input is the 16-octet value `C` recovered in
+[[PROTO-003-selfsame-pairing-v1#CON-402]]:
 
 ```text
-packed = ((i1 << 11) | i2) << 2
-wib    = U24BE(packed)
+wib = C          ; exactly 16 octets, 128 bits
 ```
 
-Thus `wib` is exactly three bytes: 22 index bits followed by two zero pad bits.
-For `account-clinic`, indices 12 and 345 produce hex `018564`.
+The name `wib` is retained so that
+[[PROTO-003-selfsame-pairing-v1#CON-404]] reads unchanged, but it is no longer a
+packed word-index pair. The former three-octet 22-bit encoding is withdrawn by
+[[PROTO-003-selfsame-pairing-v1#ADR-406]]; an implementation offering it MUST be
+rejected as a downgrade under
+[[PROTO-003-selfsame-pairing-v1#REQ-407]].
 
-Let `number`, `route`, and `nameplate` be the canonical code substrings. Let
-`profile_digest` and `descriptor_digest` be canonical unpadded base64url
+`route`, `nameplate`, `number`, `providerId`, and `descriptor_digest` are no
+longer parsed from the human code. Under
+[[PROTO-003-selfsame-pairing-v1#ADR-409]] the application takes them from its
+own profile and selection, and the wallet reconstructs them from the resolved
+[[PROTO-003-selfsame-pairing-v1#CON-409]] record together with the profile it
+fetches and pins by `profileDigest`. `number` is `route || nameplate` as before.
+
+Both parties MUST hold every member below before either processes a peer frame.
+Let `profile_digest` and `descriptor_digest` be canonical unpadded base64url
 SHA-256 values. Both clients construct this exact logical object:
 
 ```json
@@ -640,12 +931,20 @@ The binding object has exactly those nine members and is serialized with RFC
 
 ```text
 binding_hash = SHA256(RFC8785(binding_object))
-idA = ASCII("selfsame-pairing-v1/initiator/") || binding_hash
-idB = ASCII("selfsame-pairing-v1/wallet/") || binding_hash
+idA = ASCII("selfsame-pairing-v2/application/") || binding_hash
+idB = ASCII("selfsame-pairing-v2/wallet/") || binding_hash
 ```
 
-The words and `wib` never appear in the binding object. Two applications may
-use the same route, provider ID, number, and words; their different canonical
+The identity labels name the **party**, not who started the ceremony. Under
+[[PROTO-003-selfsame-pairing-v1#ADR-408]] either party may initiate, so the
+former `initiator` label was a misnomer for a role that is always the
+application. The label change alters every transcript hash, key, and
+confirmation MAC and therefore invalidates every previously published vector;
+this is why it is made now rather than after
+[[PROTO-003-selfsame-pairing-v1#TEST-403]] publishes.
+
+The code, `C`, and `wib` never appear in the binding object. Two applications
+may use the same route, provider ID, number, and code; their different canonical
 application IDs or profile/descriptor digests still produce different
 identities, transcript hashes, keys, and confirmation MACs.
 
@@ -667,11 +966,17 @@ N = FROM_UNIFORM_BYTES(SHA512(
 
 w_bytes = HKDF-SHA256(
   ikm  = wib,
-  salt = ASCII("selfsame-pairing-v1"),
-  info = ASCII("selfsame-pairing-password-v1"),
+  salt = ASCII("selfsame-pairing-v2"),
+  info = ASCII("selfsame-pairing-password-v2"),
   L    = 64)
 w = REDUCE_SCALAR_LE(w_bytes)
 ```
+
+Every domain-separation label in this contract carries `v2` because
+[[PROTO-003-selfsame-pairing-v1#ADR-406]] changes `wib` from three octets to
+sixteen. A version-1 and a version-2 implementation therefore cannot derive a
+common `w`, `K`, or confirmation MAC from the same input, and a downgrade
+attempt fails as a mismatch rather than succeeding weakly.
 
 `REDUCE_SCALAR_LE` interprets 64 octets as an unsigned little-endian integer
 and reduces it modulo the ristretto255 scalar order. Each role draws 64 fresh
@@ -710,13 +1015,13 @@ tt_hash = SHA256(
 K = HKDF-SHA256(
   ikm  = tt_hash,
   salt = empty,
-  info = ASCII("selfsame-pairing-session-key-v1"),
+  info = ASCII("selfsame-pairing-session-key-v2"),
   L    = 32)
 
 cA = HMAC-SHA256(
-  K, ASCII("selfsame-pairing-initiator-confirm-v1") || tt_hash)
+  K, ASCII("selfsame-pairing-application-confirm-v2") || tt_hash)
 cB = HMAC-SHA256(
-  K, ASCII("selfsame-pairing-wallet-confirm-v1") || tt_hash)
+  K, ASCII("selfsame-pairing-wallet-confirm-v2") || tt_hash)
 ```
 
 Every `pA`, `pB`, `cA`, and `cB` wire value is exactly 32 bytes. MAC comparison
@@ -922,6 +1227,126 @@ required by [[SPEC-004-application-scoped-identity]]. SPAKE2 establishes
 shared knowledge of the OOB password; it does not replace application-origin
 authentication, consent, the home signature, VC verification, or holder proof.
 
+### CON-409: Code-derived meeting point
+
+This contract is the single routing path for every carrier and every initiation
+direction. It replaces the application context that
+[[PROTO-003-selfsame-pairing-v1#CON-402]] formerly required a QR to carry or a
+person to speak.
+
+#### Address
+
+```text
+meet_seed = HKDF-SHA256(
+  ikm  = C,
+  salt = ASCII("selfsame-pairing-v2"),
+  info = ASCII("selfsame-pairing-meeting-point-v2"),
+  L    = 32)
+
+meet_key  = the Ed25519 keypair whose RFC 8032 private seed is meet_seed
+meet_addr = the public key of meet_key
+```
+
+Both parties derive `meet_key` independently from `C`. The application holds the
+private half only to sign its record; the address is the public half. Because
+`C` carries 128 bits, `meet_addr` is not enumerable: an observer cannot sweep
+the space to build an index of live ceremonies, which is the property that makes
+this construction acceptable here and unacceptable under a 22-bit code.
+
+`meet_seed` SHALL NOT be used as a SPAKE2 password, an AEAD key, a mailbox
+secret, a slot input, or any other key. `C` reaches those uses only through
+[[PROTO-003-selfsame-pairing-v1#CON-404]] and
+[[PROTO-003-selfsame-pairing-v1#CON-408]].
+
+#### Record
+
+The application publishes exactly this object, RFC 8785 serialized and signed by
+`meet_key`:
+
+```json
+{
+  "version": 2,
+  "applicationId": "https://photos.example/selfsame/application",
+  "profileDigest": "<base64url SHA-256 of the RFC 8785 profile>",
+  "providerId": "au-primary",
+  "nameplate": "482715",
+  "expiresAt": "2026-07-31T10:10:00Z"
+}
+```
+
+The member set is exactly those six names. `applicationId` is canonical under
+[[SPEC-004-application-scoped-identity#CON-201]]. `profileDigest` is canonical
+unpadded base64url decoding to exactly 32 octets. `providerId` matches
+`[a-z0-9][a-z0-9-]{0,62}`. `nameplate` is exactly six ASCII digits. `expiresAt`
+is an XML Schema `dateTimeStamp` normalized to UTC `Z`, at most 600 seconds
+after publication, and never later than the provider session it names.
+
+`providerId` is REQUIRED alongside the profile digest because `pairingUrl` alone
+is ambiguous when one profile declares two descriptors at one origin. Together
+they select exactly one descriptor.
+
+The record SHALL NOT contain an account scope, DID, alias, device key,
+permission, offer digest, enrollment evidence, ceremony or request identifier,
+person-identifying value, or any part of `C`.
+
+The record is **signed, not encrypted**. No key exists at this point in the
+ceremony that could confidentially seal it: a key derived from `C` directly
+would let anyone resolving the address brute-force `C` itself and thereby
+recover the SPAKE2 password, and the SPAKE2 output does not yet exist. The
+disclosure this accepts is bounded by
+[[PROTO-003-selfsame-pairing-v1#OQ-402]].
+
+#### Publication and resolution
+
+The publishing party MUST be the application, in both initiation directions. It
+publishes only after it has selected a descriptor from its own authenticated
+profile, obtained the nameplate, and acknowledged its `pA` write.
+
+The resolving party MUST, in order:
+
+1. recover `C` and verify the BIP-39 checksum under
+   [[PROTO-003-selfsame-pairing-v1#CON-402]];
+2. derive `meet_addr` and resolve the record;
+3. verify the record signature against `meet_addr` and reject on failure;
+4. reject an expired record, and reject a second record at the same address;
+5. recognize the closed member set above before any semantic action;
+6. fetch the application profile from the canonical `applicationId` origin and
+   require its RFC 8785 SHA-256 digest to equal `profileDigest`;
+7. select the unique descriptor matching `providerId` and re-run both bounded
+   capability probes in [[PROTO-003-selfsame-pairing-v1#CON-401]]; and
+8. construct the [[PROTO-003-selfsame-pairing-v1#CON-403]] binding before
+   claiming the nameplate.
+
+A resolved record is an **unauthenticated hint**. Its signature proves only that
+whoever holds `C` wrote it; it establishes no application authority. A
+substituted `applicationId`, `profileDigest`, `providerId`, or `nameplate`
+produces a different `binding_hash` and fails confirmation, so a hostile host
+can withhold but cannot redirect. Application authenticity comes from
+[[SPEC-004-application-scoped-identity#CON-214]] after the mailbox opens, never
+from this record.
+
+#### Transport
+
+A conforming implementation MAY resolve through any transport that returns the
+signed record intact — a signed-record relay over HTTPS, a distributed hash
+table, or both raced concurrently. Racing is safe precisely because the record
+is self-authenticating: no trust decision depends on which transport answered,
+so latency is the faster arm and availability is the more resilient one.
+
+A transport SHALL NOT be treated as a trust anchor, SHALL NOT be permitted to
+substitute a record, and SHALL NOT be consulted for anything other than the
+exact derived address. Errors are `PairingRecordUnavailable`,
+`PairingRecordMalformed`, `PairingRecordBadSignature`, `PairingRecordExpired`,
+or `PairingRecordConflict`; every one abandons the ceremony under
+[[PROTO-003-selfsame-pairing-v1#REQ-406]].
+
+Which transports a conforming client ships, and who operates them, is
+[[PROTO-003-selfsame-pairing-v1#OQ-401]] and is unresolved.
+
+Implements: REQ-402, REQ-403, REQ-408, REQ-409.
+
+Verified by: TEST-402, TEST-408, TEST-409, TEST-413.
+
 ## Test specifications
 
 ### TEST-401: Capability and descriptor recognition
@@ -933,26 +1358,42 @@ unknown/missing member, duplicate route, invalid route width, non-canonical
 URL, wrong protocol, wrong fixed limit, expired descriptor, redirect, content
 encoding, oversized body, and pairing-only provider lacking PROTO-002.
 
-### TEST-402: Code grammar and BIP-39 packing
+### TEST-402: Code grammar and rendering
 
 **Validates:** REQ-402, CON-402, CON-403.
 
-Accept and re-encode canonical `03482715-account-clinic`; split route `03` and
-nameplate `482715`; and produce `wib = 018564`. Cover index boundaries
-`0/0`, `0/2047`, `2047/0`, and `2047/2047`, including repeated words.
+Accept and re-encode canonical twelve-word codes, recovering `wib = C` as
+exactly sixteen octets. Cover all-zero entropy, all-ones entropy, repeated
+words, and codes whose first and last words are the first and last list
+entries.
 
-Reject missing leading zeroes, non-ASCII digits, Unicode hyphens/confusables,
-one or three words, a non-list word, empty tokens, overlong input, and any
-presentation form that does not converge on one canonical output.
+Require the twelve-word rendering and the `c` bootstrap to round-trip to
+identical octets, and require every derivation to consume `C` rather than a
+spelling — render one `C` two ways and require identical `w_bytes` and
+`binding_hash`.
+
+Reject a failing BIP-39 checksum, an abbreviated word, a word absent from the
+list, eleven or thirteen tokens, empty tokens, non-ASCII digits, Unicode
+hyphens and confusables, overlong input, a machine carrier transporting words
+rather than `c`, and any presentation form that does not converge on one
+canonical output. Assert that a checksum failure produces no network request
+and no key derivation.
+
+Reject the withdrawn version-1 forms explicitly: an eight-digit-plus-two-word
+code, and a three-octet `wib`.
 
 ### TEST-403: Normative SPAKE2 vectors
 
 **Validates:** REQ-405, CON-403, CON-404.
 
 Publish fixed vectors containing the complete binding object, RFC 8785 bytes,
-binding hash, word indices, `wib`, role ephemerals, M/N encodings, `w_bytes`,
-`pA`, `pB`, encoded shared element, transcript hash, `K`, `cA`, `cB`, and
-mailbox secret. Two independent implementations reproduce every byte.
+binding hash, the twelve words, `C`, `wib`, role ephemerals, M/N encodings,
+`w_bytes`, `pA`, `pB`, encoded shared element, transcript hash, `K`, `cA`, `cB`,
+and mailbox secret. Two independent implementations reproduce every byte.
+
+Vectors SHALL use the `v2` domain-separation labels and the
+`application`/`wallet` transcript identities. Any vector published against the
+version-1 labels is invalid and MUST NOT be reproduced.
 
 This test is blocking until the vectors receive cryptographic review; examples
 in this draft are not substitute vectors.
@@ -1070,6 +1511,47 @@ entire SPEC-004 chain and require successful authorization.
 This proves that the PAKE authenticates the OOB capability, not the developer
 origin or final credential.
 
+### TEST-413: Meeting point, initiation direction, and prefix entry
+
+**Validates:** REQ-402, REQ-403, REQ-408, REQ-409, ADR-406 through ADR-409,
+CON-402, CON-403, CON-409.
+
+Derive `meet_addr` from normative `C` vectors in two independent
+implementations and require byte-identical addresses. Require a one-bit change
+in `C` to change the address. Require `meet_seed` never to equal, and never to
+be derivable from, `w_bytes`, `K`, or `mailbox_secret_16`.
+
+Publish and resolve a valid record. Then reject, individually: a bad signature,
+a signature by a key other than `meet_addr`, an expired record, a second record
+at one address, an unknown or missing member, a non-canonical base64url
+`profileDigest`, a `nameplate` that is not six digits, a `providerId` matching
+no descriptor, a `providerId` matching two, and a `profileDigest` that does not
+equal the digest of the fetched profile. Assert zero semantic action on every
+rejection — no claim, no frame, no probe beyond the profile fetch.
+
+Substitute a hostile record naming a different `applicationId`, `providerId`, or
+`nameplate` while keeping a valid signature. Require the ceremony to reach
+confirmation and fail there, proving the record is a hint that a divergent
+`binding_hash` catches rather than a trusted routing decision.
+
+Run a complete ceremony in **both** initiation directions with fresh randomness.
+Require identical role assignment, transcript identities, frame order, derived
+keys, and acceptance decisions; require the traces to differ only in which party
+generated and displayed the code. Require a wallet-generated code to expire
+within 600 seconds, to admit at most one resolved record, and to surface the
+resolved `applicationId` before any consent affordance.
+
+Require the twelve-word rendering and the `c` bootstrap to round-trip to the
+identical sixteen octets. Reject an abbreviated word, a word absent from the
+list, a failing checksum, and a machine carrier transporting words rather than
+`c`. Confirm that every derivation consumes `C` and never a spelling of it, by
+rendering one `C` two ways and requiring identical `w_bytes`, `meet_addr`, and
+`binding_hash`.
+
+Resolve the same record through a relay transport and a distributed hash table,
+and through both raced concurrently. Require identical results and require no
+trust decision to depend on which transport answered.
+
 ## Trust assumptions
 
 - The application's profile is authenticated to its canonical HTTPS
@@ -1113,7 +1595,7 @@ It may not, for the protocol's remote-attacker claim:
 ### Required security properties
 
 - **Passive offline resistance:** provider transcripts do not verify guesses
-  for the two words.
+  for `C`, which at 128 bits is not guessable in any case.
 - **Bounded active guessing:** the wallet evaluates at most one initiator
   confirmation per minted ceremony; success probability from guessing alone is
   at most `2^-22` for that ceremony.
@@ -1173,17 +1655,93 @@ No implementation task may be marked ready until all boxes are checked:
       documented; Selfsame does not copy its provider-as-responder trust model.
 - [ ] Two independently operated providers pass TEST-401 and TEST-404 through
       TEST-411 without Anuna infrastructure or an Anuna runtime dependency.
-- [ ] An application-profile security review approves two-digit route
-      assignment, profile digest binding, profile updates during a ceremony,
-      and the bare-code failure rule.
+- [ ] An application-profile security review approves route assignment,
+      profile digest binding, profile updates during a ceremony, and the
+      unresolvable-code failure rule.
 - [ ] A privacy review covers application/profile metadata, browser Origin,
       nameplate enumeration, token handling, IP/timing retention, and
       cross-application/provider collusion.
 - [ ] A production-operator review approves atomic claim/write behavior across
       replicas, exact TTL/tombstone semantics, overload handling, and abuse
       controls.
+- [ ] A human cryptography reviewer approves CON-409, including the
+      code-derived meeting-point keypair, its domain separation from `w`, `K`,
+      and `mailbox_secret_16`, and the decision to sign rather than encrypt the
+      record.
+- [ ] TEST-413 passes in both initiation directions against two independent
+      implementations, including the hostile-record and transport-race cases.
+- [ ] OQ-401, OQ-402, and OQ-403 are resolved normatively or explicitly
+      accepted by the human owner with bounded consequences.
+- [ ] SPEC-004 ADR-215, ADR-216, CON-209, CON-216, and REQ-226–227 are
+      reconciled with ADR-406 through ADR-409, or this protocol is reverted.
 - [ ] SPEC-004's profile-origin and mobile-platform evidence gate closes.
 - [ ] Human security sign-off records an approved version and commit.
+
+## Open questions
+
+### OQ-401: Who operates the meeting-point transport? — blocking
+
+[[PROTO-003-selfsame-pairing-v1#CON-409]] requires a transport that returns a
+signed record, but does not say who runs one or how a client finds it. The
+resolving party is by definition the one without the application profile, so the
+profile cannot name it — which leaves a shipped list, a distributed hash table,
+or both.
+
+A shipped relay list brushes against
+[[SPEC-004-application-scoped-identity#REQ-210]] and the Infrastructure promise.
+The tension is narrower than it first appears, because a signed record means such
+a host can **withhold but never substitute**, making it a liveness dependency
+rather than a trust anchor — the same "hints, not trust anchors" line CON-409
+already draws. But `REQ-210` and the Infrastructure promise are anti-lock-in
+commitments about operator *power*, not privacy commitments, and a default
+transport is exactly the operator dependency they were written to prevent.
+
+The decision must fix: whether a version-2 client ships a relay list, whether at
+least two independent operators are required before the gate closes, whether a
+DHT is mandatory as the correctness arm, and what a client does when every
+declared transport fails. Racing several is permitted by CON-409 and does not by
+itself resolve who runs them.
+
+Owner: HOC + application-profile working group.
+
+### OQ-402: What does a meeting-point observer accumulate? — blocking for the privacy review
+
+A record host observes a publish and a resolve at one address, seconds apart,
+from two addresses on the network. It learns neither which person nor which
+account, and 128-bit addressing makes ceremonies unlinkable to each other. But
+it does learn that two devices are pairing, and — because
+[[PROTO-003-selfsame-pairing-v1#CON-409]] cannot encrypt its payload — which
+application they are pairing with.
+
+The rendezvous operator already sees both endpoints today, since
+[[PROTO-003-selfsame-pairing-v1#CON-408]] makes one descriptor URL the only
+mailbox origin. The change is **aggregation scope**: today's observer is chosen
+by the application from its own profile and sees only that application's
+ceremonies, whereas a meeting-point transport must be reachable by a party that
+has no profile, and therefore sees across applications.
+
+The decision must fix whether that aggregation is acceptable, and whether
+transports must be structured so that publish and resolve can land on different
+hosts — which a DHT-backed cache arrangement permits and a single authoritative
+relay does not.
+
+Owner: privacy reviewer + HOC.
+
+### OQ-403: Does version 1 coexist with version 2? — blocking for any deployed client
+
+Version 2 changes the code grammar, the password width, every domain-separation
+label, and the transcript identities, so a version-1 and a version-2 client
+cannot complete a ceremony together and will fail at confirmation rather than
+negotiate.
+
+That is the intended fail-closed behaviour, but no migration is specified. The
+decision must fix whether any version-1 code may still be accepted, how a client
+reports a version mismatch without creating a downgrade oracle, and whether the
+`selfsame-pairing-v1` capability token in
+[[PROTO-003-selfsame-pairing-v1#CON-401]] is retired or served alongside a
+version-2 token.
+
+Owner: HOC.
 
 ## Traceability
 
@@ -1195,6 +1753,10 @@ No implementation task may be marked ready until all boxes are checked:
 | Mutual confirmation and N=1 guessing | REQ-405, REQ-406 | ADR-404, CON-404, CON-407 | TEST-403, TEST-406, TEST-411 |
 | Existing encrypted grant ceremony reused | REQ-407 | ADR-405, CON-408 | TEST-404, TEST-410, TEST-412 |
 | QR/manual/same-device equivalence | REQ-408 | CON-402, CON-407, CON-408 | TEST-409, TEST-410 |
+| A code a person can say, with room for discovery | REQ-402 | ADR-406, CON-402 | TEST-402, TEST-403, TEST-413 |
+| First-encounter routing without a spoken identity | REQ-402, REQ-403 | ADR-407, ADR-409, CON-409 | TEST-408, TEST-413 |
+| Either party may start the ceremony | REQ-408, REQ-409 | ADR-408, CON-402, CON-409 | TEST-409, TEST-413 |
+| One value, many renderings | REQ-402 | ADR-406, CON-402 | TEST-402, TEST-413 |
 
 ## Amendment Channels
 
@@ -1250,16 +1812,61 @@ Standards constraints that are easy to miss:
 - RFC 9382 states that SPAKE2 is not augmented; a SPAKE2 server stores a
   password equivalent. Selfsame avoids that property by making the application
   and wallet the endpoints and the provider a relay.
-- PAKE prevents passive offline guessing; it does not make a 22-bit password
-  high entropy or prevent one active online guess.
+- PAKE prevents passive offline guessing and bounds online guessing to one
+  attempt per ceremony. At the 128-bit width fixed by
+  [[PROTO-003-selfsame-pairing-v1#ADR-406]] guessing is infeasible regardless,
+  so SPAKE2 is retained for its transcript binding and forward secrecy rather
+  than to rescue a small password.
 - Knowledge of a PAKE password authenticates shared password knowledge, not a
   developer origin, human identity, account, device key, or VC issuer.
-- BIP-39 defines mnemonic-to-seed behavior for supported mnemonic lengths.
-  This protocol uses only two English word indices as a compact 22-bit PAKE
-  input and does not claim that two words form a BIP-39 mnemonic.
+- BIP-39 defines mnemonic-to-seed behavior. This protocol uses the English
+  wordlist and its checksum purely as a transcription-resistant rendering of
+  128 bits, and never derives a BIP-39 seed. A pairing code is not a wallet
+  mnemonic and MUST NOT be entered as one.
 
 ## Changelog
 
+- **0.3.0 — 2026-07-31 — draft, normative.** Replaces the code and its routing.
+  Adds ADR-406 through ADR-409, REQ-409, CON-409, TEST-413, and OQ-401–403;
+  rewrites CON-402; amends REQ-402, REQ-403, REQ-408, CON-403, CON-404, the
+  Orientation block, the Tier-1 gate, and traceability.
+
+  *The code.* `<8 digits>-<word>-<word>` becomes twelve BIP-39 English words
+  carrying 128 bits. SPEC-004 ADR-215 cut entropy from 128 to 22 bits to fix an
+  accessibility complaint about **41 Bech32m characters** — a defect of encoding,
+  not of entropy. Twelve words cost two spoken tokens against the old code,
+  return 80 bits, and self-check via the BIP-39 checksum. CON-402 now states the
+  separation explicitly: the protocol value is `C`, sixteen octets, and words and
+  the base64url bootstrap are renderings of it. Machine carriers transport `C`
+  and never words. Abbreviated four-character word entry was considered and
+  deliberately excluded — one value, one recogniser, one accepted spelling.
+
+  *The routing.* Route and nameplate leave the human code entirely. The
+  application publishes a signed, ephemeral record at an Ed25519 address derived
+  from `C`; the other party resolves it for `applicationId`, `profileDigest`,
+  `providerId`, and `nameplate`. This closes first-encounter routing, which
+  version 0.2.0 could only solve by having a person say an HTTPS URI aloud. The
+  128-bit address is what makes it safe: at 22 bits the same construction yields
+  an enumerable directory of live ceremonies and hence targeted pre-claim denial
+  of service. CON-403's binding object is unchanged in membership — route and
+  nameplate are reconstructed from the record — so ADR-401 and ADR-402's
+  cross-application separation survives intact.
+
+  *The direction.* Either party may generate and display the code; the
+  application is always SPAKE2 role A, always selects the provider, and always
+  publishes the record. This puts the typing on whichever device has the better
+  keyboard. The residual risk is recorded rather than mitigated away: a
+  wallet-generated code has no intended recipient, so consent is its only
+  signal.
+
+  *Domain separation.* Every label moves to `v2` and the transcript identities
+  become `application`/`wallet`, since `initiator` was a misnomer for a role that
+  is always the application. This invalidates every previously published vector
+  and makes a v1/v2 downgrade fail as a mismatch rather than succeed weakly.
+  OQ-403 records that no v1/v2 migration is specified.
+
+  Not changed: the ristretto255 construction, mutual confirmation, N=1 burn, the
+  blind relay boundary, and mailbox derivation.
 - **0.2.0 — 2026-07-31 — draft, normative.** Repairs a scope gap: this document
   placed "the encrypted offer/bundle mailbox wire contract" out of scope and
   delegated it to [[PROTO-002-selfsame-rendezvous-v1]], which had itself placed
