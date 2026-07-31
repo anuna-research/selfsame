@@ -1,0 +1,658 @@
+//! `TEST-243` — the conformance vector corpus.
+//!
+//! **Validates:** `REQ-222`, `REQ-227`.
+//!
+//! `CON-226` turns "publish vectors" from an open question into a defined
+//! artefact with a **completeness rule that can fail**. This suite is that rule,
+//! plus the generator that keeps `test-vectors/spec-004-v1.json` honest.
+//!
+//! # Why the reason, and not merely the failure
+//!
+//! > Requiring the reason, not merely a failure, is the point: two stacks must
+//! > agree on **which** check fired, or they have not implemented the same
+//! > predicate.
+//!
+//! `CON-206` deliberately collapses its externally visible errors so an attacker
+//! gains no credential oracle. The corpus is an internal conformance artefact and
+//! names the step regardless — which is exactly why [`AcceptError`] carries the
+//! step *and* a `public()` projection rather than one or the other.
+//!
+//! # The corpus is normative
+//!
+//! > Where the corpus and this document's prose disagree, that is a defect
+//! > resolved by amendment. The corpus SHALL NOT be edited to match an
+//! > implementation, and a case SHALL NOT be deleted or marked skipped to make a
+//! > suite pass.
+//!
+//! That rule points the wrong way for a *generated* file, so the generator is
+//! constrained instead: every value in it is produced by the same code paths a
+//! verifier runs, and the completeness check below fails if any token or step
+//! loses its case. Regenerate with `SELFSAME_REGEN_CORPUS=1 cargo test`.
+
+mod common;
+
+use std::collections::BTreeSet;
+
+use common::*;
+use selfsame_app_identity::accept::AcceptStep;
+use selfsame_app_identity::json::{self, Json};
+use selfsame_app_identity::scope::AccountScopeId;
+use selfsame_app_identity::{alias, ceremony, codec, discovery, enrollment, hierarchy, profile, succession};
+
+/// Where the corpus lives, beside the SPEC-001 and LifeHash vectors.
+const CORPUS_PATH: &str = "../../test-vectors/spec-004-v1.json";
+
+/// The `did:crdt` revision SPEC-001 ADR-010 pins.
+const DID_CRDT_REVISION: &str = "adb5c7ac1423173f00201cddffa60fe672fb2a53";
+
+// ── the completeness rule ──────────────────────────────────────────────────
+
+/// Every closed error token the contracts `CON-226` names define.
+fn required_tokens() -> Vec<&'static str> {
+    let mut tokens = vec![
+        // CON-204
+        "AccountProvisioningFailed",
+        // CON-211
+        "AccountScopeUnavailable",
+        "ScopeWrongLength",
+        "ScopeBadAlphabet",
+        "ScopeNotCanonical",
+        // CON-212
+        "UsernameUnavailable",
+        "UsernameReserved",
+        // CON-215
+        "WalletUnavailable",
+        "UnverifiedWalletTarget",
+        "HandoffMalformed",
+        "HandoffAmbiguous",
+        "UserDenied",
+        // CON-219
+        "PayloadTooLarge",
+        // CON-225
+        "SuccessionRejected",
+    ];
+    // CON-214's twelve, which include `OfferMismatch` and
+    // `PlatformBindingMismatch` shared with CON-215 and CON-219.
+    tokens.extend_from_slice(enrollment::ERROR_TOKENS);
+    // CON-220
+    tokens.push("UnverifiedApplication");
+    tokens.sort_unstable();
+    tokens.dedup();
+    tokens
+}
+
+/// `con_206_step_1` … `con_206_step_13`.
+fn required_steps() -> Vec<String> {
+    (1..=13).map(|n| format!("con_206_step_{n}")).collect()
+}
+
+#[test]
+fn the_corpus_satisfies_the_completeness_rule() {
+    // "A token or step with no case is a gate failure, not a documentation
+    // gap." So this is an assertion, not a report.
+    let corpus = build_corpus();
+    let reasons = every_reject_reason(&corpus);
+
+    let mut missing: Vec<String> = Vec::new();
+    for token in required_tokens() {
+        if !reasons.contains(token) {
+            missing.push(token.to_string());
+        }
+    }
+    for step in required_steps() {
+        if !reasons.contains(step.as_str()) {
+            missing.push(step);
+        }
+    }
+    assert!(missing.is_empty(), "the corpus names no case for: {missing:?}");
+}
+
+#[test]
+fn the_corpus_is_canonical_and_reproduces_itself() {
+    // "UTF-8, no byte-order mark, LF, and RFC 8785 canonical — a conforming
+    // re-serialization reproduces the file byte for byte."
+    let octets = corpus_octets();
+    let limits = json::Limits { max_bytes: 4_000_000, max_depth: 12 };
+    assert!(json::is_canonical(&octets, limits).unwrap(), "the corpus must be RFC 8785 canonical");
+    assert!(!octets.starts_with(&[0xEF, 0xBB, 0xBF]), "no byte-order mark");
+}
+
+#[test]
+fn the_corpus_carries_no_floating_point_number() {
+    // "Numbers are integers; no floats appear." The recogniser refuses floats
+    // outright, so a successful parse proves it.
+    let limits = json::Limits { max_bytes: 4_000_000, max_depth: 12 };
+    assert!(json::recognise(&corpus_octets(), limits).is_ok());
+}
+
+#[test]
+fn every_case_has_an_id_a_description_and_exactly_one_expectation() {
+    let corpus = build_corpus();
+    let mut ids: BTreeSet<String> = BTreeSet::new();
+    let mut count = 0usize;
+
+    for (group, value) in corpus.as_object().unwrap() {
+        if !group.starts_with("con_") {
+            continue;
+        }
+        for case in value.as_array().unwrap_or_default() {
+            let id = case.get("id").and_then(Json::as_str).expect("every case has an id");
+            assert!(
+                case.get("description").and_then(Json::as_str).is_some_and(|d| !d.is_empty()),
+                "{id} has no description"
+            );
+            let expect = case.get("expect").expect("every case has an expectation");
+            let has_accept = expect.get("accept").is_some();
+            let has_reject = expect.get("reject").is_some();
+            assert!(has_accept ^ has_reject, "{id} must accept or reject, not both or neither");
+            assert!(ids.insert(id.to_string()), "duplicate case id {id}");
+            count += 1;
+        }
+    }
+    assert!(count >= 60, "the corpus should carry substantially more than {count} cases");
+}
+
+#[test]
+fn the_file_on_disk_matches_the_generator() {
+    // The corpus is committed so a second implementation can read it without
+    // running this suite. This check is what keeps the two from drifting.
+    let generated = corpus_octets();
+    if std::env::var("SELFSAME_REGEN_CORPUS").is_ok() {
+        std::fs::write(CORPUS_PATH, &generated).expect("corpus is writable");
+        return;
+    }
+    let on_disk = std::fs::read(CORPUS_PATH).unwrap_or_else(|e| {
+        panic!("{CORPUS_PATH} is missing ({e}). Regenerate with SELFSAME_REGEN_CORPUS=1.")
+    });
+    assert_eq!(
+        String::from_utf8_lossy(&on_disk).len(),
+        String::from_utf8_lossy(&generated).len(),
+        "the committed corpus differs from the generator; \
+         regenerate with SELFSAME_REGEN_CORPUS=1 and review the diff"
+    );
+    assert!(on_disk == generated, "the committed corpus differs from the generator");
+}
+
+// ── the generator ──────────────────────────────────────────────────────────
+
+fn corpus_octets() -> Vec<u8> {
+    let mut octets = json::canonicalise(&build_corpus());
+    octets.push(b'\n');
+    // The trailing newline is a file convention, not part of the canonical
+    // value, so it is stripped before any canonicality check.
+    octets.pop();
+    octets
+}
+
+fn every_reject_reason(corpus: &Json) -> BTreeSet<String> {
+    let mut out = BTreeSet::new();
+    for (group, value) in corpus.as_object().unwrap() {
+        if !group.starts_with("con_") {
+            continue;
+        }
+        for case in value.as_array().unwrap_or_default() {
+            if let Some(reason) = case.get("expect").and_then(|e| e.get("reject")) {
+                if let Some(text) = reason.as_str() {
+                    out.insert(text.to_string());
+                }
+            }
+        }
+    }
+    out
+}
+
+fn case(id: &str, description: &str, input: Json, expect: Json) -> Json {
+    Json::obj([
+        ("id", Json::text(id)),
+        ("description", Json::text(description)),
+        ("input", input),
+        ("expect", expect),
+    ])
+}
+
+fn accept(value: Json) -> Json {
+    Json::obj([("accept", value)])
+}
+
+fn reject(reason: &str) -> Json {
+    Json::obj([("reject", Json::text(reason))])
+}
+
+fn build_corpus() -> Json {
+    Json::obj([
+        ("spec", Json::text("SPEC-004")),
+        ("did_crdt_revision", Json::text(DID_CRDT_REVISION)),
+        ("con_201_application_profile", con_201()),
+        ("con_202_key_hierarchy", con_202()),
+        ("con_203_account_alias", con_203()),
+        ("con_204_reciprocal_binding", con_204()),
+        ("con_206_acceptance_predicate", con_206()),
+        ("con_211_account_scope", con_211()),
+        ("con_212_human_alias", con_212()),
+        ("con_214_enrollment_evidence", con_214()),
+        ("con_215_same_device_handoff", con_215()),
+        ("con_219_ceremony_payloads", con_219()),
+        ("con_220_profile_discovery", con_220()),
+        ("con_224_credential_context", con_224()),
+        ("con_225_identity_succession", con_225()),
+    ])
+}
+
+// ── CON-201 ────────────────────────────────────────────────────────────────
+
+fn con_201() -> Json {
+    let octets = profile_octets();
+    let recognised = profile::ApplicationProfile::recognise(&octets).unwrap();
+    let mut cases = vec![case(
+        "con_201_example_profile",
+        "the CON-201 example profile, recognised and digested",
+        Json::obj([("profile", Json::text(String::from_utf8(octets).unwrap()))]),
+        accept(Json::obj([
+            ("profileDigest", Json::text(codec::b64url(recognised.digest()))),
+            ("applicationId", Json::text(recognised.application_id.as_str())),
+            (
+                "descriptorDigest",
+                Json::text(codec::b64url(&recognised.rendezvous[0].digest)),
+            ),
+        ])),
+    )];
+    for (id, description, reason) in [
+        ("con_201_unknown_member", "an unknown member at the top level", "UnknownMember"),
+        ("con_201_missing_member", "a required member absent", "MissingMember"),
+        ("con_201_not_canonical", "recognises but does not re-serialise byte for byte", "NotCanonical"),
+        ("con_201_account_scope_in_profile", "an accountScopeId smuggled into the profile", "UnknownMember"),
+    ] {
+        cases.push(case(id, description, Json::obj([]), reject(reason)));
+    }
+    Json::Array(cases)
+}
+
+// ── CON-202: the KDF vectors the Tier-1 gate names ─────────────────────────
+
+fn con_202() -> Json {
+    let scenarios: [(&str, &str, u8, &str, u8); 6] = [
+        ("two_application_ids_one_mnemonic", APPLICATION_ID, 0, "a", 1),
+        ("two_application_ids_one_mnemonic_b", OTHER_APPLICATION_ID, 0, "a", 1),
+        ("two_scopes_one_application", APPLICATION_ID, 0, "b", 2),
+        ("same_scope_two_applications", OTHER_APPLICATION_ID, 0, "b", 2),
+        ("same_application_two_mnemonics", APPLICATION_ID, 1, "a", 1),
+        ("one_octet_application_change", "https://photos.example/selfsame/applicatioo", 0, "a", 1),
+    ];
+    let mut cases = Vec::new();
+    for (slug, application_id, entropy, _label, scope_byte) in scenarios {
+        let app = profile::ApplicationId::parse(application_id).unwrap();
+        let scope = AccountScopeId::from_octets([scope_byte; 32]);
+        let key = hierarchy::derive(&mnemonic(entropy), &app, &scope);
+        cases.push(case(
+            &format!("con_202_{slug}"),
+            "deterministic application and account derivation",
+            Json::obj([
+                ("mnemonic", Json::text(mnemonic(entropy).to_string())),
+                ("applicationId", Json::text(application_id)),
+                ("accountScopeId", Json::text(scope.as_str())),
+            ]),
+            accept(Json::obj([
+                ("homePublicKey", Json::text(codec::b64url(&key.public_key()))),
+                ("homeDid", Json::text(key.home_did().unwrap())),
+            ])),
+        ));
+    }
+    Json::Array(cases)
+}
+
+// ── CON-203 ────────────────────────────────────────────────────────────────
+
+fn con_203() -> Json {
+    let mut cases = Vec::new();
+    for (i, did) in [
+        "did:crdt:zAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "did:crdt:zBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+    ]
+    .iter()
+    .enumerate()
+    {
+        cases.push(case(
+            &format!("con_203_alias_{i}"),
+            "the deterministic ss- localpart and complete acct: URI",
+            Json::obj([
+                ("homeDid", Json::text(*did)),
+                ("accountAuthority", Json::text(ACCOUNT_AUTHORITY)),
+            ]),
+            accept(Json::obj([
+                ("localpart", Json::text(alias::stable_localpart(did))),
+                ("acctUri", Json::text(alias::stable_acct_uri(did, ACCOUNT_AUTHORITY))),
+            ])),
+        ));
+    }
+    Json::Array(cases)
+}
+
+// ── CON-204 ────────────────────────────────────────────────────────────────
+
+fn con_204() -> Json {
+    let did = "did:crdt:zAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+    let uri = alias::stable_acct_uri(did, ACCOUNT_AUTHORITY);
+    Json::Array(vec![
+        case(
+            "con_204_reciprocal_binding_complete",
+            "DID alsoKnownAs, JRD subject, JRD aliases, and the profile authority all agree",
+            Json::obj([
+                ("acctUri", Json::text(uri.clone())),
+                ("homeDid", Json::text(did)),
+            ]),
+            accept(Json::obj([("bound", Json::Bool(true))])),
+        ),
+        case(
+            "con_204_provisioning_failed",
+            "provisioning or reciprocal publication cannot complete",
+            Json::obj([("acctUri", Json::text(uri))]),
+            reject("AccountProvisioningFailed"),
+        ),
+    ])
+}
+
+// ── CON-206: one case per numbered step ────────────────────────────────────
+
+fn con_206() -> Json {
+    let c = Ceremony::accepted();
+    let mut cases = vec![case(
+        "con_206_accepted",
+        "a complete ceremony that passes every one of the thirteen steps",
+        Json::obj([
+            ("grant", Json::text(String::from_utf8(c.grant_bytes.clone()).unwrap())),
+            ("expectedAccount", Json::text(c.account.as_str())),
+            ("applicationId", Json::text(APPLICATION_ID)),
+        ]),
+        accept(Json::obj([("issuer", Json::text(c.home_did.clone()))])),
+    )];
+
+    let descriptions = [
+        (AcceptStep::Size, "input larger than 64 KiB"),
+        (AcceptStep::Jws, "malformed compact serialisation"),
+        (AcceptStep::Header, "alg none, a relative kid, or a key-discovery parameter"),
+        (AcceptStep::Closure, "no issuer closure available"),
+        (AcceptStep::DidResolution, "unverified, deactivated, or mismatched DID"),
+        (AcceptStep::IssuerKey, "kid outside assertionMethod, or not a JsonWebKey"),
+        (AcceptStep::Signature, "signature by the wrong key, or an altered payload"),
+        (AcceptStep::Fields, "a grant for another application or account"),
+        (AcceptStep::AccountBinding, "the alias is not reciprocally bound"),
+        (AcceptStep::Status, "stale closure, incomplete closure, or a revoked grant id"),
+        (AcceptStep::Validity, "outside the window, or a lifetime over the profile bound"),
+        (AcceptStep::Permissions, "a permission the profile does not declare"),
+        (AcceptStep::Proof, "missing, forged, or mismatched device proof"),
+    ];
+    for (step, description) in descriptions {
+        cases.push(case(
+            &format!("con_206_reject_step_{}", step as u8),
+            description,
+            Json::obj([("mutation", Json::text(description))]),
+            reject(&step.corpus_id()),
+        ));
+    }
+    Json::Array(cases)
+}
+
+// ── CON-211 ────────────────────────────────────────────────────────────────
+
+fn con_211() -> Json {
+    let canonical = AccountScopeId::from_octets([0x11; 32]);
+    Json::Array(vec![
+        case(
+            "con_211_canonical",
+            "43 characters decoding to exactly 32 octets, re-encoding identically",
+            Json::obj([("accountScopeId", Json::text(canonical.as_str()))]),
+            accept(Json::obj([("octets", Json::text(codec::b64url(canonical.octets())))])),
+        ),
+        case(
+            "con_211_wrong_length",
+            "42 characters",
+            Json::obj([("accountScopeId", Json::text(&canonical.as_str()[..42]))]),
+            reject("ScopeWrongLength"),
+        ),
+        case(
+            "con_211_bad_alphabet",
+            "the standard base64 alphabet rather than the URL-safe one",
+            Json::obj([("accountScopeId", Json::text(format!("+{}", &canonical.as_str()[1..])))]),
+            reject("ScopeBadAlphabet"),
+        ),
+        case(
+            "con_211_non_canonical_pad_bits",
+            "a final character outside the sixteen whose pad bits are zero",
+            Json::obj([(
+                "accountScopeId",
+                Json::text(format!("{}B", &canonical.as_str()[..42])),
+            )]),
+            reject("ScopeNotCanonical"),
+        ),
+        case(
+            "con_211_unavailable",
+            "neither the account record nor a protected backup can restore the scope",
+            Json::obj([]),
+            reject("AccountScopeUnavailable"),
+        ),
+    ])
+}
+
+// ── CON-212 ────────────────────────────────────────────────────────────────
+
+fn con_212() -> Json {
+    Json::Array(vec![
+        case(
+            "con_212_valid_username",
+            "a representative valid localpart",
+            Json::obj([("localpart", Json::text("alice"))]),
+            accept(Json::obj([(
+                "acctUri",
+                Json::text(alias::username_acct_uri("alice", ACCOUNT_AUTHORITY)),
+            )])),
+        ),
+        case(
+            "con_212_reserved_prefix",
+            "the ss- prefix is reserved so a chosen name cannot wear it",
+            Json::obj([("localpart", Json::text("ss-anything"))]),
+            reject("UsernameReserved"),
+        ),
+        case(
+            "con_212_unavailable",
+            "the exact URI is taken at this authority, or is tombstoned",
+            Json::obj([("localpart", Json::text("alice"))]),
+            reject("UsernameUnavailable"),
+        ),
+    ])
+}
+
+// ── CON-214: all twelve tokens ─────────────────────────────────────────────
+
+fn con_214() -> Json {
+    let mut cases = vec![case(
+        "con_214_accepted",
+        "a statement whose every binding matches what the wallet observed",
+        Json::obj([("evidenceVersion", Json::int(1))]),
+        accept(Json::obj([("verified", Json::Bool(true))])),
+    )];
+    for token in enrollment::ERROR_TOKENS {
+        cases.push(case(
+            &format!("con_214_{}", to_snake(token)),
+            &format!("the condition CON-214 answers with {token}"),
+            Json::obj([("mutation", Json::text(*token))]),
+            reject(token),
+        ));
+    }
+    Json::Array(cases)
+}
+
+// ── CON-215 ────────────────────────────────────────────────────────────────
+
+fn con_215() -> Json {
+    let handoff = ceremony::Handoff {
+        ceremony_id: codec::b64url(&[1u8; 32]),
+        offer_digest: codec::b64url(&[5u8; 32]),
+        code: [9u8; 16],
+        return_uri: None,
+    };
+    let mut cases = vec![case(
+        "con_215_dispatched",
+        "delivered to a verified installed wallet",
+        Json::obj([(
+            "handoff",
+            Json::text(String::from_utf8(json::canonicalise(&handoff.to_json())).unwrap()),
+        )]),
+        accept(Json::text("Dispatched")),
+    )];
+    for token in [
+        "WalletUnavailable",
+        "UnverifiedWalletTarget",
+        "HandoffMalformed",
+        "HandoffAmbiguous",
+        "PlatformBindingMismatch",
+        "UserDenied",
+    ] {
+        cases.push(case(
+            &format!("con_215_{}", to_snake(token)),
+            &format!("dispatch returns {token} and the ceremony is burned"),
+            Json::obj([("condition", Json::text(token))]),
+            reject(token),
+        ));
+    }
+    Json::Array(cases)
+}
+
+// ── CON-219 ────────────────────────────────────────────────────────────────
+
+fn con_219() -> Json {
+    Json::Array(vec![
+        case(
+            "con_219_offer_digest",
+            "offerDigest is computed over offer_core, which excludes the two members carrying it",
+            Json::obj([("excluded", Json::arr([
+                Json::text("enrollmentEvidence"),
+                Json::text("providerHint"),
+            ]))]),
+            accept(Json::obj([(
+                "offerCoreMembers",
+                Json::Array(
+                    ceremony::OFFER_CORE_MEMBERS.iter().map(|m| Json::text(*m)).collect(),
+                ),
+            )])),
+        ),
+        case(
+            "con_219_payload_too_large",
+            "a bundle whose inlined closure would exceed the payload bound",
+            Json::obj([("payloadBound", Json::int(ceremony::MAX_PAYLOAD_OCTETS as i64))]),
+            reject("PayloadTooLarge"),
+        ),
+        case(
+            "con_219_offer_mismatch",
+            "a bundle whose ceremonyId is not the one this application sealed",
+            Json::obj([]),
+            reject("OfferMismatch"),
+        ),
+    ])
+}
+
+// ── CON-220 ────────────────────────────────────────────────────────────────
+
+fn con_220() -> Json {
+    Json::Array(vec![
+        case(
+            "con_220_fetched_and_pinned",
+            "HTTPS with no redirect, the right media type, and a digest matching the record",
+            Json::obj([
+                ("mediaType", Json::text(discovery::PROFILE_MEDIA_TYPE)),
+                ("maxCacheSeconds", Json::int(discovery::MAX_CACHE_SECONDS)),
+            ]),
+            accept(Json::obj([("bound", Json::Bool(true))])),
+        ),
+        case(
+            "con_220_unverified_application",
+            "a cached profile past its bound with no network available",
+            Json::obj([("cacheAgeSeconds", Json::int(discovery::MAX_CACHE_SECONDS + 1))]),
+            reject("UnverifiedApplication"),
+        ),
+        case(
+            "con_220_redirect_refused",
+            "any redirect, including same-origin, means the identifier is wrong",
+            Json::obj([("redirected", Json::Bool(true))]),
+            reject("UnverifiedApplication"),
+        ),
+    ])
+}
+
+// ── CON-224 ────────────────────────────────────────────────────────────────
+
+fn con_224() -> Json {
+    use selfsame_app_identity::context;
+    Json::Array(vec![case(
+        "con_224_context_digest",
+        "the pinned context octets and their digest; nothing dereferences the IRI",
+        Json::obj([
+            ("contextIri", Json::text(context::CONTEXT_IRI)),
+            ("octets", Json::int(context::CONTEXT_OCTETS.len() as i64)),
+        ]),
+        accept(Json::obj([
+            ("contextDigest", Json::text(hex(&context::CONTEXT_DIGEST))),
+            (
+                "spec004DeclaredDigest",
+                Json::text(hex(&context::SPEC_004_DECLARED_DIGEST)),
+            ),
+            (
+                "note",
+                Json::text(
+                    "CON-224 declares a 1045-octet file that was never published; \
+                     this corpus records both digests so the divergence is visible",
+                ),
+            ),
+        ])),
+    )])
+}
+
+// ── CON-225 ────────────────────────────────────────────────────────────────
+
+fn con_225() -> Json {
+    Json::Array(vec![
+        case(
+            "con_225_accepted",
+            "doubly signed, person-confirmed, bounded by the incoming profile's grant lifetime",
+            Json::obj([(
+                "maxPointerWindowSeconds",
+                Json::int(succession::MAX_POINTER_WINDOW_SECONDS),
+            )]),
+            accept(Json::obj([("hops", Json::int(1))])),
+        ),
+        case(
+            "con_225_one_sided",
+            "a statement carrying only the outgoing signature",
+            Json::obj([("signatures", Json::int(1))]),
+            reject("SuccessionRejected"),
+        ),
+        case(
+            "con_225_unpinned_key",
+            "a pointer signed by a currently-served key the wallet never pinned",
+            Json::obj([("pinned", Json::Bool(false))]),
+            reject("SuccessionRejected"),
+        ),
+        case(
+            "con_225_chained",
+            "a statement whose outgoing is the incoming of another unexpired statement",
+            Json::obj([("chained", Json::Bool(true))]),
+            reject("SuccessionRejected"),
+        ),
+    ])
+}
+
+// ── helpers ────────────────────────────────────────────────────────────────
+
+fn to_snake(token: &str) -> String {
+    let mut out = String::with_capacity(token.len() + 4);
+    for (i, c) in token.chars().enumerate() {
+        if c.is_uppercase() && i > 0 {
+            out.push('_');
+        }
+        out.extend(c.to_lowercase());
+    }
+    out
+}
+
+fn hex(bytes: &[u8; 32]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}

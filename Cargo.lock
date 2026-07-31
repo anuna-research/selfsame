@@ -441,6 +441,7 @@ name = "cbcl-core"
 version = "0.1.0"
 dependencies = [
  "hashbrown 0.15.5",
+ "sha2",
 ]
 
 [[package]]
@@ -3777,6 +3778,25 @@ dependencies = [
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
+ "zeroize",
+]
+
+[[package]]
+name = "selfsame-app-identity"
+version = "0.1.0"
+dependencies = [
+ "base64ct",
+ "bip39",
+ "did-crdt",
+ "ed25519-dalek",
+ "hex",
+ "hkdf",
+ "proptest",
+ "rand 0.8.7",
+ "selfsame-core",
+ "serde_json",
+ "sha2",
+ "thiserror 1.0.69",
  "zeroize",
 ]
 
