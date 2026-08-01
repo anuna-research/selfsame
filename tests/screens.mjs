@@ -277,6 +277,13 @@ const SCREEN_RULES = {
     requiredText: 'publicly discoverable',
   },
   '22-fingerprint-compare': {
+    // The wallet's onboarding teaches "same fingerprint everywhere, or it
+    // isn't yours" — SPEC-001's human backstop. This screen legitimately shows
+    // a different value, because REQ-201 gives every application account its
+    // own. Saying so is what keeps a correct value from reading as an attack,
+    // and keeps a person from learning that mismatches are sometimes fine.
+    requiredText: 'not',
+    requiredTextAll: ['account identity', 'home key fingerprint'],
     // REQ-230 forbids offering a skip. Not "hides" — the control must not exist.
     forbidden: [
       ['[data-action="skip-fingerprint"]', 'REQ-230 forbids offering a skip'],
@@ -492,6 +499,11 @@ for (const shot of shots) {
       document.querySelector('.screen:not([hidden])')?.innerText ?? '');
     if (rules.requiredText && !shown.includes(rules.requiredText)) {
       errors.push(`${shot.name}: missing required text "${rules.requiredText}"`);
+    }
+    for (const phrase of rules.requiredTextAll ?? []) {
+      if (!shown.includes(phrase)) {
+        errors.push(`${shot.name}: missing required text "${phrase}"`);
+      }
     }
     for (const [phrase, why] of rules.forbiddenText ?? []) {
       if (shown.toLowerCase().includes(phrase.toLowerCase())) {

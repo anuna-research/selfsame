@@ -3,7 +3,7 @@ id: IMPL-004
 title: Application- and Account-Scoped Identity — the person-facing surface
 status: implemented
 tier: 2
-version: 0.5.0
+version: 0.6.0
 audience: agent, human, frontend implementer
 author: Anuna Research (drafted with Claude, 2026-08-01)
 last-updated: 2026-08-01
@@ -422,6 +422,7 @@ than fixed:
 | `username-set` | "Claim it", then the name shown under *Public username* | **Fixed.** Recognition is not reservation. `CON-212` step 3 has the authority validate, reserve and publish; the wallet was stopping at recognition and setting the name locally, putting a name nobody held on the application screen. It now asks `provision_username` and surfaces `AccountProvisioningFailed`. |
 | `applications` | "Each one gets its own identity below your recovery words" | **Fixed in the fixture.** Both fixture applications shared one `home_did`, so the screen told the truth about a system the fixture did not model — and cross-application unlinkability is the property `SPEC-004` exists to deliver. A real linkability defect would have looked correct. |
 | `fingerprint-compare` | "You are asked this once for this account, ever" | **Recorded.** `CON-221`'s once-per-account obligation is the wallet's, and nothing here records that the question was asked, so this build would re-ask. Borderline: the sentence tells the person what kind of moment this is rather than reporting state. Owner: HOC. |
+| `fingerprint-compare` | shows a fingerprint at all | **Fixed.** SPEC-001's onboarding teaches "same fingerprint everywhere"; this one is legitimately different. See `FINDING-017`. |
 | `username-taken` | "Someone holds it, or it is reserved" | **Recorded.** The specified reason for the token, asserted as fact without the build having determined which. Minor. Owner: HOC. |
 
 ### Rendering permissions
@@ -677,6 +678,7 @@ amendment requests; none changes this plan by itself.
 
 | Version | Date | Change |
 |---|---|---|
+| 0.6.0 | 2026-08-01 | **`FINDING-017`.** "Home key" names the SPEC-001 root in the wallet and a per-application-account key in SPEC-004, and both have a fingerprint. SPEC-001's created screen teaches "if one ever shows something else, it isn't part of your home key" — the `CON-221` comparison legitimately shows something else, so the rule either alarms at a correct value or teaches that mismatches are sometimes fine. Nothing renamed: `fingerprint-compare` now states the distinction before the stakes and names the application, `application` says it in passing, and a screen check asserts both phrases. The vocabulary decision spans two specs and the `anuna-ssi` vault. |
 | 0.5.0 | 2026-08-01 | **Claim audit over all eleven screens.** Two defects fixed: `username-set` presented an unreserved name as held — recognition is not reservation, and it now asks `provision_username` and surfaces `AccountProvisioningFailed`; the `applications` fixture shared one home DID across two applications while the screen claimed each gets its own. Two gaps recorded (`fingerprint-compare`'s once-ever claim, `username-taken`'s asserted reason). New assertions for both fixes verified by reintroducing each regression and watching it fail. |
 | 0.4.0 | 2026-08-01 | `remove-pending` claimed "this will keep trying until one does" and "it is retained and retried". Both are `CON-210` obligations on a wired implementation; neither is true of this build, which submits once and checks once. Removed, and TEST-609 gains forbidden-phrase assertions so the claim cannot return without a deliberate edit — verified by reintroducing the sentence and watching the test fail. `scope-unavailable` now names the application. |
 | 0.3.0 | 2026-08-01 | **Thirteen screens to eleven.** `handoff`, `wallet-unavailable` and `handoff-refused` were application-side screens rendered in the wallet: `CON-222` assigns the wallet search to "the developer application", so a wallet showing *Selfsame isn't installed* asserts its own absence. Version 0.1.0 listed them as "modelled from the wallet's side", which is not something that can be done. Replaced by `binding-mismatch` — the `CON-222` caller comparison, which genuinely is the wallet's, and which gives the unattributed-Android-caller fix a surface it did not have. |

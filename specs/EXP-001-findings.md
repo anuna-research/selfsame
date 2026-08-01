@@ -15,7 +15,7 @@
 The pure core of [[SPEC-004-application-scoped-identity]] is implementable from
 the specification text. **All twenty-six contracts** are now implemented and
 tested against the specification's own `TEST-2NN` criteria, with a published
-conformance corpus. **Sixteen findings** are recorded below, one of which
+conformance corpus. **Seventeen findings** are recorded below, one of which
 (`FINDING-004`) is **withdrawn as incorrect**. Three deserve a reviewer's
 attention ahead of the rest: `FINDING-005` is a security defect in a pinned
 dependency; `FINDING-013` is a contradiction between two contracts whose failure
@@ -491,6 +491,63 @@ change is smuggled into a presentation plan.
 Either way the choice widens what a passcode compromise yields, so it wants the
 security sign-off the Tier-1 gate already requires. It should be settled before
 any wallet ships a SPEC-004 surface.
+
+### FINDING-017 — "home key" names two different things, and one screen's security rule contradicts another's
+
+Found by a reader looking at the screens rather than the specifications, which is
+the only place it is visible.
+
+[[SPEC-004-application-scoped-identity#REQ-201]] is titled *"One secret, a
+different home key per application account"*, and `hierarchy::derive` implements
+exactly that: `recovery_seed → application_node → account_node → home_key`. A
+home key is per `(applicationId, accountScopeId)` pair.
+
+The wallet uses the same two words for something else. `src/index.html` says
+*"Your home key lives on this phone"*, *"Create my home key"*, *"Your home key
+fingerprint"* — twelve occurrences, all meaning the SPEC-001 root identity
+created at onboarding, before any application exists. Two objects, one name, one
+binary.
+
+**The collision is not cosmetic, because both objects have a fingerprint and one
+screen teaches a rule about them.** SPEC-001's created screen says:
+
+> Every device you link will show this same picture and the same fingerprint. If
+> one ever shows something else, it isn't part of your home key.
+
+That is SPEC-001's human backstop, protected by
+[[SPEC-002-visual-key-fingerprint#NFR-008]], and it is correct — for the home
+key. The `CON-221` first-enrollment comparison legitimately shows a **different**
+fingerprint, because it is a different identity. A person carrying the onboarding
+rule to that screen either alarms at a correct value, or learns that a mismatched
+fingerprint is sometimes acceptable.
+
+The second direction is the dangerous one: it erodes the control by teaching an
+exception to it, and it does so on the screen where the exception looks benign.
+
+**Taken as:** a vocabulary defect spanning two specifications, surfaced by
+putting their screens in one application for the first time.
+
+**What was done.** [[IMPL-004-application-scoped-identity-screens]] 0.6.0 does
+not rename anything. The `CON-221` screen now states the distinction before the
+stakes — *"This is Photos' account identity — not your home key fingerprint.
+Every account gets its own"* — and the application screen says the same in
+passing. A screen check asserts both phrases, so the distinction cannot be
+edited away silently.
+
+**Proposed resolution:** pick one owner for the term. Two options, and the choice
+is not this repository's to make:
+
+1. **SPEC-004 keeps "home key"** (it is the specified term) and SPEC-001's
+   screens rename the root — "recovery identity", or similar. This is the
+   consistent answer and it rewrites shipped wording that
+   [[SCREEN-001-authorise-a-device]] and [[SCREEN-002-device-client]] govern from
+   the `anuna-ssi` vault, which is not checked out here.
+2. **SPEC-001 keeps "home key"** for the root and SPEC-004 renames its
+   per-account key in *person-facing* language while keeping `home_key` as the
+   internal and specification term.
+
+Either way the two fingerprints need a stated relationship in the vocabulary
+rather than a sentence on one screen. Owner: HOC.
 
 ## Gate Evidence Record
 

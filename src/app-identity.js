@@ -277,6 +277,9 @@ export function initAppIdentity(d) {
       // the 32x32 CON-101 fixes. Painting here by hand would be a second
       // implementation of both.
       renderLifehash($("[data-home-fp-lifehash]"), fp.lifehash);
+      // Name the application, so "not your home key fingerprint" lands on a
+      // specific thing rather than an abstraction.
+      $("[data-fp-app]").textContent = s.app.display_name || "this application";
       show("fingerprint-compare");
     } catch (e) {
       fail("username", message(e));

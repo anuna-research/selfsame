@@ -488,6 +488,8 @@
           <p class="value value--mono" data-app-alias></p>
           <p class="footnote">
             Opaque by design. It identifies the account without naming you.
+            This account has its own identity, separate from your home key and
+            from every other application's.
           </p>
           <p class="label" data-app-username-label hidden>Public username</p>
           <p class="value" data-app-username hidden></p>
@@ -585,9 +587,30 @@
           <p class="fp__label" data-home-fp-label></p>
         </div>
 
+        <!--
+          The distinction comes before the stakes, deliberately.
+
+          The wallet's own onboarding teaches a rule: "every device you link
+          will show this same picture and the same fingerprint. If one ever
+          shows something else, it isn't part of your home key." That rule is
+          SPEC-001's human backstop and it is correct — for the home key.
+
+          This value is not the home key's. REQ-201 gives every application
+          account its own, so this screen legitimately shows something else,
+          and a person carrying the onboarding rule here would either alarm at
+          a correct value or learn that a mismatched fingerprint is sometimes
+          fine. The second is the dangerous direction, and saying which key
+          this is costs one sentence.
+        -->
         <p class="lede">
-          You are asked this once for this account, ever. It is what stands
-          between you and someone else's identity being bound to it.
+          This is <strong data-fp-app>this application</strong>'s account
+          identity — <em>not</em> your home key fingerprint. Every account gets
+          its own, so this differs from the one on your home screen, and differs
+          again for every other account.
+        </p>
+        <p class="caution">
+          You are asked this once for this account. It is what stands between
+          you and someone else's identity being bound to it.
         </p>
 
         <div class="spacer"></div>
