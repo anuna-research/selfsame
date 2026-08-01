@@ -15,7 +15,7 @@
 The pure core of [[SPEC-004-application-scoped-identity]] is implementable from
 the specification text. **All twenty-six contracts** are now implemented and
 tested against the specification's own `TEST-2NN` criteria, with a published
-conformance corpus. **Fifteen findings** are recorded below, one of which
+conformance corpus. **Sixteen findings** are recorded below, one of which
 (`FINDING-004`) is **withdrawn as incorrect**. Three deserve a reviewer's
 attention ahead of the rest: `FINDING-005` is a security defect in a pinned
 dependency; `FINDING-013` is a contradiction between two contracts whose failure
@@ -438,6 +438,59 @@ Until one of them lands, an adopting application's resolvers are declaratively
 conforming and functionally unusable for step 4, and every acceptance depends on
 the bundle path — which `CON-206` permits only at first acceptance, so repeat
 sessions fail closed. This should be closed before the Tier-1 gate.
+
+### FINDING-016 — the wallet holds no material from which a SPEC-004 home DID can be derived
+
+Found while planning the person-facing surface
+([[IMPL-004-application-scoped-identity-screens]]), and it blocks the one part of
+that surface which ought to have been the easiest.
+
+`CON-202` derives every application-account home below the recovery secret, and
+the implementation roots that hierarchy at the BIP-39 seed:
+
+```rust
+// crates/selfsame-app-identity/src/hierarchy.rs:176
+pub fn recovery_seed(mnemonic: &Mnemonic) -> RecoverySeed {
+    Zeroizing::new(mnemonic.to_seed_normalized(""))
+}
+```
+
+SPEC-001's custody stores something else, and is explicit that it does — *"The
+phrase is not stored"* (`src-tauri/src/custody.rs:206`). What it seals under the
+passcode is `derive::root_seed(mnemonic, PERSONA_ZERO)`, a one-way KDF output.
+The BIP-39 seed is not recoverable from it.
+
+So the two specifications root at different points of the same secret, and the
+wallet retains only the SPEC-001 root. A wallet that has completed SPEC-001
+onboarding cannot derive a SPEC-004 home DID for any application, at any time,
+without the person re-entering their twelve words.
+
+**Why this is not merely an implementation detail.**
+[[SPEC-004-application-scoped-identity#REQ-213]] promises the same identity from
+the same words with no provider or configuration involved, and
+[[person-happy-paths]] `HP-3`'s precondition is only "signed into A1" — no phrase
+entry. Both are satisfiable in principle and neither is reachable from the
+wallet's current custody. The specification never states where in the recovery
+hierarchy SPEC-001 and SPEC-004 meet, which is why the two implementations chose
+different roots without either being wrong locally.
+
+**Taken as:** a gap between two specifications rather than a defect in either.
+`IMPL-004` stubs the home DID and wires only the pure commands, so no custody
+change is smuggled into a presentation plan.
+
+**Proposed resolution:** one of
+
+1. state the shared root explicitly in `CON-202` and have SPEC-001 custody seal
+   whatever that root requires — the honest fix, and a custody format change
+   with a migration; or
+2. accept that SPEC-004 derivation is an unlock-time operation, and specify
+   where the recovery secret is held during a session and for how long — which
+   is a threat-model change, not a storage change, and belongs in the SPEC-004
+   threat boundary rather than in an implementation.
+
+Either way the choice widens what a passcode compromise yields, so it wants the
+security sign-off the Tier-1 gate already requires. It should be settled before
+any wallet ships a SPEC-004 surface.
 
 ## Gate Evidence Record
 

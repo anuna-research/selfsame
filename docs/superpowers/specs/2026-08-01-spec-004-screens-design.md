@@ -1,7 +1,21 @@
 # SPEC-004 screens — design
 
+> **Superseded by [[IMPL-004-application-scoped-identity-screens]]**
+> (`specs/IMPL-004-application-scoped-identity-screens.md`).
+>
+> This document is the brainstorming-format design that preceded the USDD
+> artefact. It is retained for the reasoning trajectory — PROTO-001 values
+> preserved process, not only end state — but it is **not** the governing plan
+> and MUST NOT be implemented from. Where the two disagree, IMPL-004 wins.
+>
+> The successor differs in three substantive ways: it introduces no `REQ-###`
+> (every screen traces to an existing SPEC-004 requirement, which keeps it clear
+> of the Amendment Channels); it allocates artefacts in the free 6xx band; and
+> it defers the `SCREEN-###` documents to the `anuna-ssi` vault rather than
+> minting IDs against a sequence this repository cannot see.
+
 **Date:** 2026-08-01
-**Status:** design, approved for planning
+**Status:** superseded
 **Scope:** the person-facing surface for [[SPEC-004-application-scoped-identity]]
 
 ## Why this exists
