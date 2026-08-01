@@ -880,23 +880,22 @@ gates:
       the frontend routing reverted — reaching remove-pending and binding-mismatch
       respectively, which is the reviewed behaviour exactly
   - gate: "All tests green"
-    mechanism: "cargo test --workspace"
-    result: fail
+    mechanism: "cargo test --workspace --locked"
+    result: pass
     evidence: >
-      32 of 33 suites pass (207 core unit, 37 net unit, 35 CON-206, 30 CON-219).
-      One failure, pre-existing and unrelated to this version:
-      probe::an_unreachable_group_is_probed_in_parallel_and_not_in_sequence
-      (NFR-207) measures wall-clock over four unresolvable hosts and asserts
-      under 3x the 1500ms probe deadline. It passes in isolation in 0.02s,
-      3 runs of 3, and fails in the whole-workspace run at ~7.98s. Attributed
-      by reverting selfsame-app-identity-net to its pre-0.7.0 state and
-      reproducing the failure there, so it is not a regression from this work.
-      7.98s also exceeds the 6s a fully serial probe would take, which points
-      at the DNS resolver threadpool saturating across concurrently-running
-      test binaries rather than at probe_group serialising — the deadline does
-      not cancel an in-flight lookup. Not repaired here: loosening the bound
-      would weaken an NFR-207 assertion, and re-designing the measurement is a
-      change to how that requirement is verified. Owner: HOC.
+      33 suites, 0 failed, two consecutive runs (207 core unit, 38 net unit,
+      35 CON-206, 30 CON-219). One test was repaired to get here — see
+      "The wall-clock test that could not measure what it claimed" below.
+  - gate: "CI parity: all four checks the pipeline runs"
+    mechanism: ".forgejo/workflows/ci.yml, each command run verbatim"
+    result: pass
+    evidence: >
+      clippy --workspace --all-targets --locked -- -D warnings: 0;
+      test --workspace --locked: 0 failures;
+      build -p selfsame-core --target wasm32-unknown-unknown --locked: 0 errors;
+      npm run screens: all screens rendered clean. Run because CI triggers on
+      pull_request and pushes to main only, so no push to this branch has
+      exercised it.
   - gate: "Presentation surface renders and every screen rule holds"
     mechanism: "node tests/screens.mjs"
     result: pass
@@ -948,12 +947,53 @@ gates:
       do not survive the copy — so `--in-place` from a clean tree is required.
 ```
 
-One gate is `fail` and two are `unverified`, each with a named owner, so this
-phase is **not** reported complete. A phase MUST NOT be reported complete while
-any gate is `fail`, and this one is — the failing test is pre-existing and
-unrelated to this version, but "pre-existing" is a fact about its cause and not
-a licence to record it as passing. The `review-gate` field in the frontmatter
-still reads `not-approved`, and that is the accurate state.
+Two gates are `unverified`, each with a named owner, so this phase is **not**
+reported complete. The `review-gate` field in the frontmatter still reads
+`not-approved`, and that is the accurate state.
+
+### The wall-clock test that could not measure what it claimed
+
+`probe::an_unreachable_group_is_probed_in_parallel_and_not_in_sequence` verified
+[[SPEC-004-application-scoped-identity#NFR-207]] — "a slow high-priority
+provider SHALL NOT serially block all fallbacks" — by timing four unreachable
+probes and requiring the group to finish inside three 1500 ms deadlines. It
+passed in isolation and failed under `cargo test --workspace`, which is the
+command CI runs. It predates this version; it is nonetheless repaired here,
+because a red pipeline is not something to hand a reviewer with an explanation
+attached.
+
+Two compounding causes, and the instructive part is that **both look identical
+to the defect the test exists to detect**:
+
+1. Four descriptors carry *eight* hosts — a mailbox origin and a pairing origin
+   each — so the `.invalid` fixture timed eight concurrent DNS queries. In
+   isolation that took 0.02 s; in the workspace run, 7.98 s. The second figure
+   is above the 6 s a *fully serial* probe would cost, so it cannot be evidence
+   of sequencing under any reading.
+2. Replacing the unresolvable hosts with a loopback listener removed DNS, and it
+   still failed at 9.76 s. The per-probe numbers say why: each probe reported
+   3565 ms against a 1500 ms deadline. Every capability request builds its own
+   `reqwest::Client`, and that construction is CPU work sitting *outside* the
+   per-probe timeout — so when cargo runs the crates' test binaries
+   concurrently, the client builds serialise and the connects never overlap.
+   The join was parallel throughout.
+
+The per-request client was considered as the thing to change and deliberately
+left alone. `client()` builds one per call so that no connection pool is shared
+between providers, which is the same unlinkability argument its own
+documentation makes about cookie jars — a correlation handle "better made
+impossible than made off-by-default". Trading that for a green tick would repair
+the wrong thing.
+
+So the property moved to where it can be decided rather than estimated. A
+`tokio::sync::Barrier` that opens only when all four futures have reached it
+completes under a concurrent join and deadlocks under a sequential one: no
+threshold, no network, no sensitivity to machine load. Verified by making
+`futures_join_all` sequential and watching it time out. What remains of the
+integration test asserts the bounded half — a server that accepts and never
+speaks yields one ineligible outcome per descriptor — and carries no wall-clock
+assertion at all, because the deadline is the contract and how long a loaded
+runtime takes to notice it is not.
 
 **What the mutation round found is worth recording separately**, because it is
 evidence about the *repairs* rather than about the original defects. Seventeen

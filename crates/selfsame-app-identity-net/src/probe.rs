@@ -397,31 +397,116 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn an_unreachable_group_is_probed_in_parallel_and_not_in_sequence() {
-        // NFR-207: "A slow high-priority provider SHALL NOT serially block all
-        // fallbacks." Four descriptors that will not resolve each burn a
-        // deadline; in sequence that is four deadlines, in parallel it is one.
+    async fn a_group_is_polled_together_and_not_one_after_another() {
+        // NFR-207: "Health probes SHALL be bounded and parallel. A slow
+        // high-priority provider SHALL NOT serially block all fallbacks."
         //
-        // The assertion is deliberately loose — this measures wall-clock on a
-        // machine under test load — but a serial implementation would take at
-        // least 4× the deadline and cannot pass it.
+        // A barrier decides it, and decides it exactly. Each future below waits
+        // on a barrier that opens only once all four have reached it, so the
+        // set completes if and only if all four are in flight at the same
+        // moment. Under `futures_join_all` it returns immediately; under a
+        // `for` loop — the mistake `probe_group`'s comment warns about — the
+        // first future waits for three that have not been started, forever.
+        // There is no threshold to tune and nothing to measure.
+        //
+        // # Why this replaced a wall-clock test
+        //
+        // This assertion used to time four unreachable probes and require the
+        // group to finish inside three deadlines. It measured the machine
+        // rather than the code, and it failed in CI for two compounding reasons
+        // that both look identical to "probed in sequence":
+        //
+        // 1. Four descriptors carry *eight* hosts, so the original `.invalid`
+        //    fixture timed eight concurrent DNS queries. In isolation that took
+        //    0.02 s; under load, 7.98 s — above the 6 s a fully serial probe
+        //    would cost, which no reading of the result can attribute to
+        //    sequencing.
+        // 2. Moving to a loopback listener removed DNS and it still failed, at
+        //    9.76 s. The numbers say why: each probe reported 3565 ms against a
+        //    1500 ms deadline. Every capability request builds its own
+        //    `reqwest::Client`, and that construction is CPU work sitting
+        //    *outside* the per-probe timeout — so when `cargo test --workspace`
+        //    runs the crates' test binaries concurrently, the client builds
+        //    serialise and the connects never overlap. The join was parallel
+        //    the whole time.
+        //
+        // The per-request client is not the thing to change: [`crate::client`]
+        // builds one per call so that no connection pool is shared between
+        // providers, which is the same unlinkability argument its own
+        // documentation makes about cookie jars. Trading that for a green tick
+        // would be the wrong repair. The test is what was wrong.
+        use std::sync::Arc;
+        let barrier = Arc::new(tokio::sync::Barrier::new(4));
+        let futures: Vec<_> = (0..4)
+            .map(|i| {
+                let barrier = Arc::clone(&barrier);
+                async move {
+                    barrier.wait().await;
+                    i
+                }
+            })
+            .collect();
+
+        let joined = tokio::time::timeout(Duration::from_secs(10), futures_join_all(futures))
+            .await
+            .expect("a sequential implementation cannot pass this barrier and times out here");
+        assert_eq!(joined, vec![0, 1, 2, 3], "every future ran, and results keep their order");
+    }
+
+    /// A loopback listener that accepts connections and then says nothing.
+    ///
+    /// Returns its port and the accept task's handle. Accepted streams are
+    /// retained rather than dropped, because dropping one closes the connection
+    /// and lets the client fail fast — the point of this server is to make a
+    /// probe cost its full deadline against something that is *reachable*, so
+    /// nothing depends on name resolution or routing.
+    async fn stalling_listener() -> (u16, tokio::task::JoinHandle<()>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("binds");
+        let port = listener.local_addr().expect("has an address").port();
+        let task = tokio::spawn(async move {
+            let mut held = Vec::new();
+            loop {
+                match listener.accept().await {
+                    Ok((stream, _)) => held.push(stream),
+                    Err(_) => return,
+                }
+            }
+        });
+        (port, task)
+    }
+
+    #[tokio::test]
+    async fn a_group_of_silent_servers_yields_one_ineligible_outcome_each() {
+        // The bounded half of `NFR-207`, kept as an integration check now that
+        // the parallel half is decided by a barrier above.
+        //
+        // A server that accepts and then never speaks is the case a deadline
+        // exists for: no error comes back, so only the bound ends it. Loopback
+        // rather than an unresolvable name, so this exercises the timeout
+        // rather than the machine's resolver — and it carries no wall-clock
+        // assertion, because the deadline is the contract and how long the
+        // runtime takes to notice it is not.
+        let (port, server) = stalling_listener().await;
+        let host = format!("127.0.0.1:{port}");
         let ds: Vec<RendezvousDescriptor> = (0..4)
-            .map(|i| descriptor(&format!("p{i}"), &format!("nonexistent-{i}.invalid")))
+            .map(|i| RendezvousDescriptor {
+                id: format!("p{i}"),
+                url: format!("https://{host}"),
+                pairing_url: format!("https://{host}"),
+                ..descriptor(&format!("p{i}"), "unused.example")
+            })
             .collect();
         let refs: Vec<&RendezvousDescriptor> = ds.iter().collect();
 
-        let started = Instant::now();
         let outcomes = probe_group(&refs).await;
-        let elapsed = started.elapsed();
+        server.abort();
 
-        assert_eq!(outcomes.len(), 4);
+        assert_eq!(outcomes.len(), 4, "one outcome per descriptor, in order");
         for outcome in &outcomes {
-            assert!(!outcome.is_eligible(), "an unresolvable host is not eligible");
+            assert!(!outcome.pairing_ok, "a server that never answers has no capability");
+            assert!(!outcome.mailbox_ok);
+            assert!(!outcome.is_eligible());
         }
-        assert!(
-            elapsed < PROBE_DEADLINE * 3,
-            "probing took {elapsed:?}, which suggests the group was probed in sequence"
-        );
     }
 
     #[tokio::test]
