@@ -242,6 +242,7 @@ pub struct Ceremony {
     pub home_key: ed25519_dalek::SigningKey,
     pub account: AcctUri,
     pub device_key: ed25519_dalek::SigningKey,
+    pub device_public_key: [u8; 32],
     pub device_did: String,
     pub grant_bytes: Vec<u8>,
     pub issuer: IssuerState,
@@ -350,6 +351,7 @@ impl Ceremony {
             home_key,
             account,
             device_key,
+            device_public_key: device_public,
             device_did,
             grant_bytes,
             issuer,
@@ -364,6 +366,7 @@ impl Ceremony {
         Expectation {
             profile: &self.profile,
             account: &self.account,
+            device_public_key: &self.device_public_key,
             operation_permissions: &[],
             now: self.now,
             clock_skew_seconds: 0,

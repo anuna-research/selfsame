@@ -16,7 +16,7 @@
 //! | 5 | recompute the DID and resolve it | a document that does not belong to its DID |
 //! | 6 | require `kid` in `assertionMethod` | a key the issuer never authorised to assert |
 //! | 7 | verify the JWS over the received octets | a signature over bytes nobody sent |
-//! | 8 | validate every VC field and equality | a grant for another application or account |
+//! | 8 | validate every VC field and equality | a grant for another application, account, or device |
 //! | 9 | verify the reciprocal account binding | a deterministically named but unprovisioned alias |
 //! | 10 | enforce closure freshness and the G-Set | a revoked device that still works |
 //! | 11 | check validity **and** the lifetime bound | a grant minted to outlive revocation |
@@ -134,17 +134,34 @@ pub struct AcceptError {
     pub step: AcceptStep,
     /// Local diagnostic detail. Never returned over a wire.
     pub detail: String,
+    /// Whether this refusal is the verifier's inability to obtain sufficiently
+    /// fresh issuer state, rather than a defect in what the presenter supplied.
+    ///
+    /// It is a field rather than a step of its own because `CON-206` numbers the
+    /// thirteen steps and `CON-226` requires one corpus case per number, so
+    /// staleness cannot be given a fourteenth. It still has to be distinguished:
+    /// [`PublicReason::StateUnavailable`] is contracted as the failure a caller
+    /// **retries**, and a stale closure collapsed to `Rejected` makes a caller
+    /// discard a grant that is very likely still good.
+    pub state_unavailable: bool,
 }
 
 impl AcceptError {
     fn at(step: AcceptStep, detail: impl Into<String>) -> Self {
-        Self { step, detail: detail.into() }
+        Self { step, detail: detail.into(), state_unavailable: false }
+    }
+
+    /// A refusal the caller should retry rather than discard the grant over.
+    fn unavailable(step: AcceptStep, detail: impl Into<String>) -> Self {
+        Self { step, detail: detail.into(), state_unavailable: true }
     }
 
     /// Collapse to the small stable set (`CON-206`).
     pub fn public(&self) -> PublicReason {
+        if self.state_unavailable {
+            return PublicReason::StateUnavailable;
+        }
         match self.step {
-            AcceptStep::Closure => PublicReason::StateUnavailable,
             AcceptStep::Proof => PublicReason::ProofFailed,
             _ => PublicReason::Rejected,
         }
@@ -237,6 +254,21 @@ pub struct Expectation<'a> {
     pub profile: &'a ApplicationProfile,
     /// The exact account the current authenticated context expects.
     pub account: &'a AcctUri,
+    /// The device key this context offered, and the only one it may bind.
+    ///
+    /// `CON-214`'s offer names the device key the grant will be minted for, and
+    /// `CON-205` puts that key in the grant's `cnf.jwk`. Without this field
+    /// nothing compares the two: issuer, application, and account all match for
+    /// a grant this same person holds on a *different* device, and step 13 then
+    /// verifies the proof against whichever key the presented grant happened to
+    /// name. Any grant on the account would authorise any session offered to any
+    /// device on it — which is the binding the offer exists to make.
+    ///
+    /// A verifier that has an offer takes it from `OfferCore::device_public_key`;
+    /// one continuing a session takes it from the key that session was
+    /// established under. There is deliberately no "unknown" value: a verifier
+    /// that cannot say which device it is talking to has nothing to bind.
+    pub device_public_key: &'a [u8; 32],
     /// The permissions the local operation being attempted requires.
     pub operation_permissions: &'a [&'a str],
     /// The current time, injected.
@@ -312,7 +344,7 @@ pub fn accept_grant(
     // ── 4 ──────────────────────────────────────────────────────────────────
     let issuer = evidence
         .issuer
-        .ok_or_else(|| AcceptError::at(AcceptStep::Closure, "no issuer closure available"))?;
+        .ok_or_else(|| AcceptError::unavailable(AcceptStep::Closure, "no issuer closure available"))?;
 
     // ── 5 ──────────────────────────────────────────────────────────────────
     if !issuer.did_recomputed_ok {
@@ -367,6 +399,27 @@ pub fn accept_grant(
     }
     if grant.account.as_str() != expect.account.as_str() {
         return Err(AcceptError::at(AcceptStep::Fields, "account is not the expected one"));
+    }
+    // The device the offer named, not merely *a* device of this account. Every
+    // check above is satisfied by a sibling device's grant, and step 13 below
+    // verifies the proof against the key the grant itself chose — so without
+    // this line the presenter picks which key is checked.
+    if grant.device_public_key != *expect.device_public_key {
+        return Err(AcceptError::at(
+            AcceptStep::Fields,
+            "grant names a different device key than the one offered",
+        ));
+    }
+    // `CON-205` admits a `BitstringStatusListEntry` beside the mandatory CRDT
+    // entry only when the profile enables the projection. `grant::recognise`
+    // checks the entry's shape and cannot check that, because it holds no
+    // profile — so a grant naming a status list the application never declared
+    // reaches here fully recognised.
+    if grant.projection_entry.is_some() && expect.profile.revocation.projection.is_none() {
+        return Err(AcceptError::at(
+            AcceptStep::Fields,
+            "grant carries a projection entry the profile does not enable",
+        ));
     }
     // The account has to be the CON-203 function of the issuer that signed the
     // grant, so a valid issuer cannot name an alias belonging to a different
@@ -444,8 +497,14 @@ fn check_status(
         Freshness::SessionEstablishment => policy.session_establishment_bound(),
         Freshness::Continuation => policy.max_closure_age_seconds,
     };
+    // Stale, not refused. The grant may be perfectly good and this verifier
+    // simply holds an old closure, so the caller is told to obtain fresher state
+    // and try again rather than to discard the credential.
     if issuer.closure_age_seconds > bound {
-        return Err(AcceptError::at(AcceptStep::Status, "closure is older than the applicable bound"));
+        return Err(AcceptError::unavailable(
+            AcceptStep::Status,
+            "closure is older than the applicable bound",
+        ));
     }
     // "causally valid and causally complete" — the most security-critical check
     // in the profile, and the one whose upstream definition is still deferred

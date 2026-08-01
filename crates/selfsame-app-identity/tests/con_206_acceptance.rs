@@ -22,6 +22,7 @@ use selfsame_app_identity::accept::{
 use selfsame_app_identity::alias::Jrd;
 use selfsame_app_identity::codec;
 use selfsame_app_identity::json::{self, Json};
+use selfsame_app_identity::profile::ApplicationProfile;
 use selfsame_app_identity::{didkey, grant, jws, proof};
 
 fn accepts(c: &Ceremony) {
@@ -245,6 +246,31 @@ fn step_8_rejects_a_grant_for_another_application_or_another_account() {
 }
 
 #[test]
+fn step_8_rejects_a_grant_minted_for_a_sibling_device_of_the_same_account() {
+    // The splice every other step-8 check passes. Same person, same home DID,
+    // same account, same application — a second device of theirs. Issuer,
+    // application, and account all agree; the reciprocal binding is the same
+    // one; the closure is the same closure; and step 13 verifies the proof
+    // against whichever key the *presented grant* names, which is the sibling's.
+    //
+    // So the only thing that can refuse it is the comparison against the key
+    // this context offered.
+    let offered = Ceremony::accepted();
+    let sibling = Ceremony::build(0, 1, 4, APPLICATION_ID);
+    assert_eq!(sibling.home_did, offered.home_did, "the fixtures must share an account");
+    assert_ne!(sibling.device_public_key, offered.device_public_key);
+
+    let err = accept_grant(&sibling.grant_bytes, &offered.expectation(), &sibling.evidence())
+        .expect_err("a sibling device's grant must not authorise this session");
+    assert_eq!(err.step, AcceptStep::Fields, "{err}");
+
+    // …and the same grant is accepted by the context that actually offered it,
+    // so the refusal above is the binding and not an unrelated mismatch.
+    accept_grant(&sibling.grant_bytes, &sibling.expectation(), &sibling.evidence())
+        .expect("the sibling's own context accepts its own grant");
+}
+
+#[test]
 fn step_8_rejects_a_credential_whose_fields_do_not_agree_with_each_other() {
     let c = Ceremony::accepted();
     let base = payload_of(&c);
@@ -298,6 +324,50 @@ fn step_8_rejects_a_cnf_key_that_is_not_the_key_the_subject_did_encodes() {
         )]),
     );
     reject_field(&c, &payload);
+}
+
+#[test]
+fn step_8_rejects_a_projection_entry_the_profile_does_not_enable() {
+    // `CON-205` admits the Bitstring entry beside the mandatory CRDT one
+    // "when the profile enables the projection". `grant::recognise` holds no
+    // profile and so decides only the entry's *shape*: the grant below is a
+    // conforming credential naming a status list this application never
+    // declared, and every other step-8 equality holds.
+    let c = Ceremony::accepted();
+    let mut payload = payload_of(&c);
+    let crdt = payload.get("credentialStatus").unwrap().clone();
+    let list = "https://status-cache.provider.example/selfsame/v1/lists/list-7";
+    let bitstring = Json::obj([
+        ("id", Json::text(format!("{list}#4"))),
+        ("type", Json::text("BitstringStatusListEntry")),
+        ("statusPurpose", Json::text("revocation")),
+        ("statusListIndex", Json::text("4")),
+        ("statusListCredential", Json::text(list)),
+    ]);
+    set(&mut payload, "credentialStatus", Json::Array(vec![crdt, bitstring]));
+    let mutated = jws::sign(&grant::header(&c.home_did), &payload, &c.home_key);
+
+    let without = ApplicationProfile::recognise(&with_member(
+        "revocation",
+        Json::obj([
+            ("method", Json::text("did-crdt-revocations-v1")),
+            ("maxGrantLifetimeSeconds", Json::int(2_592_000)),
+            ("maxClosureAgeSeconds", Json::int(900)),
+            ("propagationSlaSeconds", Json::int(60)),
+        ]),
+    ))
+    .expect("a profile with no projection is still a profile");
+    let disabled = Expectation { profile: &without, ..c.expectation() };
+    let err = accept_grant(mutated.as_bytes(), &disabled, &c.evidence())
+        .expect_err("a projection the profile disabled must not be admitted");
+    assert_eq!(err.step, AcceptStep::Fields, "{err}");
+
+    // The same grant against the fixture profile, which *does* enable the
+    // projection, gets past step 8 — so the refusal above is the profile
+    // setting rather than the entry being malformed. It stops at step 13
+    // because the challenge was bound to the unmutated octets.
+    let err = accept_grant(mutated.as_bytes(), &c.expectation(), &c.evidence()).unwrap_err();
+    assert_eq!(err.step, AcceptStep::Proof, "{err}");
 }
 
 #[test]
@@ -365,6 +435,32 @@ fn step_10_rejects_a_stale_or_causally_incomplete_closure() {
     issuer.causally_complete = false;
     let evidence = Evidence { issuer: Some(&issuer), ..c.evidence() };
     refused_at(&c, c.expectation(), evidence, AcceptStep::Status);
+}
+
+#[test]
+fn step_10_reports_a_stale_closure_as_retryable_and_a_revoked_grant_as_refused() {
+    // Both refuse at step 10, and the two mean opposite things to a caller.
+    // `StateUnavailable` is contracted as the verifier's own problem — obtain
+    // fresher state and try the same grant again. Collapsing staleness to
+    // `Rejected` tells the caller to discard a credential that is very likely
+    // still good, and does so during exactly the resolver outage that produced
+    // it.
+    let c = Ceremony::accepted();
+
+    let mut stale = c.issuer.clone();
+    stale.closure_age_seconds = 61;
+    let evidence = Evidence { issuer: Some(&stale), ..c.evidence() };
+    let err = accept_grant(&c.grant_bytes, &c.expectation(), &evidence).unwrap_err();
+    assert_eq!(err.step, AcceptStep::Status);
+    assert_eq!(err.public(), PublicReason::StateUnavailable, "{err}");
+
+    let g = accept_grant(&c.grant_bytes, &c.expectation(), &c.evidence()).unwrap().grant;
+    let mut revoked = c.issuer.clone();
+    revoked.revoked_credential_ids.push(g.id);
+    let evidence = Evidence { issuer: Some(&revoked), ..c.evidence() };
+    let err = accept_grant(&c.grant_bytes, &c.expectation(), &evidence).unwrap_err();
+    assert_eq!(err.step, AcceptStep::Status);
+    assert_eq!(err.public(), PublicReason::Rejected, "{err}");
 }
 
 #[test]

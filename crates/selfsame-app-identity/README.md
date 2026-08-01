@@ -75,6 +75,7 @@ let accepted = accept_grant(
     &Expectation {
         profile: &profile,
         account: &expected_account,
+        device_public_key: &offer.device_public_key,   // the key this context offered
         operation_permissions: &["https://photos.example/selfsame/application#device"],
         now,
         clock_skew_seconds: 0,
@@ -84,7 +85,7 @@ let accepted = accept_grant(
         issuer: Some(&resolved_closure),   // the shell resolved this
         jrd: Some(&webfinger_record),      // …and fetched this
         projection: None,
-        proof: Some((&challenge, &signature)),
+        proof: Some((&challenge, &signature, &verifier_session)),
     },
 )?;
 ```

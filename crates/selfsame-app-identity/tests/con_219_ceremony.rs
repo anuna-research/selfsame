@@ -415,6 +415,44 @@ fn each_binding_mismatch_returns_its_own_closed_token() {
 }
 
 #[test]
+fn an_android_binding_with_nothing_attributed_is_refused_and_an_apple_one_is_not() {
+    // `CON-222` states the calling-package comparison as an obligation with a
+    // named failure; `CON-223` records that Apple gives the wallet no general
+    // caller attribution. So absent attribution is conforming on one platform
+    // and a skipped mandatory check on the other, and `verify` has to tell them
+    // apart — otherwise any Android caller reaches the Apple carve-out by
+    // having its adapter report nothing.
+    let p = profile_with_real_key();
+    let core = offer_core(&p);
+    let digest = codec::b64url(&p.rendezvous[0].digest);
+    let android = format!("android:com.example.photos:{}", codec::b64url(&[2u8; 32]));
+
+    let compact = enrollment::sign(
+        &EnrollmentStatement { platform_binding_id: android.clone(), ..statement(&p, &core) },
+        KID,
+        &backend_key(),
+    );
+    assert_eq!(
+        enrollment::verify(&compact, &observed(&p, &core, &digest)),
+        Err(EnrollmentError::PlatformBindingMismatch),
+        "an unattributed Android caller must not be admitted",
+    );
+
+    // The same statement, with the package the OS actually reported.
+    let attributed =
+        Observed { platform_binding_id: Some(&android), ..observed(&p, &core, &digest) };
+    assert!(
+        enrollment::verify(&compact, &attributed).is_ok(),
+        "an attributed Android caller matching the binding is admitted",
+    );
+
+    // The Apple binding, unattributed, still passes: the carve-out is per
+    // platform and this is the case it exists for.
+    let apple = enrollment::sign(&statement(&p, &core), KID, &backend_key());
+    assert!(enrollment::verify(&apple, &observed(&p, &core, &digest)).is_ok());
+}
+
+#[test]
 fn both_timestamp_boundaries_are_exercised() {
     let p = profile_with_real_key();
     let core = offer_core(&p);

@@ -442,10 +442,27 @@ pub fn verify(
         .iter()
         .find(|b| b.id() == statement.platform_binding_id)
         .ok_or(EnrollmentError::PlatformBindingMismatch)?;
-    if let Some(observed_id) = observed.platform_binding_id {
-        if observed_id != binding.id() {
+    // Absent attribution is permitted on exactly one platform, and this is the
+    // same rule [`crate::platform::caller_matches_binding`] applies — stated
+    // twice because the adapter reaches this function without going through
+    // that one, and a check that only one of two entry points performs is a
+    // check an attacker chooses whether to face.
+    //
+    // `CON-223` records that Apple gives the wallet no general caller
+    // attribution for a Universal Link open, so `None` there is the conforming
+    // case. `CON-222` states the Android comparison as an obligation with a
+    // named failure, so `None` there means the mandatory comparison did not
+    // happen — and "I could not check" is not a pass. Treating it as optional
+    // turns the Apple carve-out into a universal bypass reachable by any
+    // Android caller whose adapter simply reports nothing.
+    match (observed.platform_binding_id, binding) {
+        (Some(observed_id), _) if observed_id != binding.id() => {
             return Err(EnrollmentError::PlatformBindingMismatch);
         }
+        (None, crate::profile::MobileBinding::Android { .. }) => {
+            return Err(EnrollmentError::PlatformBindingMismatch);
+        }
+        _ => {}
     }
     // The return URI is the one the authenticated binding declares, not one the
     // caller supplied.
