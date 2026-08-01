@@ -299,24 +299,166 @@ function scriptedWallet(base, code) {
   }
 }
 
+/** The Tauri identifier from `src-tauri/tauri.conf.json`. */
+const PACKAGE = 'io.anuna.selfsame';
+
+/** Run adb, returning stdout, or null if it could not run. */
+function adb(args, { serial } = {}) {
+  try {
+    return execFileSync('adb', serial ? ['-s', serial, ...args] : args, {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: 30_000,
+    }).trim();
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Layer three's wallet: the real application in an emulator.
  *
- * Unimplemented, and refusing rather than pretending. EXP-002's three unknowns
- * — whether `ar-crawl android` can reach the Tauri WebView's DOM, how the
- * application is pointed at a loopback rendezvous, and what the biometric
- * presence check needs — are all unanswered, and none can be answered on a
- * machine with no Android SDK. A stub that silently passed would make the
- * harness report success for a ceremony that never happened, which is the exact
- * defect the last review round was about.
+ * **Written but never executed.** There is no Android SDK on the machine this
+ * was authored on, so every line below is unverified — and the three unknowns
+ * EXP-002 exists to settle are settled *by running this*, not by having written
+ * it. It is therefore built to **report** what it finds rather than to assume:
+ * each unknown is probed, the answer is printed, and a failure names which
+ * unknown defeated it. That is the difference between a spike apparatus and a
+ * guess with a confident interface.
+ *
+ * The one thing it will not do is pass without linking. Every path out of here
+ * either returns a DID the wallet genuinely reported or calls `die`.
  */
-function emulatorWallet() {
-  die(
-    'the emulator wallet is not implemented yet.\n' +
-      '        EXP-002 records three unknowns it depends on (U1 the WebView, U2 the\n' +
-      '        endpoint, U3 the presence check), none of which can be settled without\n' +
-      '        an Android SDK. Run `node tests/e2e/preflight.mjs` to see what is missing.',
+async function emulatorWallet(base, code, rendezvousPort) {
+  // ── the prerequisites, before anything slow ─────────────────────────────
+  const { preflight } = await import('./preflight.mjs');
+  const report = preflight();
+  if (!report.ready) {
+    die(
+      'the emulator wallet needs a toolchain this machine does not have:\n' +
+        report.results
+          .filter((r) => !r.found)
+          .map((r) => `          ${r.name} — ${r.fix}`)
+          .join('\n') +
+        '\n\n        Run `npm run e2e:preflight` for the full report.',
+    );
+  }
+
+  // ── a device to drive ───────────────────────────────────────────────────
+  const listed = JSON.parse(execFileSync('ar-crawl', ['android', 'devices'], { encoding: 'utf8' }));
+  const device = listed.devices?.[0];
+  if (!device) die('no Android device or emulator is running — start your AVD first');
+  log(`device: ${device.serial} (${device.model ?? 'unknown model'})`);
+
+  // ── U2: point the application at the host's rendezvous ──────────────────
+  //
+  // `adb reverse` makes the host's port reachable inside the emulator on the
+  // same number, so `127.0.0.1:<port>` means the same thing on both sides. That
+  // half is reliable. The unreliable half is telling the application to use it:
+  // `net.rs` reads `SELFSAME_ENDPOINT` from the process environment, and Android
+  // does not hand out process environments.
+  //
+  // `setprop wrap.<package>` is Android's supported mechanism for a *debuggable*
+  // application and needs no source change, so it is tried first — EXP-002 U2
+  // candidate 2. Candidate 1, a debug-only cargo feature, is a production change
+  // and is EXP-002 Q1, which is the owner's to answer. If this fails, that is
+  // the finding, and it is reported as one rather than worked around.
+  if (adb(['reverse', `tcp:${rendezvousPort}`, `tcp:${rendezvousPort}`], { serial: device.serial }) === null) {
+    die('adb reverse failed — the emulator cannot reach the host rendezvous');
+  }
+  log(`adb reverse tcp:${rendezvousPort} → host`);
+
+  const endpoint = `http://127.0.0.1:${rendezvousPort}`;
+  const wrapped = adb(
+    ['shell', 'setprop', `wrap.${PACKAGE}`, `SELFSAME_ENDPOINT='${endpoint}'`],
+    { serial: device.serial },
   );
+  if (wrapped === null) {
+    die(
+      `U2 unresolved: could not set wrap.${PACKAGE}.\n` +
+        '        The application will use its compiled-in endpoint and this run would\n' +
+        '        test nothing. EXP-002 U2 candidate 2 has failed; candidate 1 is a\n' +
+        '        debug-only cargo feature, which is EXP-002 Q1 and is the owner\'s call.',
+    );
+  }
+  log(`U2: wrap.${PACKAGE} set to ${endpoint} (unverified until the app reads it)`);
+
+  // ── a clean application, so a previous run cannot satisfy this one ──────
+  adb(['shell', 'pm', 'clear', PACKAGE], { serial: device.serial });
+  adb(['shell', 'monkey', '-p', PACKAGE, '-c', 'android.intent.category.LAUNCHER', '1'], {
+    serial: device.serial,
+  });
+
+  const wallet = openSession(['android', 'session', device.serial], 'wallet');
+  await wallet.ready();
+
+  // ── U1: is the Tauri WebView reachable? ─────────────────────────────────
+  const views = await wallet.send('webviews');
+  const hasWebview = Array.isArray(views?.webviews) && views.webviews.length > 0;
+  log(
+    hasWebview
+      ? `U1: WebView reachable (${views.webviews.length}) — DOM assertions available`
+      : 'U1: no WebView reported — falling back to native selectors, which is a ' +
+          'materially weaker harness (EXP-002 records this as a possible outcome)',
+  );
+
+  // ── drive the ceremony ──────────────────────────────────────────────────
+  //
+  // `IMPL-004` requires a `data-action` hook on every interactive element, so
+  // the DOM path uses exactly the selectors `tests/screens.mjs` uses. The native
+  // path matches on visible text, which is the thing that path can see — and is
+  // why it is weaker: text is a display label, and `PROTO-001` is explicit that
+  // stable identifiers must never be derived from one.
+  const tap = async (action, text) =>
+    hasWebview
+      ? wallet.send({ type: 'tap', selector: `css=[data-action="${action}"]` })
+      : wallet.send({ type: 'tap', selector: `text=${text}` });
+
+  await tap('to-link', 'Link a device');
+  await wallet.send(
+    hasWebview
+      ? { type: 'fill', selector: 'css=#code-input', text: code }
+      : { type: 'fill', selector: `res=${PACKAGE}:id/code-input`, text: code },
+  );
+  await tap('read-code', 'Continue');
+  await tap('to-presence', 'Continue');
+
+  // ── U3: the presence check ──────────────────────────────────────────────
+  //
+  // Biometric on mobile, which is a native dialog rather than a DOM element.
+  // The emulator answers `finger touch` for exactly this. Best-effort: on a
+  // build where the check is the typed passcode instead, there is no prompt and
+  // this is a no-op.
+  adb(['emu', 'finger', 'touch', '1'], { serial: device.serial });
+
+  await tap('authorise', 'Authorise');
+
+  // ── what the wallet says it did ─────────────────────────────────────────
+  const method = await until(
+    async () => {
+      if (!hasWebview) {
+        // Without the DOM there is no reliable way to read the method id, and
+        // guessing from a screenshot would be a claim the harness cannot back.
+        die(
+          'U1 resolved against the DOM path, so the wallet reached the linked screen ' +
+            'but its identity cannot be read. The harness cannot assert the two parties ' +
+            'agree, which is the one assertion it exists to make. Recorded as an EXP-002 ' +
+            'finding rather than reported as a pass.',
+        );
+      }
+      const r = await wallet.send({
+        type: 'evaluate',
+        expression: `(document.querySelector('[data-linked-method]')?.textContent || '').trim() || null`,
+      });
+      return r.result ?? r.value ?? r.data ?? null;
+    },
+    { what: 'the wallet to reach its linked screen', timeoutMs: 60_000 },
+  );
+
+  const did = String(method).split('#')[0];
+  if (!did.startsWith('did:crdt:')) die(`the wallet reported no usable identity: ${method}`);
+  wallet.close();
+  return did;
 }
 
 // ── the ceremony ───────────────────────────────────────────────────────────
@@ -356,7 +498,10 @@ async function main() {
   if (typeof code !== 'string' || !code) die(`could not read the link code, got: ${code}`);
   log(`link code: ${code}`);
 
-  const walletDid = WALLET === 'scripted' ? scriptedWallet(base, code) : emulatorWallet();
+  const walletDid =
+    WALLET === 'scripted'
+      ? scriptedWallet(base, code)
+      : await emulatorWallet(base, code, rendezvousPort);
   log(`wallet published: ${walletDid}`);
 
   // The browser polls on its own; wait for it to reach a terminal state rather
