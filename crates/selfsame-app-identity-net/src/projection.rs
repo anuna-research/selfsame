@@ -115,24 +115,49 @@ pub async fn fetch(
 ///
 /// "Under" is a path-boundary test, not a prefix test. `https://status.example`
 /// as a base must not admit `https://status.example.attacker.test/…`, which a
-/// bare `starts_with` would, so the base is normalised to end in `/` before the
-/// comparison and the candidate must extend it by at least one character.
+/// bare `starts_with` would.
+///
+/// # The comparison runs on the parsed URL, not on the string
+///
+/// The check the request will actually be made against is the one that has to
+/// pass, and the request goes through a URL parser. That parser resolves dot
+/// segments — including their percent-encoded spellings, which the WHATWG URL
+/// Standard treats as dot segments — so
+/// `https://status.example/lists/%2E%2E/admin` is a string containing no `/..`
+/// and a *request* to `https://status.example/admin`. A raw-string test passes
+/// it and the fetch then leaves the configured base entirely.
+///
+/// So the value is parsed first, checked as an origin and a path, and returned
+/// in its canonical serialisation — the same form the client will re-parse, so
+/// what was checked and what is requested cannot come apart.
 fn contained_url(base: &str, declared: &str) -> Result<String, NetError> {
-    if !declared.starts_with("https://") {
+    let base = reqwest::Url::parse(base)
+        .map_err(|_| NetError::Refused("the profile's credentialBaseUrl is not a URL"))?;
+    let url = reqwest::Url::parse(declared)
+        .map_err(|_| NetError::Refused("statusListCredential is not an absolute HTTPS URL"))?;
+    if url.scheme() != "https" {
         return Err(NetError::Refused("statusListCredential is not an absolute HTTPS URL"));
     }
-    // A fragment or a dot segment would let one string denote two resources.
-    if declared.contains('#') || declared.contains("/..") || declared.contains("/./") {
+    // A fragment or a query would let one string denote two resources, and
+    // neither belongs on a status list credential.
+    if url.fragment().is_some() || url.query().is_some() {
         return Err(NetError::Refused("statusListCredential is not a canonical URL"));
     }
-    let mut boundary = base.trim_end_matches('/').to_string();
-    boundary.push('/');
-    if !declared.starts_with(&boundary) || declared.len() <= boundary.len() {
+    if url.origin() != base.origin() {
         return Err(NetError::Refused(
             "statusListCredential names a host the profile never declared",
         ));
     }
-    Ok(declared.to_string())
+    // The path boundary, over the parsed paths, so a segment the parser already
+    // resolved cannot climb out after the check.
+    let mut boundary = base.path().trim_end_matches('/').to_string();
+    boundary.push('/');
+    if !url.path().starts_with(&boundary) || url.path().len() <= boundary.len() {
+        return Err(NetError::Refused(
+            "statusListCredential names a host the profile never declared",
+        ));
+    }
+    Ok(url.to_string())
 }
 
 /// Allocate a `(credential, index)` pair at issuance (`CON-210`).
@@ -157,8 +182,22 @@ pub async fn allocate(policy: &ProjectionPolicy) -> Result<Allocation, NetError>
         return Err(NetError::Refused("the allocation host refused"));
     }
     let body = bounded_body(response, 8_192).await?;
-    let value: serde_json::Value = serde_json::from_slice(&body)
-        .map_err(|e| NetError::Recognition(e.to_string()))?;
+    recognise_allocation(policy, &body)
+}
+
+/// Recognise an allocation response (`CON-210`).
+///
+/// Separated from the fetch so the whole of what this crate *decides* about an
+/// allocation is reachable without a network, which is the same split every
+/// other module here makes. Both members arrive from a host `CON-210` states
+/// plainly "is not an authorization trust anchor", and both go straight into a
+/// credential the home key signs.
+fn recognise_allocation(
+    policy: &ProjectionPolicy,
+    body: &[u8],
+) -> Result<Allocation, NetError> {
+    let value: serde_json::Value =
+        serde_json::from_slice(body).map_err(|e| NetError::Recognition(e.to_string()))?;
 
     let credential = value
         .get("statusListCredential")
@@ -182,7 +221,16 @@ pub async fn allocate(policy: &ProjectionPolicy) -> Result<Allocation, NetError>
         return Err(NetError::Refused("the allocated index is not a canonical integer"));
     }
 
-    Ok(Allocation { status_list_credential: credential, status_list_index: index })
+    // The allocation host is not a trust anchor either, and this half of its
+    // answer travels further than the index does: the credential URL is signed
+    // into the grant, where every future verifier reads it. An off-base value
+    // here mints a conforming-looking grant that points its own revocation
+    // status at a host the profile never declared — the same property
+    // [`fetch`] refuses at read time, applied at the moment the value is
+    // accepted rather than only when it is used.
+    let status_list_credential = contained_url(&policy.credential_base_url, &credential)?;
+
+    Ok(Allocation { status_list_credential, status_list_index: index })
 }
 
 /// A projection slot obtained at issuance.
@@ -229,6 +277,13 @@ mod tests {
             "https://status.example.attacker.test/lists/list-7",
             // A dot segment climbs out of the base after the check.
             "https://status.example/lists/../../elsewhere/list-7",
+            // …and its percent-encoded spelling, which the raw-string test did
+            // not contain a `/..` for and which the URL parser resolves to
+            // `/admin` before the request is made.
+            "https://status.example/lists/%2E%2E/admin",
+            "https://status.example/lists/%2e%2e/%2e%2e/admin",
+            // A query makes one string denote two resources.
+            "https://status.example/lists/list-7?as=admin",
             // Not absolute: the old shape, now refused rather than concatenated.
             "list-7",
             "/lists/list-7",
@@ -259,18 +314,54 @@ mod tests {
     }
 
     #[test]
-    fn a_non_canonical_index_would_be_refused() {
+    fn a_non_canonical_index_is_refused() {
+        let p = policy();
+        let body = |index: &str| {
+            format!(
+                r#"{{"statusListCredential":"https://status.example/lists/list-7","statusListIndex":"{index}"}}"#
+            )
+        };
         for index in ["", "007", "1a", "-1"] {
-            let canonical = !index.is_empty()
-                && index.bytes().all(|b| b.is_ascii_digit())
-                && !(index.len() > 1 && index.starts_with('0'));
-            assert!(!canonical, "{index} should not be canonical");
+            assert!(
+                recognise_allocation(&p, body(index).as_bytes()).is_err(),
+                "{index} should not be canonical"
+            );
         }
         for index in ["0", "1", "131071"] {
-            let canonical = !index.is_empty()
-                && index.bytes().all(|b| b.is_ascii_digit())
-                && !(index.len() > 1 && index.starts_with('0'));
-            assert!(canonical, "{index} should be canonical");
+            let out = recognise_allocation(&p, body(index).as_bytes())
+                .unwrap_or_else(|e| panic!("{index} should be canonical: {e}"));
+            assert_eq!(out.status_list_index, index);
         }
+    }
+
+    #[test]
+    fn an_allocated_credential_outside_the_profiles_base_is_refused() {
+        // The index is validated because the allocation host is not a trust
+        // anchor, and the credential URL travels further than the index does:
+        // it is signed into the grant and every future verifier reads its own
+        // revocation status from it. An unchecked one lets the allocation host
+        // choose where that is — which is the property `fetch` refuses at read
+        // time, and refusing it only there leaves a nonconforming grant already
+        // signed.
+        let p = policy();
+        for credential in [
+            "https://attacker.example/lists/list-7",
+            "https://status.example/elsewhere/list-7",
+            "https://status.example/lists/%2E%2E/admin",
+            "http://status.example/lists/list-7",
+            "list-7",
+        ] {
+            let body = format!(
+                r#"{{"statusListCredential":"{credential}","statusListIndex":"4"}}"#
+            );
+            assert!(
+                recognise_allocation(&p, body.as_bytes()).is_err(),
+                "{credential} was accepted into an allocation"
+            );
+        }
+
+        let body = r#"{"statusListCredential":"https://status.example/lists/list-7","statusListIndex":"4"}"#;
+        let out = recognise_allocation(&p, body.as_bytes()).expect("an on-base allocation");
+        assert_eq!(out.status_list_credential, "https://status.example/lists/list-7");
     }
 }

@@ -113,6 +113,25 @@ pub(crate) fn client(deadline: Duration) -> Result<reqwest::Client, NetError> {
         .map_err(|e| NetError::Transport(e.to_string()))
 }
 
+/// Join a declared base URL to an absolute path with exactly one separator.
+///
+/// `CON-201` does not require a `stateResolvers` entry to be spelled without a
+/// trailing `/`, and `https://state.example` and `https://state.example/` name
+/// the same origin. Concatenation makes them two different requests: the second
+/// produces `https://state.example//did:crdt:…`, and nothing obliges a server to
+/// treat an empty first path segment as absent. A conforming profile could
+/// therefore make every closure resolution and every revocation submission miss
+/// the endpoint the pinned method's `CON-003` defines — resolution falling
+/// through to the issuer's own bundled state, and revocation silently reaching
+/// nobody.
+///
+/// The boundary is normalised, and only the boundary: the caller's path is used
+/// as given.
+pub(crate) fn join(base: &str, path: &str) -> String {
+    debug_assert!(path.starts_with('/'), "join takes an absolute path");
+    format!("{}{path}", base.trim_end_matches('/'))
+}
+
 /// Read a response body, refusing rather than truncating past the bound.
 ///
 /// Public because an adopting application adding a fetch of its own needs the
@@ -215,6 +234,18 @@ mod tests {
         // are what make the contracts' response checks meaningful, and a client
         // built without them would make several of those checks unreachable.
         assert!(client(Duration::from_millis(1_500)).is_ok());
+    }
+
+    #[test]
+    fn a_base_url_is_joined_to_a_path_with_exactly_one_separator() {
+        // Both spellings of the same origin have to produce the same request,
+        // or a profile's punctuation decides whether revocation propagates.
+        assert_eq!(join("https://state.example", "/did:crdt:abc"), "https://state.example/did:crdt:abc");
+        assert_eq!(join("https://state.example/", "/did:crdt:abc"), "https://state.example/did:crdt:abc");
+        assert_eq!(
+            join("https://state.example/", "/dids/did:crdt:abc/deltas"),
+            "https://state.example/dids/did:crdt:abc/deltas"
+        );
     }
 
     #[test]

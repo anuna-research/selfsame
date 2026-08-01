@@ -26,6 +26,7 @@ use selfsame_app_identity::discovery::{
     self, DiscoveryError, HttpResponse, MAX_BODY_OCTETS, PROFILE_MEDIA_TYPE,
 };
 use selfsame_app_identity::profile::{ApplicationId, ApplicationProfile};
+use selfsame_app_identity::uri::{self, UriPolicy};
 use selfsame_app_identity::UnixSeconds;
 
 use crate::{bounded_body, client, has_content_encoding, media_type, NetError};
@@ -146,11 +147,37 @@ pub async fn fetch_or_cached(
 /// origin a *person typed*, which is the only circumstance in which tier 3 is
 /// reached, and it returns a list for the person to choose from rather than
 /// picking one.
+///
+/// # A person typed it, so it is recognised before it is used
+///
+/// The typed value is used twice: to build the request path, and to check that
+/// every identifier the origin returns is on that same origin. Both uses need
+/// the canonical origin, and neither tolerates the forms a person actually
+/// types.
+///
+/// ```abnf
+/// typed-origin = "https://" host [ ":" port ] [ "/" ]
+/// ```
+///
+/// A trailing `/` — the shape a browser address bar shows and a person copies —
+/// concatenates to `https://photos.example//.well-known/selfsame/applications`,
+/// and then fails every comparison against `ApplicationId::origin()`, which
+/// carries none. A typed *path* aims the request somewhere the endpoint is not
+/// and makes the response check compare against a string no identifier can
+/// equal. Recognising the origin first fixes both, and the empty-path form is
+/// admitted because `https://photos.example/` is a spelling of the origin, not a
+/// path — nothing else is repaired.
 pub async fn enumerate_applications(
     typed_origin: &str,
     now: UnixSeconds,
 ) -> Result<Vec<ApplicationId>, NetError> {
     let _ = now;
+    let parts = uri::recognise(typed_origin, UriPolicy::PROVIDER_URL)
+        .map_err(|_| NetError::Refused("the typed value is not an HTTPS origin"))?;
+    if !parts.path.is_empty() && parts.path != "/" {
+        return Err(NetError::Refused("origin enumeration takes an origin, not a path"));
+    }
+    let typed_origin = parts.origin;
     let url = format!("{typed_origin}{}", discovery::ENUMERATION_PATH);
     let response = client(FETCH_DEADLINE)?
         .get(&url)
@@ -179,6 +206,45 @@ mod tests {
     #[test]
     fn the_enumeration_path_is_the_well_known_one_con_220_fixes() {
         assert_eq!(discovery::ENUMERATION_PATH, "/.well-known/selfsame/applications");
+    }
+
+    #[test]
+    fn a_typed_origin_is_recognised_before_it_becomes_a_request_or_a_comparand() {
+        // The same value builds the request path *and* is compared against
+        // every returned `ApplicationId::origin()`, which never carries a
+        // trailing slash. So the browser-address-bar form a person copies used
+        // to request `//.well-known/selfsame/applications` and then reject every
+        // otherwise valid answer, and a typed path aimed the request somewhere
+        // the endpoint is not.
+        let recognised = |text: &str| -> Option<String> {
+            let parts = uri::recognise(text, UriPolicy::PROVIDER_URL).ok()?;
+            (parts.path.is_empty() || parts.path == "/").then(|| parts.origin.to_string())
+        };
+
+        // Both spellings of the origin yield the origin itself.
+        assert_eq!(recognised("https://photos.example").as_deref(), Some("https://photos.example"));
+        assert_eq!(recognised("https://photos.example/").as_deref(), Some("https://photos.example"));
+        assert_eq!(
+            recognised("https://photos.example:8443/").as_deref(),
+            Some("https://photos.example:8443")
+        );
+
+        // …and everything that is not an origin is refused rather than repaired.
+        for typed in [
+            "https://photos.example/selfsame",
+            "https://photos.example/?x=1",
+            "https://photos.example#frag",
+            "http://photos.example",
+            "photos.example",
+            "",
+        ] {
+            assert!(recognised(typed).is_none(), "`{typed}` was accepted as an origin");
+        }
+
+        // The recognised origin is exactly what `recognise_application_list`
+        // compares against, so a conforming answer now matches.
+        let id = ApplicationId::parse("https://photos.example/selfsame/application").unwrap();
+        assert_eq!(Some(id.origin().to_string()), recognised("https://photos.example/"));
     }
 
     #[test]

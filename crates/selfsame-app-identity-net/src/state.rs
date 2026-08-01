@@ -90,7 +90,26 @@ use selfsame_app_identity::accept::ClosureSource;
 use selfsame_app_identity::profile::{ApplicationProfile, StateResolver};
 use selfsame_app_identity::revocation::Submission;
 
-use crate::{bounded_body, client, NetError};
+use crate::{bounded_body, client, join, NetError};
+
+/// Recognise a `did:crdt` identifier before it is interpolated into a URL.
+///
+/// The DID this module is asked to resolve reaches it from
+/// [`selfsame_app_identity::accept::peek_issuer`], which reads `issuer` out of a
+/// grant **whose signature has not been checked** — that is the whole point of
+/// `peek_issuer`, and it is correct there because the value is used to derive a
+/// name. Here it is used to build a request path, and an unrecognised value
+/// carrying `/../`, a `?`, or a `#` chooses which same-origin resolver endpoint
+/// gets called before the closure replay below ever gets to refuse it.
+///
+/// The recogniser is the pinned method's own `Did::from_str`, never a second
+/// one: `did:crdt:` followed by 64 hexadecimal characters and nothing else,
+/// which is a single path segment by construction.
+fn recognise_did(did: &str) -> Result<(), NetError> {
+    did.parse::<did_crdt::Did>()
+        .map(|_| ())
+        .map_err(|_| NetError::Refused("the issuer is not a did:crdt identifier"))
+}
 
 /// Deadline for one resolver request. Chosen, not specified.
 pub const RESOLVER_DEADLINE: Duration = Duration::from_millis(3_000);
@@ -187,6 +206,9 @@ pub async fn resolve_closure(
     bundled: Option<&[u8]>,
     acceptance: Acceptance,
 ) -> Result<ResolvedClosure, NetError> {
+    // Full recognition before any request. Nothing below may build a URL out of
+    // a value a grant chose and nobody parsed.
+    recognise_did(did)?;
     let mut outcomes: Vec<(String, ResolverOutcome)> = Vec::new();
 
     for resolver in &profile.state_resolvers {
@@ -263,9 +285,11 @@ fn outcome_of(error: &NetError) -> ResolverOutcome {
 }
 
 async fn fetch_closure(resolver: &StateResolver, did: &str) -> Result<Document, NetError> {
-    // CON-003: `GET /{did}`. The DID is already a canonical `did:crdt:` string
-    // with no reserved characters, so it is a path segment as it stands.
-    let url = format!("{}{RESOLUTION_PATH}{did}", resolver.url);
+    // CON-003: `GET /{did}`. `resolve_closure` has recognised the DID, so it is
+    // a canonical `did:crdt:` string with no reserved characters and stands as a
+    // path segment; `join` supplies exactly one separator whether or not the
+    // profile spelled the resolver URL with a trailing `/`.
+    let url = join(&resolver.url, &format!("{RESOLUTION_PATH}{did}"));
     let response = client(RESOLVER_DEADLINE)?
         .get(&url)
         .header(reqwest::header::ACCEPT, "application/json")
@@ -338,6 +362,19 @@ fn replay_closure(octets: &[u8], expected_did: &str) -> Result<Document, NetErro
     Ok(document)
 }
 
+/// The credential a `RevokeCredential` delta revokes.
+///
+/// Any other operation is refused rather than tracked. `Submission` exists to
+/// answer one question — has *this* credential appeared in a verified closure —
+/// and there is no credential a `Deactivate` or a `RevokeVerificationMethod`
+/// makes that question true about.
+fn revoked_credential_id(delta: &SignedDelta) -> Result<&str, NetError> {
+    match &delta.op {
+        DeltaOp::RevokeCredential { credential_id } => Ok(credential_id),
+        _ => Err(NetError::Refused("the delta is not a RevokeCredential operation")),
+    }
+}
+
 /// The outcome of fanning one delta out to every declared resolver.
 pub struct SubmissionReport {
     /// Still `Pending` however many resolvers acknowledged.
@@ -355,19 +392,33 @@ pub struct SubmissionReport {
 /// and changes nothing else. `CON-210`: "A failed or unacknowledged submission
 /// to any one resolver SHALL NOT abandon the revocation, discard the delta, or
 /// cause the controller to report success."
+///
+/// # The tracked credential comes from the delta
+///
+/// The identifier the returned [`Submission`] watches is read out of the
+/// delta's own `RevokeCredential` operation rather than taken as a parameter,
+/// for the same reason the DID is: *"taking it from the delta rather than from
+/// a parameter means the two can never disagree."* A caller that passed an
+/// independent string could submit the revocation of credential A and be handed
+/// a `Submission` that waits for credential B — and since only
+/// [`confirm_revocation`] can move it, it would wait forever, reporting
+/// `Pending` for a revocation that landed and never reporting the one that did.
+///
+/// A delta carrying any other operation is refused. This function submits
+/// revocations, and there is no correct credential to track for anything else.
 pub async fn submit_revocation(
     profile: &ApplicationProfile,
     delta: &SignedDelta,
-    credential_id: &str,
-) -> SubmissionReport {
+) -> Result<SubmissionReport, NetError> {
+    let credential_id = revoked_credential_id(delta)?;
     let body = match serde_json::to_vec(delta) {
         Ok(b) => b,
         Err(_) => {
-            return SubmissionReport {
+            return Ok(SubmissionReport {
                 submission: Submission::begin(credential_id),
                 acknowledged: Vec::new(),
                 unreachable: profile.state_resolvers.iter().map(|r| r.id.clone()).collect(),
-            }
+            })
         }
     };
 
@@ -396,12 +447,12 @@ pub async fn submit_revocation(
     for id in &acknowledged {
         submission = submission.acknowledged(id.clone());
     }
-    SubmissionReport { submission, acknowledged, unreachable }
+    Ok(SubmissionReport { submission, acknowledged, unreachable })
 }
 
 async fn submit_one(resolver: &StateResolver, did: &str, body: Vec<u8>) -> bool {
     // CON-003: `POST /dids/{did}/deltas`, which answers `202 Accepted`.
-    let url = format!("{}{}", resolver.url, submission_path(did));
+    let url = join(&resolver.url, &submission_path(did));
     let Ok(http) = client(RESOLVER_DEADLINE) else { return false };
     match http
         .post(&url)
@@ -459,6 +510,94 @@ mod tests {
         // revocation missed the node it was aimed at.
         assert_eq!(RESOLUTION_PATH, "/");
         assert_eq!(submission_path("did:crdt:abc"), "/dids/did:crdt:abc/deltas");
+    }
+
+    #[test]
+    fn a_resolver_url_with_a_trailing_slash_produces_the_same_two_requests() {
+        // `CON-201` does not forbid the trailing form, and the two spellings
+        // name one origin. Concatenating produced `//did:crdt:…` and
+        // `//dids/…/deltas` from one of them — a 404 from every conforming
+        // node, which is the shape of a resolution that silently falls back to
+        // the issuer's own bundled state and a revocation that reaches nobody.
+        let did = "did:crdt:abc";
+        for base in ["https://state.example", "https://state.example/"] {
+            assert_eq!(
+                crate::join(base, &format!("{RESOLUTION_PATH}{did}")),
+                "https://state.example/did:crdt:abc"
+            );
+            assert_eq!(
+                crate::join(base, &submission_path(did)),
+                "https://state.example/dids/did:crdt:abc/deltas"
+            );
+        }
+    }
+
+    #[test]
+    fn an_issuer_that_is_not_a_did_crdt_identifier_never_reaches_a_url() {
+        // The value arrives from `accept::peek_issuer`, which reads it out of a
+        // grant nobody has verified. Interpolated unrecognised, it chooses which
+        // same-origin resolver path is requested — before the closure replay
+        // that would have refused it ever runs.
+        for bad in [
+            "did:crdt:../../admin",
+            "did:crdt:abc/../../admin",
+            "did:crdt:abc?as=admin",
+            "did:crdt:abc#frag",
+            "did:key:z6Mk",
+            "",
+            // Right alphabet, wrong length — the boundary a hand-rolled
+            // recogniser gets wrong.
+            "did:crdt:4b8e2f7a91c05d63e8f240ab17c9d3e56082f4a1bc7d90e35f61a284c093db7",
+        ] {
+            assert!(recognise_did(bad).is_err(), "`{bad}` was recognised");
+        }
+        assert!(recognise_did(
+            "did:crdt:4b8e2f7a91c05d63e8f240ab17c9d3e56082f4a1bc7d90e35f61a284c093db7e"
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn the_tracked_credential_comes_from_the_delta_and_not_from_a_parameter() {
+        // The `Submission` returned watches one credential id, and only
+        // `confirm_revocation` can move it. Taking that id independently of the
+        // delta lets the two disagree: the revocation of A is submitted, a
+        // submission watching B is returned, and it stays `Pending` forever —
+        // reporting failure for a revocation that landed, and never reporting
+        // the one that did not.
+        let key = ed25519_dalek::SigningKey::from_bytes(&[7u8; 32]);
+        let (mut document, genesis) =
+            selfsame_core::identity::sign_genesis(&key).expect("genesis signs");
+        document.merge(genesis).expect("genesis merges");
+        let method = selfsame_core::identity::root_method_id(&document.did);
+        let credential = format!(
+            "{}#grant-{}",
+            document.did,
+            selfsame_app_identity::codec::b64url(&[3u8; 32])
+        );
+
+        let delta = selfsame_app_identity::revocation::revoke_credential(
+            &document,
+            &key,
+            &method,
+            &credential,
+            1_000,
+        )
+        .expect("a well-formed grant id is revocable");
+        assert_eq!(revoked_credential_id(&delta).unwrap(), credential);
+
+        // Anything else is refused rather than tracked against a credential the
+        // operation says nothing about.
+        let other = SignedDelta::new_with_parents(
+            document.did.clone(),
+            DeltaOp::Deactivate,
+            delta.timestamp,
+            document.frontier(),
+            method,
+            &did_crdt::core::delta::SigningKey::Ed25519(key),
+        )
+        .expect("a deactivate delta signs");
+        assert!(revoked_credential_id(&other).is_err());
     }
 
     #[test]
