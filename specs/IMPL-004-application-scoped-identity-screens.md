@@ -3,7 +3,7 @@ id: IMPL-004
 title: Application- and Account-Scoped Identity — the person-facing surface
 status: implemented
 tier: 2
-version: 0.4.0
+version: 0.5.0
 audience: agent, human, frontend implementer
 author: Anuna Research (drafted with Claude, 2026-08-01)
 last-updated: 2026-08-01
@@ -391,6 +391,39 @@ a re-resolved verified closure contains the grant ID, so pending can persist
 indefinitely when no resolver answers. HP-6 calls this "honest and
 unsatisfying". The screen SHALL NOT add a reassuring animation to cover it.
 
+### Claim audit
+
+Every sentence on all eleven screens was checked against one question: *is this
+true of the build showing it?* The pass separated two kinds of statement, and
+only one of them can be wrong here.
+
+**Statements about the designed system** — "Devices check for this when they
+next look", "this is publicly discoverable", "it stops being able to act for
+this account" — describe `SPEC-004` behaviour. A screen SHOULD carry these; they
+are what it says in production, and a prototype that hedged them would be
+describing itself rather than the design.
+
+**Statements about what just happened** — "a verified record now carries the
+removal", "nothing has told you it worked" — assert state. These MUST be true of
+the build rendering them, and they are where every defect found so far has been.
+
+The distinguishing test is *delegation*. `remove-confirmed` asserts a verified
+record and is reachable only when `revocation_status` says so, so the claim is
+delegated to a command and is as true as that command — which is the correct
+architecture, and the same status every other rendered value has. `remove-pending`
+asserted a retry that **no command backed and the frontend did not perform**, so
+nothing could make it true. That is the line.
+
+Two defects were found and fixed at version 0.5.0; two gaps were recorded rather
+than fixed:
+
+| Screen | Claim | Finding |
+|---|---|---|
+| `username-set` | "Claim it", then the name shown under *Public username* | **Fixed.** Recognition is not reservation. `CON-212` step 3 has the authority validate, reserve and publish; the wallet was stopping at recognition and setting the name locally, putting a name nobody held on the application screen. It now asks `provision_username` and surfaces `AccountProvisioningFailed`. |
+| `applications` | "Each one gets its own identity below your recovery words" | **Fixed in the fixture.** Both fixture applications shared one `home_did`, so the screen told the truth about a system the fixture did not model — and cross-application unlinkability is the property `SPEC-004` exists to deliver. A real linkability defect would have looked correct. |
+| `fingerprint-compare` | "You are asked this once for this account, ever" | **Recorded.** `CON-221`'s once-per-account obligation is the wallet's, and nothing here records that the question was asked, so this build would re-ask. Borderline: the sentence tells the person what kind of moment this is rather than reporting state. Owner: HOC. |
+| `username-taken` | "Someone holds it, or it is reserved" | **Recorded.** The specified reason for the token, asserted as fact without the build having determined which. Minor. Owner: HOC. |
+
 ### Rendering permissions
 
 SPEC-004 fixes *that* permissions are shown and is silent on how. A raw URI is
@@ -644,6 +677,7 @@ amendment requests; none changes this plan by itself.
 
 | Version | Date | Change |
 |---|---|---|
+| 0.5.0 | 2026-08-01 | **Claim audit over all eleven screens.** Two defects fixed: `username-set` presented an unreserved name as held — recognition is not reservation, and it now asks `provision_username` and surfaces `AccountProvisioningFailed`; the `applications` fixture shared one home DID across two applications while the screen claimed each gets its own. Two gaps recorded (`fingerprint-compare`'s once-ever claim, `username-taken`'s asserted reason). New assertions for both fixes verified by reintroducing each regression and watching it fail. |
 | 0.4.0 | 2026-08-01 | `remove-pending` claimed "this will keep trying until one does" and "it is retained and retried". Both are `CON-210` obligations on a wired implementation; neither is true of this build, which submits once and checks once. Removed, and TEST-609 gains forbidden-phrase assertions so the claim cannot return without a deliberate edit — verified by reintroducing the sentence and watching the test fail. `scope-unavailable` now names the application. |
 | 0.3.0 | 2026-08-01 | **Thirteen screens to eleven.** `handoff`, `wallet-unavailable` and `handoff-refused` were application-side screens rendered in the wallet: `CON-222` assigns the wallet search to "the developer application", so a wallet showing *Selfsame isn't installed* asserts its own absence. Version 0.1.0 listed them as "modelled from the wallet's side", which is not something that can be done. Replaced by `binding-mismatch` — the `CON-222` caller comparison, which genuinely is the wallet's, and which gives the unattributed-Android-caller fix a surface it did not have. |
 | 0.2.0 | 2026-08-01 | **Implemented.** Two corrections the build forced, both recorded rather than quietly applied: `CON-601`'s `home-did` grammar was `1*63(ALPHA / DIGIT)` and is `64HEXDIG` — the first draft rejected every real DID, and the recogniser is now the method's own `Did::from_str` rather than one written here. `scope-unavailable` required "no action at all"; that over-read `REQ-217`, which prohibits offering a way to supply the scope rather than leaving without one, so it now carries navigation and its test forbids `.btn` instead of every `button`. |

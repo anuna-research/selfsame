@@ -65,6 +65,11 @@ const KEY_FP = { hex: 'C0 7A 1E 42 9B 33', label: 'copper-lynx-42', lifehash: LH
 // DID's *provenance* is fixture (see FINDING-016: the wallet holds no material
 // to derive one), but everything rendered from it is genuinely computed.
 const HOME_DID = 'did:crdt:4b8e2f7a91c05d63e8f240ab17c9d3e56082f4a1bc7d90e35f61a284c093db7e';
+// A DIFFERENT identity, and that is the point of the fixture. CON-202 gives each
+// application its own home below the recovery secret, and the applications
+// screen says so in as many words. Sharing one DID across both rows would make
+// a real cross-application linkability defect look correct on screen.
+const HOME_DID_2 = 'did:crdt:c17d0e93b426a8f5104e7b2c96d38af0521e6bc94d70382af659c1e04b7d28a3';
 const HOME_FP = { hex: 'FF 9E 3B 49 7A 49', label: 'cobalt-quarry-27', lifehash: LH['home_FF9E3B497A49'] };
 
 // The account alias is the opaque one CON-203 derives from the home DID. The
@@ -94,7 +99,7 @@ const APPLICATIONS = [
     // there is no alias and no identity to open. REQ-217 forbids guessing one.
     account_alias: null,
     username: null,
-    home_did: HOME_DID,
+    home_did: HOME_DID_2,
     fingerprint: HOME_FP,
     permissions: [],
     devices: [],
@@ -189,6 +194,10 @@ const bridge = (state) => `
             };
           }
           case 'home_fingerprint': return ${JSON.stringify(HOME_FP)};
+          // CON-204. There is no account authority in this build, so a name can
+          // be recognised and never reserved — and the wallet says so rather
+          // than showing it as held.
+          case 'provision_username': throw 'AccountProvisioningFailed';
           case 'app_identity_derive': {
             if (!args.accountScopeId) throw 'AccountScopeUnavailable';
             return { homeDid: ${JSON.stringify(HOME_DID)}, publicKey: 'AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE' };
@@ -226,7 +235,8 @@ const shots = [
   { name: '18-applications', expect: 'applications', state: STATE_APPS, steps: ['to-applications'] },
   { name: '19-application', expect: 'application', state: STATE_APPS, steps: ['to-applications', 'open-application'] },
   { name: '20-username-set', expect: 'username-set', state: STATE_APPS, steps: ['to-applications', 'open-application', 'to-username'] },
-  { name: '21-username-taken', expect: 'username-taken', state: STATE_APPS, steps: ['to-applications', 'open-application', 'to-username', 'fill-taken-username', 'set-username'] },
+  { name: '21-username-unprovisioned', expect: 'username-set', state: STATE_APPS, steps: ['to-applications', 'open-application', 'to-username', 'fill-username', 'set-username'] },
+  { name: '21b-username-taken', expect: 'username-taken', state: STATE_APPS, steps: ['to-applications', 'open-application', 'to-username', 'fill-taken-username', 'set-username'] },
   { name: '22-fingerprint-compare', expect: 'fingerprint-compare', state: STATE_APPS, steps: ['to-applications', 'open-application', 'to-fingerprint'] },
   { name: '23-consent-application', expect: 'consent-application', state: STATE_APPS, steps: ['to-applications', 'open-application', 'to-app-consent'] },
   { name: '24-binding-mismatch', expect: 'binding-mismatch', state: STATE_BAD_CALLER, steps: [] },
@@ -248,6 +258,15 @@ const SCREEN_RULES = {
   '18-applications': {
     // NFR-203: the account scope never reaches a screen.
     forbidden: [['[data-account-scope]', 'NFR-203 forbids rendering an accountScopeId']],
+    // The screen says each application gets its own identity below the recovery
+    // words. That is CON-202, and it is the property SPEC-004 exists to deliver,
+    // so the fixture behind it has to actually hold.
+    distinctHomeDids: true,
+  },
+  '21-username-unprovisioned': {
+    // A name recognised and not reserved is not a name you hold. The screen
+    // must say so rather than returning as though it were claimed.
+    requiredText: 'AccountProvisioningFailed',
   },
   '19-application': {
     forbidden: [['[data-grant-id]', 'a grant ID is held to act on, not rendered']],
@@ -373,6 +392,11 @@ for (const shot of shots) {
       await page.evaluate(() => document.querySelectorAll('.application')[1]?.click());
     } else if (step === 'open-grant') {
       await page.evaluate(() => document.querySelector('.grant')?.click());
+    } else if (step === 'fill-username') {
+      await page.evaluate(() => {
+        const el = document.querySelector('#username-input');
+        if (el) { el.value = 'alice'; el.dispatchEvent(new Event('input')); }
+      });
     } else if (step === 'fill-taken-username') {
       await page.evaluate(() => {
         const el = document.querySelector('#username-input');
@@ -472,6 +496,19 @@ for (const shot of shots) {
     for (const [phrase, why] of rules.forbiddenText ?? []) {
       if (shown.toLowerCase().includes(phrase.toLowerCase())) {
         errors.push(`${shot.name}: says "${phrase}" — ${why}`);
+      }
+    }
+    // A claim can also be contradicted by the data behind it rather than by
+    // the copy. The applications screen says each application gets its own
+    // identity below the recovery words (CON-202) — so the state it renders
+    // has to actually give them different ones, or the screen is telling the
+    // truth about a system the fixture is not modelling.
+    if (rules.distinctHomeDids) {
+      const dids = (shot.state.applications ?? []).map((a) => a.home_did);
+      if (new Set(dids).size !== dids.length) {
+        errors.push(
+          `${shot.name}: the fixture shares one home DID across ${dids.length} applications, ` +
+          `while the screen claims each gets its own (CON-202)`);
       }
     }
   }

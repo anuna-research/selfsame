@@ -233,14 +233,33 @@ export function initAppIdentity(d) {
         accountAuthority: authorityOf(s.app.account_alias),
         localpart: local,
       });
-      // A real implementation publishes here (CON-212 step 5). This build has
-      // no account authority to publish to, so the flow stops at recognition.
+      // Recognition is not reservation. CON-212 step 3 has the *authority*
+      // validate, reserve, and publish the reciprocal binding, and only then
+      // does the name exist — so the wallet asks it, and does not decide.
+      //
+      // An earlier version stopped at the line above and set `username`
+      // locally, which put a name nobody held on the application screen under
+      // the heading "Public username". That is the same defect as promising a
+      // retry that does not run: a screen reporting a state the system is not
+      // in. Nothing may set this but the authority's answer.
+      await invoke("provision_username", {
+        homeDid: s.app.home_did,
+        accountAuthority: authorityOf(s.app.account_alias),
+        localpart: local,
+      });
       s.app = { ...s.app, username: local };
       await openApplication(s.app);
     } catch (e) {
       // One closed token, no detail. The person picks another and is never
       // asked to edit a URI.
-      if (message(e).includes("UsernameUnavailable")) return show("username-taken");
+      const token = message(e);
+      if (token.includes("UsernameUnavailable")) return show("username-taken");
+      // CON-204's failure, and HP-1 names it: the authority was unreachable, so
+      // nothing was reserved. Shown as the token rather than as prose, because
+      // the person needs to know it did *not* happen — not why.
+      if (token.includes("AccountProvisioningFailed")) {
+        return fail("username", "AccountProvisioningFailed — nothing was reserved.");
+      }
       fail("username", "That username can't be used.");
     }
   }
