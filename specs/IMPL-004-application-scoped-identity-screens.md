@@ -763,6 +763,7 @@ written and observed to fail before the screens exist.
 | TEST-617 | `fingerprint-mismatch` | reached from "They're different"; **no retry control, and none of the CON-222 evidence fields** |
 | TEST-618 | [[IMPL-004-application-scoped-identity-screens#CON-601]] | the preview recognises exactly the language `alias::recognise_username` recognises, asserted as an equivalence over both |
 | TEST-619 | [[IMPL-004-application-scoped-identity-screens#CON-603]] | the stub `publicKey` derives the stub `homeDid` |
+| TEST-620 | the `invoke` surface | **every command the frontend calls is one the Tauri handler registers**; commands registered and unreached are reported, not failed |
 
 ### Negative-output tests
 
@@ -804,6 +805,29 @@ captured, from a state flag named `wired_backend` and under shot names prefixed
 `wired-`, so that a reader of the shot list cannot mistake a render of the design
 for a state the build produces. That flag is the only place this harness stands
 in for a backend it does not have, and naming it is what keeps it from spreading.
+
+### The check that would have caught it
+
+Rewriting the bridge fixes this instance. It does not fix the class, and the
+class is the interesting part: **a call site and its callee were each correct in
+isolation, and no artefact compared them.** Reading either file carefully finds
+nothing wrong; the harness made it harder still, because its stub answered.
+[[PROTO-001-usdd-agent-protocol]] is direct about what a countermeasure may be
+here — the control moves outside the reader, into something deterministic that
+runs.
+
+So [[IMPL-004-application-scoped-identity-screens#TEST-620]] scans `lib.rs`'s
+`generate_handler!` block and every `invoke("…")` in the frontend, and fails the
+build on a call the handler does not register. Commands registered and *not*
+called are reported rather than failed: a declared contract nothing reaches is
+worth knowing about and is not always a defect —
+[[IMPL-004-application-scoped-identity-screens#CON-603]] is stubbed and has no
+screen path yet.
+
+It reads the handler block rather than a hand-kept list, which is the property
+that matters: a list would need updating by the same person who forgot to
+register the command. Verified by removing one registration and watching the
+build fail with the exact defect this version repairs.
 
 Rust-side, CON-601 and CON-602 get unit tests in `src-tauri`. There is no new
 security logic to test: both are thin wrappers over functions already covered by

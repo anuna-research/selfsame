@@ -8,6 +8,15 @@ src-tauri/gen/
 # Screen-render output — regenerate with `node tests/screens.mjs out/`
 screens-out/
 
+# cargo-mutants working tree and reports. The kill rate belongs in a Gate
+# Evidence Record; the per-mutant logs are a rerun away and are ~100 MB.
+#
+# Note for anyone rerunning it here: this workspace has sibling path
+# dependencies (`../did-crdt`, `../cbcl-rs`), which cargo-mutants' default
+# copy-to-tmp strategy breaks. Use `--in-place`, from a clean tree.
+mutants.out/
+mutants.out.old/
+
 node_modules/
 .DS_Store
 **/.DS_Store

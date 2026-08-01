@@ -770,6 +770,55 @@ for (const shot of shots) {
   await page.close();
 }
 
+// ── every invoke names a command the handler registers ──────────────────────
+//
+// The structural countermeasure for the defect that produced most of version
+// 0.7.0. The frontend called `provision_username`, `revoke_grant` and
+// `revocation_status`; the Tauri handler registered none of them; every call
+// rejected with a "command not found" the screens could not distinguish from
+// any other failure, and `remove-pending` asserted a signature and a submission
+// that had not happened.
+//
+// No amount of care catches that, because both halves look correct in
+// isolation — and this harness made it *harder* to see, since its bridge
+// answered all three. So the two lists are compared by a check rather than by a
+// reader. A command called and not registered fails the build; one registered
+// and not called is reported, because a declared contract nothing reaches is
+// worth knowing about and is not always a defect (CON-603 is stubbed and has no
+// screen yet).
+//
+// It is a text scan of two files, which is the right weight for what it decides.
+// It reads the generated-handler block rather than a hand-kept list, so a
+// command added without a caller — or a caller added without a command — is
+// visible the same day.
+{
+  const src = (p) => readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', p), 'utf8');
+  const handler = src('src-tauri/src/lib.rs');
+  const open = handler.indexOf('generate_handler![');
+  const block = handler.slice(open, handler.indexOf('])', open));
+  const registered = new Set([...block.matchAll(/(?:commands|app_identity)::(\w+)/g)].map((m) => m[1]));
+
+  const called = new Map();
+  for (const file of ['src/app.js', 'src/app-identity.js']) {
+    for (const m of src(file).matchAll(/invoke\(\s*["'](\w+)["']/g)) {
+      called.set(m[1], (called.get(m[1]) ?? []).concat(file));
+    }
+  }
+
+  if (!registered.size) {
+    errors.push('invoke-surface: found no generate_handler! block — the check has stopped checking');
+  }
+  for (const [command, files] of called) {
+    if (!registered.has(command)) {
+      errors.push(`invoke-surface: ${files.join(', ')} calls "${command}", which lib.rs does not register — the call rejects and any screen after it claims a state nothing produced`);
+    }
+  }
+  const unreached = [...registered].filter((c) => !called.has(c)).sort();
+  if (!errors.some((e) => e.startsWith('invoke-surface'))) {
+    console.log(`invoke-surface every invoke resolves; ${unreached.length} registered and unreached (${unreached.join(', ')})`);
+  }
+}
+
 await browser.close();
 server.close();
 if (errors.length) {
