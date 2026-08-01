@@ -15,6 +15,9 @@
  *   REQ-230  the first-enrollment comparison offers no skip; there is no third
  *            control on that screen and no back button
  *   REQ-217  `scope-unavailable` offers no remedial control at all
+ *   CON-222  the wallet checks the calling package against the CON-214
+ *            binding, and shows the mismatch; it never renders the
+ *            application's own `WalletUnavailable`
  *   CON-210  `remove-pending` claims nothing; only a verified closure moves it
  *   NFR-203  no screen renders an accountScopeId, and none is passed one
  *
@@ -254,28 +257,23 @@ export function initAppIdentity(d) {
     }
   }
 
-  // ── HP-5: the same-device handoff (CON-215, CON-222) ─────────────────
+  // ── HP-5: the caller check the wallet actually performs (CON-222) ────
 
-  function toHandoff() {
-    show("handoff");
-  }
-
-  async function dispatchHandoff(outcome) {
-    try {
-      await invoke("dispatch_handoff", { outcome });
-      await openApplication(s.app);
-    } catch (e) {
-      const token = message(e);
-      // CON-222: no wallet is the ordinary state of a device without one, and
-      // it gets the install action rather than a refusal. Everything else is a
-      // refusal, and REQ-225 burns the ceremony either way.
-      if (token.includes("WalletUnavailable")) return show("wallet-unavailable");
-      $("[data-handoff-token]").textContent =
-        token.includes("Ambiguous")
-          ? "The system couldn't prove which application would receive it."
-          : "The application that answered couldn't be verified.";
-      show("handoff-refused");
-    }
+  /**
+   * Render `PlatformBindingMismatch`.
+   *
+   * This is the wallet's whole part in the same-device path. `WalletUnavailable`
+   * and `UnverifiedWalletTarget` are the developer application's outcomes — its
+   * adapter looked for a wallet and did not find or could not verify one — and
+   * a wallet cannot render either without asserting its own absence.
+   *
+   * REQ-225: every result but `Dispatched` abandons the ceremony, so there is
+   * nothing to retry here and nothing offered.
+   */
+  function showBindingMismatch(handoff) {
+    $("[data-mismatch-expected]").textContent = handoff.claimed ?? "(nothing named)";
+    $("[data-mismatch-actual]").textContent = handoff.observed ?? "(not attributed)";
+    show("binding-mismatch");
   }
 
   // ── HP-6: removal (CON-210) ──────────────────────────────────────────
@@ -343,15 +341,10 @@ export function initAppIdentity(d) {
     "set-username": setUsername,
     "to-fingerprint": toFingerprint,
     "fingerprint-matches": () => (s.app ? openApplication(s.app) : show("applications")),
-    "fingerprint-differs": () => show("handoff-refused"),
+    "fingerprint-differs": () => show("binding-mismatch"),
     "to-app-consent": toConsent,
     "consent-approve": () => (s.app ? openApplication(s.app) : show("applications")),
     "consent-refuse": () => (s.app ? openApplication(s.app) : show("applications")),
-    "to-handoff": toHandoff,
-    "handoff-continue": () => dispatchHandoff("ok"),
-    "handoff-no-wallet": () => dispatchHandoff("no-wallet"),
-    "handoff-unverified": () => dispatchHandoff("unverified"),
-    "install-wallet": () => show("applications"),
     "to-remove-device": () => (s.grant ? openGrant(s.grant) : show("application")),
     "remove-device": removeDevice,
   });
@@ -359,5 +352,5 @@ export function initAppIdentity(d) {
   const input = $("#username-input");
   if (input) input.addEventListener("input", previewUsername);
 
-  return { renderApplications, renderSummary };
+  return { renderApplications, renderSummary, showBindingMismatch };
 }

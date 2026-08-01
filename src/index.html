@@ -519,9 +519,6 @@
         <button class="btn btn--quiet" data-action="to-app-consent">
           Review what this application may do
         </button>
-        <button class="btn btn--quiet" data-action="to-handoff">
-          Authorise on this device
-        </button>
       </section>
 
       <!-- ══ HP-3 · set a username (CON-212, NFR-201) ═══════════════════ -->
@@ -644,58 +641,48 @@
         <button class="btn btn--quiet" data-action="consent-refuse">No</button>
       </section>
 
-      <!-- ══ HP-5 · same-device handoff (CON-215) ═══════════════════════ -->
-      <section class="screen" data-screen="handoff" hidden>
-        <button class="back" data-action="back-to-application">Cancel</button>
-        <div class="mark mark--lg" aria-hidden="true"></div>
-        <h1>Continue in Selfsame</h1>
-        <p class="lede">
-          The application will hand this over to your wallet. Nothing is sent
-          anywhere else, and nothing leaves this device.
-        </p>
-        <div class="spacer"></div>
-        <button class="btn btn--primary" data-action="handoff-continue">Continue</button>
-        <!--
-          The two failure paths, reachable here only so the screen check can
-          capture them. A real adapter reaches them from the platform.
-        -->
-        <button class="btn btn--quiet" data-action="handoff-no-wallet" hidden>no wallet</button>
-        <button class="btn btn--quiet" data-action="handoff-unverified" hidden>unverified</button>
-      </section>
-
       <!--
-        ══ HP-5 · no wallet (CON-222) ═══════════════════════════════════
+        ══ HP-5 · caller binding mismatch (CON-222, REQ-225) ═════════════
 
-        The ordinary state of a device with no wallet yet — not a failed check.
-        CON-222: "the result is WalletUnavailable and an install action
-        containing no ceremony value", so the install button carries nothing.
+        The wallet's own check, and the only part of the same-device path it
+        actually performs. CON-222: "The wallet obtains the calling package
+        through the `PendingIntent` creator, or `getCallingPackage()` where the
+        invocation form provides it, and compares it to the `platformBindingId`
+        in the CON-214 evidence. A mismatch is `PlatformBindingMismatch`."
+
+        `WalletUnavailable` and `UnverifiedWalletTarget` are deliberately NOT
+        here. They are produced by the developer application's adapter when it
+        looks for a wallet and fails to find or verify one — a wallet rendering
+        "Selfsame isn't installed" would be asserting its own absence.
+
+        The claimed identity is shown under the untrusted treatment. It is the
+        value that did not check out, so stating it plainly would be repeating
+        the assertion the wallet just refused.
       -->
-      <section class="screen" data-screen="wallet-unavailable" hidden>
-        <div class="mark mark--lg" aria-hidden="true"></div>
-        <h1>Selfsame isn't installed.</h1>
-        <p class="lede">
-          You need the wallet on this device to authorise an application on it.
-        </p>
-        <p class="caution">
-          Installing carries nothing across. You will start this again
-          afterwards, from the beginning.
-        </p>
-        <div class="spacer"></div>
-        <button class="btn btn--primary" data-action="install-wallet">Get Selfsame</button>
-        <button class="btn btn--quiet" data-action="back-to-application">Not now</button>
-      </section>
-
-      <!-- ══ HP-5 · handoff refused (REQ-225) ═══════════════════════════ -->
-      <section class="screen" data-screen="handoff-refused" hidden>
+      <section class="screen screen--scroll" data-screen="binding-mismatch" hidden>
         <div class="mark mark--lg mark--broken" aria-hidden="true"></div>
-        <h1>That couldn't be delivered safely.</h1>
-        <p class="lede" data-handoff-token></p>
+        <h1>That didn't come from where it says.</h1>
+        <p class="lede">
+          Something asked to act for your account, and this device says it came
+          from somewhere other than the application it named.
+        </p>
+        <div class="evidence">
+          <div class="evidence__row evidence__row--untrusted">
+            <p class="evidence__key">Claimed to be</p>
+            <p class="evidence__val evidence__val--mono" data-mismatch-expected></p>
+            <p class="evidence__note">its own words, unchecked</p>
+          </div>
+          <div class="evidence__row">
+            <p class="evidence__key">Actually came from</p>
+            <p class="evidence__val evidence__val--mono" data-mismatch-actual></p>
+          </div>
+        </div>
         <p class="caution">
-          Nothing was handed over. Start again when you're ready — you will need
-          a fresh attempt, not a retry of this one.
+          Nothing was shared and nothing was authorised. This attempt is over —
+          if you were expecting it, start again from the application itself.
         </p>
         <div class="spacer"></div>
-        <button class="btn btn--primary" data-action="back-to-application">Back</button>
+        <button class="btn btn--primary" data-action="to-applications">Close</button>
       </section>
 
       <!-- ══ HP-6 · remove a device (CON-210) ═══════════════════════════ -->

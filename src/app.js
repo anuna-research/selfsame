@@ -160,6 +160,15 @@ async function refresh() {
   appIdentity.renderApplications(s.applications ?? []);
   appIdentity.renderSummary(s.applications ?? []);
 
+  // CON-222: the wallet was opened by something. If the platform attributed a
+  // caller that does not match the CON-214 binding, that is where this stops —
+  // an arrival state rather than a screen anyone navigates to, which is why it
+  // is decided here and not behind a button.
+  if (s.pending_handoff && s.pending_handoff.caller_matches === false) {
+    appIdentity.showBindingMismatch(s.pending_handoff);
+    return;
+  }
+
   $("[data-endpoint]").textContent = await invoke("service_endpoint");
   show("home");
 }

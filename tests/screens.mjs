@@ -117,6 +117,17 @@ const STATE_APPS = {
 // decides. `28-remove-pending` asks and is told no; `29` asks and is told yes.
 const STATE_APPS_SETTLED = { ...STATE_APPS, revocation_settled: true };
 
+// CON-222: the wallet is opened by a caller whose attribution does not match
+// the CON-214 binding. An arrival state, so it needs no click path.
+const STATE_BAD_CALLER = {
+  ...STATE_APPS,
+  pending_handoff: {
+    caller_matches: false,
+    claimed: 'android:com.example.photos',
+    observed: 'com.attacker.lookalike',
+  },
+};
+
 const STATE_LINKED = {
   has_identity: true,
   backup_confirmed: true,
@@ -184,10 +195,6 @@ const bridge = (state) => `
           }
           case 'revoke_grant': return null;
           case 'revocation_status': return { confirmed: ${JSON.stringify(state)}.revocation_settled === true };
-          case 'dispatch_handoff':
-            if (args.outcome === 'no-wallet') throw 'WalletUnavailable';
-            if (args.outcome === 'unverified') throw 'UnverifiedWalletTarget';
-            return null;
 
           default: return null;
         }
@@ -222,13 +229,11 @@ const shots = [
   { name: '21-username-taken', expect: 'username-taken', state: STATE_APPS, steps: ['to-applications', 'open-application', 'to-username', 'fill-taken-username', 'set-username'] },
   { name: '22-fingerprint-compare', expect: 'fingerprint-compare', state: STATE_APPS, steps: ['to-applications', 'open-application', 'to-fingerprint'] },
   { name: '23-consent-application', expect: 'consent-application', state: STATE_APPS, steps: ['to-applications', 'open-application', 'to-app-consent'] },
-  { name: '24-handoff', expect: 'handoff', state: STATE_APPS, steps: ['to-applications', 'open-application', 'to-handoff'] },
-  { name: '25-wallet-unavailable', expect: 'wallet-unavailable', state: STATE_APPS, steps: ['to-applications', 'open-application', 'to-handoff', 'handoff-no-wallet'] },
-  { name: '26-handoff-refused', expect: 'handoff-refused', state: STATE_APPS, steps: ['to-applications', 'open-application', 'to-handoff', 'handoff-unverified'] },
-  { name: '27-remove-device', expect: 'remove-device', state: STATE_APPS, steps: ['to-applications', 'open-application', 'open-grant', 'to-remove-device'] },
-  { name: '28-remove-pending', expect: 'remove-pending', state: STATE_APPS, steps: ['to-applications', 'open-application', 'open-grant', 'to-remove-device', 'remove-device'] },
-  { name: '29-remove-confirmed', expect: 'remove-confirmed', state: STATE_APPS_SETTLED, steps: ['to-applications', 'open-application', 'open-grant', 'to-remove-device', 'remove-device'] },
-  { name: '30-scope-unavailable', expect: 'scope-unavailable', state: STATE_APPS, steps: ['to-applications', 'open-unscoped-application'] },
+  { name: '24-binding-mismatch', expect: 'binding-mismatch', state: STATE_BAD_CALLER, steps: [] },
+  { name: '25-remove-device', expect: 'remove-device', state: STATE_APPS, steps: ['to-applications', 'open-application', 'open-grant', 'to-remove-device'] },
+  { name: '26-remove-pending', expect: 'remove-pending', state: STATE_APPS, steps: ['to-applications', 'open-application', 'open-grant', 'to-remove-device', 'remove-device'] },
+  { name: '27-remove-confirmed', expect: 'remove-confirmed', state: STATE_APPS_SETTLED, steps: ['to-applications', 'open-application', 'open-grant', 'to-remove-device', 'remove-device'] },
+  { name: '28-scope-unavailable', expect: 'scope-unavailable', state: STATE_APPS, steps: ['to-applications', 'open-unscoped-application'] },
 ];
 
 // ── Negative-output assertions (IMPL-004 TEST-605 / 611 / 613) ───────────
@@ -263,18 +268,14 @@ const SCREEN_RULES = {
     // REQ-222: the application's own name may never carry the decision.
     requiredText: 'its own words, unchecked',
   },
-  '25-wallet-unavailable': {
-    // CON-222: the install action carries no ceremony value.
-    forbidden: [['[data-ceremony]', 'CON-222: the install action carries no ceremony value']],
-  },
-  '28-remove-pending': {
+    '26-remove-pending': {
     // CON-210 forbids reporting success before a verified closure.
     forbidden: [
       ['[data-action="remove-done"]', 'CON-210 forbids a success affordance while pending'],
       ['.steps__ok', 'CON-210: a completion tick is a success claim'],
     ],
   },
-  '30-scope-unavailable': {
+  '28-scope-unavailable': {
     // REQ-217 forbids guessing and forbids prompting, so no *remedial* control
     // may exist: no field, no retry, nothing that implies the scope can be
     // supplied from here. `.btn` is this app's action class and is forbidden;

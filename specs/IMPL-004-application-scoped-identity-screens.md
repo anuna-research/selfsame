@@ -3,7 +3,7 @@ id: IMPL-004
 title: Application- and Account-Scoped Identity — the person-facing surface
 status: implemented
 tier: 2
-version: 0.2.0
+version: 0.3.0
 audience: agent, human, frontend implementer
 author: Anuna Research (drafted with Claude, 2026-08-01)
 last-updated: 2026-08-01
@@ -31,7 +31,7 @@ under one identity — not a second wallet, not a second account system.
 
 ```
                    ┌─────────────────────────────┐
-                   │  index.html   13 sections   │  markup, one document
+                   │  index.html   11 sections   │  markup, one document
                    └──────────────┬──────────────┘
                                   │
               ┌───────────────────┴───────────────────┐
@@ -89,8 +89,10 @@ Dependencies point inward. No screen decides anything.
   ([[SPEC-004-application-scoped-identity#CON-210]])
 - `consent-application` SHALL render the application's own name under the
   untrusted treatment. ([[SPEC-004-application-scoped-identity#REQ-222]])
-- `wallet-unavailable`'s install action SHALL carry no ceremony value.
-  ([[SPEC-004-application-scoped-identity#CON-222]])
+- `binding-mismatch` SHALL show the claimed identity under the untrusted
+  treatment and offer no retry.
+  ([[SPEC-004-application-scoped-identity#CON-222]],
+  [[SPEC-004-application-scoped-identity#REQ-225]])
 - No screen SHALL render an `accountScopeId`.
   ([[SPEC-004-application-scoped-identity#NFR-203]])
 - Refusal screens SHALL render one closed token and no further detail.
@@ -132,8 +134,10 @@ proofs of it:
 - `android_select` returned `UnverifiedWalletTarget` when no wallet was
   installed, so an ordinary device with no wallet rendered as a *failed security
   check*. [[SPEC-004-application-scoped-identity#CON-222]] requires
-  `WalletUnavailable` and an install action. The outcomes are now distinct and
-  nothing consumes the distinction.
+  `WalletUnavailable` and an install action. The outcomes are now distinct, and
+  nothing in **this** repository consumes the distinction — nor should it. That
+  outcome belongs to the developer application's adapter, and the surface it
+  needs is the SDK's, not the wallet's. See Out of scope.
 - `Handoff::binds_to` validates a return URI against the authenticated platform
   binding, per [[SPEC-004-application-scoped-identity#CON-215]]. It has no
   caller.
@@ -341,7 +345,7 @@ Implements: [[SPEC-004-application-scoped-identity#REQ-222]],
 
 ## Screen inventory
 
-Thirteen screens, each tracing to an existing SPEC-004 obligation. `data-screen`
+Eleven screens, each tracing to an existing SPEC-004 obligation. `data-screen`
 values are stable identifiers and MUST NOT be derived from display labels.
 
 | `data-screen` | Path | Presents | Traces to |
@@ -352,9 +356,7 @@ values are stable identifiers and MUST NOT be derived from display labels.
 | `username-taken` | HP-3 | `UsernameUnavailable` | [[SPEC-004-application-scoped-identity#CON-212]] |
 | `fingerprint-compare` | HP-4a | hex + [[LifeHash]], no skip | [[SPEC-004-application-scoped-identity#CON-221]], [[SPEC-004-application-scoped-identity#REQ-230]] |
 | `consent-application` | HP-4, HP-5 | origin, account, permissions | [[SPEC-004-application-scoped-identity#REQ-222]] |
-| `handoff` | HP-5 | Continue in Selfsame | [[SPEC-004-application-scoped-identity#CON-215]] |
-| `wallet-unavailable` | HP-5 | `WalletUnavailable` + install action | [[SPEC-004-application-scoped-identity#CON-222]] |
-| `handoff-refused` | HP-5 | `UnverifiedWalletTarget` / `HandoffAmbiguous` | [[SPEC-004-application-scoped-identity#REQ-225]] |
+| `binding-mismatch` | HP-5 | `PlatformBindingMismatch` | [[SPEC-004-application-scoped-identity#CON-222]] |
 | `remove-device` | HP-6 | names the account *and* the device | [[SPEC-004-application-scoped-identity#CON-210]] |
 | `remove-pending` | HP-6 | the honest wait | [[SPEC-004-application-scoped-identity#CON-210]] |
 | `remove-confirmed` | HP-6 | verified closure carries the grant ID | [[SPEC-004-application-scoped-identity#CON-210]] |
@@ -520,7 +522,7 @@ and the command SHALL NOT prompt for one
 
 Implements: [[SPEC-004-application-scoped-identity#REQ-213]]
 
-Verified by: [[IMPL-004-application-scoped-identity-screens#TEST-613]]
+Verified by: [[IMPL-004-application-scoped-identity-screens#TEST-611]]
 
 ---
 
@@ -575,25 +577,23 @@ written and observed to fail before the screens exist.
 | TEST-604 | `username-taken` | exactly one closed token; no parse detail |
 | TEST-605 | `fingerprint-compare` | hex and [[LifeHash]] both painted; **no skip control exists in the DOM** |
 | TEST-606 | `consent-application` | origin under verified treatment, display name under `--untrusted`; permissions listed |
-| TEST-607 | `handoff` | carries no ceremony material in any rendered attribute |
-| TEST-608 | `wallet-unavailable` | install action present and carries no ceremony value |
-| TEST-609 | `handoff-refused` | one closed token; ceremony marked burned |
-| TEST-610 | `remove-device` | names both the account and the device |
-| TEST-611 | `remove-pending` | **no success affordance and no completion animation** |
-| TEST-612 | `remove-confirmed` | reachable only from a closure-carrying state |
-| TEST-613 | `scope-unavailable` | **no actionable control exists in the DOM** |
-| TEST-614 | all thirteen | exactly one screen visible; no horizontal overflow at phone width; nothing thrown |
+| TEST-607 | `binding-mismatch` | claimed identity under `--untrusted`; observed caller beside it; no retry control |
+| TEST-608 | `remove-device` | names both the account and the device |
+| TEST-609 | `remove-pending` | **no success affordance and no completion animation** |
+| TEST-610 | `remove-confirmed` | reachable only from a closure-carrying state |
+| TEST-611 | `scope-unavailable` | **no actionable control exists in the DOM** |
+| TEST-612 | all eleven | exactly one screen visible; no horizontal overflow at phone width; nothing thrown |
 
 ### Negative-output tests
 
-TEST-605, TEST-611, and TEST-613 are **prohibited-action** tests in the sense of
+TEST-605, TEST-609, and TEST-611 are **prohibited-action** tests in the sense of
 PROTO-001's prohibitive-requirement template: each asserts the *absence* of an
 affordance. They are the half most easily lost, because a suite that checks only
 that the screen renders passes a screen that renders and also offers a skip.
 
 ### Harness
 
-`tests/screens.mjs` gains thirteen shots. New `data-action` hooks are REQUIRED
+`tests/screens.mjs` gains eleven shots. New `data-action` hooks are REQUIRED
 on every interactive element, since the harness drives screens by clicking
 `[data-action="…"]`. The stub bridge answers CON-601..603 with the shapes the
 real commands return.
@@ -632,5 +632,6 @@ amendment requests; none changes this plan by itself.
 
 | Version | Date | Change |
 |---|---|---|
+| 0.3.0 | 2026-08-01 | **Thirteen screens to eleven.** `handoff`, `wallet-unavailable` and `handoff-refused` were application-side screens rendered in the wallet: `CON-222` assigns the wallet search to "the developer application", so a wallet showing *Selfsame isn't installed* asserts its own absence. Version 0.1.0 listed them as "modelled from the wallet's side", which is not something that can be done. Replaced by `binding-mismatch` — the `CON-222` caller comparison, which genuinely is the wallet's, and which gives the unattributed-Android-caller fix a surface it did not have. |
 | 0.2.0 | 2026-08-01 | **Implemented.** Two corrections the build forced, both recorded rather than quietly applied: `CON-601`'s `home-did` grammar was `1*63(ALPHA / DIGIT)` and is `64HEXDIG` — the first draft rejected every real DID, and the recogniser is now the method's own `Did::from_str` rather than one written here. `scope-unavailable` required "no action at all"; that over-read `REQ-217`, which prohibits offering a way to supply the scope rather than leaving without one, so it now carries navigation and its test forbids `.btn` instead of every `button`. |
 | 0.1.0 | 2026-08-01 | Initial plan. Thirteen screens, three contracts, three ADRs. No `REQ-###` introduced. `SCREEN-###` documents deferred to `anuna-ssi`. |
