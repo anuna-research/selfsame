@@ -362,6 +362,32 @@ fn each_binding_mismatch_returns_its_own_closed_token() {
             EnrollmentStatement { profile_digest: codec::b64url(&[0u8; 32]), ..statement(&p, &core) },
             EnrollmentError::ProfileMismatch,
         ),
+        // The profile block has three clauses and only its third was ever the
+        // sole one true, so a mutant collapsing either of the other two
+        // survived. Each is now the only thing wrong with an otherwise
+        // conforming statement.
+        (
+            EnrollmentStatement {
+                application_id: OTHER_APPLICATION_ID.into(),
+                ..statement(&p, &core)
+            },
+            EnrollmentError::ProfileMismatch,
+        ),
+        (
+            EnrollmentStatement { profile_version: 2, ..statement(&p, &core) },
+            EnrollmentError::ProfileMismatch,
+        ),
+        // `expiresAt` alone, so the second clause of the timestamp comparison
+        // carries the refusal on its own. Shortened rather than extended:
+        // `recognise` caps the evidence window at 120 s, so a longer one is
+        // `EnrollmentMalformed` and never reaches the comparison at all. And
+        // the wallet's own window check that follows does not fire on this
+        // value either, which is what leaves the offer comparison as the only
+        // thing that can refuse it.
+        (
+            EnrollmentStatement { expires_at: core.expires_at - 30, ..statement(&p, &core) },
+            EnrollmentError::OfferMismatch,
+        ),
         (
             EnrollmentStatement {
                 account_scope_id: codec::b64url(&[9u8; 32]),
@@ -453,6 +479,107 @@ fn an_android_binding_with_nothing_attributed_is_refused_and_an_apple_one_is_not
 }
 
 #[test]
+fn an_attributed_caller_that_is_not_the_binding_the_statement_names_is_refused() {
+    // `CON-222`: "compares it to the `platformBindingId` in the `CON-214`
+    // evidence. A mismatch is `PlatformBindingMismatch`." That comparison is
+    // the whole point of the caller check, and nothing exercised it — the
+    // existing mismatch case names a binding the profile does not carry, so the
+    // lookup fails first and the comparison is never reached.
+    //
+    // This is the case where both are real: the profile declares both bindings,
+    // the statement names the Apple one, and the OS reports the Android one. A
+    // caller substituting itself for another declared application on the same
+    // device is exactly what the comparison stands between.
+    let p = profile_with_real_key();
+    let core = offer_core(&p);
+    let digest = codec::b64url(&p.rendezvous[0].digest);
+    let android = format!("android:com.example.photos:{}", codec::b64url(&[2u8; 32]));
+
+    // The statement names Apple; the platform attributed Android.
+    let apple = enrollment::sign(&statement(&p, &core), KID, &backend_key());
+    let elsewhere =
+        Observed { platform_binding_id: Some(&android), ..observed(&p, &core, &digest) };
+    assert_eq!(
+        enrollment::verify(&apple, &elsewhere),
+        Err(EnrollmentError::PlatformBindingMismatch),
+        "an observed caller that is not the one the statement names must not pass",
+    );
+
+    // …and the same statement with the caller it names does pass, so the
+    // refusal above is the comparison rather than the presence of an
+    // observation.
+    let apple_id = "apple:TEAM123456:com.example.photos:https://photos.example";
+    let matching =
+        Observed { platform_binding_id: Some(apple_id), ..observed(&p, &core, &digest) };
+    assert!(enrollment::verify(&apple, &matching).is_ok());
+}
+
+#[test]
+fn a_statement_matching_the_profile_and_contradicting_the_offer_is_refused() {
+    // The check `verify` carries a paragraph of reasoning for and no test:
+    //
+    //   "A backend that signs a statement whose profile fields match the
+    //   fetched profile while the *offer* carries different ones satisfies the
+    //   first check and contradicts the offer it claims to be enrolling."
+    //
+    // `applicationId`, `profileVersion` and `profileDigest` are compared twice
+    // — once against the profile the wallet fetched, once against the offer
+    // this ceremony is processing — and no case could ever reach the second
+    // comparison, because mutating the *statement* trips the first. Three
+    // mutants collapsing the offer comparison therefore survived.
+    //
+    // Reaching it needs the offer mutated instead, with the statement left
+    // agreeing with the profile. `offerDigest` is taken from the mutated offer
+    // so the digest check does not fire first and mask which clause refused.
+    let p = profile_with_real_key();
+    let digest = codec::b64url(&p.rendezvous[0].digest);
+
+    let mut by_application = offer_core(&p);
+    by_application.application_id = OTHER_APPLICATION_ID.into();
+    let mut by_version = offer_core(&p);
+    by_version.profile_version = 2;
+    let mut by_digest = offer_core(&p);
+    by_digest.profile_digest = codec::b64url(&[9u8; 32]);
+
+    for (member, offer) in [
+        ("applicationId", by_application),
+        ("profileVersion", by_version),
+        ("profileDigest", by_digest),
+    ] {
+        let st = EnrollmentStatement {
+            // The three the first block checks, restored to the profile's own
+            // values — so the statement passes that block cleanly.
+            application_id: p.application_id.as_str().to_string(),
+            profile_version: 1,
+            profile_digest: codec::b64url(p.digest()),
+            // …and bound to the offer actually being processed, so nothing
+            // else fires.
+            offer_digest: offer.digest(),
+            ..statement(&p, &offer)
+        };
+        let compact = enrollment::sign(&st, KID, &backend_key());
+        assert_eq!(
+            enrollment::verify(&compact, &observed(&p, &offer, &digest)),
+            Err(EnrollmentError::OfferMismatch),
+            "an offer whose {member} contradicts the statement must be refused",
+        );
+    }
+
+    // The same construction with nothing substituted is accepted, so each
+    // refusal above is the substitution and not the way the fixture is built.
+    let offer = offer_core(&p);
+    let st = EnrollmentStatement {
+        application_id: p.application_id.as_str().to_string(),
+        profile_version: 1,
+        profile_digest: codec::b64url(p.digest()),
+        offer_digest: offer.digest(),
+        ..statement(&p, &offer)
+    };
+    let compact = enrollment::sign(&st, KID, &backend_key());
+    assert!(enrollment::verify(&compact, &observed(&p, &offer, &digest)).is_ok());
+}
+
+#[test]
 fn both_timestamp_boundaries_are_exercised() {
     let p = profile_with_real_key();
     let core = offer_core(&p);
@@ -507,6 +634,11 @@ fn every_retry_of_byte_identical_evidence_returns_enrollment_replay() {
     // A crash after consumption loses the ceremony rather than permitting a
     // second one, because the record is what survives, not the decision.
     assert!(ledger.is_consumed(&core.request_id));
+    // …and the query answers about *this* identifier rather than about having
+    // consumed anything. A ledger that said yes to everything would refuse
+    // every ceremony after the first, which fails closed and is therefore easy
+    // to mistake for correct — a body of `true` survived the suite until now.
+    assert!(!ledger.is_consumed("a request id this ledger has never seen"));
 }
 
 #[test]

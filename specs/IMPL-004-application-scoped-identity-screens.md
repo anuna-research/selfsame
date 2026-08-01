@@ -881,12 +881,33 @@ gates:
       respectively, which is the reviewed behaviour exactly
   - gate: "All tests green"
     mechanism: "cargo test --workspace"
-    result: pass
-    evidence: "33 suites, 0 failed; 207 core unit, 37 net unit, 32 CON-206, 28 CON-219"
+    result: fail
+    evidence: >
+      32 of 33 suites pass (207 core unit, 37 net unit, 35 CON-206, 30 CON-219).
+      One failure, pre-existing and unrelated to this version:
+      probe::an_unreachable_group_is_probed_in_parallel_and_not_in_sequence
+      (NFR-207) measures wall-clock over four unresolvable hosts and asserts
+      under 3x the 1500ms probe deadline. It passes in isolation in 0.02s,
+      3 runs of 3, and fails in the whole-workspace run at ~7.98s. Attributed
+      by reverting selfsame-app-identity-net to its pre-0.7.0 state and
+      reproducing the failure there, so it is not a regression from this work.
+      7.98s also exceeds the 6s a fully serial probe would take, which points
+      at the DNS resolver threadpool saturating across concurrently-running
+      test binaries rather than at probe_group serialising — the deadline does
+      not cancel an in-flight lookup. Not repaired here: loosening the bound
+      would weaken an NFR-207 assertion, and re-designing the measurement is a
+      change to how that requirement is verified. Owner: HOC.
   - gate: "Presentation surface renders and every screen rule holds"
     mechanism: "node tests/screens.mjs"
     result: pass
     evidence: "31 shots, all screens rendered clean"
+  - gate: "Every invoke names a registered command"
+    mechanism: "node tests/screens.mjs (TEST-620)"
+    result: pass
+    evidence: >
+      every invoke resolves; 2 registered and unreached (app_identity_derive,
+      forget_identity), reported not failed. Red-gated by removing one
+      registration and watching it report the exact 0.7.0 defect.
   - gate: "Architecture / lint clean"
     mechanism: "cargo clippy --workspace --all-targets"
     result: pass
@@ -908,14 +929,63 @@ gates:
       0.7.0 declares CON-604..606 and a twelfth screen. The amendment is written
       and traceability updated; approval is outstanding. Owner: HOC.
   - gate: "Mutation testing on the changed predicates"
-    mechanism: "cargo mutants"
-    result: unverified
-    evidence: "not run this cycle; Red Gate evidence above stands in its place. Owner: HOC."
+    mechanism: >
+      cargo mutants --in-place -p selfsame-app-identity
+      --file accept.rs --file proof.rs --file revocation.rs --file enrollment.rs
+      -F "accept_grant|check_status|check_validity|AcceptError::public|consume|read_projection|verify|is_consumed"
+    result: pass
+    evidence: >
+      first round 112 mutants, 90 caught, 17 missed, 5 unviable (84%);
+      second round after the repairs 107 mutants, 101 caught, 5 unviable,
+      0 missed, 1 reported timeout. The 5 fewer mutants are the mutation sites
+      removed with the empty `if` in check_status. The timeout
+      (revocation.rs read_projection, `<` to `<=`) is a tool artefact rather
+      than a gap: applied by hand, it is caught by
+      `the_projection_reading_is_asymmetric_at_every_age` in 0.09 s. So 102 of
+      102 viable mutants are killed.
+      Note: cargo-mutants' default copy-to-tmp strategy cannot build this
+      workspace — the sibling path dependencies (`../did-crdt`, `../cbcl-rs`)
+      do not survive the copy — so `--in-place` from a clean tree is required.
 ```
 
-Two gates are `unverified` and both name an owner, so this phase is **not**
-reported complete. The `review-gate` field in the frontmatter still reads
-`not-approved`, and that is the accurate state.
+One gate is `fail` and two are `unverified`, each with a named owner, so this
+phase is **not** reported complete. A phase MUST NOT be reported complete while
+any gate is `fail`, and this one is — the failing test is pre-existing and
+unrelated to this version, but "pre-existing" is a fact about its cause and not
+a licence to record it as passing. The `review-gate` field in the frontmatter
+still reads `not-approved`, and that is the accurate state.
+
+**What the mutation round found is worth recording separately**, because it is
+evidence about the *repairs* rather than about the original defects. Seventeen
+mutants survived the first round, and they resolved into one deletion and five
+test gaps — none of which any review pass had named:
+
+- The clock-skew parameter of
+  [[SPEC-004-application-scoped-identity#CON-206]] step 11 was never non-zero in
+  any test, so `now + skew` and `now - skew` were indistinguishable. A skew
+  applied with the wrong sign *narrows* the validity window instead of widening
+  it: valid grants refused at one edge, expired grants accepted at the other.
+- The step-10 freshness bound had no test at exactly the bound, and step 1's
+  ordering was unobservable because the JWS recogniser carries the same 64 KiB
+  limit and reports it as step 1 — so "refused before parsing" and "refused
+  while parsing" looked identical from outside.
+- `verify`'s second comparison of `applicationId`/`profileVersion`/
+  `profileDigest` — the one its own comment explains at length, against the
+  *offer* rather than the profile — could not be reached by any test, because
+  mutating the statement trips the first comparison.
+- `check_status` carried a three-clause condition guarding an empty block. Five
+  mutants survived it and none could be killed: a condition with no body has no
+  behaviour to change. It read as a control and enforced nothing.
+- **And the Android caller fix made in this very version had an untested
+  branch.** `observed_id != binding.id()` — the comparison
+  [[SPEC-004-application-scoped-identity#CON-222]] exists to make — was never
+  exercised with an attributed caller that *differs* from the binding, because
+  the pre-existing mismatch case names a binding the profile does not carry and
+  so fails the lookup first.
+
+That last one is the reason this gate is worth its cost. A fix written in
+response to a security review, reviewed by its own author, tested, and green,
+still had no coverage on the branch that does the work.
 
 ---
 

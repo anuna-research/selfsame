@@ -87,6 +87,36 @@ fn step_1_rejects_input_over_sixty_four_kibibytes() {
 }
 
 #[test]
+fn step_1_is_the_step_that_refuses_an_oversized_grant_and_it_refuses_at_the_boundary() {
+    // "Order is normative and load-bearing." Step 1 exists to refuse before the
+    // parser is handed the octets at all — but `GRANT_JWS` carries the *same*
+    // 64 KiB bound, and `JwsError::TooLarge` maps back to `AcceptStep::Size`, so
+    // an assertion on the step alone cannot tell which of the two fired. Both
+    // orderings look identical from outside, which is why two boundary mutants
+    // survived the suite.
+    //
+    // The detail string can tell them apart, and it is the local diagnostic
+    // `CON-226`'s corpus records, so this is what it is for.
+    let c = Ceremony::accepted();
+
+    let over = vec![b'a'; grant::MAX_GRANT_OCTETS + 1];
+    let err = accept_grant(&over, &c.expectation(), &c.evidence()).unwrap_err();
+    assert_eq!(err.step, AcceptStep::Size);
+    assert!(
+        err.detail.contains("64 KiB"),
+        "step 1 must refuse before the recogniser sees it, got: {}",
+        err.detail
+    );
+
+    // Exactly at the bound is *not* oversized. It is refused, but by the
+    // recogniser, for not being a JWS — which is the boundary the `>` fixes and
+    // a `>=` would move by one octet.
+    let at = vec![b'a'; grant::MAX_GRANT_OCTETS];
+    let err = accept_grant(&at, &c.expectation(), &c.evidence()).unwrap_err();
+    assert_eq!(err.step, AcceptStep::Jws, "exactly 64 KiB is within the bound: {err}");
+}
+
+#[test]
 fn step_2_rejects_a_malformed_compact_serialisation() {
     let c = Ceremony::accepted();
     let text = String::from_utf8(c.grant_bytes.clone()).unwrap();
@@ -461,6 +491,62 @@ fn step_10_reports_a_stale_closure_as_retryable_and_a_revoked_grant_as_refused()
     let err = accept_grant(&c.grant_bytes, &c.expectation(), &evidence).unwrap_err();
     assert_eq!(err.step, AcceptStep::Status);
     assert_eq!(err.public(), PublicReason::Rejected, "{err}");
+}
+
+#[test]
+fn step_10_accepts_a_closure_of_exactly_the_applicable_bound() {
+    // The other side of the staleness check. `> bound` refuses; a closure *at*
+    // the bound is inside it, and a `>=` would sever every session one second
+    // early — which is invisible to a suite that only ever tests `bound + 1`.
+    let c = Ceremony::accepted();
+    let bound = c.profile.revocation.session_establishment_bound();
+
+    let mut at = c.issuer.clone();
+    at.closure_age_seconds = bound;
+    let evidence = Evidence { issuer: Some(&at), ..c.evidence() };
+    assert!(
+        accept_grant(&c.grant_bytes, &c.expectation(), &evidence).is_ok(),
+        "a closure of exactly {bound}s is within the bound"
+    );
+
+    let mut over = c.issuer.clone();
+    over.closure_age_seconds = bound + 1;
+    let evidence = Evidence { issuer: Some(&over), ..c.evidence() };
+    refused_at(&c, c.expectation(), evidence, AcceptStep::Status);
+}
+
+#[test]
+fn step_11_widens_the_window_by_the_configured_skew_and_by_no_more() {
+    // `CON-206` step 11 allows "only the application's explicitly configured
+    // clock-skew bound", and every other test in this file passes zero — under
+    // which `now + skew` and `now - skew` are the same expression. Both
+    // arithmetic mutants therefore survived, and a skew applied with the wrong
+    // sign *narrows* the window instead of widening it: valid grants refused at
+    // one edge, expired grants accepted at the other, wherever two clocks
+    // disagree.
+    let c = Ceremony::accepted();
+    let g = accept_grant(&c.grant_bytes, &c.expectation(), &c.evidence()).unwrap().grant;
+    let skew = 60;
+    let at = |now: i64| Expectation { now, clock_skew_seconds: skew, ..c.expectation() };
+
+    // Before `validFrom`, inside the skew: accepted. This is the direction
+    // `now + skew` exists for.
+    assert!(
+        accept_grant(&c.grant_bytes, &at(g.valid_from - skew), &c.evidence()).is_ok(),
+        "the lower edge is widened by the skew, not narrowed"
+    );
+    // One second further out is outside it.
+    let err = accept_grant(&c.grant_bytes, &at(g.valid_from - skew - 1), &c.evidence()).unwrap_err();
+    assert_eq!(err.step, AcceptStep::Validity);
+
+    // Past `validUntil`, inside the skew: accepted.
+    assert!(
+        accept_grant(&c.grant_bytes, &at(g.valid_until + skew - 1), &c.evidence()).is_ok(),
+        "the upper edge is widened by the skew, not narrowed"
+    );
+    // And the half-open end still holds, one skew out.
+    let err = accept_grant(&c.grant_bytes, &at(g.valid_until + skew), &c.evidence()).unwrap_err();
+    assert_eq!(err.step, AcceptStep::Validity);
 }
 
 #[test]

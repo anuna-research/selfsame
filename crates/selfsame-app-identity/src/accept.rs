@@ -513,17 +513,20 @@ fn check_status(
     if !issuer.causally_complete {
         return Err(AcceptError::at(AcceptStep::Status, "closure is not causally complete"));
     }
-    // At session establishment, a closure from a declared resolver is preferred
-    // over the issuer's own account of its own revocations.
-    if expect.freshness == Freshness::SessionEstablishment
-        && issuer.source == ClosureSource::BundleOrCache
-        && !expect.profile.state_resolvers.is_empty()
-    {
-        // Permitted only when no declared resolver is reachable. The shell
-        // signals that by leaving the source as `BundleOrCache`; a verifier that
-        // *could* reach one and did not is out of conformance, so this is where
-        // the record in `Acceptance` is made rather than a hard refusal.
-    }
+    // At session establishment a closure from a declared resolver is preferred
+    // over the issuer's own account of its own revocations — and the preference
+    // is *not* enforced here, deliberately. `CON-206` permits the bundle only
+    // when no declared resolver is reachable, and reachability is something the
+    // shell observed and this function cannot. A verifier that could have
+    // reached one and did not is out of conformance, but the evidence for that
+    // lives in `state::ResolvedClosure::outcomes`, not in these parameters.
+    //
+    // So the record in `Acceptance::used_bundle_closure` is the whole of what
+    // this step does about it. Until this sentence, that was written as a
+    // three-clause `if` guarding an empty block: five mutants survive it and
+    // none can be killed, because a condition whose body is empty has no
+    // behaviour to change. It read as a control and enforced nothing, which is
+    // the more expensive kind of nothing.
 
     // A set projection bit rejects early. An unset, stale, invalid, or
     // unavailable one never bypasses the CRDT check — which is why the CRDT
