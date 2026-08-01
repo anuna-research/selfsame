@@ -3,7 +3,7 @@ id: IMPL-004
 title: Application- and Account-Scoped Identity — the person-facing surface
 status: implemented
 tier: 2
-version: 0.6.0
+version: 0.7.0
 audience: agent, human, frontend implementer
 author: Anuna Research (drafted with Claude, 2026-08-01)
 last-updated: 2026-08-01
@@ -31,7 +31,7 @@ under one identity — not a second wallet, not a second account system.
 
 ```
                    ┌─────────────────────────────┐
-                   │  index.html   11 sections   │  markup, one document
+                   │  index.html   12 sections   │  markup, one document
                    └──────────────┬──────────────┘
                                   │
               ┌───────────────────┴───────────────────┐
@@ -44,7 +44,7 @@ under one identity — not a second wallet, not a second account system.
               └──────────────────┬────────────────────┘
                                  │  invoke()  ← trust boundary
                    ┌─────────────▼──────────────┐
-                   │  src-tauri  CON-601..603   │  recognise, then act
+                   │  src-tauri  CON-601..606   │  recognise, then act
                    └─────────────┬──────────────┘
                                  │
                    ┌─────────────▼──────────────┐
@@ -85,8 +85,16 @@ Dependencies point inward. No screen decides anything.
   ([[SPEC-004-application-scoped-identity#REQ-217]])
 - `fingerprint-compare` SHALL offer no skip.
   ([[SPEC-004-application-scoped-identity#REQ-230]])
-- `remove-pending` SHALL NOT report success before a verified closure.
+- `remove-pending` SHALL NOT report success before a verified closure, and SHALL
+  NOT be reached before the submission it asserts has succeeded.
   ([[SPEC-004-application-scoped-identity#CON-210]])
+- `fingerprint-mismatch` SHALL terminate the enrollment and offer no retry.
+  ([[SPEC-004-application-scoped-identity#CON-221]],
+  [[SPEC-004-application-scoped-identity#REQ-230]])
+- Every `invoke` this surface makes SHALL name a command the Tauri handler
+  registers. ([[IMPL-004-application-scoped-identity-screens#CON-604]],
+  [[IMPL-004-application-scoped-identity-screens#CON-605]],
+  [[IMPL-004-application-scoped-identity-screens#CON-606]])
 - `consent-application` SHALL render the application's own name under the
   untrusted treatment. ([[SPEC-004-application-scoped-identity#REQ-222]])
 - `binding-mismatch` SHALL show the claimed identity under the untrusted
@@ -345,7 +353,7 @@ Implements: [[SPEC-004-application-scoped-identity#REQ-222]],
 
 ## Screen inventory
 
-Eleven screens, each tracing to an existing SPEC-004 obligation. `data-screen`
+Twelve screens, each tracing to an existing SPEC-004 obligation. `data-screen`
 values are stable identifiers and MUST NOT be derived from display labels.
 
 | `data-screen` | Path | Presents | Traces to |
@@ -355,6 +363,7 @@ values are stable identifiers and MUST NOT be derived from display labels.
 | `username-set` | HP-3 | live alias preview + correlation warning | [[SPEC-004-application-scoped-identity#CON-212]], [[SPEC-004-application-scoped-identity#NFR-201]] |
 | `username-taken` | HP-3 | `UsernameUnavailable` | [[SPEC-004-application-scoped-identity#CON-212]] |
 | `fingerprint-compare` | HP-4a | hex + [[LifeHash]], no skip | [[SPEC-004-application-scoped-identity#CON-221]], [[SPEC-004-application-scoped-identity#REQ-230]] |
+| `fingerprint-mismatch` | HP-4a | the comparison's other answer; terminal, no retry | [[SPEC-004-application-scoped-identity#CON-221]], [[SPEC-004-application-scoped-identity#REQ-230]] |
 | `consent-application` | HP-4, HP-5 | origin, account, permissions | [[SPEC-004-application-scoped-identity#REQ-222]] |
 | `binding-mismatch` | HP-5 | `PlatformBindingMismatch` | [[SPEC-004-application-scoped-identity#CON-222]] |
 | `remove-device` | HP-6 | names the account *and* the device | [[SPEC-004-application-scoped-identity#CON-210]] |
@@ -423,7 +432,9 @@ than fixed:
 | `applications` | "Each one gets its own identity below your recovery words" | **Fixed in the fixture.** Both fixture applications shared one `home_did`, so the screen told the truth about a system the fixture did not model — and cross-application unlinkability is the property `SPEC-004` exists to deliver. A real linkability defect would have looked correct. |
 | `fingerprint-compare` | "You are asked this once for this account, ever" | **Recorded.** `CON-221`'s once-per-account obligation is the wallet's, and nothing here records that the question was asked, so this build would re-ask. Borderline: the sentence tells the person what kind of moment this is rather than reporting state. Owner: HOC. |
 | `fingerprint-compare` | shows a fingerprint at all | **Fixed.** SPEC-001's onboarding teaches "same fingerprint everywhere"; this one is legitimately different. See `FINDING-017`. |
-| `username-taken` | "Someone holds it, or it is reserved" | **Recorded.** The specified reason for the token, asserted as fact without the build having determined which. Minor. Owner: HOC. |
+| `username-taken` | "Someone holds it, or it is reserved" | **Recorded.** The specified reason for the token, asserted as fact without the build having determined which. Minor. Owner: HOC. Narrowed at 0.7.0: the shot now drives it with `ss-admin`, a name the core refuses *because it is reserved*, so the fixture at least exercises a case the sentence describes. |
+| `remove-pending` | "Signed on this device and sent." | **Fixed at 0.7.0.** The audit's own delegation test was applied to a command that was never registered. `revoke_grant` rejected on every press, the frontend discarded the rejection, and the screen asserted a signature and a submission that had not happened — the same defect as the retry claim removed at 0.4.0, one level down. The command is now declared ([[IMPL-004-application-scoped-identity-screens#CON-605]]), refuses honestly, and the refusal is rendered on `remove-device`. |
+| `binding-mismatch` | reached from "They're different" on `fingerprint-compare` | **Fixed at 0.7.0.** A fingerprint mismatch was routed to the `CON-222` caller-binding screen, whose two evidence fields nothing on that path populates — so the person was shown someone else's error with blanks in it, and the enrollment carried on. [[IMPL-004-application-scoped-identity-screens#Screen inventory]] gains `fingerprint-mismatch`, which terminates. |
 
 ### Rendering permissions
 
@@ -558,6 +569,134 @@ Implements: [[SPEC-004-application-scoped-identity#REQ-213]]
 
 Verified by: [[IMPL-004-application-scoped-identity-screens#TEST-611]]
 
+### The three commands version 0.6.0 assumed and did not declare
+
+Versions 0.4.0 and 0.5.0 changed the frontend to call `provision_username`,
+`revoke_grant`, and `revocation_status`, and reasoned about the screens on the
+basis that those calls reach commands. They reached nothing: the Tauri handler
+registered `CON-601` to `CON-603` and no more, so every one of the three
+rejected with a "command not found" the screens could not distinguish from any
+other failure. The removal path discarded its rejection and advanced to
+`remove-pending`, which opens *"Signed on this device and sent."*
+
+That is the defect
+[[IMPL-004-application-scoped-identity-screens#Claim audit]] already names, one
+level down. Its own test is delegation — a claim delegated to a command "is as
+true as that command" — and a claim delegated to a command that does not exist
+is not delegated at all. Nothing could make the sentence true, which is exactly
+the line the audit draws for the retry claim it removed at 0.4.0.
+
+The three are therefore declared here. **All three refuse**, and the refusals are
+not placeholders: they are what is the case for a build with no account
+authority, no SPEC-004 home key
+([[EXP-001-findings|FINDING-016]]), and no state resolver. A refusal is a
+computation the surface can honestly delegate to; a missing command is not.
+
+### CON-604: `provision_username`
+
+```
+Interface:  invoke("provision_username", { homeDid, accountAuthority, localpart })
+            → () | UsernameUnavailable | AccountProvisioningFailed
+```
+
+**Status this cycle: REFUSES.**
+[[SPEC-004-application-scoped-identity#CON-212]] step 3 has the *authority*
+validate, reserve, and publish the reciprocal binding. This build is wired to no
+authority, so `AccountProvisioningFailed` — "nothing was reserved" — is the true
+answer rather than a stand-in for one, and it is the token
+`username-set` already renders.
+
+**Input grammar.** `homeDid` per
+[[IMPL-004-application-scoped-identity-screens#CON-601]]; `accountAuthority` per
+[[SPEC-004-application-scoped-identity#CON-204]]; `localpart` per
+[[SPEC-004-application-scoped-identity#CON-212]], recognised by
+`alias::recognise_username` and no second grammar.
+
+**Pre-conditions.** All three recognise before the refusal. A command that
+refused without recognising would leave its recognisers unexercised until the
+day a real authority lands, which is the day they most need to already work.
+
+**Post-conditions.** Nothing is reserved, published, or stored. The wallet SHALL
+NOT set a local username on the strength of recognition
+([[SPEC-004-application-scoped-identity#CON-212]]).
+
+**Error model.** `UsernameUnavailable` when the localpart fails recognition —
+the person picks another name. `AccountProvisioningFailed` when it recognises
+and no authority answered.
+
+Implements: [[SPEC-004-application-scoped-identity#CON-212]]
+
+Verified by: [[IMPL-004-application-scoped-identity-screens#TEST-614]]
+
+### CON-605: `revoke_grant`
+
+```
+Interface:  invoke("revoke_grant", { grantId })
+            → () | HandoffMalformed | RevocationUnavailable
+```
+
+**Status this cycle: REFUSES.**
+[[SPEC-004-application-scoped-identity#CON-210]] steps 2 to 4 sign the
+`RevokeCredential` delta with the account's home key. `FINDING-016` is that this
+wallet holds no material from which one can be derived. A wallet that cannot
+sign cannot submit.
+
+**Input grammar.** `grantId` per
+[[SPEC-004-application-scoped-identity#CON-205]]:
+
+```abnf
+grant-id = home-did "#grant-" 43(ALPHA / DIGIT / "-" / "_")
+```
+
+The DID half uses the pinned method's own parser; the token is 32 octets
+base64url. This is the pair
+[[SPEC-004-application-scoped-identity#CON-210]] itself insists on before a
+delta is built, checked at the boundary rather than inward.
+
+**Pre-conditions.** Recognition precedes the refusal, as for
+[[IMPL-004-application-scoped-identity-screens#CON-604]].
+
+**Post-conditions.** No delta is signed and none is submitted. `remove-pending`
+SHALL be reachable only when this command returned successfully, because its
+first sentence asserts that a delta was signed and sent.
+
+**Error model.** `HandoffMalformed` for an unrecognised identifier;
+`RevocationUnavailable` when the identifier recognises and no home key exists.
+
+Implements: [[SPEC-004-application-scoped-identity#CON-210]]
+
+Verified by: [[IMPL-004-application-scoped-identity-screens#TEST-615]]
+
+### CON-606: `revocation_status`
+
+```
+Interface:  invoke("revocation_status", { grantId })
+            → { confirmed: Boolean } | HandoffMalformed
+```
+
+**Status this cycle: NEVER CONFIRMED**, which is
+[[SPEC-004-application-scoped-identity#CON-210]]'s own answer rather than a
+shortfall: *"The initiating application reports pending until a newly resolved,
+cryptographically verified closure includes `grant_id`."* This build resolves no
+closure, so no closure includes anything, so the report is pending. A resolver's
+acknowledgement would not have changed it either.
+
+**Input grammar.** `grantId`, as
+[[IMPL-004-application-scoped-identity-screens#CON-605]].
+
+**Post-conditions.** `confirmed` SHALL be true only on the evidence of a
+resolved, cryptographically verified closure carrying the exact grant ID. A
+timeout, an acknowledgement, and an elapsed interval are each insufficient.
+
+**Error model.** `HandoffMalformed` for an unrecognised identifier. An
+unobtainable status is `{ confirmed: false }`, never an error — a status the
+verifier could not obtain leaves the screen at pending, which is the honest
+report.
+
+Implements: [[SPEC-004-application-scoped-identity#CON-210]]
+
+Verified by: [[IMPL-004-application-scoped-identity-screens#TEST-616]]
+
 ---
 
 ## Purity Boundary Map
@@ -616,7 +755,14 @@ written and observed to fail before the screens exist.
 | TEST-609 | `remove-pending` | **no success affordance, no completion animation, and no retry claim in the copy** |
 | TEST-610 | `remove-confirmed` | reachable only from a closure-carrying state |
 | TEST-611 | `scope-unavailable` | **no actionable control exists in the DOM** |
-| TEST-612 | all eleven | exactly one screen visible; no horizontal overflow at phone width; nothing thrown |
+| TEST-612 | all twelve | exactly one screen visible; no horizontal overflow at phone width; nothing thrown |
+| TEST-613 | `remove-device` after a refused submission | the refusal token is rendered, and **no sentence claims the delta was signed or sent** |
+| TEST-614 | [[IMPL-004-application-scoped-identity-screens#CON-604]] | recognises all three inputs, then refuses; a malformed localpart is `UsernameUnavailable` and a recognised one is `AccountProvisioningFailed` |
+| TEST-615 | [[IMPL-004-application-scoped-identity-screens#CON-605]] | a malformed `grantId` is `HandoffMalformed`; a well-formed one is `RevocationUnavailable` |
+| TEST-616 | [[IMPL-004-application-scoped-identity-screens#CON-606]] | never `confirmed`; a malformed `grantId` is `HandoffMalformed` |
+| TEST-617 | `fingerprint-mismatch` | reached from "They're different"; **no retry control, and none of the CON-222 evidence fields** |
+| TEST-618 | [[IMPL-004-application-scoped-identity-screens#CON-601]] | the preview recognises exactly the language `alias::recognise_username` recognises, asserted as an equivalence over both |
+| TEST-619 | [[IMPL-004-application-scoped-identity-screens#CON-603]] | the stub `publicKey` derives the stub `homeDid` |
 
 ### Negative-output tests
 
@@ -639,10 +785,25 @@ an edit someone has to make deliberately rather than one they can forget.
 
 ### Harness
 
-`tests/screens.mjs` gains eleven shots. New `data-action` hooks are REQUIRED
+`tests/screens.mjs` gains twelve shots. New `data-action` hooks are REQUIRED
 on every interactive element, since the harness drives screens by clicking
-`[data-action="…"]`. The stub bridge answers CON-601..603 with the shapes the
+`[data-action="…"]`. The stub bridge answers CON-601..606 with the shapes the
 real commands return.
+
+**"The shapes the real commands return" includes the refusals.** The bridge
+previously answered three commands the backend did not register, and answered
+two of them with success — which is how `remove-pending` was captured for a
+build in which the invoke rejected and nothing was signed. A stub more capable
+than the thing it stands for does not test the screen; it manufactures the state
+the screen claims, and every assertion then runs against the fixture rather than
+against the app.
+
+Two screens — `remove-pending` and `remove-confirmed` — are consequently
+unreachable in this build, because `revoke_grant` refuses. They are still
+captured, from a state flag named `wired_backend` and under shot names prefixed
+`wired-`, so that a reader of the shot list cannot mistake a render of the design
+for a state the build produces. That flag is the only place this harness stands
+in for a backend it does not have, and naming it is what keeps it from spreading.
 
 Rust-side, CON-601 and CON-602 get unit tests in `src-tauri`. There is no new
 security logic to test: both are thin wrappers over functions already covered by
@@ -674,10 +835,71 @@ dispatch, and mobile caller/wallet identity.
 Chat instructions, implementation drift, and passing screenshots are evidence or
 amendment requests; none changes this plan by itself.
 
+## Gate Evidence Record — version 0.7.0
+
+One entry per gate closed in this cycle, written as each was run. A `pass` with
+no `evidence` is invalid, not passed; `unverified` is a legitimate value and is
+how an obligation with no available mechanism is recorded honestly.
+
+```yaml
+phase: 3
+version: 0.7.0
+gates:
+  - gate: "Test-First (Red Gate): each fix has a test observed to fail first"
+    mechanism: "revert the fix in place, run the suite, restore"
+    result: pass
+    evidence: >
+      con_206_acceptance: 3 FAILED with the three checks neutered;
+      con_219_ceremony: an_android_binding_with_nothing_attributed_is_refused… FAILED
+      with the Android arm removed;
+      screens.mjs: 26-remove-refused and 29-fingerprint-mismatch both FAILED with
+      the frontend routing reverted — reaching remove-pending and binding-mismatch
+      respectively, which is the reviewed behaviour exactly
+  - gate: "All tests green"
+    mechanism: "cargo test --workspace"
+    result: pass
+    evidence: "33 suites, 0 failed; 207 core unit, 37 net unit, 32 CON-206, 28 CON-219"
+  - gate: "Presentation surface renders and every screen rule holds"
+    mechanism: "node tests/screens.mjs"
+    result: pass
+    evidence: "31 shots, all screens rendered clean"
+  - gate: "Architecture / lint clean"
+    mechanism: "cargo clippy --workspace --all-targets"
+    result: pass
+    evidence: "0 warnings, 0 errors"
+  - gate: "Traceability: no new dead links"
+    mechanism: "zetl check --dead-links -d specs"
+    result: pass
+    evidence: "78 before this change, 78 after — the pre-existing concept-page backlog, unchanged"
+  - gate: "Adversarial review of these fixes (Constitutional Principle 12)"
+    mechanism: "cross-model review from a clean context"
+    result: unverified
+    evidence: >
+      not run — this cycle *is* the response to such a review, and the session
+      that wrote the fixes may not validate them. Owner: HOC.
+  - gate: "Amendment approved through a declared channel"
+    mechanism: "reviewer: human owner, per this document's Amendment Channels"
+    result: unverified
+    evidence: >
+      0.7.0 declares CON-604..606 and a twelfth screen. The amendment is written
+      and traceability updated; approval is outstanding. Owner: HOC.
+  - gate: "Mutation testing on the changed predicates"
+    mechanism: "cargo mutants"
+    result: unverified
+    evidence: "not run this cycle; Red Gate evidence above stands in its place. Owner: HOC."
+```
+
+Two gates are `unverified` and both name an owner, so this phase is **not**
+reported complete. The `review-gate` field in the frontmatter still reads
+`not-approved`, and that is the accurate state.
+
+---
+
 ## Changelog
 
 | Version | Date | Change |
 |---|---|---|
+| 0.7.0 | 2026-08-01 | **Cross-model review response — the surface's claims, and the commands under them.** Three commands the frontend has called since 0.4.0 were registered nowhere, so every call rejected with a Tauri "command not found" the screens could not distinguish from any other failure. `remove-pending` — "Signed on this device and sent." — was reached by discarding that rejection, which is [[IMPL-004-application-scoped-identity-screens#Claim audit]]'s own defect one level down: a claim delegated to a command that does not exist is not delegated at all. `CON-604`/`CON-605`/`CON-606` are declared, recognise their inputs, and refuse honestly (no account authority, no home key, no resolver); the removal refusal is rendered on `remove-device` and `remove-pending` is reachable only after a successful submission. "They're different" on `fingerprint-compare` opened the `CON-222` caller-binding screen with two blank evidence fields and left the enrollment running — a twelfth screen, `fingerprint-mismatch`, terminates it. `CON-601` dropped a hand-written localpart grammar that admitted `Alice`, `.alice`, `ss-admin`, and 33–64-character names the core refuses, for `alias::recognise_username`; the username is now submitted exactly as typed rather than trimmed into a different name; and `CON-603`'s stub `publicKey` now derives its stub `homeDid`, which it did not. The screen harness answers only registered commands: two screens are consequently unreachable in this build and are captured under a named `wired_backend` flag rather than by a bridge that pretends. Six new TEST entries; every fix verified by reintroducing the defect and watching the assertion fail. **Awaiting owner approval per [[IMPL-004-application-scoped-identity-screens#Amendment Channels]].** |
 | 0.6.0 | 2026-08-01 | **`FINDING-017`.** "Home key" names the SPEC-001 root in the wallet and a per-application-account key in SPEC-004, and both have a fingerprint. SPEC-001's created screen teaches "if one ever shows something else, it isn't part of your home key" — the `CON-221` comparison legitimately shows something else, so the rule either alarms at a correct value or teaches that mismatches are sometimes fine. Nothing renamed: `fingerprint-compare` now states the distinction before the stakes and names the application, `application` says it in passing, and a screen check asserts both phrases. The vocabulary decision spans two specs and the `anuna-ssi` vault. |
 | 0.5.0 | 2026-08-01 | **Claim audit over all eleven screens.** Two defects fixed: `username-set` presented an unreserved name as held — recognition is not reservation, and it now asks `provision_username` and surfaces `AccountProvisioningFailed`; the `applications` fixture shared one home DID across two applications while the screen claimed each gets its own. Two gaps recorded (`fingerprint-compare`'s once-ever claim, `username-taken`'s asserted reason). New assertions for both fixes verified by reintroducing each regression and watching it fail. |
 | 0.4.0 | 2026-08-01 | `remove-pending` claimed "this will keep trying until one does" and "it is retained and retried". Both are `CON-210` obligations on a wired implementation; neither is true of this build, which submits once and checks once. Removed, and TEST-609 gains forbidden-phrase assertions so the claim cannot return without a deliberate edit — verified by reintroducing the sentence and watching the test fail. `scope-unavailable` now names the application. |

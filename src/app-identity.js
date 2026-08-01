@@ -15,11 +15,24 @@
  *   REQ-230  the first-enrollment comparison offers no skip; there is no third
  *            control on that screen and no back button
  *   REQ-217  `scope-unavailable` offers no remedial control at all
+ *   CON-221  "they're different" terminates the enrollment on a screen of its
+ *            own; it is not the CON-222 caller-binding failure, whose evidence
+ *            fields nothing on that path can fill in
  *   CON-222  the wallet checks the calling package against the CON-214
  *            binding, and shows the mismatch; it never renders the
  *            application's own `WalletUnavailable`
- *   CON-210  `remove-pending` claims nothing; only a verified closure moves it
+ *   CON-210  `remove-pending` claims nothing; only a verified closure moves it —
+ *            and it is reached only when the submission succeeded, because its
+ *            first sentence asserts that a delta was signed and sent
+ *   CON-212  the username is submitted exactly as typed; recognition refuses
+ *            malformed input rather than trimming it into something else
  *   NFR-203  no screen renders an accountScopeId, and none is passed one
+ *
+ * Every `invoke` here names a command `src-tauri/src/app_identity.rs` registers
+ * (`CON-601` to `CON-606`). Three of those commands refuse in this build, and
+ * the refusals are the point: a screen's claim is only as true as the command it
+ * is delegated to, and a claim delegated to a command that is not registered is
+ * not delegated at all.
  *
  * # Why this is a separate module
  *
@@ -201,7 +214,13 @@ export function initAppIdentity(d) {
    * string the person is about to publish.
    */
   async function previewUsername() {
-    const local = $("#username-input").value.trim();
+    // The exact characters typed. `CON-212`'s localpart grammar admits no
+    // leading or trailing space, and `.trim()` here previewed a *different*
+    // name from the one in the field — so a person who pasted `alice ` was
+    // shown `acct:alice@…` as available and then submitted a value the
+    // recogniser must refuse. Recognition refuses malformed input; it does not
+    // repair it into something else and approve that.
+    const local = $("#username-input").value;
     const el = $("[data-username-preview]");
     if (!s.app) return;
     try {
@@ -225,7 +244,10 @@ export function initAppIdentity(d) {
 
   async function setUsername() {
     clearErrors();
-    const local = $("#username-input").value.trim();
+    // As typed, for the same reason the preview is. An empty field is "no name
+    // asked for" and gets a prompt; whitespace is a name the grammar refuses,
+    // and the refusal is the core's to make.
+    const local = $("#username-input").value;
     if (!local) return fail("username", "Type a username first.");
     try {
       await invoke("alias_preview", {
@@ -309,7 +331,28 @@ export function initAppIdentity(d) {
 
   async function removeDevice() {
     if (!s.grant) return;
-    await invoke("revoke_grant", { grantId: s.grant.grant_id }).catch(() => {});
+    clearErrors();
+    try {
+      await invoke("revoke_grant", { grantId: s.grant.grant_id });
+    } catch (e) {
+      // The failure is the answer, and it stays on this screen.
+      //
+      // This used to be `.catch(() => {})` followed unconditionally by
+      // `remove-pending`, whose first sentence is "signed on this device and
+      // sent". Nothing had been signed and nothing sent: `revoke_grant` needs
+      // the SPEC-004 home key, which this build does not hold (FINDING-016),
+      // so the invoke rejected every time and the screen asserted a state the
+      // system was never in. `CON-210`'s whole discipline is that submission is
+      // not revocation; claiming submission that did not happen is the same
+      // defect one step earlier.
+      const token = message(e);
+      return fail(
+        "remove",
+        token.includes("RevocationUnavailable")
+          ? "RevocationUnavailable — nothing was signed and nothing was sent."
+          : "That removal could not be sent. Nothing was signed.",
+      );
+    }
     // Submitted, and that is all submission means. CON-210: "A resolver's
     // acknowledgement is not evidence of revocation." The only thing that can
     // move this is a re-resolved verified closure carrying the grant ID, so
@@ -327,10 +370,40 @@ export function initAppIdentity(d) {
    * is unreachable without the evidence, rather than being a timer.
    */
   async function settleRevocation() {
+    // A status this verifier could not obtain is not a confirmation, so a
+    // failure here leaves the screen where it is — which is `remove-pending`,
+    // the honest report. That is why this one *may* swallow and `removeDevice`
+    // may not: there, discarding the failure promoted the screen; here it
+    // leaves it alone.
     const out = await invoke("revocation_status", { grantId: s.grant?.grant_id }).catch(() => null);
     if (!out?.confirmed) return;
     $("[data-removed-title]").textContent = `${s.grant?.label ?? "That device"} was removed.`;
     show("remove-confirmed");
+  }
+
+  /**
+   * "They're different" — the answer the `CON-221` comparison exists to collect.
+   *
+   * It used to open `binding-mismatch`, which is the `CON-222` caller-package
+   * failure: a different check, a different cause, and two evidence fields
+   * (`claimed`, `observed`) that nothing on this path populates — so the person
+   * was shown someone else's error with blanks in it, and the enrollment was
+   * left running.
+   *
+   * A mismatched fingerprint means the value on the other screen is not this
+   * account's identity, which is the one thing `REQ-230` says this screen stands
+   * between the person and. So it terminates: the ceremony state this surface
+   * holds is dropped, and the screen offers no retry, for the same reason the
+   * comparison offers no skip.
+   */
+  function fingerprintDiffers() {
+    // Dropped before the screen renders, so nothing later in this session can
+    // act on a half-finished enrollment. It is the whole of the abandonment
+    // this build can perform — the ceremony's own state lives in the
+    // application under CON-214, and this wallet is not wired to it.
+    s.app = null;
+    s.grant = null;
+    show("fingerprint-mismatch");
   }
 
   // ── consent (REQ-222) ────────────────────────────────────────────────
@@ -370,7 +443,7 @@ export function initAppIdentity(d) {
     "set-username": setUsername,
     "to-fingerprint": toFingerprint,
     "fingerprint-matches": () => (s.app ? openApplication(s.app) : show("applications")),
-    "fingerprint-differs": () => show("binding-mismatch"),
+    "fingerprint-differs": fingerprintDiffers,
     "to-app-consent": toConsent,
     "consent-approve": () => (s.app ? openApplication(s.app) : show("applications")),
     "consent-refuse": () => (s.app ? openApplication(s.app) : show("applications")),

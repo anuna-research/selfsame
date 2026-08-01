@@ -64,13 +64,13 @@ const KEY_FP = { hex: 'C0 7A 1E 42 9B 33', label: 'copper-lynx-42', lifehash: LH
 // real LifeHash of that digest — same discipline as the constants above. The
 // DID's *provenance* is fixture (see FINDING-016: the wallet holds no material
 // to derive one), but everything rendered from it is genuinely computed.
-const HOME_DID = 'did:crdt:4b8e2f7a91c05d63e8f240ab17c9d3e56082f4a1bc7d90e35f61a284c093db7e';
+const HOME_DID = 'did:crdt:2a3557b5321f2990e2d8222d3e4571f4c8ca3b821593c2128f212a2b7c7b635d';
 // A DIFFERENT identity, and that is the point of the fixture. CON-202 gives each
 // application its own home below the recovery secret, and the applications
 // screen says so in as many words. Sharing one DID across both rows would make
 // a real cross-application linkability defect look correct on screen.
 const HOME_DID_2 = 'did:crdt:c17d0e93b426a8f5104e7b2c96d38af0521e6bc94d70382af659c1e04b7d28a3';
-const HOME_FP = { hex: 'FF 9E 3B 49 7A 49', label: 'cobalt-quarry-27', lifehash: LH['home_FF9E3B497A49'] };
+const HOME_FP = { hex: '0C 57 68 F9 50 37', label: 'topaz-adder-57', lifehash: LH['home_0C5768F95037'] };
 
 // The account alias is the opaque one CON-203 derives from the home DID. The
 // account *scope* appears nowhere here and must appear nowhere on screen
@@ -119,8 +119,15 @@ const STATE_APPS = {
 
 // CON-210: only a re-resolved verified closure moves a removal to confirmed.
 // Two states rather than a timer or a button — the screen asks, and the answer
-// decides. `28-remove-pending` asks and is told no; `29` asks and is told yes.
-const STATE_APPS_SETTLED = { ...STATE_APPS, revocation_settled: true };
+// decides.
+//
+// Both carry `wired_backend`, because both are renders of screens this build
+// cannot reach: `revoke_grant` refuses here (FINDING-016 — no home key to sign
+// with), so a removal never gets as far as pending. They are captured as
+// *design* renders and are labelled `wired-` for it. The state this build
+// actually reaches is `26-remove-refused`.
+const STATE_APPS_WIRED = { ...STATE_APPS, wired_backend: true };
+const STATE_APPS_SETTLED = { ...STATE_APPS_WIRED, revocation_settled: true };
 
 // CON-222: the wallet is opened by a caller whose attribution does not match
 // the CON-214 binding. An arrival state, so it needs no click path.
@@ -182,10 +189,26 @@ const bridge = (state) => `
           case 'reject_offer': return null;
           case 'flush_publications': return 0;
 
-          // ── IMPL-004 CON-601..603 ──────────────────────────────────────
+          // ── IMPL-004 CON-601..606 ──────────────────────────────────────
+          //
+          // Every case below answers what the *registered* command answers,
+          // which is the rule IMPL-004 states for this bridge. Three of them
+          // refuse, because three of the real commands refuse: this build has
+          // no account authority, no SPEC-004 home key (FINDING-016), and no
+          // resolver.
+          //
+          // The bridge used to answer three commands the backend did not
+          // register at all, and answered two of them with success. That is how
+          // 'remove-pending' — "Signed on this device and sent." — was captured
+          // for a build in which the invoke rejected and nothing was signed. A
+          // stub more capable than the thing it stands for does not test the
+          // screen; it manufactures the state the screen claims.
           case 'alias_preview': {
-            // The refusal path: CON-601 returns one closed token and no detail.
-            if (args.localpart === 'admin') throw 'UsernameUnavailable';
+            // CON-601 returns one closed token and no detail. 'ss-' is the
+            // CON-203 identifier's reserved prefix, which the core's
+            // alias::recognise_username refuses — so this refusal is one the
+            // real command also makes, for this exact input.
+            if (String(args.localpart ?? '').startsWith('ss-')) throw 'UsernameUnavailable';
             return {
               stableAlias: ${JSON.stringify(APPLICATIONS[0].account_alias)},
               usernameAlias: args.localpart
@@ -194,15 +217,27 @@ const bridge = (state) => `
             };
           }
           case 'home_fingerprint': return ${JSON.stringify(HOME_FP)};
-          // CON-204. There is no account authority in this build, so a name can
+          // CON-604. There is no account authority in this build, so a name can
           // be recognised and never reserved — and the wallet says so rather
           // than showing it as held.
           case 'provision_username': throw 'AccountProvisioningFailed';
           case 'app_identity_derive': {
             if (!args.accountScopeId) throw 'AccountScopeUnavailable';
-            return { homeDid: ${JSON.stringify(HOME_DID)}, publicKey: 'AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE' };
+            return { homeDid: ${JSON.stringify(HOME_DID)}, publicKey: 'iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w', derived: false };
           }
-          case 'revoke_grant': return null;
+          // CON-605. The real command refuses: signing a RevokeCredential delta
+          // needs the account's home key, and FINDING-016 is that this wallet
+          // holds none.
+          //
+          // 'wired_backend' is the single place this harness stands in for a
+          // backend it does not have, and it exists only to render the two
+          // screens CON-210 designs for a wired build. It is named rather than
+          // implied so a reader of a shot list cannot mistake those two
+          // captures for states this build reaches.
+          case 'revoke_grant':
+            if (!${JSON.stringify(state)}.wired_backend) throw 'RevocationUnavailable';
+            return null;
+          // CON-606. Never confirmed without a resolved, verified closure.
           case 'revocation_status': return { confirmed: ${JSON.stringify(state)}.revocation_settled === true };
 
           default: return null;
@@ -241,9 +276,18 @@ const shots = [
   { name: '23-consent-application', expect: 'consent-application', state: STATE_APPS, steps: ['to-applications', 'open-application', 'to-app-consent'] },
   { name: '24-binding-mismatch', expect: 'binding-mismatch', state: STATE_BAD_CALLER, steps: [] },
   { name: '25-remove-device', expect: 'remove-device', state: STATE_APPS, steps: ['to-applications', 'open-application', 'open-grant', 'to-remove-device'] },
-  { name: '26-remove-pending', expect: 'remove-pending', state: STATE_APPS, steps: ['to-applications', 'open-application', 'open-grant', 'to-remove-device', 'remove-device'] },
-  { name: '27-remove-confirmed', expect: 'remove-confirmed', state: STATE_APPS_SETTLED, steps: ['to-applications', 'open-application', 'open-grant', 'to-remove-device', 'remove-device'] },
+  // What this build actually does when the person presses "Remove it": the
+  // command refuses, and the refusal stays on the screen that offered it.
+  { name: '26-remove-refused', expect: 'remove-device', state: STATE_APPS, steps: ['to-applications', 'open-application', 'open-grant', 'to-remove-device', 'remove-device'] },
+  // The two CON-210 screens a *wired* build reaches. Marked `wired-` because
+  // they are renders of the design rather than states this build produces.
+  { name: '26b-wired-remove-pending', expect: 'remove-pending', state: STATE_APPS_WIRED, steps: ['to-applications', 'open-application', 'open-grant', 'to-remove-device', 'remove-device'] },
+  { name: '27-wired-remove-confirmed', expect: 'remove-confirmed', state: STATE_APPS_SETTLED, steps: ['to-applications', 'open-application', 'open-grant', 'to-remove-device', 'remove-device'] },
   { name: '28-scope-unavailable', expect: 'scope-unavailable', state: STATE_APPS, steps: ['to-applications', 'open-unscoped-application'] },
+  // CON-221's other answer. "They're different" is the whole reason the
+  // comparison is asked, and it used to open the CON-222 caller-binding screen
+  // with two blank evidence fields.
+  { name: '29-fingerprint-mismatch', expect: 'fingerprint-mismatch', state: STATE_APPS, steps: ['to-applications', 'open-application', 'to-fingerprint', 'fingerprint-differs'] },
 ];
 
 // ── Negative-output assertions (IMPL-004 TEST-605 / 611 / 613) ───────────
@@ -294,7 +338,28 @@ const SCREEN_RULES = {
     // REQ-222: the application's own name may never carry the decision.
     requiredText: 'its own words, unchecked',
   },
-    '26-remove-pending': {
+  '26-remove-refused': {
+    // The claim that had nothing behind it. `revoke_grant` refuses in this
+    // build, and the person must be told that nothing was signed rather than
+    // advanced to a screen that says it was.
+    requiredText: 'RevocationUnavailable',
+    forbiddenText: [
+      ['Signed on this device', 'nothing was signed, so nothing may say it was'],
+      ['Removing', 'a removal that was refused is not in progress'],
+    ],
+  },
+  '29-fingerprint-mismatch': {
+    // REQ-230 gives the comparison no skip; its refusal gets no retry, for the
+    // same reason. And it must not be the CON-222 caller-binding screen, whose
+    // evidence fields nothing on this path fills in.
+    forbidden: [
+      ['[data-action="to-fingerprint"]', 'a retry here is the skip REQ-230 forbids, one screen later'],
+      ['[data-mismatch-expected]', 'this is not the CON-222 caller-binding failure'],
+      ['[data-mismatch-actual]', 'this is not the CON-222 caller-binding failure'],
+    ],
+    requiredText: 'Nothing has been bound',
+  },
+    '26b-wired-remove-pending': {
     // CON-210 forbids reporting success before a verified closure.
     forbidden: [
       ['[data-action="remove-done"]', 'CON-210 forbids a success affordance while pending'],
@@ -405,9 +470,15 @@ for (const shot of shots) {
         if (el) { el.value = 'alice'; el.dispatchEvent(new Event('input')); }
       });
     } else if (step === 'fill-taken-username') {
+      // `ss-` is the CON-203 identifier's reserved prefix. The core's
+      // `alias::recognise_username` refuses it, so this is a name the real
+      // command also answers `UsernameUnavailable` to — and "or it is
+      // reserved" on the screen is true of it. The earlier fixture used
+      // `admin`, which the core accepts, so the shot asserted a refusal
+      // nothing produced.
       await page.evaluate(() => {
         const el = document.querySelector('#username-input');
-        if (el) { el.value = 'admin'; el.dispatchEvent(new Event('input')); }
+        if (el) { el.value = 'ss-admin'; el.dispatchEvent(new Event('input')); }
       });
     } else {
       await page.evaluate((a) => document.querySelector(`[data-action="${a}"]`)?.click(), step);

@@ -128,12 +128,43 @@
 
 (given (blocked-on-upstream con-203))
 
+;; ── the first review round came back ────────────────────────────────────────
+;;
+;; The partition above was the input to a cross-model adversarial review, and
+;; the review returned nineteen findings — which is the theory working, not the
+;; theory being wrong: it said which contracts were worth a reviewer's time, and
+;; they were.
+;;
+;; Two of the findings are recorded as discoveries rather than as contract
+;; defects, because neither is about a contract. Both are about the *frontier*
+;; between the surface and the commands under it: the frontend invoked three
+;; commands the Tauri handler registered nowhere, and the screen harness stubbed
+;; those same three more capably than the backend implements them. Between them
+;; they made a screen's claim unfalsifiable — the assertion ran against the
+;; fixture, and the fixture was the only thing that could satisfy it.
+
+(given (finding review-2026-08-01-nineteen-defects))
+
+(given (discovered frontend-invoked-three-unregistered-commands))
+(given (discovered stub-bridge-more-capable-than-backend))
+
+;; The two P1s, repaired and covered by tests observed to fail first.
+
+(given (verified con-206-device-key-binding))
+(given (verified con-214-android-caller-attribution))
+
+;; IMPL-004 0.7.0 declares CON-604..606 and a twelfth screen. Its own
+;; Amendment Channels block reserves approval to the human owner, so the
+;; amendment is written and the gate is open — recorded rather than assumed.
+
+(given (blocked-by impl-004-v070 owner-approval))
+
 ;; ─────────────────────────────────────────────────────────────────────────────
 ;; Conclusion, at the time of writing: 18 contracts ready for adversarial
 ;; review, 8 blocked — 6 on external stacks, 2 on upstream defects.
 ;;
-;; Closure fingerprint (elephant.closure.v1, 99 conclusions):
-;;   sha256:f52e5f37746697905cd5cbec06d1abe4705321b82af0be9f2eae2dc0f263b605
+;; Closure fingerprint (elephant.closure.v1, 105 conclusions):
+;;   sha256:a8afba8bcc6c2df072ca5ae89d86231d0dd93315bedb5654430ffe8d1de83f33
 ;;
 ;; That fingerprint is the value PROTO-001 Phase 4 asks every member of a shared
 ;; theory to agree on before process lessons are drawn from it. This theory has

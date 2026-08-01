@@ -619,6 +619,35 @@
       </section>
 
       <!--
+        ══ HP-4a · the fingerprints did not match (CON-221) ═══════════════
+
+        "They're different" is the answer the comparison exists to collect, and
+        it used to open `binding-mismatch` — a screen about a *caller package*
+        failure, whose two evidence fields nothing on this path populates. The
+        person was shown someone else's error, with two blanks in it, and the
+        enrollment carried on.
+
+        This screen is terminal. REQ-230 gives the comparison no skip and no
+        back, and the same reasoning applies to its refusal: there is nothing to
+        retry, because retrying is what an attacker would ask for. The only exit
+        is out.
+      -->
+      <section class="screen screen--scroll" data-screen="fingerprint-mismatch" hidden>
+        <div class="mark mark--lg mark--broken" aria-hidden="true"></div>
+        <h1>Then this isn't your account.</h1>
+        <p class="lede">
+          The other screen is showing a different account identity from the one
+          this wallet holds. Nothing has been bound and nothing was shared.
+        </p>
+        <p class="caution">
+          Do not try again from here. If you were expecting this, start again
+          from the application itself and compare once more.
+        </p>
+        <div class="spacer"></div>
+        <button class="btn btn--primary" data-action="to-applications">Close</button>
+      </section>
+
+      <!--
         ══ HP-4/HP-5 · consent (REQ-222, CON-217) ═══════════════════════
 
         REQ-222 names display name, icon, bundle name, deep link, callback URI
@@ -719,6 +748,14 @@
         <p class="caution">
           Devices check for this when they next look, so it is not instant.
         </p>
+        <!--
+          A removal that could not be submitted is reported here rather than by
+          advancing to `remove-pending`. That screen says "signed on this device
+          and sent", which is a claim about what just happened — and this build
+          holds no SPEC-004 home key to sign with (FINDING-016), so the claim
+          was false every time it was shown.
+        -->
+        <p class="error" data-error="remove" hidden></p>
         <div class="spacer"></div>
         <button class="btn btn--danger" data-action="remove-device">Remove it</button>
         <button class="btn btn--quiet" data-action="back-to-application">Keep it</button>

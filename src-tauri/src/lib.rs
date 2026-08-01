@@ -74,6 +74,9 @@ pub fn run() {
             app_identity::alias_preview,
             app_identity::home_fingerprint,
             app_identity::app_identity_derive,
+            app_identity::provision_username,
+            app_identity::revoke_grant,
+            app_identity::revocation_status,
         ])
         .run(tauri::generate_context!())
         .expect("Selfsame failed to start");
