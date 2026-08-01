@@ -212,6 +212,15 @@ impl NonceLedger {
         };
         let challenge = self.outstanding.remove(position);
         self.used.push(*nonce);
+        // A nonce cannot be presented before it was issued. Without this line
+        // the subtraction below goes negative and passes: a clock that moves
+        // backwards — or a challenge stamped ahead of the verifier's own time —
+        // yields a nonce that stays usable until 120 seconds past a timestamp
+        // in the future. The window is checked from both ends, or it is not a
+        // window.
+        if now < challenge.issued_at {
+            return Err(ProofError::NonceExpired);
+        }
         if now - challenge.issued_at > MAX_NONCE_AGE_SECONDS {
             return Err(ProofError::NonceExpired);
         }
@@ -408,6 +417,25 @@ mod tests {
         let mut ledger = NonceLedger::new();
         ledger.issue(c.clone());
         assert!(ledger.consume(&c.nonce, 1_000 + 120).is_ok(), "the boundary is inclusive");
+    }
+
+    #[test]
+    fn a_nonce_presented_before_it_was_issued_is_refused() {
+        // The other end of the window. Subtracting a later `issued_at` from an
+        // earlier `now` goes negative, which is under the maximum by
+        // arithmetic — so a backwards clock, or a challenge stamped ahead of
+        // this verifier, produced a nonce good until 120 seconds past a future
+        // instant.
+        let mut ledger = NonceLedger::new();
+        let c = challenge();
+        ledger.issue(c.clone());
+        assert_eq!(ledger.consume(&c.nonce, 999), Err(ProofError::NonceExpired));
+        // …and consumed anyway, like every other refusal here.
+        assert!(ledger.is_used(&c.nonce));
+
+        let mut ledger = NonceLedger::new();
+        ledger.issue(c.clone());
+        assert!(ledger.consume(&c.nonce, 1_000).is_ok(), "the issuing instant itself is usable");
     }
 
     #[test]

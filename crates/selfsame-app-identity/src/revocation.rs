@@ -249,6 +249,15 @@ pub fn read_projection(
     now: UnixSeconds,
     policy: &ProjectionPolicy,
 ) -> ProjectionReading {
+    // A credential whose window is empty or inverted establishes nothing, and
+    // it has to be refused *before* the bit is read. A negative duration passes
+    // the maximum-age check below by arithmetic, and the set-bit branch that
+    // follows would then return `Revoked` on the strength of a projection that
+    // is not valid at any instant — revocation evidence manufactured out of a
+    // malformed window.
+    if valid_until <= valid_from {
+        return ProjectionReading::Unavailable;
+    }
     // A publisher may not sign a window longer than the profile's bound, so a
     // consumer applying nothing but W3C validity rules already rejects an
     // over-age projection. Expressing the bound as Selfsame-specific policy
@@ -601,6 +610,28 @@ mod tests {
             ProjectionReading::Unavailable,
             "an over-long window is refused before the bit is read"
         );
+    }
+
+    #[test]
+    fn a_projection_with_an_empty_or_inverted_window_is_unavailable() {
+        // A credential valid at no instant is evidence of nothing, and the
+        // asymmetry that makes a set bit permanently true does not extend to a
+        // window that never opened. `validUntil - validFrom` is negative here,
+        // which slips under the maximum-age bound by arithmetic and would have
+        // reached the set-bit branch — manufacturing revocation evidence out of
+        // a malformed projection.
+        let p = policy();
+        for (from, until) in [(1_000, 1_000), (1_900, 1_000)] {
+            assert_eq!(
+                read_projection(true, from, until, 1_500, &p),
+                ProjectionReading::Unavailable,
+                "a set bit in a [{from}, {until}) window is not revocation evidence"
+            );
+            assert_eq!(
+                read_projection(false, from, until, 1_500, &p),
+                ProjectionReading::Unavailable
+            );
+        }
     }
 
     #[test]
