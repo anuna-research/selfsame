@@ -113,6 +113,13 @@ export function initAppIdentity(d) {
     // account. REQ-217 forbids guessing and forbids prompting, so this is a
     // terminal screen rather than a retry.
     if (!app.account_alias) {
+      // The application's own name. It is untrusted text and is inserted as
+      // text, but naming it is what tells the person which row they tapped —
+      // and the *alias* is the value that is legitimately missing here, not
+      // the application.
+      $("[data-scope-title]").textContent = app.display_name
+        ? `${app.display_name} can't be opened.`
+        : "This account can't be opened.";
       show("scope-unavailable");
       return;
     }

@@ -714,13 +714,23 @@
       <section class="screen screen--scroll" data-screen="remove-pending" hidden>
         <div class="mark mark--lg mark--pending" aria-hidden="true"></div>
         <h1>Removing…</h1>
+        <!--
+          Every sentence here is a claim about what has happened, so each one
+          is checked against what this build actually does.
+
+          An earlier version said "this will keep trying until one does" and
+          "it is retained and retried" — both true of CON-210, neither true of
+          this build, which submits once and checks once. On the one screen
+          whose whole design is refusing to claim more than it knows, that was
+          the wrong sentence to have written. The retry claim returns when the
+          retry does.
+        -->
         <p class="lede">
           Signed on this device and sent. It is not removed until a resolver
-          confirms it, and this will keep trying until one does.
+          confirms it.
         </p>
         <p class="caution">
-          If it stays here, the revocation is not lost — it is retained and
-          retried. Nothing has told you it worked, because nothing has.
+          Nothing has told you it worked, because nothing has.
         </p>
         <div class="spacer"></div>
         <button class="btn btn--quiet" data-action="back-to-application">Leave it running</button>
@@ -755,7 +765,13 @@
         -->
         <button class="back" data-action="to-applications">Applications</button>
         <div class="mark mark--lg mark--broken" aria-hidden="true"></div>
-        <h1>This account can't be opened.</h1>
+        <!--
+          The application's name, not the account's. The alias is legitimately
+          absent — that is what this screen is about — but the person tapped a
+          row with a name on it, and a heading that does not say which one makes
+          them check.
+        -->
+        <h1 data-scope-title>This account can't be opened.</h1>
         <p class="lede">
           Your recovery words rebuild your identity, but the account itself is
           named by the application — and it hasn't supplied that name.

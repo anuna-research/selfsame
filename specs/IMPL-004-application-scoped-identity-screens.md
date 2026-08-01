@@ -3,7 +3,7 @@ id: IMPL-004
 title: Application- and Account-Scoped Identity — the person-facing surface
 status: implemented
 tier: 2
-version: 0.3.0
+version: 0.4.0
 audience: agent, human, frontend implementer
 author: Anuna Research (drafted with Claude, 2026-08-01)
 last-updated: 2026-08-01
@@ -579,7 +579,7 @@ written and observed to fail before the screens exist.
 | TEST-606 | `consent-application` | origin under verified treatment, display name under `--untrusted`; permissions listed |
 | TEST-607 | `binding-mismatch` | claimed identity under `--untrusted`; observed caller beside it; no retry control |
 | TEST-608 | `remove-device` | names both the account and the device |
-| TEST-609 | `remove-pending` | **no success affordance and no completion animation** |
+| TEST-609 | `remove-pending` | **no success affordance, no completion animation, and no retry claim in the copy** |
 | TEST-610 | `remove-confirmed` | reachable only from a closure-carrying state |
 | TEST-611 | `scope-unavailable` | **no actionable control exists in the DOM** |
 | TEST-612 | all eleven | exactly one screen visible; no horizontal overflow at phone width; nothing thrown |
@@ -590,6 +590,18 @@ TEST-605, TEST-609, and TEST-611 are **prohibited-action** tests in the sense of
 PROTO-001's prohibitive-requirement template: each asserts the *absence* of an
 affordance. They are the half most easily lost, because a suite that checks only
 that the screen renders passes a screen that renders and also offers a skip.
+
+**A claim is a claim whether it is a control or a sentence.** TEST-609 asserts
+forbidden *phrases* as well as forbidden selectors, because the first version of
+`remove-pending` promised "this will keep trying until one does" and "it is
+retained and retried" — both obligations `CON-210` places on a wired
+implementation, neither true of a build that submits once and checks once. No
+selector assertion could have caught it: the screen had no success affordance,
+no tick, and a false sentence.
+
+Copy drifts back more easily than controls do, because reassuring prose does not
+read as an assertion. The forbidden-phrase list is what makes implementing retry
+an edit someone has to make deliberately rather than one they can forget.
 
 ### Harness
 
@@ -632,6 +644,7 @@ amendment requests; none changes this plan by itself.
 
 | Version | Date | Change |
 |---|---|---|
+| 0.4.0 | 2026-08-01 | `remove-pending` claimed "this will keep trying until one does" and "it is retained and retried". Both are `CON-210` obligations on a wired implementation; neither is true of this build, which submits once and checks once. Removed, and TEST-609 gains forbidden-phrase assertions so the claim cannot return without a deliberate edit — verified by reintroducing the sentence and watching the test fail. `scope-unavailable` now names the application. |
 | 0.3.0 | 2026-08-01 | **Thirteen screens to eleven.** `handoff`, `wallet-unavailable` and `handoff-refused` were application-side screens rendered in the wallet: `CON-222` assigns the wallet search to "the developer application", so a wallet showing *Selfsame isn't installed* asserts its own absence. Version 0.1.0 listed them as "modelled from the wallet's side", which is not something that can be done. Replaced by `binding-mismatch` — the `CON-222` caller comparison, which genuinely is the wallet's, and which gives the unattributed-Android-caller fix a surface it did not have. |
 | 0.2.0 | 2026-08-01 | **Implemented.** Two corrections the build forced, both recorded rather than quietly applied: `CON-601`'s `home-did` grammar was `1*63(ALPHA / DIGIT)` and is `64HEXDIG` — the first draft rejected every real DID, and the recogniser is now the method's own `Did::from_str` rather than one written here. `scope-unavailable` required "no action at all"; that over-read `REQ-217`, which prohibits offering a way to supply the scope rather than leaving without one, so it now carries navigation and its test forbids `.btn` instead of every `button`. |
 | 0.1.0 | 2026-08-01 | Initial plan. Thirteen screens, three contracts, three ADRs. No `REQ-###` introduced. `SCREEN-###` documents deferred to `anuna-ssi`. |

@@ -274,6 +274,22 @@ const SCREEN_RULES = {
       ['[data-action="remove-done"]', 'CON-210 forbids a success affordance while pending'],
       ['.steps__ok', 'CON-210: a completion tick is a success claim'],
     ],
+    // A claim is a claim whether it is a control or a sentence. This screen
+    // once said "this will keep trying until one does" and "it is retained and
+    // retried" — both obligations CON-210 places on a *wired* implementation,
+    // neither of them true of this build, which submits once and checks once.
+    //
+    // Copy drifts back more easily than controls do, because it reads as
+    // reassurance rather than as an assertion. So the words are asserted too,
+    // and the day retry is implemented this list is what has to be edited
+    // deliberately rather than forgotten.
+    forbiddenText: [
+      ['keep trying', 'nothing retries in this build'],
+      ['retried', 'nothing retries in this build'],
+      ['retained', 'nothing retains the delta in this build'],
+      ['will be removed', 'CON-210 forbids asserting the outcome while pending'],
+    ],
+    requiredText: 'because nothing has',
   },
   '28-scope-unavailable': {
     // REQ-217 forbids guessing and forbids prompting, so no *remedial* control
@@ -448,11 +464,14 @@ for (const shot of shots) {
       }, selector);
       if (present) errors.push(`${shot.name}: \`${selector}\` is present — ${why}`);
     }
-    if (rules.requiredText) {
-      const shown = await page.evaluate(() =>
-        document.querySelector('.screen:not([hidden])')?.innerText ?? '');
-      if (!shown.includes(rules.requiredText)) {
-        errors.push(`${shot.name}: missing required text "${rules.requiredText}"`);
+    const shown = await page.evaluate(() =>
+      document.querySelector('.screen:not([hidden])')?.innerText ?? '');
+    if (rules.requiredText && !shown.includes(rules.requiredText)) {
+      errors.push(`${shot.name}: missing required text "${rules.requiredText}"`);
+    }
+    for (const [phrase, why] of rules.forbiddenText ?? []) {
+      if (shown.toLowerCase().includes(phrase.toLowerCase())) {
+        errors.push(`${shot.name}: says "${phrase}" — ${why}`);
       }
     }
   }
