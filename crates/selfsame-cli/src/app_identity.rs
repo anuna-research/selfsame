@@ -35,7 +35,13 @@ use selfsame_app_identity::scope::AccountScopeId;
 use selfsame_app_identity::{alias, codec, hierarchy};
 
 /// Dispatch `selfsame app-identity …`.
+///
+/// The banner is printed here rather than inside each subcommand, because
+/// "every invocation" is the obligation and a per-subcommand call is a list two
+/// of the four were missing from. Printed *before* dispatch, so it precedes the
+/// output it qualifies even when the subcommand fails.
 pub fn run(args: &[String]) -> Result<()> {
+    banner();
     match args.first().map(String::as_str) {
         Some("derive") => derive(&args[1..]),
         Some("alias") => show_alias(&args[1..]),
@@ -53,6 +59,11 @@ pub fn run(args: &[String]) -> Result<()> {
 /// `EXP-001` requires the prototype status to be visible at the point of use,
 /// not only in a document. A person running this should not have to have read
 /// the findings report to know what they are holding.
+///
+/// Called once from [`run`]. It used to be called from the two subcommands that
+/// remembered to, which meant `alias` and `verify-profile` printed nothing —
+/// the two that need no network and therefore look most like finished
+/// utilities.
 fn banner() {
     eprintln!(
         "  note: SPEC-004 is a Tier-1 draft with an open review gate.\n\
@@ -86,7 +97,6 @@ fn derive(args: &[String]) -> Result<()> {
     let [application_id, scope_arg] = args else {
         bail!("usage: selfsame app-identity derive APP_ID SCOPE");
     };
-    banner();
 
     // Both inputs are recognised before anything is derived — CON-202's
     // precondition, carried by the types rather than by a comment.
@@ -145,6 +155,13 @@ fn show_alias(args: &[String]) -> Result<()> {
     let [did, authority] = args else {
         bail!("usage: selfsame app-identity alias DID AUTHORITY");
     };
+    // *Both* arguments, not only the second. `stable_localpart` hashes whatever
+    // it is given, so an unrecognised DID produces a perfectly plausible
+    // `ss-…@authority` for an identity that cannot exist — and the person's next
+    // step is to compare that name against one a real deployment computed.
+    // The recogniser is the pinned method's own, never a second one.
+    did.parse::<did_crdt::Did>()
+        .map_err(|_| anyhow!("`{did}` is not a did:crdt identifier"))?;
     selfsame_app_identity::uri::recognise_dns_name(authority)
         .map_err(|e| anyhow!("accountAuthority is not a lower-case A-label DNS name: {e}"))?;
 
@@ -162,7 +179,6 @@ fn fetch_profile(args: &[String]) -> Result<()> {
     let [application_id] = args else {
         bail!("usage: selfsame app-identity fetch-profile APP_ID");
     };
-    banner();
     let application = ApplicationId::parse(application_id)
         .map_err(|e| anyhow!("applicationId is not canonical: {e}"))?;
 
