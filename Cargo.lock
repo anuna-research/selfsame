@@ -441,6 +441,7 @@ name = "cbcl-core"
 version = "0.1.0"
 dependencies = [
  "hashbrown 0.15.5",
+ "sha2",
 ]
 
 [[package]]
@@ -3897,6 +3898,15 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "selfsame-web-device"
+version = "0.1.0"
+dependencies = [
+ "ed25519-dalek",
+ "selfsame-core",
+ "wasm-bindgen",
 ]
 
 [[package]]

@@ -1,0 +1,30 @@
+[package]
+name = "selfsame-web-device"
+description = "A browser device client for SPEC-001 linking: the wasm surface over selfsame-core's decisions, for EXP-002's end-to-end harness"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# `cdylib` is what wasm-bindgen links; `rlib` keeps the crate testable natively,
+# which is the only way its logic gets exercised without a browser.
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+# ── Why this crate exists rather than annotations in selfsame-core ───────────
+#
+# `selfsame-core/tests/purity.rs` asserts the core's dependency graph, and the
+# wasm build for `wasm32-unknown-unknown` is that same boundary checked from the
+# other side. Putting `#[wasm_bindgen]` in the core would add a dependency to
+# the one crate whose dependencies are the subject of a test — for the benefit
+# of a harness.
+#
+# So the binding surface lives here, one directory over, exactly as
+# `selfsame-app-identity-net` is the effectful shell for `selfsame-app-identity`.
+# The core keeps deciding; this crate only makes the decisions callable from
+# JavaScript. Recorded as EXP-002 Q2.
+[dependencies]
+selfsame-core = { workspace = true }
+ed25519-dalek = { workspace = true, features = ["std"] }
+wasm-bindgen = "0.2"
