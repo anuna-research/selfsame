@@ -655,14 +655,18 @@ textarea:focus {
   margin-top: 6px;
 }
 
-.devices {
+.devices,
+.applications,
+.grants {
   list-style: none;
   display: flex;
   flex-direction: column;
   gap: 10px;
 }
 
-.device {
+.device,
+.application,
+.grant {
   background: var(--card);
   border: 1px solid var(--hairline);
   border-radius: 14px;
@@ -679,22 +683,30 @@ textarea:focus {
   min-height: var(--tap);
 }
 
-.device:hover {
+.device:hover,
+.application:hover,
+.grant:hover {
   border-color: var(--hairline-strong);
 }
 
-.device__body {
+.device__body,
+.application__body,
+.grant__body {
   display: flex;
   flex-direction: column;
   gap: 2px;
   min-width: 0;
 }
 
-.device__name {
+.device__name,
+.application__name,
+.grant__name {
   font-size: 15px;
 }
 
-.device__meta {
+.device__meta,
+.application__meta,
+.grant__meta {
   font-family: var(--mono);
   font-size: 13px;
   color: var(--dim);
@@ -928,4 +940,49 @@ textarea:focus {
 
 .restored-list .device__name {
   font-size: 15px;
+}
+
+/* ── IMPL-004 · the SPEC-004 surface ─────────────────────────────────────
+   The lists above are shared with `.devices`/`.device` rather than
+   duplicated: an application row and a device row are the same component
+   doing the same job, and two copies would be two places for one of them to
+   drift. Only what is genuinely new appears below. */
+
+/* A value the person may need to read character by character — an `acct:`
+   URI, an origin. Same treatment as `.did`, which is the same kind of thing. */
+.value--mono,
+.evidence__val--mono {
+  font-family: var(--mono);
+  font-size: 13px;
+  word-break: break-all;
+  line-height: 1.5;
+}
+
+/* REQ-222's permission list. Each row is what the application gains, with its
+   URI underneath — subordinate, and never omitted: an unrecognised permission
+   shows the URI as its headline instead, because paraphrasing one would be
+   consenting the person to a description nobody wrote. */
+.permissions {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.permission {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.permission__what {
+  font-size: 15px;
+}
+
+.permission__uri {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--lichen);
+  word-break: break-all;
 }

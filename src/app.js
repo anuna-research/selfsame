@@ -53,6 +53,11 @@ if (!bridge) {
 }
 const invoke = bridge;
 
+// IMPL-004 ADR-601 — the SPEC-004 surface. One-way: this file hands it the
+// primitives it needs, and imports nothing back. A cycle would work and would
+// make the boundary a convention rather than a fact.
+import { initAppIdentity } from "./app-identity.js";
+
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 
@@ -150,6 +155,10 @@ async function refresh() {
   const link = $('[data-action="to-link"]');
   link.disabled = !s.backup_confirmed;
   link.title = s.backup_confirmed ? "" : "Confirm your recovery phrase first";
+
+  // IMPL-004: applications beside devices, under one identity.
+  appIdentity.renderApplications(s.applications ?? []);
+  appIdentity.renderSummary(s.applications ?? []);
 
   $("[data-endpoint]").textContent = await invoke("service_endpoint");
   show("home");
@@ -728,6 +737,12 @@ const actions = {
   "back-to-device": () => openDevice(ui.device),
   unlink,
 };
+
+// IMPL-004 registers its own actions into the same map, so the delegated
+// listener below dispatches both surfaces without knowing there are two.
+const appIdentity = initAppIdentity({
+  $, $$, show, invoke, fail, clearErrors, message, renderLifehash, since, actions,
+});
 
 document.addEventListener("click", (e) => {
   const el = e.target.closest("[data-action]");

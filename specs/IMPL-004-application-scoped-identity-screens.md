@@ -1,9 +1,9 @@
 ---
 id: IMPL-004
 title: Application- and Account-Scoped Identity — the person-facing surface
-status: draft
+status: implemented
 tier: 2
-version: 0.1.0
+version: 0.2.0
 audience: agent, human, frontend implementer
 author: Anuna Research (drafted with Claude, 2026-08-01)
 last-updated: 2026-08-01
@@ -370,9 +370,18 @@ in the specification":
 > restores the *hierarchy*; the account scope comes from the application.
 
 [[SPEC-004-application-scoped-identity#REQ-217]] forbids guessing and forbids
-prompting. The screen therefore SHALL offer no action, and SHALL NOT imply a
-remedy that does not exist. It will read as a bug to anyone who has not read
-HP-7, and softening it is a specification change, not a design improvement.
+prompting. The screen therefore SHALL offer no **remedial** control — no field,
+no retry, nothing implying the scope can be supplied from here — and SHALL NOT
+imply a remedy that does not exist. It will read as a bug to anyone who has not
+read HP-7, and softening it is a specification change, not a design improvement.
+
+It SHALL nevertheless carry a navigation control back to
+`applications`. Version 0.1.0 of this plan required "no action at all" and its
+test forbade every `button`, which would have stranded the person who reached
+it and failed the accessibility baseline besides. That was over-reading the
+requirement: `REQ-217` prohibits offering a way to *supply the scope*, not
+leaving without one. The test now forbids `.btn` — this app's action class —
+and requires `.back`.
 
 `remove-pending` is the same shape in miniature.
 [[SPEC-004-application-scoped-identity#CON-210]] forbids reporting success until
@@ -412,11 +421,19 @@ Interface:  invoke("alias_preview", { homeDid, accountAuthority, localpart? })
 **Input grammar.**
 
 ```abnf
-home-did     = "did:crdt:" 1*63(ALPHA / DIGIT)
+home-did     = "did:crdt:" 64HEXDIG        ; BLAKE3, lower-case
 authority    = label *("." label)          ; RFC 1123, lower-case A-label
 label        = alnum / (alnum *61ldh alnum)
 localpart    = 1*64(ALPHA / DIGIT / "-" / "_" / ".")
 ```
+
+`home-did` is recognised by the method's own `Did::from_str`, not by a parser
+written here. The distinction is not stylistic: a first draft of `CON-601`
+capped the identifier at 63 characters and rejected every real DID, which the
+unit tests caught immediately. A shell-side recogniser that disagrees with the
+method's by one character is the parser differential
+[[SPEC-004-application-scoped-identity#CON-205]] spends its length avoiding,
+arriving through the back door.
 
 **Pre-conditions.**
 
@@ -615,4 +632,5 @@ amendment requests; none changes this plan by itself.
 
 | Version | Date | Change |
 |---|---|---|
+| 0.2.0 | 2026-08-01 | **Implemented.** Two corrections the build forced, both recorded rather than quietly applied: `CON-601`'s `home-did` grammar was `1*63(ALPHA / DIGIT)` and is `64HEXDIG` — the first draft rejected every real DID, and the recogniser is now the method's own `Did::from_str` rather than one written here. `scope-unavailable` required "no action at all"; that over-read `REQ-217`, which prohibits offering a way to supply the scope rather than leaving without one, so it now carries navigation and its test forbids `.btn` instead of every `button`. |
 | 0.1.0 | 2026-08-01 | Initial plan. Thirteen screens, three contracts, three ADRs. No `REQ-###` introduced. `SCREEN-###` documents deferred to `anuna-ssi`. |

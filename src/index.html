@@ -144,6 +144,18 @@
           No devices yet. Open cbcl-chat on your computer and choose
           <em>This is my device</em>.
         </p>
+
+        <!--
+          IMPL-004. Devices are how you reach your identity; applications are
+          what it does. Two lists, one identity — beside each other rather than
+          behind a mode, because they are two views of the same thing.
+        -->
+        <div class="section-head">
+          <h2>Applications</h2>
+          <button class="btn btn--small" data-action="to-applications">See all</button>
+        </div>
+        <p class="footnote" data-applications-summary></p>
+
         <div class="spacer"></div>
         <p class="footnote" data-endpoint></p>
       </section>
@@ -435,6 +447,337 @@
         </p>
         <div class="spacer"></div>
         <button class="btn btn--primary" data-action="to-home">Continue</button>
+      </section>
+
+      <!--
+        ══════════════════════════════════════════════════════════════════
+        IMPL-004 · the SPEC-004 surface
+        ══════════════════════════════════════════════════════════════════
+
+        Devices are how you reach your identity; applications are what it
+        does. The wallet already shows the first list; these thirteen screens
+        are the second, under the same identity.
+
+        Nothing here decides anything. Every value and every refusal arrives
+        from Rust — see IMPL-004's Purity Boundary Map.
+      -->
+
+      <!-- ══ HP-3 · applications ════════════════════════════════════════ -->
+      <section class="screen screen--scroll" data-screen="applications" hidden>
+        <button class="back" data-action="to-home">Home</button>
+        <h1>Applications</h1>
+        <p class="lede">
+          Each one gets its own identity below your recovery words. They cannot
+          see each other, and none of them can see this list.
+        </p>
+        <ul class="applications" data-applications></ul>
+        <p class="empty" data-applications-empty hidden>
+          No applications yet. Sign into one that supports Selfsame and it will
+          appear here.
+        </p>
+      </section>
+
+      <!-- ══ HP-3 · one application ═════════════════════════════════════ -->
+      <section class="screen screen--scroll" data-screen="application" hidden>
+        <button class="back" data-action="to-applications">Applications</button>
+        <h1 data-app-title></h1>
+        <p class="did did--wrap" data-app-origin></p>
+
+        <div class="card">
+          <p class="label">This account is known as</p>
+          <p class="value value--mono" data-app-alias></p>
+          <p class="footnote">
+            Opaque by design. It identifies the account without naming you.
+          </p>
+          <p class="label" data-app-username-label hidden>Public username</p>
+          <p class="value" data-app-username hidden></p>
+        </div>
+
+        <button class="btn btn--quiet" data-action="to-username">
+          <span data-app-username-cta>Set a public username</span>
+        </button>
+
+        <div class="section-head">
+          <h2>Devices on this account</h2>
+        </div>
+        <ul class="grants" data-grants></ul>
+        <p class="empty" data-grants-empty hidden>
+          No devices hold a grant for this account.
+        </p>
+
+        <div class="spacer"></div>
+        <button class="btn btn--quiet" data-action="to-fingerprint">
+          Compare this account's fingerprint
+        </button>
+        <!--
+          Two ceremony entries. In a wired build these are reached *from the
+          ceremony* — an application asks, and the wallet shows consent — not
+          browsed to. They are here because a screen no path reaches is a screen
+          nobody has looked at, and IMPL-004's whole premise is that unreachable
+          contracts go unexamined.
+        -->
+        <button class="btn btn--quiet" data-action="to-app-consent">
+          Review what this application may do
+        </button>
+        <button class="btn btn--quiet" data-action="to-handoff">
+          Authorise on this device
+        </button>
+      </section>
+
+      <!-- ══ HP-3 · set a username (CON-212, NFR-201) ═══════════════════ -->
+      <section class="screen screen--scroll" data-screen="username-set" hidden>
+        <button class="back" data-action="back-to-application">Back</button>
+        <h1>Choose a public username.</h1>
+        <p class="lede">
+          Optional. Your account already works without one.
+        </p>
+        <label class="field">
+          <span class="field__label">Username</span>
+          <input id="username-input" type="text" autocomplete="off" spellcheck="false"
+                 autocapitalize="none" inputmode="text" />
+        </label>
+        <p class="label">People would find you at</p>
+        <p class="value value--mono" data-username-preview></p>
+        <!--
+          NFR-201's only control. The protocol cannot make a voluntarily reused
+          public name unlinkable, so the warning is the mechanism rather than a
+          courtesy — and it names the consequence rather than gesturing at it.
+        -->
+        <p class="caution">
+          This is publicly discoverable. Anyone can look it up, and if you reuse
+          a name you use elsewhere it links this account to those.
+        </p>
+        <p class="error" data-error="username" hidden></p>
+        <div class="spacer"></div>
+        <button class="btn btn--primary" data-action="set-username">Claim it</button>
+      </section>
+
+      <!-- ══ HP-3 · username refused ════════════════════════════════════ -->
+      <section class="screen" data-screen="username-taken" hidden>
+        <div class="mark mark--lg mark--broken" aria-hidden="true"></div>
+        <h1>That username isn't available.</h1>
+        <p class="lede">
+          Someone holds it, or it is reserved. Your account is unchanged and
+          still works.
+        </p>
+        <div class="spacer"></div>
+        <button class="btn btn--primary" data-action="to-username">Try another</button>
+        <button class="btn btn--quiet" data-action="back-to-application">Leave it</button>
+      </section>
+
+      <!--
+        ══ HP-4a · first enrollment (CON-221, REQ-230) ══════════════════
+
+        REQ-230 forbids offering a skip, so there is no third control and no
+        back button. Two options, both of which are answers to the question.
+        A "later" here would be the whole of what CON-221 protects, discarded
+        by the one person it protects.
+
+        The compared value is the hex, exactly as SCREEN-001 — the picture is
+        a recognition aid and is quieter for the same reason.
+      -->
+      <section class="screen screen--scroll" data-screen="fingerprint-compare" hidden>
+        <div class="consent-head">
+          <span class="screen-title">First time on this account</span>
+        </div>
+        <h1>Does the other screen show this?</h1>
+
+        <div class="fp">
+          <canvas class="fp__lifehash fp__lifehash--lg" data-home-fp-lifehash aria-hidden="true"></canvas>
+          <p class="fp__hex" data-home-fp-hex></p>
+          <p class="fp__label" data-home-fp-label></p>
+        </div>
+
+        <p class="lede">
+          You are asked this once for this account, ever. It is what stands
+          between you and someone else's identity being bound to it.
+        </p>
+
+        <div class="spacer"></div>
+        <button class="btn btn--primary" data-action="fingerprint-matches">Yes, they match</button>
+        <button class="btn btn--danger" data-action="fingerprint-differs">They're different</button>
+      </section>
+
+      <!--
+        ══ HP-4/HP-5 · consent (REQ-222, CON-217) ═══════════════════════
+
+        REQ-222 names display name, icon, bundle name, deep link, callback URI
+        and TLS connection as insufficient by themselves. So the application's
+        own name appears under the untrusted treatment this app already uses
+        for a device's self-description, and the authenticated origin appears
+        under the verified one.
+
+        The person is shown which fact is which rather than asked to know that
+        origins are trustworthy and names are not.
+      -->
+      <section class="screen screen--scroll" data-screen="consent-application" hidden>
+        <div class="consent-head">
+          <span class="screen-title">Authorise an application</span>
+        </div>
+        <h1>Let this application act for your account?</h1>
+
+        <div class="evidence">
+          <div class="evidence__row">
+            <p class="evidence__key">Asked by</p>
+            <p class="evidence__val evidence__val--mono" data-consent-origin></p>
+          </div>
+
+          <div class="evidence__row evidence__row--untrusted">
+            <p class="evidence__key">Calls itself</p>
+            <p class="evidence__val" data-consent-name></p>
+            <p class="evidence__note">its own words, unchecked</p>
+          </div>
+
+          <div class="evidence__row">
+            <p class="evidence__key">For this account</p>
+            <p class="evidence__val evidence__val--mono" data-consent-alias></p>
+          </div>
+
+          <div class="evidence__row">
+            <p class="evidence__key">Gains</p>
+            <ul class="permissions" data-consent-permissions></ul>
+          </div>
+        </div>
+
+        <div class="spacer"></div>
+        <button class="btn btn--primary" data-action="consent-approve">Allow</button>
+        <button class="btn btn--quiet" data-action="consent-refuse">No</button>
+      </section>
+
+      <!-- ══ HP-5 · same-device handoff (CON-215) ═══════════════════════ -->
+      <section class="screen" data-screen="handoff" hidden>
+        <button class="back" data-action="back-to-application">Cancel</button>
+        <div class="mark mark--lg" aria-hidden="true"></div>
+        <h1>Continue in Selfsame</h1>
+        <p class="lede">
+          The application will hand this over to your wallet. Nothing is sent
+          anywhere else, and nothing leaves this device.
+        </p>
+        <div class="spacer"></div>
+        <button class="btn btn--primary" data-action="handoff-continue">Continue</button>
+        <!--
+          The two failure paths, reachable here only so the screen check can
+          capture them. A real adapter reaches them from the platform.
+        -->
+        <button class="btn btn--quiet" data-action="handoff-no-wallet" hidden>no wallet</button>
+        <button class="btn btn--quiet" data-action="handoff-unverified" hidden>unverified</button>
+      </section>
+
+      <!--
+        ══ HP-5 · no wallet (CON-222) ═══════════════════════════════════
+
+        The ordinary state of a device with no wallet yet — not a failed check.
+        CON-222: "the result is WalletUnavailable and an install action
+        containing no ceremony value", so the install button carries nothing.
+      -->
+      <section class="screen" data-screen="wallet-unavailable" hidden>
+        <div class="mark mark--lg" aria-hidden="true"></div>
+        <h1>Selfsame isn't installed.</h1>
+        <p class="lede">
+          You need the wallet on this device to authorise an application on it.
+        </p>
+        <p class="caution">
+          Installing carries nothing across. You will start this again
+          afterwards, from the beginning.
+        </p>
+        <div class="spacer"></div>
+        <button class="btn btn--primary" data-action="install-wallet">Get Selfsame</button>
+        <button class="btn btn--quiet" data-action="back-to-application">Not now</button>
+      </section>
+
+      <!-- ══ HP-5 · handoff refused (REQ-225) ═══════════════════════════ -->
+      <section class="screen" data-screen="handoff-refused" hidden>
+        <div class="mark mark--lg mark--broken" aria-hidden="true"></div>
+        <h1>That couldn't be delivered safely.</h1>
+        <p class="lede" data-handoff-token></p>
+        <p class="caution">
+          Nothing was handed over. Start again when you're ready — you will need
+          a fresh attempt, not a retry of this one.
+        </p>
+        <div class="spacer"></div>
+        <button class="btn btn--primary" data-action="back-to-application">Back</button>
+      </section>
+
+      <!-- ══ HP-6 · remove a device (CON-210) ═══════════════════════════ -->
+      <section class="screen screen--scroll" data-screen="remove-device" hidden>
+        <button class="back" data-action="back-to-application">Back</button>
+        <h1 data-remove-title></h1>
+        <p class="lede">
+          It stops being able to act for <strong data-remove-account></strong>.
+          Your other accounts, and your other devices, are untouched.
+        </p>
+        <p class="caution">
+          Devices check for this when they next look, so it is not instant.
+        </p>
+        <div class="spacer"></div>
+        <button class="btn btn--danger" data-action="remove-device">Remove it</button>
+        <button class="btn btn--quiet" data-action="back-to-application">Keep it</button>
+      </section>
+
+      <!--
+        ══ HP-6 · pending (CON-210) ═════════════════════════════════════
+
+        CON-210 forbids reporting success until a re-resolved verified closure
+        contains the grant ID, so this screen can persist indefinitely when no
+        resolver answers. HP-6 calls that "honest and unsatisfying".
+
+        There is deliberately no tick, no progress bar, and no completion
+        affordance: each would be a success claim the wallet cannot make.
+      -->
+      <section class="screen screen--scroll" data-screen="remove-pending" hidden>
+        <div class="mark mark--lg mark--pending" aria-hidden="true"></div>
+        <h1>Removing…</h1>
+        <p class="lede">
+          Signed on this device and sent. It is not removed until a resolver
+          confirms it, and this will keep trying until one does.
+        </p>
+        <p class="caution">
+          If it stays here, the revocation is not lost — it is retained and
+          retried. Nothing has told you it worked, because nothing has.
+        </p>
+        <div class="spacer"></div>
+        <button class="btn btn--quiet" data-action="back-to-application">Leave it running</button>
+      </section>
+
+      <!-- ══ HP-6 · confirmed ═══════════════════════════════════════════ -->
+      <section class="screen screen--scroll" data-screen="remove-confirmed" hidden>
+        <div class="mark mark--lg mark--ok" aria-hidden="true"></div>
+        <h1 data-removed-title></h1>
+        <p class="lede">
+          A verified record now carries the removal. Devices that check will see
+          it.
+        </p>
+        <div class="spacer"></div>
+        <button class="btn btn--primary" data-action="back-to-application">Done</button>
+      </section>
+
+      <!--
+        ══ HP-7 · no account scope (REQ-217) ════════════════════════════
+
+        The sharpest cliff in the specification, and this screen's job is to be
+        honest rather than helpful. REQ-217 forbids guessing and forbids
+        prompting, so there is no control here at all — not a disabled one, not
+        a "try again", not a text field. A button would be a lie about what is
+        possible.
+      -->
+      <section class="screen screen--scroll" data-screen="scope-unavailable" hidden>
+        <!--
+          Navigation, not a remedy. REQ-217 forbids offering a way to supply
+          the scope; it does not require stranding the person who arrived here,
+          and a screen with no exit fails the accessibility baseline besides.
+        -->
+        <button class="back" data-action="to-applications">Applications</button>
+        <div class="mark mark--lg mark--broken" aria-hidden="true"></div>
+        <h1>This account can't be opened.</h1>
+        <p class="lede">
+          Your recovery words rebuild your identity, but the account itself is
+          named by the application — and it hasn't supplied that name.
+        </p>
+        <p class="caution">
+          Sign into the application first. If that account is gone for good,
+          this identity cannot be recovered, and no recovery phrase changes
+          that.
+        </p>
       </section>
 
       <!-- ══ busy ═══════════════════════════════════════════════════════ -->

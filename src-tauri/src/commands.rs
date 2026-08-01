@@ -44,6 +44,17 @@ impl serde::Serialize for UiError {
     }
 }
 
+/// A closed error token, straight through.
+///
+/// `IMPL-004`'s refusal screens each render exactly one token from
+/// `CON-226`'s set and nothing else, so the token *is* the message. This
+/// conversion exists so those commands cannot accidentally grow a second
+/// sentence explaining which check failed — there is nowhere to put one.
+impl From<&'static str> for UiError {
+    fn from(token: &'static str) -> Self {
+        UiError(token.to_owned())
+    }
+}
 impl From<CustodyError> for UiError {
     fn from(e: CustodyError) -> Self {
         UiError(e.to_string())

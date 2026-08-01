@@ -58,6 +58,65 @@ const ROOT_FP = { hex: '5F 9A C9 07 2E 11', label: 'slate-heron-07', lifehash: L
 const DID_FP = { hex: '2E 41 D0 88 6B 15', label: 'garnet-plover-31', lifehash: LH['did_2E41D0886B15'] };
 const KEY_FP = { hex: 'C0 7A 1E 42 9B 33', label: 'copper-lynx-42', lifehash: LH['key_C07A1E429B33'] };
 
+// ── IMPL-004 · the SPEC-004 surface ──────────────────────────────────────
+//
+// HOME_FP is a real fingerprint of the stub home DID CON-603 returns, with a
+// real LifeHash of that digest — same discipline as the constants above. The
+// DID's *provenance* is fixture (see FINDING-016: the wallet holds no material
+// to derive one), but everything rendered from it is genuinely computed.
+const HOME_DID = 'did:crdt:4b8e2f7a91c05d63e8f240ab17c9d3e56082f4a1bc7d90e35f61a284c093db7e';
+const HOME_FP = { hex: 'FF 9E 3B 49 7A 49', label: 'cobalt-quarry-27', lifehash: LH['home_FF9E3B497A49'] };
+
+// The account alias is the opaque one CON-203 derives from the home DID. The
+// account *scope* appears nowhere here and must appear nowhere on screen
+// (NFR-203) — the fixture cannot leak what it does not carry.
+const APPLICATIONS = [
+  {
+    application_id: 'https://photos.example/selfsame/application',
+    display_name: 'Photos',
+    account_alias: 'acct:ss-k4f7q2m9x3v6b8n1p5r0t2w4y6z8a1c3e5g7@accounts.photos.example',
+    username: 'alice',
+    home_did: HOME_DID,
+    fingerprint: HOME_FP,
+    permissions: [
+      { uri: 'https://photos.example/selfsame/application#device', title: 'Act as this account on this device', known: true },
+      { uri: 'https://photos.example/selfsame/application#upload', title: null, known: false },
+    ],
+    devices: [
+      { label: 'This phone', grant_id: `${HOME_DID}#grant-AAAA`, added_at: Math.floor(Date.now()/1000) - 86400, is_this_device: true },
+      { label: 'Laptop', grant_id: `${HOME_DID}#grant-BBBB`, added_at: Math.floor(Date.now()/1000) - 604800, is_this_device: false },
+    ],
+  },
+  {
+    application_id: 'https://notes.example/selfsame/application',
+    display_name: 'Notes',
+    // HP-7's cliff: the application has not supplied this account's scope, so
+    // there is no alias and no identity to open. REQ-217 forbids guessing one.
+    account_alias: null,
+    username: null,
+    home_did: HOME_DID,
+    fingerprint: HOME_FP,
+    permissions: [],
+    devices: [],
+  },
+];
+
+const STATE_APPS = {
+  has_identity: true,
+  backup_confirmed: true,
+  did: 'did:crdt:9f3a11c2e70b4d8a5c6f9012ab34cd56ef78901234abcd56ef7890123456abcd',
+  fingerprint: { hex: '2E 41 D0 88 6B 15', label: 'garnet-plover-31', lifehash: LH['did_2E41D0886B15'] },
+  root_fingerprint: { hex: '5F 9A C9 07 2E 11', label: 'slate-heron-07', lifehash: LH['root_5F9AC9072E11'] },
+  pending_publications: 0,
+  devices: [],
+  applications: APPLICATIONS,
+};
+
+// CON-210: only a re-resolved verified closure moves a removal to confirmed.
+// Two states rather than a timer or a button — the screen asks, and the answer
+// decides. `28-remove-pending` asks and is told no; `29` asks and is told yes.
+const STATE_APPS_SETTLED = { ...STATE_APPS, revocation_settled: true };
+
 const STATE_LINKED = {
   has_identity: true,
   backup_confirmed: true,
@@ -106,6 +165,30 @@ const bridge = (state) => `
           case 'unlink_device': return null;
           case 'reject_offer': return null;
           case 'flush_publications': return 0;
+
+          // ── IMPL-004 CON-601..603 ──────────────────────────────────────
+          case 'alias_preview': {
+            // The refusal path: CON-601 returns one closed token and no detail.
+            if (args.localpart === 'admin') throw 'UsernameUnavailable';
+            return {
+              stableAlias: ${JSON.stringify(APPLICATIONS[0].account_alias)},
+              usernameAlias: args.localpart
+                ? 'acct:' + args.localpart + '@accounts.photos.example'
+                : null,
+            };
+          }
+          case 'home_fingerprint': return ${JSON.stringify(HOME_FP)};
+          case 'app_identity_derive': {
+            if (!args.accountScopeId) throw 'AccountScopeUnavailable';
+            return { homeDid: ${JSON.stringify(HOME_DID)}, publicKey: 'AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE' };
+          }
+          case 'revoke_grant': return null;
+          case 'revocation_status': return { confirmed: ${JSON.stringify(state)}.revocation_settled === true };
+          case 'dispatch_handoff':
+            if (args.outcome === 'no-wallet') throw 'WalletUnavailable';
+            if (args.outcome === 'unverified') throw 'UnverifiedWalletTarget';
+            return null;
+
           default: return null;
         }
       },
@@ -131,7 +214,80 @@ const shots = [
   { name: '15-restored', state: STATE_LINKED, steps: ['begin-restore', 'fill-restore', 'restore'] },
   { name: '16-unlinked', state: STATE_LINKED, steps: ['open-device', 'to-unlink', 'fill-unlink-passcode', 'unlink'] },
   { name: '17-refused-code', state: STATE_LINKED, steps: ['to-link', 'fill-bad-code', 'read-code'] },
+
+  // ── IMPL-004 · TEST-601..613 ─────────────────────────────────────────
+  { name: '18-applications', expect: 'applications', state: STATE_APPS, steps: ['to-applications'] },
+  { name: '19-application', expect: 'application', state: STATE_APPS, steps: ['to-applications', 'open-application'] },
+  { name: '20-username-set', expect: 'username-set', state: STATE_APPS, steps: ['to-applications', 'open-application', 'to-username'] },
+  { name: '21-username-taken', expect: 'username-taken', state: STATE_APPS, steps: ['to-applications', 'open-application', 'to-username', 'fill-taken-username', 'set-username'] },
+  { name: '22-fingerprint-compare', expect: 'fingerprint-compare', state: STATE_APPS, steps: ['to-applications', 'open-application', 'to-fingerprint'] },
+  { name: '23-consent-application', expect: 'consent-application', state: STATE_APPS, steps: ['to-applications', 'open-application', 'to-app-consent'] },
+  { name: '24-handoff', expect: 'handoff', state: STATE_APPS, steps: ['to-applications', 'open-application', 'to-handoff'] },
+  { name: '25-wallet-unavailable', expect: 'wallet-unavailable', state: STATE_APPS, steps: ['to-applications', 'open-application', 'to-handoff', 'handoff-no-wallet'] },
+  { name: '26-handoff-refused', expect: 'handoff-refused', state: STATE_APPS, steps: ['to-applications', 'open-application', 'to-handoff', 'handoff-unverified'] },
+  { name: '27-remove-device', expect: 'remove-device', state: STATE_APPS, steps: ['to-applications', 'open-application', 'open-grant', 'to-remove-device'] },
+  { name: '28-remove-pending', expect: 'remove-pending', state: STATE_APPS, steps: ['to-applications', 'open-application', 'open-grant', 'to-remove-device', 'remove-device'] },
+  { name: '29-remove-confirmed', expect: 'remove-confirmed', state: STATE_APPS_SETTLED, steps: ['to-applications', 'open-application', 'open-grant', 'to-remove-device', 'remove-device'] },
+  { name: '30-scope-unavailable', expect: 'scope-unavailable', state: STATE_APPS, steps: ['to-applications', 'open-unscoped-application'] },
 ];
+
+// ── Negative-output assertions (IMPL-004 TEST-605 / 611 / 613) ───────────
+//
+// The half most easily lost. A suite that only checks a screen renders will
+// pass a screen that renders *and also* offers a skip, so these assert the
+// ABSENCE of an affordance and name the requirement each absence serves.
+//
+// `forbidden` is a list of [selector, why] pairs evaluated against the visible
+// screen. `requiredText` is a substring that must appear.
+const SCREEN_RULES = {
+  '18-applications': {
+    // NFR-203: the account scope never reaches a screen.
+    forbidden: [['[data-account-scope]', 'NFR-203 forbids rendering an accountScopeId']],
+  },
+  '19-application': {
+    forbidden: [['[data-grant-id]', 'a grant ID is held to act on, not rendered']],
+  },
+  '20-username-set': {
+    // NFR-201: the correlation warning is the only control over a voluntarily
+    // reused public name, so it is not optional.
+    requiredText: 'publicly discoverable',
+  },
+  '22-fingerprint-compare': {
+    // REQ-230 forbids offering a skip. Not "hides" — the control must not exist.
+    forbidden: [
+      ['[data-action="skip-fingerprint"]', 'REQ-230 forbids offering a skip'],
+      ['[data-action="to-home"]', 'REQ-230: a bare exit is a skip wearing another label'],
+    ],
+  },
+  '23-consent-application': {
+    // REQ-222: the application's own name may never carry the decision.
+    requiredText: 'its own words, unchecked',
+  },
+  '25-wallet-unavailable': {
+    // CON-222: the install action carries no ceremony value.
+    forbidden: [['[data-ceremony]', 'CON-222: the install action carries no ceremony value']],
+  },
+  '28-remove-pending': {
+    // CON-210 forbids reporting success before a verified closure.
+    forbidden: [
+      ['[data-action="remove-done"]', 'CON-210 forbids a success affordance while pending'],
+      ['.steps__ok', 'CON-210: a completion tick is a success claim'],
+    ],
+  },
+  '30-scope-unavailable': {
+    // REQ-217 forbids guessing and forbids prompting, so no *remedial* control
+    // may exist: no field, no retry, nothing that implies the scope can be
+    // supplied from here. `.btn` is this app's action class and is forbidden;
+    // `.back` is navigation and is required, because a screen with no exit is a
+    // defect rather than compliance — the requirement is about not offering a
+    // remedy that does not exist, not about trapping the person who found it.
+    forbidden: [
+      ['.btn', 'REQ-217 forbids offering a remedial action here'],
+      ['input', 'REQ-217 forbids prompting for a scope'],
+    ],
+    requiredText: 'Sign into the application first',
+  },
+};
 
 // `protocolTimeout` is raised because a screenshot on a loaded machine can take
 // longer than the 30 s default, and a flaky presentation check is worse than a
@@ -193,6 +349,18 @@ for (const shot of shots) {
       });
     } else if (step === 'open-device') {
       await page.evaluate(() => document.querySelector('.device')?.click());
+    } else if (step === 'open-application') {
+      await page.evaluate(() => document.querySelector('.application')?.click());
+    } else if (step === 'open-unscoped-application') {
+      // The second fixture application has no scope available — HP-7's cliff.
+      await page.evaluate(() => document.querySelectorAll('.application')[1]?.click());
+    } else if (step === 'open-grant') {
+      await page.evaluate(() => document.querySelector('.grant')?.click());
+    } else if (step === 'fill-taken-username') {
+      await page.evaluate(() => {
+        const el = document.querySelector('#username-input');
+        if (el) { el.value = 'admin'; el.dispatchEvent(new Event('input')); }
+      });
     } else {
       await page.evaluate((a) => document.querySelector(`[data-action="${a}"]`)?.click(), step);
     }
@@ -269,10 +437,35 @@ for (const shot of shots) {
     }
   }
 
+  // IMPL-004 negative-output and required-text assertions.
+  const rules = SCREEN_RULES[shot.name];
+  if (rules) {
+    for (const [selector, why] of rules.forbidden ?? []) {
+      const present = await page.evaluate((sel) => {
+        const screen = document.querySelector('.screen:not([hidden])');
+        return !!screen && !!screen.querySelector(sel);
+      }, selector);
+      if (present) errors.push(`${shot.name}: \`${selector}\` is present — ${why}`);
+    }
+    if (rules.requiredText) {
+      const shown = await page.evaluate(() =>
+        document.querySelector('.screen:not([hidden])')?.innerText ?? '');
+      if (!shown.includes(rules.requiredText)) {
+        errors.push(`${shot.name}: missing required text "${rules.requiredText}"`);
+      }
+    }
+  }
+
   const pics = pictures.length ? `  lifehash×${pictures.length}` : '';
   console.log(`${shot.name.padEnd(14)} screen=${visible.join(',') || 'NONE'}${pics}${overflow ? '  ⚠ horizontal overflow' : ''}`);
   if (visible.length !== 1) errors.push(`${shot.name}: ${visible.length} screens visible (${visible})`);
   if (overflow) errors.push(`${shot.name}: horizontal overflow at 430px`);
+  // "Exactly one screen visible" passes for ANY single screen, so a shot whose
+  // navigation silently does nothing still looks green while capturing `home`.
+  // `expect` names the screen the steps must actually reach.
+  if (shot.expect && visible[0] !== shot.expect) {
+    errors.push(`${shot.name}: reached ${visible[0] ?? 'NONE'}, expected ${shot.expect}`);
+  }
 
   try {
     await page.screenshot({ path: `${OUT}/${shot.name}.png` });
