@@ -212,17 +212,71 @@ Expected shape, reserved but not yet written:
 
 None of these are written yet, deliberately. They are what the spike is for.
 
+## Findings so far
+
+### FINDING-018 — the dev rendezvous sends no CORS headers
+
+Layer two found this on its first run and it is the spike earning its cost: a
+browser device client **cannot** talk to `selfsame-rendezvous` cross-origin,
+because the service sets no `Access-Control-Allow-*` on any route. The sealed
+offer's `PUT` never leaves the page.
+
+Nothing had noticed because every previous client of that service was a CLI or a
+test using an HTTP library, and neither is subject to the same-origin policy.
+The first browser client finds it immediately.
+
+It is **recorded, not fixed**. This brief's isolation clause says a production
+change made to suit the harness is a finding needing its own justification, and
+adding CORS to a service is a decision about who may call it from where — which
+deserves that justification on its own terms rather than as a side effect of
+turning a test green. It joins Q1 as the owner's.
+
+The harness proceeds without touching the service: the driver forwards
+`/rendezvous/*` and `/dids/*` from the page's own origin, so the browser sees one
+origin and needs no CORS while the real service still handles every request. The
+cost is stated plainly — a proxy sits in the path, so **the harness does not
+prove the browser can reach the service cross-origin**, which is exactly what the
+finding says it cannot. If a browser device client is ever more than a fixture,
+this has to be settled properly.
+
+### Two defects in the harness's own first draft
+
+Both are recorded because each produced a failure that looked like something
+else, which is the kind of thing worth writing down once.
+
+The page server computed `req.url === '/' ? '/index.html' : req.url.split('?')[0]`.
+With the query string the page is always fetched with, the equality fails, the
+split yields `/`, and the server tries to read a *directory* — a 404 that renders
+as a blank page with no console error and no failed request in the browser.
+`tests/screens.mjs` carries the same expression and never trips it, because it
+navigates to an explicit `/index.html` and passes no query.
+
+The page displayed the link code *before* writing the sealed offer, against the
+intent its own comment stated. A person would be looking at a code addressing an
+empty slot; the harness, which reads the code the instant it appears, hit the
+resulting `404` every time. The invariant is now explicit — `[data-link-code]`
+is non-empty only after the `PUT` succeeds — and the driver waits for the text
+rather than the element.
+
 ## Open questions for the owner
 
 - **Q1.** Does the endpoint injection candidate U2.1 — a debug-only [[Cargo
   feature]] — count as production code changed to suit a test? It is small and
   gated, but it is a source change made for a harness, and the isolation clause
   above says such changes are findings rather than conveniences.
+- **Q3.** `FINDING-018`: should `selfsame-rendezvous` send CORS headers? A
+  browser device client is unusable without them, and the harness currently
+  proxies around it. Answering "yes" makes the browser client a real client;
+  answering "no" says it stays a fixture behind a proxy, which is also a
+  legitimate answer and should be written down rather than left implied.
+
 - **Q2.** The web device client needs a wasm surface over
   [[selfsame-core]]. Placing it in a new crate keeps the core untouched and its
   `tests/purity.rs` guard intact; placing `#[wasm_bindgen]` in the core itself
   would be smaller but adds a dependency to the one crate whose dependency
-  graph is asserted. The brief assumes a new crate. Confirm.
+  graph is asserted. The brief assumes a new crate. **Answered:** a new crate,
+  `crates/selfsame-web-device`. The core is untouched and its `purity.rs` guard
+  still passes.
 
 ## Concept-page backlog (explicit deferral)
 
