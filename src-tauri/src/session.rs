@@ -198,39 +198,51 @@ impl Session {
     /// Derived from the document rather than from a counter, so a restored
     /// phone continues the sequence instead of colliding with a method id that
     /// already exists in signed state.
-    /// The next free `dev-N`, counted over the **whole history**.
+    /// A fresh device fragment: `dev-` and 128 random bits.
     ///
-    /// Not over the resolved document, which is what this did and is what made
-    /// relinking impossible. `RevokeVerificationMethod` is a 2P-Set remove and
-    /// the pinned method computes `authorized = added \ revoked`, so the
-    /// resolved document stops listing a revoked method — and an allocator
-    /// reading it concludes the number is free. It is not free. Re-adding a
-    /// revoked id puts it back in `added` and leaves it in `revoked`, and the
-    /// difference still excludes it.
+    /// # Why not a counter
     ///
-    /// So unlinking `dev-1` and linking again handed the new device `dev-1`,
-    /// which arrived already revoked and rendered as Unlinked the instant it
-    /// linked. Every retry did the same thing, so an identity that had ever
-    /// unlinked its only device could never link another.
+    /// This was `dev-N`, allocated by counting the methods already present, and
+    /// counting is where the whole difficulty lived. `RevokeVerificationMethod`
+    /// is a 2P-Set remove and the pinned method computes
+    /// `authorized = added \ revoked`, so a revoked id is retired **for good**:
+    /// re-adding it puts it back in `added`, leaves it in `revoked`, and the
+    /// difference still excludes it. An allocator therefore has to count
+    /// history rather than live methods — and the first version counted the
+    /// resolved document, which by that same rule no longer lists a revoked
+    /// method. So unlinking `dev-1` freed the number, the next device was handed
+    /// an id that was already revoked, and it arrived dead. Every retry did the
+    /// same, so an identity that had ever unlinked its only device could never
+    /// link another.
     ///
-    /// [`Self::devices`] below already walks the deltas rather than the
-    /// resolved document, and says why in as many words. This is the same
-    /// distinction, and the same source of truth.
-    pub fn next_device_fragment(&self, document: &Document) -> String {
-        let did = document.did.to_string();
-        let prefix = format!("{did}#dev-");
-        let highest = self
-            .all_deltas()
-            .unwrap_or_default()
-            .iter()
-            .filter_map(|delta| match &delta.op {
-                did_crdt::core::delta::DeltaOp::AddVerificationMethod { id, .. } => {
-                    id.strip_prefix(&prefix).and_then(|n| n.parse::<u32>().ok())
-                }
-                _ => None,
-            })
-            .max();
-        format!("dev-{}", highest.map(|n| n + 1).unwrap_or(1))
+    /// Counting history fixes it. Not counting at all removes the question:
+    /// 128 random bits collide with nothing, so no id is ever reissued and
+    /// there is no state to consult, no history to walk, and no resolved-versus-
+    /// recorded distinction to get wrong a third time.
+    ///
+    /// # Why not the key
+    ///
+    /// Deriving the fragment from the device's public key is the other obvious
+    /// way to avoid a counter, and it is worse than either. `ADR-004` has a
+    /// relinking device present the *same* key — "linking adds no new key
+    /// material" — so a key-derived fragment is the same fragment, which is the
+    /// revoked one, and there is no next one to pick. That makes the defect
+    /// above permanent by construction rather than by accident.
+    ///
+    /// It also publishes a correlation handle. Two identities that both link
+    /// one device would each carry `#<H(key)>`, and these documents go to
+    /// resolvers — so anyone reading both learns they share a device. A random
+    /// fragment says nothing about the key it names.
+    pub fn new_device_fragment() -> String {
+        use rand::RngCore as _;
+        let mut octets = [0u8; 16];
+        rand::rngs::OsRng.fill_bytes(&mut octets);
+        let mut out = String::with_capacity(4 + 32);
+        out.push_str("dev-");
+        for b in octets {
+            out.push_str(&format!("{b:02x}"));
+        }
+        out
     }
 
     /// Every verification method, revoked ones included, as the devices list
@@ -313,86 +325,35 @@ pub struct DeviceRow {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ed25519_dalek::SigningKey;
+    use std::collections::HashSet;
 
-    fn root() -> SigningKey {
-        SigningKey::from_bytes(&[0x31; 32])
+    /// A fragment is never reissued, so a revoked one can never come back.
+    ///
+    /// This is the property the counter kept getting wrong. It is stated over
+    /// the generator rather than over an allocator, because there is no longer
+    /// an allocator to state it over — which is the point of the change.
+    #[test]
+    fn every_fragment_is_new() {
+        let seen: HashSet<String> = (0..10_000).map(|_| Session::new_device_fragment()).collect();
+        assert_eq!(seen.len(), 10_000, "128 random bits collided, which they do not");
     }
 
-    /// A session holding one identity with `count` devices added.
+    /// The shape a DID URL fragment has to have.
     ///
-    /// `name` gives each test its own directory. `Session::load` reads whatever
-    /// is already persisted there, so a shared path lets one test's deltas be
-    /// counted by another's allocator — which is exactly the confusion this
-    /// module is testing, arriving from the wrong direction.
-    fn session_with_devices(name: &str, count: usize) -> (Session, Document, SigningKey) {
-        let root = root();
-        let (mut doc, genesis) = identity::sign_genesis(&root).expect("genesis signs");
-        let dir = std::env::temp_dir().join(format!("selfsame-session-test-{name}"));
-        let _ = std::fs::remove_dir_all(&dir);
-        let mut session = Session::load(dir);
-        session.record(&genesis);
-
-        for n in 1..=count {
-            let key = SigningKey::from_bytes(&[0x40 + n as u8; 32]).verifying_key().to_bytes();
-            let add =
-                identity::add_device(&doc, &root, &key, &format!("dev-{n}"), 1_000 + n as u64)
-                    .expect("the device is added");
-            doc.merge_verified_delta(add.clone()).expect("the add merges");
-            session.record(&add);
+    /// `dev-` and 32 lower-case hex characters. Asserted because the fragment is
+    /// concatenated into `did:crdt:…#<fragment>` and that identifier is compared
+    /// as text by every verifier — a character outside the fragment grammar
+    /// would produce an id that is signed here and rejected elsewhere.
+    #[test]
+    fn a_fragment_is_dev_and_thirty_two_hex_characters() {
+        for _ in 0..100 {
+            let f = Session::new_device_fragment();
+            let rest = f.strip_prefix("dev-").expect("the `dev-` prefix names what it is");
+            assert_eq!(rest.len(), 32, "128 bits as hex: {f}");
+            assert!(
+                rest.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)),
+                "lower-case hex only, so the id is stable under any case handling: {f}"
+            );
         }
-        (session, doc, root)
-    }
-
-    /// Unlinking a device must not free its method id for the next one.
-    ///
-    /// `RevokeVerificationMethod` is a 2P-Set remove and the pinned method
-    /// computes `authorized = added \ revoked`, so a revoked id is gone for
-    /// good: re-adding it puts it back in `added` and leaves it in `revoked`,
-    /// and the difference still excludes it.
-    ///
-    /// The allocator used to count the methods in the **resolved** document,
-    /// which by that same 2P-Set rule no longer contains the revoked one. So
-    /// after unlinking `dev-1` the next device was offered `dev-1` again, was
-    /// added to an id that was already revoked, and appeared as Unlinked the
-    /// moment it linked. Every subsequent attempt did the same, so an identity
-    /// that had ever unlinked its only device could never link one again.
-    #[test]
-    fn a_revoked_fragment_is_never_offered_again() {
-        let (mut session, mut doc, root) = session_with_devices("revoked-fragment", 1);
-        assert_eq!(session.next_device_fragment(&doc), "dev-2", "with dev-1 live");
-
-        let revoke = identity::revoke_device(
-            &doc,
-            &root,
-            &format!("{}#dev-1", doc.did),
-            2_000,
-        )
-        .expect("the device is revoked");
-        doc.merge_verified_delta(revoke.clone()).expect("the revoke merges");
-        session.record(&revoke);
-
-        assert_eq!(
-            session.next_device_fragment(&doc),
-            "dev-2",
-            "dev-1 is revoked, and a revoked id can never be authorised again",
-        );
-    }
-
-    /// The allocator counts history, so gaps do not reopen either.
-    #[test]
-    fn fragments_do_not_reopen_when_a_middle_device_is_revoked() {
-        let (mut session, mut doc, root) = session_with_devices("middle-revoked", 3);
-        let revoke =
-            identity::revoke_device(&doc, &root, &format!("{}#dev-2", doc.did), 4_000)
-                .expect("the device is revoked");
-        doc.merge_verified_delta(revoke.clone()).expect("the revoke merges");
-        session.record(&revoke);
-
-        assert_eq!(
-            session.next_device_fragment(&doc),
-            "dev-4",
-            "the hole left by dev-2 is not a free slot",
-        );
     }
 }

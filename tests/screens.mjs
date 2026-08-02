@@ -153,6 +153,11 @@ const STATE_BAD_CALLER = {
   },
 };
 
+// Two method-id shapes on purpose. Fragments are now 128 random bits
+// (`Session::new_device_fragment`), but identities linked before that change
+// carry `dev-N` and keep it — both are what `get_state` returns today. The long
+// one is here so the device screen is laid out against the width it now has to
+// hold, which the horizontal-overflow check below is what actually tests.
 const STATE_LINKED = {
   has_identity: true,
   backup_confirmed: true,
@@ -162,7 +167,7 @@ const STATE_LINKED = {
   pending_publications: 1,
   devices: [
     { method_id: 'did:crdt:9f3a…#dev-1', label: 'Chrome on macOS', nickname: 'copper-lynx-42', lifehash: LH['dev1_C07A1E429B33'], revoked: false, last_seen: Math.floor(Date.now()/1000) - 120, pending: false },
-    { method_id: 'did:crdt:9f3a…#dev-2', label: 'hark on workstation-01', nickname: 'amber-quoll-88', lifehash: LH['dev2_1B44E7902A05'], revoked: false, last_seen: null, pending: true },
+    { method_id: 'did:crdt:9f3a…#dev-6b1f0a97c4e8d25301af7e39b8c6d024', label: 'hark on workstation-01', nickname: 'amber-quoll-88', lifehash: LH['dev2_1B44E7902A05'], revoked: false, last_seen: null, pending: true },
     { method_id: 'did:crdt:9f3a…#dev-3', label: 'Firefox on the old laptop', nickname: 'walnut-stoat-19', lifehash: LH['dev3_77C10D3E5182'], revoked: true, last_seen: null, pending: false },
   ],
 };
