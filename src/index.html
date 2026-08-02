@@ -270,9 +270,24 @@
         <div class="mark mark--lg mark--ok" aria-hidden="true"></div>
         <h1 data-linked-title></h1>
         <canvas class="fp__lifehash" data-linked-lifehash aria-hidden="true"></canvas>
+        <!--
+          The hex and the nickname travel together, as they do on every other
+          surface that shows a fingerprint — the home card, `consent`, and the
+          CON-221 comparison. This screen showed the hex alone, and it is the
+          screen that can least afford to: it asks the person to *compare*
+          against another device, and the nickname is what makes twelve hex
+          digits checkable by an eye. `selfsame status` and `selfsame link`
+          both print the pair, so a person looking between the two screens was
+          being shown a subset here and a superset there.
+
+          The hex remains the compared value (SPEC-002 REQ-103) and the
+          nickname remains a recognition aid; carrying both is what every other
+          screen already does.
+        -->
         <p class="lede">
           Check it now shows
           <span class="fingerprint fingerprint--inline" data-linked-fingerprint></span>
+          <span class="fp__label" data-linked-label></span>
           — the same identity fingerprint this phone shows.
         </p>
         <p class="label">Added as</p>

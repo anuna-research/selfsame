@@ -312,6 +312,15 @@ const SCREEN_RULES = {
     // must say so rather than returning as though it were claimed.
     requiredText: 'AccountProvisioningFailed',
   },
+  '10-linked': {
+    // Every fingerprint surface carries the hex *and* its nickname — the home
+    // card, `consent`, and the CON-221 comparison all do. This screen showed
+    // the hex alone, and it is the one that asks the person to compare against
+    // another device: `selfsame link` prints both, so the two screens did not
+    // match. The hex stays the compared value; the nickname is what makes
+    // comparing it possible without reading twelve characters twice.
+    requiredTextAll: [DID_FP.hex, DID_FP.label],
+  },
   '19-application': {
     forbidden: [['[data-grant-id]', 'a grant ID is held to act on, not rendered']],
   },

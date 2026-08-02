@@ -640,6 +640,10 @@ async function authorise() {
     // A comparison prompt — "check it now shows this" — so it carries the hex,
     // for the same reason SCREEN-001's question does.
     $("[data-linked-fingerprint]").textContent = result.fingerprint.hex;
+    // The nickname beside the hex, as on every other fingerprint surface. The
+    // hex is what is compared; the nickname is what makes comparing it
+    // possible without reading twelve characters twice.
+    $("[data-linked-label]").textContent = result.fingerprint.label;
     renderLifehash($("[data-linked-lifehash]"), result.fingerprint.lifehash);
     $("[data-linked-method]").textContent = result.method_id;
     $("[data-linked-publishing]").textContent =
