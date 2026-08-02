@@ -198,22 +198,39 @@ impl Session {
     /// Derived from the document rather than from a counter, so a restored
     /// phone continues the sequence instead of colliding with a method id that
     /// already exists in signed state.
+    /// The next free `dev-N`, counted over the **whole history**.
+    ///
+    /// Not over the resolved document, which is what this did and is what made
+    /// relinking impossible. `RevokeVerificationMethod` is a 2P-Set remove and
+    /// the pinned method computes `authorized = added \ revoked`, so the
+    /// resolved document stops listing a revoked method — and an allocator
+    /// reading it concludes the number is free. It is not free. Re-adding a
+    /// revoked id puts it back in `added` and leaves it in `revoked`, and the
+    /// difference still excludes it.
+    ///
+    /// So unlinking `dev-1` and linking again handed the new device `dev-1`,
+    /// which arrived already revoked and rendered as Unlinked the instant it
+    /// linked. Every retry did the same thing, so an identity that had ever
+    /// unlinked its only device could never link another.
+    ///
+    /// [`Self::devices`] below already walks the deltas rather than the
+    /// resolved document, and says why in as many words. This is the same
+    /// distinction, and the same source of truth.
     pub fn next_device_fragment(&self, document: &Document) -> String {
         let did = document.did.to_string();
-        let used: Vec<u32> = document
-            .resolve()
-            .ok()
-            .and_then(|r| r.did_document)
-            .map(|d| {
-                d.verification_method
-                    .iter()
-                    .filter_map(|vm| {
-                        vm.id.strip_prefix(&format!("{did}#dev-")).and_then(|n| n.parse().ok())
-                    })
-                    .collect()
+        let prefix = format!("{did}#dev-");
+        let highest = self
+            .all_deltas()
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|delta| match &delta.op {
+                did_crdt::core::delta::DeltaOp::AddVerificationMethod { id, .. } => {
+                    id.strip_prefix(&prefix).and_then(|n| n.parse::<u32>().ok())
+                }
+                _ => None,
             })
-            .unwrap_or_default();
-        format!("dev-{}", used.iter().max().map(|n| n + 1).unwrap_or(1))
+            .max();
+        format!("dev-{}", highest.map(|n| n + 1).unwrap_or(1))
     }
 
     /// Every verification method, revoked ones included, as the devices list
@@ -291,4 +308,91 @@ pub struct DeviceRow {
     /// True while this device's `AddVerificationMethod` is still unpublished —
     /// SCREEN-002's *"publishing — others can't see it yet"*.
     pub pending: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ed25519_dalek::SigningKey;
+
+    fn root() -> SigningKey {
+        SigningKey::from_bytes(&[0x31; 32])
+    }
+
+    /// A session holding one identity with `count` devices added.
+    ///
+    /// `name` gives each test its own directory. `Session::load` reads whatever
+    /// is already persisted there, so a shared path lets one test's deltas be
+    /// counted by another's allocator — which is exactly the confusion this
+    /// module is testing, arriving from the wrong direction.
+    fn session_with_devices(name: &str, count: usize) -> (Session, Document, SigningKey) {
+        let root = root();
+        let (mut doc, genesis) = identity::sign_genesis(&root).expect("genesis signs");
+        let dir = std::env::temp_dir().join(format!("selfsame-session-test-{name}"));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut session = Session::load(dir);
+        session.record(&genesis);
+
+        for n in 1..=count {
+            let key = SigningKey::from_bytes(&[0x40 + n as u8; 32]).verifying_key().to_bytes();
+            let add =
+                identity::add_device(&doc, &root, &key, &format!("dev-{n}"), 1_000 + n as u64)
+                    .expect("the device is added");
+            doc.merge_verified_delta(add.clone()).expect("the add merges");
+            session.record(&add);
+        }
+        (session, doc, root)
+    }
+
+    /// Unlinking a device must not free its method id for the next one.
+    ///
+    /// `RevokeVerificationMethod` is a 2P-Set remove and the pinned method
+    /// computes `authorized = added \ revoked`, so a revoked id is gone for
+    /// good: re-adding it puts it back in `added` and leaves it in `revoked`,
+    /// and the difference still excludes it.
+    ///
+    /// The allocator used to count the methods in the **resolved** document,
+    /// which by that same 2P-Set rule no longer contains the revoked one. So
+    /// after unlinking `dev-1` the next device was offered `dev-1` again, was
+    /// added to an id that was already revoked, and appeared as Unlinked the
+    /// moment it linked. Every subsequent attempt did the same, so an identity
+    /// that had ever unlinked its only device could never link one again.
+    #[test]
+    fn a_revoked_fragment_is_never_offered_again() {
+        let (mut session, mut doc, root) = session_with_devices("revoked-fragment", 1);
+        assert_eq!(session.next_device_fragment(&doc), "dev-2", "with dev-1 live");
+
+        let revoke = identity::revoke_device(
+            &doc,
+            &root,
+            &format!("{}#dev-1", doc.did),
+            2_000,
+        )
+        .expect("the device is revoked");
+        doc.merge_verified_delta(revoke.clone()).expect("the revoke merges");
+        session.record(&revoke);
+
+        assert_eq!(
+            session.next_device_fragment(&doc),
+            "dev-2",
+            "dev-1 is revoked, and a revoked id can never be authorised again",
+        );
+    }
+
+    /// The allocator counts history, so gaps do not reopen either.
+    #[test]
+    fn fragments_do_not_reopen_when_a_middle_device_is_revoked() {
+        let (mut session, mut doc, root) = session_with_devices("middle-revoked", 3);
+        let revoke =
+            identity::revoke_device(&doc, &root, &format!("{}#dev-2", doc.did), 4_000)
+                .expect("the device is revoked");
+        doc.merge_verified_delta(revoke.clone()).expect("the revoke merges");
+        session.record(&revoke);
+
+        assert_eq!(
+            session.next_device_fragment(&doc),
+            "dev-4",
+            "the hole left by dev-2 is not a free slot",
+        );
+    }
 }
