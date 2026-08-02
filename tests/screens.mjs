@@ -50,10 +50,23 @@ const LH = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)),
 //
 // `get_state` returns both: `root_fingerprint` is `fingerprint_key(root_pk)`
 // and `fingerprint` is `fingerprint_did(did)`. They are separate domains over
-// separate inputs, so they never agree. An earlier version of this file used
-// one constant for both, which made the app look self-consistent in every
-// screenshot when it is not: the *created* screen shows the DID fingerprint and
-// the *home* card shows the root-key one.
+// separate inputs, so they never agree, and using one constant for both would
+// make the app look self-consistent in every screenshot when it is not.
+//
+// Which screen shows which: `created`, `home`, `linked` and `restored` all show
+// `fingerprint` — the DID one — and that is coherent, because it is the value
+// `linked` names as "the same identity fingerprint this phone shows" and the
+// value a person compares between devices. `root_fingerprint` crosses the
+// bridge and is currently rendered nowhere. An earlier version of this comment
+// claimed the home card showed the root-key one; it does not, and asserting
+// that would have pinned a fiction.
+// The recovery phrase the stubbed `create_identity` returns.
+//
+// Hoisted out of the bridge so the fixture and the assertion on `03-phrase` are
+// the same list. Written twice, they could drift, and the drift would look like
+// a passing test for a screen showing eleven words.
+const WORDS = ['harbour','lichen','quarry','saddle','verbena','tundra','gravel','mussel','plover','basalt','ferment','willow'];
+
 const ROOT_FP = { hex: '5F 9A C9 07 2E 11', label: 'slate-heron-07', lifehash: LH['root_5F9AC9072E11'] };
 const DID_FP = { hex: '2E 41 D0 88 6B 15', label: 'garnet-plover-31', lifehash: LH['did_2E41D0886B15'] };
 const KEY_FP = { hex: 'C0 7A 1E 42 9B 33', label: 'copper-lynx-42', lifehash: LH['key_C07A1E429B33'] };
@@ -162,7 +175,7 @@ const bridge = (state) => `
           case 'get_state': return ${JSON.stringify(state)};
           case 'service_endpoint': return 'http://127.0.0.1:8787';
           case 'create_identity': return {
-            words: ['harbour','lichen','quarry','saddle','verbena','tundra','gravel','mussel','plover','basalt','ferment','willow'],
+            words: ${JSON.stringify(WORDS)},
             did: ${JSON.stringify(STATE_LINKED.did)},
             fingerprint: ${JSON.stringify(DID_FP)},
           };
@@ -320,6 +333,91 @@ const SCREEN_RULES = {
     // match. The hex stays the compared value; the nickname is what makes
     // comparing it possible without reading twelve characters twice.
     requiredTextAll: [DID_FP.hex, DID_FP.label],
+  },
+  // ── SPEC-001 content assertions ────────────────────────────────────────
+  //
+  // Until now these twenty screens were rendered and never read: the harness
+  // checked that a screen appeared, not what it said. That is how a missing
+  // half of a security comparison survived every green run on `10-linked`.
+  //
+  // What is asserted here is deliberately narrow — the values a person acts on
+  // and the claims that must be true of the build showing them. Decorative copy
+  // is left alone, because an assertion on wording that may legitimately change
+  // trains people to edit the test rather than read it.
+
+  '03-phrase': {
+    // The recovery secret. Twelve words, all of them: a screen that dropped one
+    // would be unrecoverable and would look completely normal, and the person
+    // finds out only when they try to restore.
+    requiredTextAll: WORDS,
+  },
+  '05-created': {
+    // hex and nickname together, as on every fingerprint surface.
+    requiredTextAll: [DID_FP.hex, DID_FP.label],
+  },
+  '06-home': {
+    // The home card's own comparison values, plus the identifier beneath them.
+    requiredTextAll: [DID_FP.hex, DID_FP.label],
+  },
+  '08-consent': {
+    // The security-critical one. SCREEN-001 has the person compare this
+    // fingerprint against the other device before authorising, and the CLI
+    // prints the same pair — so both halves must be here or the comparison is
+    // a guess. The device's self-description must also carry its untrusted
+    // treatment: REQ-222's rule that a name never carries the decision.
+    requiredTextAll: [KEY_FP.hex, KEY_FP.label, 'Chrome on macOS', 'its own words, unchecked'],
+  },
+  '11-rejected': {
+    requiredText: 'Nothing was authorised.',
+    forbiddenText: [
+      ['Linked', 'a rejected offer must not read as a link'],
+      ['was added', 'a rejected offer must not read as a link'],
+    ],
+  },
+  '12-device': {
+    // The device is identified by its nickname and its method id; both are how
+    // a person tells one device from another before unlinking it.
+    requiredTextAll: ['copper-lynx-42', 'did:crdt:9f3a…#dev-1'],
+  },
+  '15-restored': {
+    requiredTextAll: [DID_FP.hex, DID_FP.label],
+  },
+  '16-unlinked': {
+    // CON-006: the change is signed here and *published* separately, so the
+    // screen may not report that contacts have stopped trusting the device
+    // until publishing has happened. It says what was signed and what is still
+    // in flight, and the assertion keeps those two facts distinct.
+    requiredTextAll: ['Signed on this phone', 'Publishing the change'],
+  },
+  '17-refused-code': {
+    // SCREEN-002 S4: one line, and no `RejectReason` detail. Naming the check
+    // that failed would hand an attacker an oracle over the acceptance
+    // predicate, one guess at a time.
+    forbiddenText: [
+      ['transcript', 'the refusal must not name which check failed'],
+      ['signature', 'the refusal must not name which check failed'],
+      ['expired', 'the refusal must not name which check failed'],
+      ['genesis', 'the refusal must not name which check failed'],
+      ['RejectReason', 'an internal type never reaches a screen'],
+    ],
+  },
+  '21b-username-taken': {
+    requiredText: "That username isn't available.",
+  },
+  '24-binding-mismatch': {
+    // Both evidence fields must actually carry values. The sibling defect on
+    // the CON-221 path opened this very screen with both blank, which reads as
+    // a rendering failure rather than as the security refusal it is.
+    requiredTextAll: ['android:com.example.photos', 'com.attacker.lookalike'],
+  },
+  '25-remove-device': {
+    // Names the device *and* the account, so a person removing one of several
+    // knows which is about to stop working. `open-grant` opens the first row,
+    // which the fixture calls "This phone".
+    requiredTextAll: ['This phone', 'Photos'],
+  },
+  '27-wired-remove-confirmed': {
+    requiredText: 'This phone',
   },
   '19-application': {
     forbidden: [['[data-grant-id]', 'a grant ID is held to act on, not rendered']],
