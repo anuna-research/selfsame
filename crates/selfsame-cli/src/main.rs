@@ -141,7 +141,18 @@ fn link() -> Result<()> {
     let rendered = link_code.render();
     println!("\nScan this with Selfsame\n");
     print_qr(&rendered);
-    println!("\n  or type it:  {rendered}\n");
+    println!("\n  or type it:  {rendered}");
+
+    // The value the phone's consent screen asks the person to compare against
+    // this screen. Printed here rather than after linking, because after
+    // linking the comparison is over and its answer no longer matters.
+    let device_fp = fingerprint::fingerprint_key(&device.verifying_key().to_bytes());
+    for line in offer_confirmation(&device_fp) {
+        println!("{line}");
+    }
+    println!();
+    print_lifehash(&device_fp, "      ");
+    println!();
 
     let deadline = minted + OFFER_TTL_SECONDS;
     let ctx = LinkContext { secret, offer };
@@ -371,6 +382,35 @@ fn genesis_root_key(deltas: &[did_crdt::core::delta::SignedDelta]) -> Option<[u8
 /// Asking `qrcode` for exactly that version — rather than letting it pick the
 /// smallest that fits — makes the requirement the thing that is checked, at the
 /// moment it matters.
+/// What the person reads while the phone is deciding.
+///
+/// The phone's consent screen asks **"Does your other screen show this?"** over
+/// `fingerprint_key(offer.device_key)`, and offers "Yes, that's what I see" and
+/// "It shows something else". That comparison is the human backstop against an
+/// offer the person did not make: everything else about the ceremony is
+/// mediated by a rendezvous the design treats as untrusted, and this is the one
+/// step where a human eye is the check.
+///
+/// This screen is the other screen. Until now it printed the code and the QR
+/// and never the fingerprint, so the phone asked a question this side made
+/// unanswerable — and a person who cannot compare still has to press something.
+/// They press "Yes". The control is not merely absent at that point; it has
+/// been taught to be a formality.
+///
+/// Returned as lines rather than printed so the content is testable without
+/// capturing stdout, for the same reason [`qr_lines`] is.
+fn offer_confirmation(device_fp: &fingerprint::Fingerprint) -> Vec<String> {
+    vec![
+        String::new(),
+        "  Your phone will ask whether this is what you see:".to_owned(),
+        String::new(),
+        format!("      {}   {}", device_fp.hex(), device_fp.label()),
+        String::new(),
+        "  If it shows anything else, choose \"It shows something else\"."
+            .to_owned(),
+    ]
+}
+
 fn print_qr(text: &str) {
     match qr_lines(text) {
         Some(lines) => {
@@ -401,7 +441,14 @@ fn qr_lines(text: &str) -> Option<Vec<String>> {
     // zone on every side, so a rendered cell can address a module outside the
     // symbol. `module` takes *signed* coordinates and answers "light" for
     // everything off the symbol, which is exactly what a quiet zone is.
-    let quiet: isize = 2;
+    // ISO/IEC 18004 requires a quiet zone of **four** modules on every side.
+    //
+    // This was two, which is the width at which a symbol renders perfectly and
+    // does not scan: the modules are right, the finder patterns are right, and
+    // a reader still cannot isolate the symbol from the terminal text around
+    // it. Eyeballing the output is no help, because it looks correct — which is
+    // exactly how it survived.
+    let quiet: isize = 4;
     let side = width as isize;
     let module = |x: isize, y: isize| -> bool {
         (0..side).contains(&x) && (0..side).contains(&y) && dark[(y * side + x) as usize]
@@ -561,8 +608,9 @@ mod tests {
     }
 
     /// NFR-004 stated as a test: a version-6 symbol is 41×41 modules, and with
-    /// a quiet zone of 2 on each side the render is 45 columns wide and 23 rows
-    /// tall — one terminal screen, which is the point of the requirement.
+    /// the quiet zone the standard requires the render is 49 columns wide and
+    /// 25 rows tall — still one terminal screen, which is the point of the
+    /// requirement.
     #[test]
     fn the_render_is_the_size_nfr_004_requires() {
         let code = LinkCode {
@@ -571,9 +619,76 @@ mod tests {
         }
         .render();
         let lines = qr_lines(&code).unwrap();
-        assert_eq!(lines.len(), 23, "45 module rows, two per line, rounded up");
+        assert_eq!(lines.len(), 25, "49 module rows, two per line, rounded up");
         let cells = lines[0].chars().filter(|c| *c == '▀').count();
-        assert_eq!(cells, 45, "41 modules plus a quiet zone of 2 on each side");
+        assert_eq!(cells, 49, "41 modules plus a quiet zone of 4 on each side");
+    }
+
+    /// The prompt carries the value the phone asks about.
+    ///
+    /// `commands.rs` documents `key_fingerprint` as "the value the user
+    /// compares against what the other screen is showing", and the consent
+    /// screen asks "Does your other screen show this?". This side is that other
+    /// screen, and for the whole of this program's life it showed the code and
+    /// the QR and nothing to compare — so the only available answer to a
+    /// security question was a guess.
+    #[test]
+    fn the_prompt_carries_the_fingerprint_the_phone_asks_about() {
+        let fp = fingerprint::fingerprint_key(&[7u8; 32]);
+        let block = offer_confirmation(&fp).join("\n");
+
+        assert!(block.contains(&fp.hex()), "the hex is the compared value: {block}");
+        assert!(block.contains(&fp.label()), "the nickname sits beneath it: {block}");
+        // And it names the refusal the phone offers, so the person knows a
+        // mismatch has somewhere to go other than pressing yes anyway.
+        assert!(block.contains("It shows something else"), "{block}");
+    }
+
+    /// The quiet zone is **four** modules, because ISO/IEC 18004 says four.
+    ///
+    /// This was two, and two is the width at which a symbol renders perfectly
+    /// and does not scan: the finder patterns are correct, the data is correct,
+    /// and a reader cannot isolate the symbol from the terminal text around it.
+    /// It is the worst kind of defect to eyeball, because looking at it tells
+    /// you it is fine.
+    ///
+    /// Asserted from the rendered output rather than from the constant, so it
+    /// measures what a scanner would actually be given.
+    #[test]
+    fn the_quiet_zone_is_the_four_modules_the_standard_requires() {
+        let code = LinkCode {
+            application: Application::CbclChat,
+            secret: LinkSecret::from_bytes([0x5a; 16]),
+        }
+        .render();
+        let lines = qr_lines(&code).unwrap();
+
+        // Rebuild the module grid: fg 30 is an upper dark module, bg 40 a lower.
+        let mut grid: Vec<Vec<bool>> = Vec::new();
+        for line in &lines {
+            let (mut upper, mut lower) = (Vec::new(), Vec::new());
+            let mut rest = line.as_str();
+            while let Some(at) = rest.find('▀') {
+                let cell = &rest[..at];
+                let codes: Vec<&str> = cell.split('\u{1b}').filter(|s| !s.is_empty()).collect();
+                upper.push(codes.iter().any(|c| c.starts_with("[30m")));
+                lower.push(codes.iter().any(|c| c.starts_with("[40m")));
+                rest = &rest[at + '▀'.len_utf8()..];
+            }
+            grid.push(upper);
+            grid.push(lower);
+        }
+
+        let first_dark_row = grid.iter().position(|r| r.iter().any(|d| *d)).expect("a symbol");
+        let first_dark_col = grid
+            .iter()
+            .filter(|r| r.iter().any(|d| *d))
+            .map(|r| r.iter().position(|d| *d).unwrap())
+            .min()
+            .expect("a symbol");
+
+        assert_eq!(first_dark_row, 4, "four light module rows above the symbol");
+        assert_eq!(first_dark_col, 4, "four light module columns left of the symbol");
     }
 
     /// A code longer than NFR-004 admits is reported, not silently upgraded to
