@@ -3,7 +3,7 @@ id: SPEC-005
 title: SSKR Sharded Recovery — splitting the root entropy into a quorum of shares
 status: draft
 tier: 1
-version: 0.2.0
+version: 0.3.0
 audience: agent, human, security reviewer, interface designer
 author: Anuna Research (drafted with Claude, 2026-08-03; screens folded in
   2026-08-03)
@@ -51,8 +51,9 @@ library produces exactly that.
   │ HKDF → root seed → DID   │◀───────────│ SSKR combine (CON-603) │
   │ derive.rs, UNTOUCHED     │  entropy   │ recogniser CON-601     │
   └──────────────────────────┘            └────────────────────────┘
-         │                                            ▲
-         └── derive_did() ── verify against expected ─┘  REQ-603
+         │
+         └── derive_did() ──▶ shown for a person to recognise   REQ-603
+                              (never typed in — ADR-604)
 
   arrows point inward → the split sits above derivation, never inside it
 ```
@@ -64,8 +65,8 @@ not the seed ·
 two ·
 [[SPEC-005-sskr-sharded-recovery#ADR-603]] the `sskr` crate does not enter the
 pure core as it stands ·
-[[SPEC-005-sskr-sharded-recovery#ADR-604]] a restore is not finished until the
-DID matches ·
+[[SPEC-005-sskr-sharded-recovery#ADR-604]] the restored identity is shown and
+recognised, never typed in ·
 [[SPEC-005-sskr-sharded-recovery#ADR-605]] shares carry an Object Identity Block
 ·
 [[SPEC-005-sskr-sharded-recovery#ADR-606]] a quorum of shares is the root, not a
@@ -77,7 +78,7 @@ fixed list, and one share is on screen at a time
 
 **Load-bearing:**
 [[SPEC-005-sskr-sharded-recovery#REQ-601]] the split ·
-[[SPEC-005-sskr-sharded-recovery#REQ-603]] identity-verified restore ·
+[[SPEC-005-sskr-sharded-recovery#REQ-603]] a restore shows what it restored ·
 [[SPEC-005-sskr-sharded-recovery#REQ-604]] full recognition before combination ·
 [[SPEC-005-sskr-sharded-recovery#NFR-602]] the core still builds for
 `wasm32-unknown-unknown`
@@ -85,8 +86,9 @@ fixed list, and one share is on screen at a time
 **Controls:**
 [[SPEC-005-sskr-sharded-recovery#REQ-602]] SHALL NOT emit a share set where any
 member threshold is 1 — no override path
-[[SPEC-005-sskr-sharded-recovery#REQ-603]] SHALL NOT report a restore as
-successful before the reconstructed DID equals the expected DID
+[[SPEC-005-sskr-sharded-recovery#REQ-603]] SHALL NOT require a person to supply
+or know an identifier in order to restore, and SHALL NOT authorise or sign
+before showing the identity it reconstructed
 [[SPEC-005-sskr-sharded-recovery#REQ-604]] SHALL NOT combine any share that
 failed recognition, including a share whose reserved bits are non-zero
 [[SPEC-005-sskr-sharded-recovery#REQ-606]] SHALL NOT produce shares without a
@@ -107,16 +109,16 @@ dependency that breaks the `wasm32-unknown-unknown` build or the purity gate
 - **OQ-602 — is a share set an alternative to the twelve words, or an addition
   to them?** SPEC-001 REQ-002 locks linking and revocation behind a passed
   backup check (`confirm_backup`). Whether a checked share set discharges that
-  obligation changes the onboarding flow, and it is not decided here. The
-  question has a screen attached to it:
-  [[SPEC-005-sskr-sharded-recovery#SCREEN-607]] dead-ends for a person who holds
-  shares, holds no words, and does not know their own DID. Owner: HOC.
+  obligation changes the onboarding flow, and it is not decided here. Owner:
+  HOC. *(Narrowed at 0.3.0: the flow no longer dead-ends for a person holding
+  shares and nothing else, so this is now a question about onboarding rather
+  than about recoverability.)*
 - **OQ-603 — the share text encoding.**
   [[SPEC-005-sskr-sharded-recovery#ADR-605]] proposes `ur:sskr`. Selfsame's
   existing human-facing encodings are BIP-39 words and a bech32 link code, so
   adopting Bytewords adds a third alphabet to the product. Owner: HOC.
 
-**Detail:** [[SPEC-005-sskr-sharded-recovery#Screens]] — eleven screens, carried
+**Detail:** [[SPEC-005-sskr-sharded-recovery#Screens]] — ten screens, carried
 here rather than as separate documents ·
 [[SPEC-004-application-scoped-identity]] ·
 [[SPEC-002-visual-key-fingerprint]] · [[PROTO-001]] ·
@@ -205,7 +207,7 @@ specification:
 **In scope.** Splitting the 128-bit root entropy into
 [[Sharded Secret Key Reconstruction]] shares; recognising a share; recombining
 a quorum; verifying that the reconstructed root is the identity the person
-asked for; and the eleven phone screens that carry those operations, specified
+asked for; and the ten phone screens that carry those operations, specified
 in [[SPEC-005-sskr-sharded-recovery#Screens]].
 
 **Out of scope, deliberately.** Share *distribution* is a different system with
@@ -460,17 +462,21 @@ entirely. That is a contribution to
 [[Blockchain Commons]], not a change to this repository, and the two SHOULD NOT
 be sequenced as though one blocks the other.
 
-### ADR-604: A restore is not finished until the DID matches
+### ADR-604: The restored identity is shown and recognised, never typed in
 
-**Status:** proposed
+**Status:** proposed — **supersedes the requirement stated in 0.1.0–0.2.0**
 
-Reconstructing the entropy is not the end of a restore. The system derives the
-DID from the reconstructed root and compares it to the DID the person set out
-to restore. Until that comparison passes, no identity is unlocked and no key is
-written to the keychain.
+Shares restore the root entropy and nothing else. The system then derives the
+DID from that entropy, and **displays** it with the fingerprint rendering
+[[SPEC-002-visual-key-fingerprint]] defines. The person recognises it. Nothing
+asks them to know, type, or scan an identifier.
 
-**Rationale.** Three facts compose into a failure the digest alone does not
-catch:
+WHEN an expected DID is available without asking — a surviving authorised
+device supplies one, or the caller already holds one — the system checks it
+automatically. That input is OPTIONAL, and its absence is the ordinary case.
+
+**Rationale.** Three facts still compose into a failure the digest alone does
+not catch:
 
 1. `bc-shamir`'s digest is 32 bits ([[SPEC-005-sskr-sharded-recovery#OBS-603]]).
 2. **Every** 16-byte string is valid BIP-39 entropy. The checksum is *computed*
@@ -478,26 +484,41 @@ catch:
    perfectly well-formed twelve-word phrase.
 3. A well-formed phrase derives a perfectly well-formed DID — a different one.
 
-So the failure mode is not an error message. It is a person holding a valid
-recovery phrase for an identity that has never existed, with every screen
-reporting success. The DID comparison converts that silent wrong answer into a
-loud refusal.
+Those three are why a restore MUST NOT end silently on "done". They are **not**
+a reason to demand an identifier as input, and this is the error the earlier
+revision made. The defence against a wrong identity in this product is already
+built and already load-bearing: SPEC-002's fingerprint, compared by a person.
+[[SPEC-002-visual-key-fingerprint#REQ-101]] puts it on every surface that
+displays a key, and SPEC-001 makes exactly this comparison the human backstop
+behind device authorisation. A restore that shows the reconstructed identity and
+waits is using that backstop. A restore that demands the identifier first is
+inventing a second one.
 
-**Where the expected DID comes from.** A person restoring onto a new phone
-knows the DID they are restoring only if something tells them. This is the part
-of the design with the least evidence behind it, so it is stated as a
-requirement with three admissible sources and no default:
-the person types or scans it; a surviving authorised device supplies it; or the
-share set itself carries it. The third option leaks the identity to anyone
-holding one share, and is therefore RECOMMENDED against.
-[[SPEC-005-sskr-sharded-recovery#REQ-603]] carries the obligation;
-[[SPEC-005-sskr-sharded-recovery#TEST-606]] verifies it.
+**The consistency argument, which is the decisive one.** The existing
+twelve-word restore does not ask which identity is being restored. A person
+types the phrase, the app derives, and the `restored` screen tells them who they
+are. Shares are a second representation of that same secret
+([[SPEC-005-sskr-sharded-recovery#ADR-606]]), so they end at the same screen by
+the same rule. Two recovery paths with different verification obligations is the
+divergence [[SPEC-005-sskr-sharded-recovery#ADR-601]] refuses elsewhere in this
+document, and it has no better justification here.
 
-**Consequence.** A person who has lost every device and does not know their DID
-cannot complete a verified restore. The honest reading is that this
-specification does not solve that case, and pretending otherwise by weakening
-the check trades a rare recoverable loss for a silent, permanent, undetectable
-one.
+**What the earlier revision cost, and why it is withdrawn.** Requiring the
+identifier dead-ended a legitimate person — shares in hand, no surviving device,
+no memory of a `did:crdt:` string. That was recorded as the weakest screen in
+the specification rather than treated as the defect it was. A control that
+locks out the user it exists to protect is not a strong control; it is a
+liveness failure wearing a safety argument.
+
+**What is genuinely lost.** Without a supplied DID there is no *machine* check
+that the reconstructed identity is the intended one. The residual risk is a
+digest collision at 2⁻³², or an attacker who hands someone a complete valid
+share set of an identity the attacker controls. The fingerprint on screen is
+the defence against the second, and it is the same defence the authorise flow
+already relies on. Recorded so the trade is visible rather than assumed away.
+
+**Consequence for `SCREEN-607`.** The screen that collected the identifier is
+withdrawn. Its identifier is retired and is not reused.
 
 ### ADR-605: Shares carry an Object Identity Block
 
@@ -637,28 +658,26 @@ There is no override, no expert mode, and no dialogue that permits it. Rationale
 [[SPEC-005-sskr-sharded-recovery#TEST-607]] (scope-invariant) ·
 [[SPEC-005-sskr-sharded-recovery#CON-602]]
 
-### REQ-603: A restore completes only when the reconstructed DID matches
+### REQ-603: A restore shows the identity it reconstructed
 
 WHEN a quorum of shares combines successfully, the system SHALL derive the DID
-from the reconstructed entropy, SHALL compare it to the expected DID, and SHALL
-withhold every identity-unlocking effect until that comparison passes.
+from the reconstructed entropy and SHALL display it, with the fingerprint
+rendering of [[SPEC-002-visual-key-fingerprint]], before any device is
+authorised and before anything is signed.
 
-The withheld effects are: writing the root seed to the platform keychain,
-displaying the identity as restored, authorising a device, and signing anything.
+The system SHALL NOT require a person to supply, type, scan, or otherwise know
+an identifier in order to restore from shares. Shares restore the root entropy.
+Deriving the identity from it is the system's work, not the person's.
 
-The expected DID SHALL come from one of three sources, and the source SHALL be
-recorded in the restore record:
+WHEN an expected DID is available without asking the person — supplied by a
+surviving authorised device, or held already by the caller — the system SHALL
+check the reconstructed DID against it and SHALL refuse on a mismatch. That
+input is OPTIONAL. Its absence is the ordinary case and SHALL NOT block a
+restore.
 
-1. the person types or scans it;
-2. a surviving authorised device supplies it;
-3. the share set carries it.
-
-Source 3 is RECOMMENDED against: it reveals the identity to any holder of a
-single share, which discards the unlinkability
-[[SPEC-004-application-scoped-identity]] is built to provide.
-
-**Trace:** [[SPEC-005-sskr-sharded-recovery#TEST-606]] (positive and
-prohibited-action) · [[SPEC-005-sskr-sharded-recovery#CON-603]] ·
+**Trace:** [[SPEC-005-sskr-sharded-recovery#TEST-606]] (positive) ·
+[[SPEC-005-sskr-sharded-recovery#TEST-618]] (prohibited-action) ·
+[[SPEC-005-sskr-sharded-recovery#CON-603]] ·
 [[SPEC-005-sskr-sharded-recovery#ADR-604]]
 
 ### REQ-604: A share is fully recognised before it is combined
@@ -913,27 +932,34 @@ specification errors. No error path emits a partial share set.
 **Verified by:** [[SPEC-005-sskr-sharded-recovery#TEST-601]] ·
 [[SPEC-005-sskr-sharded-recovery#TEST-605]]
 
-### CON-603: Combine and verify
+### CON-603: Combine
 
 ```
-combine(shares: &[Share], expected: &Did)
+combine(shares: &[Share], expected: Option<&Did>)
     -> Result<RestoredIdentity, CombineError>
 ```
 
-Combination and identity verification are **one contract**, not two calls. A
-caller cannot obtain a reconstructed entropy without also stating which
-identity it is supposed to be. That is what makes
-[[SPEC-005-sskr-sharded-recovery#REQ-603]] structural rather than procedural: no
-call site can skip the check, because no call site can reach the entropy
-without it.
+`RestoredIdentity` always carries the derived DID and its
+`Fingerprint`, alongside the mnemonic and the root seed. The identity is a
+**product of the call, never a precondition of it** — the caller learns who was
+restored rather than asserting it. This is the structural form of
+[[SPEC-005-sskr-sharded-recovery#REQ-603]]: no call site can obtain the entropy
+without also obtaining the identity to display, so the display obligation cannot
+be skipped by forgetting a separate call.
+
+`expected` is `Option` by design. `Some` means a DID was available without
+asking a person, and the call checks it. `None` is the ordinary case, and it is
+not a degraded one — the fingerprint in the returned value is what the restore
+screen shows, and a person is what checks it.
 
 **Pre-conditions:** every share has been recognised under
 [[SPEC-005-sskr-sharded-recovery#CON-601]]; the shares share one identifier;
 the quorum satisfies every threshold the shares declare.
 
-**Post-conditions:** on success, `derive_did(root_signing_key(mnemonic, 0))`
-equals `expected`, and the returned value carries the mnemonic and the root
-seed. On any failure, no key material is returned and none is written anywhere.
+**Post-conditions:** on success the returned value carries the mnemonic, the
+root seed, the derived DID, and its fingerprint; and WHEN `expected` was `Some`,
+the derived DID equals it. On any failure, no key material is returned and none
+is written anywhere.
 
 **Error model:**
 
@@ -941,11 +967,13 @@ seed. On any failure, no key material is returned and none is written anywhere.
 |---|---|---|
 | Fewer shares than a threshold demands | `QuorumIncomplete` | tell the person how many more are needed |
 | Quorum satisfied, digest fails | `SharesDamagedOrMismatched` | tell the person a share is damaged or foreign — **never** "not enough" (REQ-609) |
-| Entropy reconstructed, DID differs | `WrongIdentity` | tell the person these shares belong to a different identity |
+| `expected` was `Some` and the derived DID differs | `WrongIdentity` | tell the person these shares belong to a different identity |
 
 The middle row is the one the upstream library gets wrong
 ([[SPEC-005-sskr-sharded-recovery#OBS-603]]), so the mapping is normative here
-rather than incidental.
+rather than incidental. The last row is reachable only when a DID arrived
+without a person being asked for one; it is not a path any restore is required
+to travel.
 
 **Implements:** [[SPEC-005-sskr-sharded-recovery#REQ-603]] ·
 [[SPEC-005-sskr-sharded-recovery#REQ-605]] ·
@@ -962,8 +990,8 @@ rather than incidental.
 
 - share recogniser (CON-601): 21 bytes in, a typed share or a rejection out
 - split (CON-602): specification, entropy, and injected randomness in, shares out
-- combine and verify (CON-603): shares and an expected DID in, an identity or a
-  typed error out
+- combine (CON-603): shares in, an identity — entropy, mnemonic, DID, and
+  fingerprint — or a typed error out
 - fingerprint rendering over a share and over a share-set identifier
 
 ### Effectful shell (orchestrates I/O, calls the pure core)
@@ -999,8 +1027,9 @@ intended shape. It is not yet a description of anything.
 
 ## Screens
 
-Eleven screens, carried inside this specification rather than as separate
-documents.
+Ten screens, carried inside this specification rather than as separate
+documents. An eleventh, `SCREEN-607`, was withdrawn at 0.3.0 and its entry is
+kept as a marker.
 
 **On the identifiers.** Each screen carries a `SCREEN-6##` identifier and each
 identifier is **reserved in the `SCREEN-###` document namespace**, so that
@@ -1012,7 +1041,7 @@ continuing that sequence blind risks a silent collision.
 
 **On the co-location.** PROTO-001's comprehension rules warn against monolithic
 files where the graph wants small linked nodes. That warning applies here and is
-deliberately deferred: eleven screens that exist only to serve one specification
+deliberately deferred: ten screens that exist only to serve one specification
 are easier to keep aligned beside it than in eleven files that drift from it.
 The deferral is visible debt, and it resolves when a screen acquires an
 obligation this document does not own. Owner: HOC.
@@ -1027,13 +1056,14 @@ stop, one question or one instruction.
               605 done ◀── 604 share (paged, n times) ◀───── ┘
 
   welcome ──"I already have a home key"──▶ 606 ──┬──▶ restore   (existing, words)
-                                                 └──▶ 607 which identity
+                                                 └──▶ 608 collect
                                                           │
-                          restored ◀── 608 collect ────────┤
-                          (existing)        │              │
+                          restored ◀───────────────────────┤  shows the identity
+                          (existing)                       │  it reconstructed
                                     609 damaged ◀──────────┤
-                                    610 wrong identity ◀───┤
-                                    611 one more piece ◀───┘
+                                    611 one more piece ◀───┤
+                                    610 wrong identity ◀───┘  only when a device
+                                                                supplied a DID
 ```
 
 ### Flow A — making a share set
@@ -1127,30 +1157,25 @@ Primary: **Done**.
 
 Branches the existing Welcome screen's *I already have a home key* into two
 routes: **Twelve words** (the existing `restore` screen, untouched) and
-**Pieces of a split key** (SCREEN-607). Two options, both primary-weight,
+**Pieces of a split key** (SCREEN-608). Two options, both primary-weight,
 because neither is a fallback for the other.
 
-#### SCREEN-607: `restore-which`
+#### SCREEN-607: withdrawn
 
-> **Which identity are you restoring?**
+`restore-which` asked the person which identity they were restoring, so that
+the earlier form of [[SPEC-005-sskr-sharded-recovery#REQ-603]] had an expected
+DID to compare against.
 
-Collects the expected DID that [[SPEC-005-sskr-sharded-recovery#REQ-603]]
-requires, from the two admissible sources it recommends:
+**It is withdrawn.** Shares restore the root entropy; deriving the identity from
+it is the system's work. The reconstructed identity is shown on the existing
+`restored` screen and recognised by its fingerprint, which is the backstop
+[[SPEC-002-visual-key-fingerprint]] already puts on every surface that displays
+a key. The reasoning is [[SPEC-005-sskr-sharded-recovery#ADR-604]].
 
-- **Scan or type the identifier** — a camera route and a text field;
-- **Take it from a device you still have** — for a person who has lost the
-  phone but keeps an authorised laptop.
-
-The third source REQ-603 admits — the share set carrying its own DID — is
-**not offered here**, because it reveals the identity to any single share
-holder.
-
-**This is the weakest screen in the specification, and it is marked as such.**
-A person who has lost every device, holds shares, and does not know their own
-identifier stops here. That is the cost
-[[SPEC-005-sskr-sharded-recovery#ADR-604]] accepted, restated at the point where
-a user meets it, and it is what makes OQ-602 a live question rather than a
-tidiness concern.
+The identifier is retired and is not reused, per PROTO-001's numbering rule. The
+entry is kept rather than deleted so that a reader meeting `SCREEN-607` in the
+0.2.0 revision, or in review comments written against it, finds out what
+happened to it.
 
 #### SCREEN-608: `restore-shares`
 
@@ -1184,10 +1209,16 @@ Primary: **Re-enter a piece**. Quiet: **Start again**.
 > **These pieces belong to a different key.**
 
 The `WrongIdentity` terminal from
-[[SPEC-005-sskr-sharded-recovery#CON-603]]. Two `.fp` blocks side by side — the
-identity asked for, and the identity the pieces produce — so the mismatch is a
-comparison the person makes rather than a claim the screen asserts. This is the
-same treatment the existing `consent` screen gives to the authorise decision.
+[[SPEC-005-sskr-sharded-recovery#CON-603]], reached **only** on the optional
+path — a surviving authorised device supplied a DID, and the pieces produced a
+different one. A restore that was never given an expected DID never reaches
+this screen; it goes to the existing `restored` screen, which shows the
+reconstructed identity for the person to recognise.
+
+Two `.fp` blocks side by side — the identity the device named, and the identity
+the pieces produce — so the mismatch is a comparison the person makes rather
+than a claim the screen asserts. This is the same treatment the existing
+`consent` screen gives to the authorise decision.
 
 The screen states plainly that nothing was written and no identity was unlocked,
 because a refusal that leaves a person unsure what happened is a refusal that
@@ -1303,15 +1334,34 @@ value anywhere in the failed call equals the entropy — the prohibition is abou
 what MUST NOT exist, so the test asserts absence rather than an error code
 alone.
 
-### TEST-606: A wrong quorum does not unlock the identity
+### TEST-606: A restore returns, and shows, the identity it rebuilt
 
-**Validates:** [[SPEC-005-sskr-sharded-recovery#REQ-603]] — *positive* and
+**Validates:** [[SPEC-005-sskr-sharded-recovery#REQ-603]] — *positive*
+
+Combine a correct quorum with `expected: None` and assert the returned
+`RestoredIdentity` carries the DID and fingerprint that
+`derive_did(root_signing_key(mnemonic, 0))` produces from the same entropy.
+Assert the `restored` screen renders that fingerprint — picture, hex, and
+nickname.
+
+With `expected: Some(did)` and a matching DID, assert the same result. With
+`expected: Some(other)`, assert `WrongIdentity`, and that no key material
+reaches the keychain stub and no signing capability becomes available.
+
+### TEST-618: A restore never demands an identifier
+
+**Validates:** [[SPEC-005-sskr-sharded-recovery#REQ-603]] —
 *prohibited-action*
 
-Positive: a correct quorum with the correct expected DID returns the identity.
-Prohibited-action: a correct quorum for identity A, presented with identity B's
-DID, returns `WrongIdentity`, and no key material is written to the keychain
-stub, and no signing capability becomes available.
+Drive the whole share-restore flow with no expected DID available from any
+source, and assert it completes. Assert that no screen on the path presents a
+field, scanner, or control asking for an identifier.
+
+This is the test that keeps the withdrawn `SCREEN-607` withdrawn. The
+requirement it enforces is a liveness property, and liveness properties are the
+ones that quietly regress when a later reviewer adds "one more check" — which
+is exactly how the 0.2.0 revision of
+[[SPEC-005-sskr-sharded-recovery#ADR-604]] arrived.
 
 ### TEST-607: Splitting touches nothing else
 
@@ -1498,18 +1548,39 @@ gates:
 
 Phase 2 is **not complete**: one gate is `fail` and three are `unverified`.
 
-The screens above are specified and have never been drawn. No synthetic user has
-walked them, and [[SPEC-005-sskr-sharded-recovery#SCREEN-607]] is known to
-dead-end for one class of person. A screen set that reads well is not a screen
-set that works, which is the [[Aesthetic-Usability Effect]] this document names
-as a risk against itself.
+The screens above are specified and have never been drawn, and no synthetic user
+has walked them. A screen set that reads well is not a screen set that works,
+which is the [[Aesthetic-Usability Effect]] this document names as a risk
+against itself.
+
+The 0.3.0 revision is evidence for that risk rather than against it. The
+identifier-entry gate withdrawn in
+[[SPEC-005-sskr-sharded-recovery#ADR-604]] read as rigour on the page and
+locked out the person it existed to protect. It survived one authoring pass and
+a self-review, and it was caught by a human reading the design — not by any
+gate in this document. Recorded because the next such defect will look the
+same.
 
 ---
 
 ## Changelog
 
 <details>
-<summary>Revision history — 0.1.0 → 0.2.0</summary>
+<summary>Revision history — 0.1.0 → 0.3.0</summary>
+
+- 0.3.0 — **normative, and a correction.** ADR-604 is rewritten and supersedes
+  its 0.1.0–0.2.0 form. Shares restore the root entropy; the system derives the
+  identity and **shows** it for recognition against the SPEC-002 fingerprint,
+  and never asks a person to supply, type, or know a `did:crdt:` identifier. An
+  expected DID becomes an OPTIONAL input, checked when a surviving device
+  offers one. REQ-603 rewritten, CON-603 takes `Option<&Did>` and returns the
+  DID and fingerprint in `RestoredIdentity`, SCREEN-607 withdrawn (identifier
+  retired, not reused), SCREEN-610 re-scoped to the optional path, TEST-606
+  rewritten, TEST-618 added to keep the liveness property from regressing.
+  OQ-602 narrowed. The withdrawn gate had been recorded as "the weakest screen
+  in the specification" rather than treated as the defect it was; the existing
+  twelve-word restore already ends by showing the fingerprint, and two recovery
+  paths to one secret get one verification story.
 
 - 0.2.0 — **normative.** Eleven screens folded in rather than split into
   `SCREEN-###` documents, with the identifiers reserved so a later split is a
@@ -1517,7 +1588,7 @@ as a risk against itself.
   obligation from prose into structure: REQ-610 (fixed split shapes, making
   REQ-602 unreachable at the interface) and REQ-611 (one share value on screen,
   closing the screenshot path REQ-608 leaves open). ADR-608, NFR-604, and
-  TEST-614 … TEST-617 added. OQ-602 now names the screen that dead-ends on it.
+  TEST-614 … TEST-617 added.
 - 0.1.0 — first draft. Findings from a probe crate against `sskr` v0.12.0
   converted to specification: the wasm build failure (OBS-601), the
   threshold-one leak (OBS-602), the misleading corruption error (OBS-603), and
