@@ -92,7 +92,7 @@ pub struct AcceptedIdentity {
     ///
     /// Found by matching this client's key against the resolved methods, not
     /// by any convention about the fragment: the phone chooses it, older
-    /// identities carry `dev-1`, and newer ones carry 128 random bits.
+    /// identities carry `dev-1`, and newer ones carry 64 random bits.
     pub own_method_id: String,
     /// The signed deltas, retained verbatim so the client can re-verify offline
     /// and republish without a network round trip (NFR-006).

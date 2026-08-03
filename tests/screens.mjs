@@ -46,20 +46,16 @@ mkdirSync(OUT, { recursive: true });
 // noise shaped like it. A synthetic buffer would satisfy the assertions below
 // and quietly stop the captures being worth comparing against the mockup.
 const LH = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'lifehash-fixtures.json'), 'utf8'));
-// ROOT_FP and DID_FP are DIFFERENT VALUES, and that is the point of the stub.
+// One identity fingerprint, and only one.
 //
-// `get_state` returns both: `root_fingerprint` is `fingerprint_key(root_pk)`
-// and `fingerprint` is `fingerprint_did(did)`. They are separate domains over
-// separate inputs, so they never agree, and using one constant for both would
-// make the app look self-consistent in every screenshot when it is not.
-//
-// Which screen shows which: `created`, `home`, `linked` and `restored` all show
-// `fingerprint` — the DID one — and that is coherent, because it is the value
-// `linked` names as "the same identity fingerprint this phone shows" and the
-// value a person compares between devices. `root_fingerprint` crosses the
-// bridge and is currently rendered nowhere. An earlier version of this comment
-// claimed the home card showed the root-key one; it does not, and asserting
-// that would have pinned a fiction.
+// `get_state` returns `fingerprint` — `fingerprint_did(did)` — and nothing
+// else. It used to also carry `root_fingerprint` (`fingerprint_key(root_pk)`),
+// a different 48-bit value that the home card headlined and no other surface
+// showed; both the field and the fixture for it are gone, because a spare
+// fingerprint is an invitation to headline the wrong one again. That applies to
+// a test fixture exactly as it applies to the state object: this file has to
+// send what the real command sends, or every assertion below is made against a
+// shape the app never produces.
 // The recovery phrase the stubbed `create_identity` returns.
 //
 // Hoisted out of the bridge so the fixture and the assertion on `03-phrase` are
@@ -67,7 +63,6 @@ const LH = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)),
 // a passing test for a screen showing eleven words.
 const WORDS = ['harbour','lichen','quarry','saddle','verbena','tundra','gravel','mussel','plover','basalt','ferment','willow'];
 
-const ROOT_FP = { hex: '5F 9A C9 07 2E 11', label: 'slate-heron-07', lifehash: LH['root_5F9AC9072E11'] };
 const DID_FP = { hex: '2E 41 D0 88 6B 15', label: 'garnet-plover-31', lifehash: LH['did_2E41D0886B15'] };
 const KEY_FP = { hex: 'C0 7A 1E 42 9B 33', label: 'copper-lynx-42', lifehash: LH['key_C07A1E429B33'] };
 
@@ -124,7 +119,6 @@ const STATE_APPS = {
   backup_confirmed: true,
   did: 'did:crdt:9f3a11c2e70b4d8a5c6f9012ab34cd56ef78901234abcd56ef7890123456abcd',
   fingerprint: { hex: '2E 41 D0 88 6B 15', label: 'garnet-plover-31', lifehash: LH['did_2E41D0886B15'] },
-  root_fingerprint: { hex: '5F 9A C9 07 2E 11', label: 'slate-heron-07', lifehash: LH['root_5F9AC9072E11'] },
   pending_publications: 0,
   devices: [],
   applications: APPLICATIONS,
@@ -163,7 +157,6 @@ const STATE_LINKED = {
   backup_confirmed: true,
   did: 'did:crdt:9f3a11c2e70b4d8a5c6f9012ab34cd56ef78901234abcd56ef7890123456abcd',
   fingerprint: DID_FP,
-  root_fingerprint: ROOT_FP,
   pending_publications: 1,
   devices: [
     { method_id: 'did:crdt:9f3a…#dev-1', label: 'Chrome on macOS', nickname: 'copper-lynx-42', lifehash: LH['dev1_C07A1E429B33'], revoked: false, last_seen: Math.floor(Date.now()/1000) - 120, pending: false },

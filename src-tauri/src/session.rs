@@ -198,7 +198,7 @@ impl Session {
     /// Derived from the document rather than from a counter, so a restored
     /// phone continues the sequence instead of colliding with a method id that
     /// already exists in signed state.
-    /// A fresh device fragment: `dev-` and 128 random bits.
+    /// A fresh device fragment: `dev-` and 64 random bits.
     ///
     /// # Why not a counter
     ///
@@ -215,10 +215,31 @@ impl Session {
     /// same, so an identity that had ever unlinked its only device could never
     /// link another.
     ///
-    /// Counting history fixes it. Not counting at all removes the question:
-    /// 128 random bits collide with nothing, so no id is ever reissued and
-    /// there is no state to consult, no history to walk, and no resolved-versus-
-    /// recorded distinction to get wrong a third time.
+    /// Counting history fixes it — but only while the history is complete, and
+    /// this design does not promise that. `restore_identity` fetches the closure
+    /// inside an `if let Ok(...)` and completes regardless, because the cache is
+    /// "a performance and offline affordance". Restore with the resolver
+    /// unreachable and the phone holds no deltas, so a derived counter says
+    /// `dev-1` on an identity that already has one: dead if that id was revoked,
+    /// and colliding with a *live* device if it was not. A locally stored
+    /// counter is worse still, since `REQ-021` exists precisely because a
+    /// restored phone holds no local state.
+    ///
+    /// Not counting removes the condition rather than satisfying it. A random
+    /// fragment is correct with no history at all.
+    ///
+    /// # Why 64 bits and not more
+    ///
+    /// This is an identifier inside one identity's verification-method set, not
+    /// a secret. It has to be unique among the handful of ids that identity will
+    /// ever hold, revoked ones included — it does not have to be unguessable,
+    /// because it is published in the DID document the moment it exists.
+    /// At 64 bits the birthday bound over a hundred devices is about 3e-16.
+    ///
+    /// The first version used 128, copied from the link secret without thinking
+    /// about it. That secret is drawn against an attacker who gets to try;
+    /// this is drawn against coincidence. Same generator, different question,
+    /// and the answer is half the width on a line a person reads.
     ///
     /// # Why not the key
     ///
@@ -235,9 +256,9 @@ impl Session {
     /// fragment says nothing about the key it names.
     pub fn new_device_fragment() -> String {
         use rand::RngCore as _;
-        let mut octets = [0u8; 16];
+        let mut octets = [0u8; 8];
         rand::rngs::OsRng.fill_bytes(&mut octets);
-        let mut out = String::with_capacity(4 + 32);
+        let mut out = String::with_capacity(4 + 16);
         out.push_str("dev-");
         for b in octets {
             out.push_str(&format!("{b:02x}"));
@@ -335,21 +356,21 @@ mod tests {
     #[test]
     fn every_fragment_is_new() {
         let seen: HashSet<String> = (0..10_000).map(|_| Session::new_device_fragment()).collect();
-        assert_eq!(seen.len(), 10_000, "128 random bits collided, which they do not");
+        assert_eq!(seen.len(), 10_000, "64 random bits collided, which they do not");
     }
 
     /// The shape a DID URL fragment has to have.
     ///
-    /// `dev-` and 32 lower-case hex characters. Asserted because the fragment is
+    /// `dev-` and 16 lower-case hex characters. Asserted because the fragment is
     /// concatenated into `did:crdt:…#<fragment>` and that identifier is compared
     /// as text by every verifier — a character outside the fragment grammar
     /// would produce an id that is signed here and rejected elsewhere.
     #[test]
-    fn a_fragment_is_dev_and_thirty_two_hex_characters() {
+    fn a_fragment_is_dev_and_sixteen_hex_characters() {
         for _ in 0..100 {
             let f = Session::new_device_fragment();
             let rest = f.strip_prefix("dev-").expect("the `dev-` prefix names what it is");
-            assert_eq!(rest.len(), 32, "128 bits as hex: {f}");
+            assert_eq!(rest.len(), 16, "64 bits as hex: {f}");
             assert!(
                 rest.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)),
                 "lower-case hex only, so the id is stable under any case handling: {f}"

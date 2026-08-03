@@ -398,7 +398,7 @@ pub async fn authorise(passcode: String, session: State<'_, AppSession>) -> Resu
     };
 
     let root_pk = Custody::root_public_key()?;
-    // 128 random bits, so the fragment collides with nothing — including with a
+    // 64 random bits, so the fragment collides with nothing — including with a
     // method id this identity has already revoked, which is the case that used
     // to break relinking. It needs no lock, no document, and no history: see
     // `Session::new_device_fragment` for why counting was the wrong shape.
