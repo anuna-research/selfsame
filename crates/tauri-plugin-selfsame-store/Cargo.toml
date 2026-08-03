@@ -1,0 +1,21 @@
+[package]
+name = "tauri-plugin-selfsame-store"
+description = "Hardware-wrapped custody for the Selfsame root record on Android."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# `tauri-plugin` locates the plugin's `android/` directory through this key.
+# Without it the Gradle project is never added to the build and the Kotlin half
+# silently does not ship — the same class of failure this plugin exists to fix.
+links = "tauri-plugin-selfsame-store"
+
+[build-dependencies]
+tauri-plugin = { version = "2", features = ["build"] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { workspace = true }
+thiserror = { workspace = true }

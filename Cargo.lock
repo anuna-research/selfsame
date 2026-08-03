@@ -3796,6 +3796,7 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-barcode-scanner",
  "tauri-plugin-biometric",
+ "tauri-plugin-selfsame-store",
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
@@ -4596,6 +4597,16 @@ dependencies = [
  "tauri",
  "tauri-plugin",
  "thiserror 2.0.19",
+]
+
+[[package]]
+name = "tauri-plugin-selfsame-store"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "tauri",
+ "tauri-plugin",
+ "thiserror 1.0.69",
 ]
 
 [[package]]

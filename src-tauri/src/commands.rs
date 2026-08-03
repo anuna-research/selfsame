@@ -570,7 +570,16 @@ pub fn service_endpoint() -> String {
 }
 
 /// Wire the commands into a Tauri builder.
+///
+/// The store is adopted and proven **first**. `store::init` writes a probe value
+/// to secure storage and reads it back, and returning its error here fails
+/// Tauri's setup so the application does not start. That severity is the point:
+/// a custodian whose storage silently discards writes is worse than one that
+/// refuses to launch — the first loses identities and blames the user, the
+/// second says what is wrong while nothing is yet at stake
+/// (SPEC-001-device-key-provisioning#REQ-024).
 pub fn init(app: &tauri::App) -> std::result::Result<(), Box<dyn std::error::Error>> {
+    crate::store::init(app)?;
     let dir = app.path().app_data_dir()?;
     app.manage(AppSession(Mutex::new(Session::load(dir))));
     Ok(())

@@ -39,6 +39,7 @@ mod commands;
 pub mod custody;
 pub mod net;
 pub mod session;
+pub mod store;
 
 /// Build and run the application.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -53,6 +54,13 @@ pub fn run() {
     let builder = builder
         .plugin(tauri_plugin_barcode_scanner::init())
         .plugin(tauri_plugin_biometric::init());
+
+    // `keyring` has no Android backend and falls back to an in-memory mock, so
+    // without this the APK accepts every write to the root record and keeps
+    // none — which is exactly what it did. `store::init` refuses to start if
+    // this is ever true again, on any platform.
+    #[cfg(target_os = "android")]
+    let builder = builder.plugin(tauri_plugin_selfsame_store::init());
 
     builder
         .setup(|app| {

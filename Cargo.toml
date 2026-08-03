@@ -7,6 +7,7 @@ members = [
     "crates/selfsame-rendezvous",
     "crates/selfsame-cli",
     "crates/selfsame-web-device",
+    "crates/tauri-plugin-selfsame-store",
     "src-tauri",
 ]
 
