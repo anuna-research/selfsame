@@ -17,8 +17,15 @@
 //! | Platform | Storage | Presence |
 //! |---|---|---|
 //! | macOS / iOS | Keychain (`keyring`), enclave-wrapped by the OS | biometric on mobile, device passcode on desktop |
+//! | Android | `AndroidKeyStore` via [`crate::store`], TEE- or StrongBox-wrapped | `BiometricPrompt`, device credential allowed |
 //! | Windows | Credential Manager | device passcode |
 //! | Linux | Secret Service | device passcode |
+//!
+//! Android is in that table because it was once missing from it, and the gap
+//! was not academic: `keyring` 3 has no Android backend and falls through to
+//! its in-memory testing mock, so the shipped APK accepted every write and kept
+//! none. Storage now goes through [`crate::store`], which round-trips a probe
+//! value at startup rather than trusting any of the above to be true.
 //!
 //! On desktop there is no biometric API Tauri exposes, so the presence check is
 //! the *device passcode* half of REQ-024, which the requirement admits in as
@@ -47,11 +54,7 @@ use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use zeroize::{Zeroize, Zeroizing};
 
-/// Keychain service name.
-const SERVICE: &str = "io.anuna.selfsame";
-
-/// The keychain entry holding the sealed root record.
-const ENTRY: &str = "root-v1";
+use crate::store::{self, StoreError, ROOT_ENTRY};
 
 /// Argon2id parameters. Deliberately above the RFC 9106 second-recommended
 /// option: this gate is the only thing between a stolen keychain entry and a
@@ -78,8 +81,8 @@ pub enum CustodyError {
     BackupNotConfirmed,
     #[error("that is not a valid recovery phrase")]
     InvalidMnemonic,
-    #[error("keychain unavailable: {0}")]
-    Keychain(String),
+    #[error(transparent)]
+    Store(#[from] StoreError),
     #[error("stored record is corrupt")]
     Corrupt,
 }
@@ -115,23 +118,16 @@ struct SealedRoot {
 pub struct Custody;
 
 impl Custody {
-    fn entry() -> Result<keyring::Entry, CustodyError> {
-        keyring::Entry::new(SERVICE, ENTRY).map_err(|e| CustodyError::Keychain(e.to_string()))
-    }
-
     fn read() -> Result<Option<SealedRoot>, CustodyError> {
-        match Self::entry()?.get_password() {
-            Ok(json) => {
-                serde_json::from_str(&json).map(Some).map_err(|_| CustodyError::Corrupt)
-            }
-            Err(keyring::Error::NoEntry) => Ok(None),
-            Err(e) => Err(CustodyError::Keychain(e.to_string())),
+        match store::get(ROOT_ENTRY)? {
+            Some(json) => serde_json::from_str(&json).map(Some).map_err(|_| CustodyError::Corrupt),
+            None => Ok(None),
         }
     }
 
     fn write(record: &SealedRoot) -> Result<(), CustodyError> {
         let json = serde_json::to_string(record).map_err(|_| CustodyError::Corrupt)?;
-        Self::entry()?.set_password(&json).map_err(|e| CustodyError::Keychain(e.to_string()))
+        Ok(store::set(ROOT_ENTRY, &json)?)
     }
 
     /// Is there an identity on this device?
@@ -243,6 +239,14 @@ impl Custody {
         f: impl FnOnce(&SigningKey) -> T,
     ) -> Result<T, CustodyError> {
         let record = Self::read()?.ok_or(CustodyError::NoIdentity)?;
+
+        // Ordered deliberately: the identity must exist before the user is
+        // asked to confirm anything, so a device with no identity gets
+        // `NoIdentity` rather than a prompt it cannot satisfy. Everything after
+        // this line is the root key being used, which is the scope REQ-024's
+        // *"every operation that uses the Root Key"* names.
+        store::require_presence("Confirm to use your home key")?;
+
         let wrapping = derive_wrapping_key(passcode, &record.salt)?;
         let mut seed = open(&wrapping, &record.nonce, &record.sealed_seed)
             .map_err(|_| CustodyError::BadPasscode)?;
@@ -266,10 +270,7 @@ impl Custody {
     /// path during first run; it does **not** revoke anything, because the
     /// root key is the only thing that can revoke and this destroys it.
     pub fn forget() -> Result<(), CustodyError> {
-        match Self::entry()?.delete_credential() {
-            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-            Err(e) => Err(CustodyError::Keychain(e.to_string())),
-        }
+        Ok(store::delete(ROOT_ENTRY)?)
     }
 }
 

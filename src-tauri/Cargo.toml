@@ -43,6 +43,14 @@ tokio = { workspace = true }
 tauri-plugin-barcode-scanner = "2"
 tauri-plugin-biometric = "2"
 
+# `keyring` (above) has no Android backend — its `cfg` cascade falls through to
+# an in-memory testing mock, so the published APK accepted every write to the
+# root record and kept none. This plugin is the Android half of REQ-024:
+# `AndroidKeyStore`, TEE- or StrongBox-wrapped. Android only; iOS is served by
+# `keyring`'s `apple-native` feature, which is a real Keychain backend.
+[target.'cfg(target_os = "android")'.dependencies]
+tauri-plugin-selfsame-store = { path = "../crates/tauri-plugin-selfsame-store" }
+
 [dev-dependencies]
 tempfile = "3"
 tokio = { workspace = true }

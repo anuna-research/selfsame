@@ -2,7 +2,7 @@
 id: SPEC-003
 title: Android APK Build and Distribution
 status: implemented
-version: 1.1.0
+version: 1.2.0
 last-updated: 2026-08-03
 implemented-date: 2026-07-30
 ---
@@ -57,6 +57,11 @@ manifest ·
 not committed
 
 **Open:**
+- **`BUG-201`: the published APK could never create a home key** — `keyring` has
+  no Android backend and falls through to its testing mock, so every write to
+  the root record was accepted and discarded. A Keystore-backed store and a
+  startup durability guard are in; neither has run on a device
+  ([[SPEC-003-android-apk-distribution#BUG-201]]). Owner: HOC.
 - **`OBS-203`: the APK is 208 MB** — cause now *measured* rather than suspected
   (90% of it is DWARF in one `.so`), fix applied, awaiting the next run's
   number ([[SPEC-003-android-apk-distribution#OBS-203]]). Owner: HOC.
@@ -77,11 +82,13 @@ all capitals.
 Artefacts are numbered from **201** in every prefix, continuing the banding
 rationale recorded in [[SPEC-002-visual-key-fingerprint]].
 
-This document adds one dead link, [[Cloudflare R2]], and defers it under the
-same rule as the rest: vendor and tool pages are vault-wide vocabulary and
-belong in the shared `anuna-ssi` vault rather than duplicated into this
-repository's local `specs/`. Owner: HOC. The remaining dead targets are the
-ones already tabulated in [[SPEC-002-visual-key-fingerprint]].
+This document adds three dead links — [[Cloudflare R2]], and [[Keyring]] and
+[[AndroidKeyStore]] from
+[[SPEC-003-android-apk-distribution#BUG-201]] — and defers all three under the
+same rule: vendor and tool pages are vault-wide vocabulary and belong in the
+shared `anuna-ssi` vault rather than duplicated into this repository's local
+`specs/`. Owner: HOC. The remaining dead targets are the ones already tabulated
+in [[SPEC-002-visual-key-fingerprint]].
 
 ---
 
@@ -475,6 +482,129 @@ Owner: HOC.
 
 ---
 
+## BUG-201: the published APK could never create a home key
+
+**Found 2026-08-03, on the first attempt to use a published build. Cause
+measured, fix applied, not yet confirmed on a device.**
+
+The section below this one says, of the 2026-07-30 verification: *"What is
+verified is that an APK builds and publishes. Not that the application works on
+a phone. Nobody has installed it."* Somebody did. It does not.
+
+Entering a passcode on the first-run screen returns **"no identity on this
+device"** — under the passcode field, where a validation message goes. It is
+not intermittent and it is not device-specific: it fails on every attempt, on
+every Android build published to date.
+
+### What is actually wrong
+
+[[Keyring]] selects its credential store by `cfg`, and its final arm is:
+
+```rust
+#[cfg(not(any(
+    target_os = "linux",   target_os = "freebsd", target_os = "openbsd",
+    target_os = "macos",   target_os = "ios",     target_os = "windows",
+)))]
+pub use mock as default;
+```
+
+`target_os = "android"` matches none of those names, so an Android build links
+the crate's **mock** store — the one it ships for testing, whose own
+documentation reads *"no persistence other than in the entry itself, so getting
+a password before setting it will always result in a `NoEntry` error."* No
+feature flag fixes this. `keyring` 3 has no Android backend to enable, and the
+three this workspace requested — `apple-native`, `windows-native`,
+`sync-secret-service` — are the stores for three platforms this is not.
+
+`custody.rs` constructs a fresh `keyring::Entry` for every read and every write,
+which is correct against a real keystore and fatal against that one. So:
+
+| Step | Expected | What happened |
+|---|---|---|
+| `Custody::create` seals the root, calls `set_password` | stored | mock returns `Ok(())`, credential dropped |
+| `create_identity` calls `Custody::root_public_key` | the key | fresh mock → `NoEntry` → `Ok(None)` |
+| `.ok_or(CustodyError::NoIdentity)` | — | **"no identity on this device"** |
+
+The write was not rejected. It was *accepted and discarded*, and the failure
+surfaced one call later at a function whose name suggests reading was the
+problem. `Custody::exists` answers `false` forever for the same reason, so the
+`AlreadyExists` guard never fires either: every retry derived fresh entropy,
+sealed it, and threw it away again.
+
+### Why nothing caught it
+
+Three things had to line up, and they are worth naming separately because each
+is a different lesson:
+
+1. **The tests run on the host.** `cargo test` on macOS or a CI runner links
+   `apple-native` or `sync-secret-service`, both real stores. Every custody test
+   passed, and would have passed no matter how broken Android was, because the
+   defect is selected by a `cfg` no host test evaluates.
+2. **The mock fails by agreeing.** A store that returned an error would have
+   been caught by the first person to run the app. This one returns `Ok(())`.
+3. **`REQ-024` had no Android row.** `custody.rs` tabulated custody for
+   macOS/iOS, Windows and Linux. [[SPEC-001-device-key-provisioning#ADR-002]]
+   makes this a phone application and this specification publishes an Android
+   APK, and the requirement governing the root key did not mention the platform
+   either of them targets. The missing backend is downstream of that gap, not of
+   a coding slip.
+
+**Root cause: `implementation-error/platform-assumption`** — a dependency's
+platform support was assumed from the platforms it was configured for, rather
+than verified against the platform it was shipped to. New subtype; the existing
+taxonomy had no entry for "the dependency compiled, and compiled to nothing".
+
+### The fix
+
+Two changes, and the second matters more than the first.
+
+**A real store.** `crates/tauri-plugin-selfsame-store` is a Tauri Android plugin
+holding the record under an AES-256-GCM key in [[AndroidKeyStore]] — StrongBox
+where the device has it, TEE otherwise — with the ciphertext in app-private
+`SharedPreferences`. That is rung 3 of [[PROTO-001]]'s Simplicity Ladder, the
+native platform feature, and it satisfies `REQ-024`'s *"wrapped by a
+hardware-protected key where the platform provides one"* on the platform that
+provides one. The value it receives is **already** sealed under an Argon2id key
+derived from the user's passcode, so the Keystore wrap is the second layer
+rather than the only one.
+
+The plugin declares **no commands**, so no capability can grant JavaScript
+access to the sealed root; `Custody` reaches it from Rust through
+`run_mobile_plugin`. `AndroidManifest.xml` adds no permissions, which keeps
+[[SPEC-003-android-apk-distribution#REQ-203]]'s allowlist unchanged.
+
+**A guard that does not depend on knowing this could happen.** `store::init`
+writes a probe value to whatever backend the build linked, reads it back,
+removes it, and fails Tauri's setup if the value did not survive. The
+application does not start.
+
+That severity is deliberate. A custodian whose storage silently discards writes
+is worse than one that refuses to launch: the first loses identities and blames
+the user, the second says what is wrong while nothing is yet at stake. And the
+check is a round trip rather than an inspection of
+`CredentialPersistence` — asking a backend to describe its own durability only
+catches the backends that answer honestly, and only the ones somebody thought
+to ask. Writing a value and looking for it catches any store that does not keep
+what it is given, including ones that do not exist yet.
+
+### What is verified, and what is not
+
+`src-tauri/tests/android_custody.rs` installs the identical mock store the
+Android target compiled in, and asserts that the guard now refuses it and that
+its message names storage rather than the user's identity. It passes, and it
+needs no device.
+
+**The Keystore plugin itself is unverified.** No emulator or device has run it;
+`ANDROID_HOME` and `NDK_HOME` are unset on the machine that wrote it. CI
+compiles the Kotlin as part of the APK build, so a syntax or Gradle error will
+surface on the next run — but "it compiles" and "it stores a key" are different
+claims and only the first will have evidence. This entry closes when someone
+sideloads a build and creates a home key, and not before.
+
+Owner: HOC.
+
+---
+
 ## Status
 
 `implemented`. The pipeline runs on every push to `main`
@@ -486,10 +616,15 @@ per-commit copy return HTTP 200 with matching etags, and the permission
 allowlist matched the merged manifest exactly.
 
 **What is verified is that an APK builds and publishes. Not that the
-application works on a phone.** Nobody has installed it. The merged manifest
-shows `CAMERA` and `USE_BIOMETRIC` reach the app, which means the scanner and
-presence-check plugins are wired — not that they function on a device. Those are
-different claims and only the first has evidence.
+application works on a phone.** The merged manifest shows `CAMERA` and
+`USE_BIOMETRIC` reach the app, which means the scanner and presence-check
+plugins are wired — not that they function on a device. Those are different
+claims and only the first has evidence.
+
+That distinction stopped being hypothetical on 2026-08-03, when somebody
+installed one: it could not create a home key at all
+([[SPEC-003-android-apk-distribution#BUG-201]]). The paragraph above was
+written as a caveat and turned out to be a prediction.
 
 The experiment workflow that produced the findings above has been deleted, as
 an experiment should be. Its history is on pull requests #4 and #6.
@@ -499,8 +634,17 @@ an experiment should be. Its history is on pull requests #4 and #6.
 ## Changelog
 
 <details>
-<summary>Revision history — 1.1.0</summary>
+<summary>Revision history — 1.2.0</summary>
 
+- 1.2.0 — [[SPEC-003-android-apk-distribution#BUG-201]]: the published APK could
+  never create a home key, because `keyring` has no Android backend and falls
+  through to its testing mock. Keystore-backed store added
+  (`crates/tauri-plugin-selfsame-store`), plus a startup durability guard that
+  round-trips a probe value and refuses to start if it does not survive. New
+  root-cause subtype `implementation-error/platform-assumption`. No requirement,
+  contract, or decision of this specification changed — the defect belongs to
+  [[SPEC-001-device-key-provisioning#REQ-024]] and is recorded here because this
+  is the specification that publishes the artefact it broke.
 - 1.1.0 — [[SPEC-003-android-apk-distribution#OBS-203]] measured rather than
   suspected: 90% of the shipped `.so` is DWARF. `CARGO_PROFILE_DEV_STRIP` set
   in the job, plus a 100 MiB ceiling that fails the run if it stops applying.

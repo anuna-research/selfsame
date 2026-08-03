@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Deliberately empty of permissions and components.
+
+  The Keystore and app-private SharedPreferences are both available to every
+  application without a declared permission, so this plugin adds nothing to the
+  merged manifest. That matters here: SPEC-003 REQ-203 fails the build on an
+  unexpected permission, and SPEC-003 OBS-202 is already open against a `DUMP`
+  entry nobody asked for. A custody plugin is the last place that list should
+  grow.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+</manifest>
