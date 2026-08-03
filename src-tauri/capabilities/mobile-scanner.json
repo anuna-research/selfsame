@@ -1,0 +1,8 @@
+{
+  "$schema": "../gen/schemas/mobile-schema.json",
+  "identifier": "mobile-scanner",
+  "description": "Lets SCREEN-001's linking path open the camera to read a QR code. This is the only plugin command the webview may call; everything else the UI does is an application command, which Tauri allows by default and which this file therefore must not enumerate.",
+  "platforms": ["android", "iOS"],
+  "windows": ["main"],
+  "permissions": ["barcode-scanner:allow-scan"]
+}

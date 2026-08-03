@@ -414,10 +414,23 @@ async function startLink() {
         windowed: true,
       });
       await readCode(scanned.content);
-    } catch {
-      // A denied camera is not an error state — REQ-011 makes typing a
-      // first-class route, and the button for it is already on this screen.
-      note.textContent = "No camera. Enter the code by hand instead.";
+    } catch (e) {
+      // Falling back to typing is not an error state — REQ-011 makes the typed
+      // code a first-class route, and the button for it is already on this
+      // screen. *Why* we fell back is a different question, and it is the
+      // maintainer's rather than the user's.
+      //
+      // This used to be a bare `catch {}` that discarded the reason and
+      // asserted "No camera", which is a claim about hardware. The first
+      // Android build had a camera and no `barcode-scanner:allow-scan`
+      // capability, so every scan was rejected by the ACL and the screen
+      // blamed the phone. A swallowed error is how a one-line configuration
+      // omission spends a release looking like a missing sensor.
+      const reason = String(e?.message ?? e ?? "unknown");
+      console.error("barcode scan unavailable:", reason);
+      note.textContent = /denied|permission|not allowed/i.test(reason)
+        ? "Camera access is off for Selfsame. Enter the code by hand instead."
+        : "The camera isn't available. Enter the code by hand instead.";
     }
   } else {
     // Desktop: the typed route is the route. Say so plainly rather than
