@@ -48,6 +48,23 @@ jobs:
       # BUCKET and PROJECT are exported in the upload step rather than declared
       # here, matching hark's release workflow — one place they are set, and it
       # is the place they are used.
+      #
+      # SPEC-003 OBS-203. The APK was 208 MB and 199 MB of that was one file,
+      # `lib/arm64-v8a/libselfsame_lib.so`, of which 90% was debug information:
+      # 161.8 MB across `.debug_*` and 17.5 MB more in `.symtab`/`.strtab`,
+      # against 13 MB of actual `.text`. `--debug` is load-bearing for the
+      # signing config (ADR-201), so the dev profile stays — only the DWARF
+      # goes, which costs no build time and changes no behaviour.
+      #
+      # `debuginfo` rather than `symbols`, matching the workspace's own
+      # `[profile.release]`: the symbol table is 17.5 MB and it is what makes a
+      # native backtrace name functions, which is worth more on a sideloaded
+      # development build than the 17.5 MB is.
+      #
+      # Set here rather than in `[profile.dev]` because this is a property of
+      # the published artefact, not of the profile — a maintainer's local
+      # `cargo build` keeps its symbols and stays debuggable.
+      CARGO_PROFILE_DEV_STRIP: debuginfo
 
     steps:
       # Fail in seconds, not after a 25-minute build, and say exactly which
@@ -76,7 +93,9 @@ jobs:
             # Reported into a commit status too: this instance serves no job
             # logs, so a bare "Failing after 4s" is all anyone would otherwise
             # see — which is how the first attempt at this wasted a round-trip.
-            echo "PREFLIGHT missing:$missing" > /tmp/preflight.err
+            # /tmp/job.err is the general channel for "the reason, in words" —
+            # the size guard below writes to it as well.
+            echo "PREFLIGHT missing:$missing" > /tmp/job.err
             exit 1
           fi
           echo "all three R2 secrets present"
@@ -252,7 +271,9 @@ jobs:
           name="selfsame-UNSIGNED-DEV-$(git rev-parse --short HEAD).apk"
           cp "$built" "/tmp/$name"
           echo "name=$name" >> "$GITHUB_OUTPUT"
-          ls -la "/tmp/$name"
+          bytes=$(wc -c < "/tmp/$name")
+          echo "bytes=$bytes" >> "$GITHUB_OUTPUT"
+          echo "$name is $((bytes / 1048576)) MiB ($bytes bytes)"
 
       # Follows hark's release pipeline, which already publishes to this bucket:
       # the **flat** prefix is "latest" — not a `latest/` subdirectory, which is
@@ -299,6 +320,35 @@ jobs:
           echo "  https://files.anuna.io/${PROJECT}/selfsame-UNSIGNED-DEV.apk"
           echo "  https://files.anuna.io/${PROJECT}/${sha}/${APK}"
 
+      # SPEC-003 OBS-203. CARGO_PROFILE_DEV_STRIP is an environment variable
+      # read by a cargo that Gradle invokes on our behalf, three processes
+      # down. If a Tauri CLI bump ever builds under a different profile name,
+      # the variable stops applying and nothing says so — the APK just returns
+      # to 208 MB. This is the thing that says so.
+      #
+      # The ceiling is not a growth budget. Stripped, the APK is ~47 MB;
+      # unstripped it was 208 MB. Nothing between those is reachable by
+      # ordinary growth, so 100 MiB can only mean the debug information came
+      # back, and the check has no opinion about anything else.
+      #
+      # It runs *after* the upload, unlike the permission allowlist, which
+      # runs before. An over-permissioned APK is worse than no APK; a large
+      # one is merely large. Failing first would cost the artefact as well as
+      # the run, so the upload happens, and then the job goes red.
+      - name: Guard the APK against the debug information coming back
+        env:
+          APK_BYTES: ${{ steps.apk.outputs.bytes }}
+        run: |
+          set -euo pipefail
+          ceiling=$((100 * 1024 * 1024))
+          echo "APK is $((APK_BYTES / 1048576)) MiB, ceiling $((ceiling / 1048576)) MiB"
+          if [ "$APK_BYTES" -gt "$ceiling" ]; then
+            msg="APK is $((APK_BYTES / 1048576)) MiB, over the $((ceiling / 1048576)) MiB ceiling — CARGO_PROFILE_DEV_STRIP is no longer taking effect (SPEC-003 OBS-203). The APK was uploaded anyway."
+            echo "$msg" > /tmp/job.err
+            echo "$msg" >&2
+            exit 1
+          fi
+
       # This Forgejo serves no job logs, so a failure is otherwise visible only
       # as "Failing after Nm". Same workaround ci.yml uses.
       - name: Report the first error into a commit status
@@ -306,9 +356,9 @@ jobs:
         continue-on-error: true
         run: |
           set -uo pipefail
-          # Preflight first: a missing secret is the likeliest failure and the
-          # one a bare "Failing after 4s" explains least.
-          line=$(cat /tmp/preflight.err 2>/dev/null \
+          # The written reason first: a missing secret or a blown size ceiling
+          # is a failure a bare "Failing after 4s" explains least.
+          line=$(cat /tmp/job.err 2>/dev/null \
                  || grep -A 4 '^\* What went wrong:' /tmp/build.log 2>/dev/null | tail -n +2 \
                  || tail -n 3 /tmp/build.log 2>/dev/null \
                  || echo "failed before the build step")

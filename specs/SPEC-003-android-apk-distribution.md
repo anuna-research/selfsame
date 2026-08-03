@@ -2,8 +2,8 @@
 id: SPEC-003
 title: Android APK Build and Distribution
 status: implemented
-version: 1.0.0
-last-updated: 2026-07-30
+version: 1.1.0
+last-updated: 2026-08-03
 implemented-date: 2026-07-30
 ---
 
@@ -57,8 +57,9 @@ manifest ·
 not committed
 
 **Open:**
-- **`OBS-203`: the APK is 196 MB** — roughly ten times what an arm64 Tauri app
-  should be. Owner: HOC.
+- **`OBS-203`: the APK is 208 MB** — cause now *measured* rather than suspected
+  (90% of it is DWARF in one `.so`), fix applied, awaiting the next run's
+  number ([[SPEC-003-android-apk-distribution#OBS-203]]). Owner: HOC.
 - `android.permission.DUMP` is in the shipped manifest and nobody asked for it
   ([[SPEC-003-android-apk-distribution#OBS-202]]). Owner: HOC.
 
@@ -345,19 +346,130 @@ as success.
 
 ---
 
-## OBS-203: The APK is 196 MB
+## OBS-203: The APK is 208 MB — measured, and stripped
 
-`205,569,441` bytes. An arm64 Tauri application should be somewhere in the
-10-20 MB range, so something is included that should not be.
+**Cause measured 2026-08-03. Fix applied. Not yet confirmed by a run.**
 
-`--debug` ([[SPEC-003-android-apk-distribution#ADR-201]]) keeps full symbols,
-and this workspace's debug output is ~4 GiB by the `.gitignore`'s own
-reckoning, which makes an unstripped native library the obvious suspect.
+The first record of this said an unstripped native library was "the obvious
+suspect". It was the right suspect, and a suspect is not a measurement. This
+is the measurement.
 
-It does not prevent sideloading, and it is not worth handing anyone over mobile
-data. Likely fixes, in increasing order of change: strip the `.so` in the Gradle
-packaging step; or build the release profile and sign it with the debug keystore,
-which keeps ADR-201's "not shippable" property without the debug profile's bulk.
+### What is actually in the APK
+
+`208,453,025` bytes as published. Its ZIP central directory apportions them:
+
+| Entry | Bytes | Stored as |
+|---|---|---|
+| `lib/arm64-v8a/libselfsame_lib.so` | 199.33 MB | **uncompressed** |
+| `classes*.dex` (9 files) | 8.04 MB | deflated |
+| `resources.arsc` | 1.27 MB | uncompressed |
+| everything else (1,000 entries) | ~0.35 MB | mixed |
+
+So the question is not "what is in the APK". One file is **95.6%** of it.
+
+### What is in that file
+
+Reading the ELF section header table of the `.so` — possible without
+downloading it, because it is stored uncompressed and so can be range-read in
+place:
+
+| Section | Bytes | |
+|---|---|---|
+| `.debug_info` | 66.79 MB | debug |
+| `.debug_str` | 65.49 MB | debug |
+| `.debug_line` | 14.56 MB | debug |
+| `.debug_ranges` | 9.43 MB | debug |
+| `.debug_loc` | 2.37 MB | debug |
+| `.debug_aranges` | 2.23 MB | debug |
+| `.debug_abbrev` | 0.92 MB | debug |
+| `.strtab` | 12.02 MB | symbols |
+| `.symtab` | 5.46 MB | symbols |
+| **`.text`** | **13.00 MB** | *the program* |
+| `.eh_frame` | 2.48 MB | |
+| `.rodata` | 1.34 MB | |
+| `.gcc_except_table` | 1.03 MB | |
+| remainder | ~2.7 MB | |
+
+`161.8 MB` of DWARF and `17.5 MB` of symbol table against `13 MB` of code.
+**90% of the library, and 86% of the APK, is debug information.** The
+10–20 MB figure this observation originally guessed at was close: the program
+is 13 MB of `.text`.
+
+### How it was measured
+
+Two HTTP range requests against the published artefact — the last 1 MiB for the
+ZIP central directory, then the ELF section headers from inside the stored
+`.so`. No 208 MB download and no local Android toolchain, which matters because
+the alternative is a ~20-minute CI round-trip per question
+([[SPEC-003-android-apk-distribution#OBS-202]] is still open for want of
+exactly that). Anyone can re-run it against any published build.
+
+### The fix
+
+`CARGO_PROFILE_DEV_STRIP: debuginfo` in the job environment.
+
+Of the two routes the original entry proposed, this is neither, and it is
+smaller than both. Stripping in the Gradle packaging step means reaching into a
+generated project that [[SPEC-003-android-apk-distribution#ADR-204]]
+deliberately does not commit. Building the release profile and signing it with
+the debug keystore changes what
+[[SPEC-003-android-apk-distribution#ADR-201]] means by `--debug`, which is
+load-bearing for the signing config. Setting the profile key by environment
+variable leaves both decisions untouched: same profile, same keystore, same
+`--debug` invocation, and the linker simply does not emit the DWARF.
+
+`debuginfo` and not `symbols`, matching the workspace's own `[profile.release]`.
+That leaves the 17.5 MB symbol table in place, which is what makes a native
+backtrace name functions rather than addresses — worth more on a build whose
+entire purpose is to be sideloaded and broken than the 17.5 MB is.
+
+It is set in the workflow rather than in `[profile.dev]` because it is a
+property of the *published artefact*, not of the profile. A maintainer's local
+`cargo build` keeps full debug information and stays debuggable.
+
+**Predicted: ~47 MB**, a 4.4× reduction. Stated as a prediction because no run
+has produced one yet. [[SPEC-003-android-apk-distribution#OBS-203]] closes when
+a run does, and not before.
+
+### The guard
+
+`CARGO_PROFILE_DEV_STRIP` is an environment variable consumed by a `cargo` that
+Gradle invokes on our behalf, three processes below the shell that sets it, and
+under a profile name Tauri chooses. If a CLI bump ever builds under a different
+profile, the variable silently stops applying — the same class of failure as the
+allowlist reading the wrong manifest
+([[SPEC-003-android-apk-distribution#ADR-203]]): a control that reports a
+property it no longer establishes.
+
+So the job now fails above a **100 MiB** ceiling. That is not a growth budget
+and it is not an NFR — stripped is ~47 MB and unstripped was 208 MB, nothing in
+between is reachable by ordinary growth, and the only thing 100 MiB can detect
+is the debug information returning. It is deliberately *not* numbered as a new
+artefact: the 2xx band already carries a genuine collision between this document
+and [[SPEC-004-application-scoped-identity]], recorded in
+[[SPEC-005-sskr-sharded-recovery#Artefact numbering]], and a regression check
+belonging to a resolved `OBS` does not need to deepen it.
+
+The check runs **after** the upload, unlike the permission allowlist, which runs
+before. An over-permissioned APK is worse than no APK; a large one is merely
+large. Failing first would cost the artefact as well as the run.
+
+### Two further levers, deliberately not pulled
+
+**`.text` is 13 MB at `opt-level = 0`.** Release-grade codegen would remove
+several more MB. Not taken: `[profile.release]` here is `lto = true` with
+`codegen-units = 1`, which are precisely the memory-hungry settings, and this
+job has a documented OOM history
+([[SPEC-003-android-apk-distribution#OBS-201]]) that was resolved by raising
+the container to 8 GiB rather than by having room to spare. That trade wants
+measuring before it is made, and the 4.4× is already banked without it.
+
+**`android.useLegacyPackaging=true`** would deflate the `.so` inside the APK
+instead of storing it, worth roughly 2.5–3× on the download. Not taken: it
+trades download size for *installed* size, because Android then extracts the
+library to `/data` rather than mapping it from the APK, and install gets slower.
+The complaint that prompted this was the download, but the trade is real and
+belongs to whoever owns the on-device experience rather than to a size fix.
 
 Owner: HOC.
 
@@ -387,8 +499,12 @@ an experiment should be. Its history is on pull requests #4 and #6.
 ## Changelog
 
 <details>
-<summary>Revision history — 0.1.0</summary>
+<summary>Revision history — 1.1.0</summary>
 
+- 1.1.0 — [[SPEC-003-android-apk-distribution#OBS-203]] measured rather than
+  suspected: 90% of the shipped `.so` is DWARF. `CARGO_PROFILE_DEV_STRIP` set
+  in the job, plus a 100 MiB ceiling that fails the run if it stops applying.
+  No requirement, contract, or decision changed.
 - 0.1.0 — findings from four spike runs converted to specification. Blocked on
   a 3 GiB runner container cap.
 </details>
