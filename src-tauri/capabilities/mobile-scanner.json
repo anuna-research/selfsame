@@ -1,8 +1,12 @@
 {
   "$schema": "../gen/schemas/mobile-schema.json",
   "identifier": "mobile-scanner",
-  "description": "Lets SCREEN-001's linking path open the camera to read a QR code. This is the only plugin command the webview may call; everything else the UI does is an application command, which Tauri allows by default and which this file therefore must not enumerate.",
+  "description": "Lets SCREEN-001's linking path ask for the camera and then read a QR code with it. These are the only plugin commands the webview may call; everything else the UI does is an application command, which Tauri allows by default and which this file therefore must not enumerate. `allow-scan` alone is not enough: the plugin's `scan` checks the camera permission and throws rather than requesting it, so the two permission commands are part of the same single capability rather than a widening of it.",
   "platforms": ["android", "iOS"],
   "windows": ["main"],
-  "permissions": ["barcode-scanner:allow-scan"]
+  "permissions": [
+    "barcode-scanner:allow-check-permissions",
+    "barcode-scanner:allow-request-permissions",
+    "barcode-scanner:allow-scan"
+  ]
 }
