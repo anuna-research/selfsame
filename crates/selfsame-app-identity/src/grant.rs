@@ -61,6 +61,11 @@ pub const GRANT_JWS: JwsPolicy = JwsPolicy {
     cty: Some("vc"),
     max_octets: MAX_GRANT_OCTETS,
     max_payload_depth: 8,
+    // `CON-205` fixes no serialisation for the payload, unlike `CON-214` and
+    // `CON-225`. A verifier checks the octets it received; requiring RFC 8785
+    // of a credential another implementation serialised would refuse
+    // conforming grants over a property the contract does not state.
+    canonical_payload: false,
 };
 
 /// The media type the ceremony carries alongside the compact JWS.

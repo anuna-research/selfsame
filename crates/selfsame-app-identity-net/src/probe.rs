@@ -129,8 +129,39 @@ pub async fn probe_one(descriptor: &RendezvousDescriptor) -> ProbeOutcome {
 /// names, redirects, content encoding, a media type other than
 /// `application/json`, a body over 2,048 bytes, or a non-`200` response" — makes
 /// the descriptor ineligible, so every one of those is a `false` here.
+///
+/// # The deadline covers everything the probe does
+///
+/// `CON-208` step 4 caps *the probe*, not the request inside it. Handing
+/// [`PROBE_DEADLINE`] to `reqwest` bounds only what happens after the client
+/// exists, and building one is not free: it loads the platform root store, which
+/// is synchronous CPU work. Under load that work serialises — a measured 3,565
+/// ms elapsed against a 1,500 ms deadline, with the connects never overlapping
+/// — so the advertised bound held over a part of the probe while the whole took
+/// twice as long, and `NFR-207`'s fallbacks waited for it.
+///
+/// So the deadline is started here, before the client exists, and the
+/// construction is moved to the blocking pool. One client per request is kept:
+/// [`crate::client`] builds a fresh one so no connection pool is shared between
+/// providers, which is the same unlinkability argument its documentation makes
+/// about cookie jars, and that is not what was costing the time.
 async fn capability_ok(url: &str, expected: &[(&str, Expected)]) -> bool {
-    let Ok(http) = client(PROBE_DEADLINE) else { return false };
+    // A probe that could not be completed inside the contract's bound is not a
+    // healthy descriptor, so the elapsed deadline is `false` like every other
+    // way of failing to see a conforming capability object.
+    tokio::time::timeout(PROBE_DEADLINE, capability_response_ok(url, expected))
+        .await
+        .unwrap_or(false)
+}
+
+async fn capability_response_ok(url: &str, expected: &[(&str, Expected)]) -> bool {
+    // `spawn_blocking`, so the root-store load happens on the blocking pool
+    // rather than on the thread polling every other probe in the group. The
+    // timeout above can then elapse while a build is still queued, instead of
+    // waiting for CPU work no timer can interrupt.
+    let Ok(Ok(http)) = tokio::task::spawn_blocking(|| client(PROBE_DEADLINE)).await else {
+        return false;
+    };
     let Ok(response) = http
         .get(url)
         .header(reqwest::header::ACCEPT, "application/json")
@@ -430,11 +461,15 @@ mod tests {
         //    serialise and the connects never overlap. The join was parallel
         //    the whole time.
         //
-        // The per-request client is not the thing to change: [`crate::client`]
-        // builds one per call so that no connection pool is shared between
-        // providers, which is the same unlinkability argument its own
-        // documentation makes about cookie jars. Trading that for a green tick
-        // would be the wrong repair. The test is what was wrong.
+        // The per-request client is still not the thing to change:
+        // [`crate::client`] builds one per call so that no connection pool is
+        // shared between providers, which is the same unlinkability argument
+        // its own documentation makes about cookie jars. What *was* wrong is
+        // where the construction sat — [`capability_ok`] now starts the
+        // deadline before it and runs it on the blocking pool, so the 3,565 ms
+        // reading is a bound violation that would no longer happen. This test
+        // still does not measure it: a barrier decides sequencing exactly, and
+        // a stopwatch would go back to measuring the machine.
         use std::sync::Arc;
         let barrier = Arc::new(tokio::sync::Barrier::new(4));
         let futures: Vec<_> = (0..4)
@@ -507,6 +542,35 @@ mod tests {
             assert!(!outcome.mailbox_ok);
             assert!(!outcome.is_eligible());
         }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_probe_ends_by_the_deadline_and_not_at_the_end_of_its_own_work() {
+        // `CON-208` step 4 caps the probe at 1,500 ms. On a paused clock time
+        // advances only when the runtime is idle, so this measures where the
+        // deadline sits rather than how fast the machine is: a server that
+        // accepts and says nothing hands the probe to the timer, and the timer
+        // is the only thing that can end it.
+        //
+        // What this pins is that the bound governs the whole probe. The client
+        // construction that used to sit outside it is now inside, so a build
+        // that overran could no longer push a probe past the cap while every
+        // fallback behind it waited.
+        let (port, server) = stalling_listener().await;
+        let host = format!("127.0.0.1:{port}");
+        let d = RendezvousDescriptor {
+            url: format!("https://{host}"),
+            pairing_url: format!("https://{host}"),
+            ..descriptor("slow", "unused.example")
+        };
+
+        let started = tokio::time::Instant::now();
+        let outcome = probe_one(&d).await;
+        let elapsed = started.elapsed();
+        server.abort();
+
+        assert!(!outcome.is_eligible(), "a server that never answers has no capability");
+        assert!(elapsed <= PROBE_DEADLINE, "the probe ran {elapsed:?}, past its 1,500 ms cap");
     }
 
     #[tokio::test]

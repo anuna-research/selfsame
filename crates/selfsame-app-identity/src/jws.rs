@@ -81,6 +81,23 @@ pub struct JwsPolicy {
     pub max_octets: usize,
     /// Nesting bound applied to the payload.
     pub max_payload_depth: usize,
+    /// Whether the payload octets must be the RFC 8785 serialisation of the
+    /// payload, exactly.
+    ///
+    /// Three of the four contracts say so in as many words — `CON-214`'s
+    /// evidence is "a compact JWS over the exact UTF-8 RFC 8785 serialization",
+    /// and `CON-225`'s pointer and statement are the same — so a payload with
+    /// added whitespace or reordered members is not the document the contract
+    /// defines, whoever signed it. `CON-205` fixes no such serialisation for a
+    /// grant, and the difference is deliberate rather than an oversight: a
+    /// verifier checks the bytes it received, and requiring canonical form of a
+    /// W3C VC that some other issuer serialised would refuse conforming grants.
+    ///
+    /// The check never feeds a re-serialisation back into the signature. It
+    /// compares the received octets with the canonical form of what was
+    /// recognised *from those same octets*, and refuses on a difference — which
+    /// is the profile recogniser's step 5 (`CON-201`) applied to a payload.
+    pub canonical_payload: bool,
 }
 
 /// Why a compact JWS was refused.
@@ -120,6 +137,9 @@ pub enum JwsError {
     /// The signature does not verify under the supplied key.
     #[error("JWS signature does not verify")]
     BadSignature,
+    /// The payload is not the RFC 8785 serialisation its contract requires.
+    #[error("JWS payload is not the canonical RFC 8785 serialisation")]
+    PayloadNotCanonical,
     /// The payload carries a legacy JWT `vc` wrapper claim.
     ///
     /// `REQ-205`: "The grant SHALL NOT be wrapped in a legacy JWT `vc` claim.
@@ -163,12 +183,32 @@ impl CompactJws {
     /// The caller resolves the key from `kid` **against an authenticated
     /// source** — a `did:crdt` closure for `CON-205`, the recognised profile for
     /// `CON-214` — and never from the JWS itself.
+    ///
+    /// # Why the strict equation
+    ///
+    /// `verify_strict` rather than `verify`, and the difference is an
+    /// authentication bypass rather than a preference. RFC 8032's permissive
+    /// (cofactored) check accepts a signature whose `R` and public key `A` are
+    /// both low-order points: with `A` the identity, `[k]A` is the identity for
+    /// every challenge `k`, so `R = identity, S = 0` satisfies the equation
+    /// **for any message at all**. Nothing about that forgery needs a private
+    /// key.
+    ///
+    /// The keys that reach here are not all ones this implementation generated:
+    /// a `CON-205` grant's key comes out of a `did:crdt` closure and a `CON-214`
+    /// key out of a fetched profile, and neither recogniser has any reason to
+    /// know that one of the eight small-order encodings is special. So the
+    /// refusal belongs at the verification step, where the point is already in
+    /// hand — [`ed25519_dalek::VerifyingKey::verify_strict`] rejects a
+    /// small-order `A` or `R` outright.
     pub fn verify(&self, public_key: &[u8; 32]) -> Result<(), JwsError> {
-        use ed25519_dalek::Verifier as _;
         let verifying = ed25519_dalek::VerifyingKey::from_bytes(public_key)
             .map_err(|_| JwsError::BadSignature)?;
         verifying
-            .verify(&self.signing_input, &ed25519_dalek::Signature::from_bytes(&self.signature))
+            .verify_strict(
+                &self.signing_input,
+                &ed25519_dalek::Signature::from_bytes(&self.signature),
+            )
             .map_err(|_| JwsError::BadSignature)
     }
 }
@@ -207,6 +247,12 @@ pub fn recognise(
     let payload_limits =
         Limits { max_bytes: policy.max_octets, max_depth: policy.max_payload_depth };
     let payload = json::recognise(&payload_octets, payload_limits).map_err(JwsError::BadPayload)?;
+    // Where the contract fixes the serialisation, a second spelling of the same
+    // object is a different document — checked before any member is read, so
+    // nothing downstream compares against octets that were never canonical.
+    if policy.canonical_payload && json::canonicalise(&payload) != payload_octets {
+        return Err(JwsError::PayloadNotCanonical);
+    }
 
     recognise_header(&protected, policy, extra_header_members)?;
 
@@ -328,6 +374,7 @@ mod tests {
         cty: Some("vc"),
         max_octets: 65_536,
         max_payload_depth: 8,
+        canonical_payload: false,
     };
 
     fn key() -> ed25519_dalek::SigningKey {
@@ -349,6 +396,22 @@ mod tests {
 
     fn signed() -> String {
         sign(&header(), &payload(), &key())
+    }
+
+    /// Sign over payload octets exactly as given, canonical or not.
+    ///
+    /// [`sign`] canonicalises, which is right for an issuer and useless for
+    /// testing what a verifier does with a payload some other issuer spelled
+    /// differently.
+    fn sign_raw(header: &Json, payload_octets: &[u8], key: &ed25519_dalek::SigningKey) -> String {
+        use ed25519_dalek::Signer as _;
+        let signing_input = format!(
+            "{}.{}",
+            codec::b64url(&json::canonicalise(header)),
+            codec::b64url(payload_octets)
+        );
+        let signature = key.sign(signing_input.as_bytes());
+        format!("{signing_input}.{}", codec::b64url(&signature.to_bytes()))
     }
 
     // TEST-207 positive.
@@ -413,6 +476,7 @@ mod tests {
             cty: None,
             max_octets: 8_192,
             max_payload_depth: 4,
+            canonical_payload: true,
         };
         let https_kid = "https://photos.example/selfsame/application#enrollment-2026-01";
 
@@ -443,6 +507,56 @@ mod tests {
         ]);
         let text = sign(&h, &payload(), &key());
         assert_eq!(recognise(&text, POLICY, &[]), Err(JwsError::BadKid));
+    }
+
+    #[test]
+    fn a_non_canonical_payload_is_refused_only_where_the_contract_fixes_it() {
+        // `CON-214`'s evidence and both `CON-225` forms are defined as a JWS
+        // over the *exact* RFC 8785 serialisation, so a signer that adds a
+        // space or reorders two members has not produced that document — even
+        // though the signature over those octets is perfectly good and the
+        // recognised value is identical. `CON-205` fixes no serialisation for a
+        // grant, and the same octets must therefore still be accepted there.
+        const CANONICAL: JwsPolicy = JwsPolicy {
+            typ: "selfsame-enrollment+jws",
+            kid: KidRule::HttpsFragment,
+            cty: None,
+            max_octets: 8_192,
+            max_payload_depth: 4,
+            canonical_payload: true,
+        };
+        let canonical_header = Json::obj([
+            ("alg", Json::text("EdDSA")),
+            ("typ", Json::text("selfsame-enrollment+jws")),
+            ("kid", Json::text("https://photos.example/selfsame/application#enrollment-1")),
+        ]);
+
+        for spelling in [
+            // A space after a colon.
+            br#"{"id":"did:crdt:abc#grant-x", "n":1}"#.to_vec(),
+            // The same members in another order.
+            br#"{"n":1,"id":"did:crdt:abc#grant-x"}"#.to_vec(),
+        ] {
+            let text = sign_raw(&canonical_header, &spelling, &key());
+            assert_eq!(
+                recognise(&text, CANONICAL, &[]),
+                Err(JwsError::PayloadNotCanonical),
+                "{}",
+                String::from_utf8_lossy(&spelling)
+            );
+
+            // The same octets under a grant's policy: recognised, and the
+            // signature over them verifies.
+            let text = sign_raw(&header(), &spelling, &key());
+            let jws = recognise(&text, POLICY, &[]).expect("CON-205 fixes no serialisation");
+            assert!(jws.verify(&key().verifying_key().to_bytes()).is_ok());
+        }
+
+        // The canonical spelling of the same object passes both.
+        let canonical = json::canonicalise(&payload());
+        let text = sign_raw(&canonical_header, &canonical, &key());
+        let jws = recognise(&text, CANONICAL, &[]).expect("the exact RFC 8785 octets");
+        assert_eq!(jws.payload, payload());
     }
 
     #[test]
@@ -550,6 +664,43 @@ mod tests {
         let jws = recognise(&text, POLICY, &[]).unwrap();
         let other = ed25519_dalek::SigningKey::from_bytes(&[8u8; 32]);
         assert_eq!(jws.verify(&other.verifying_key().to_bytes()), Err(JwsError::BadSignature));
+    }
+
+    #[test]
+    fn a_low_order_key_cannot_forge_a_signature_over_arbitrary_input() {
+        // The bypass `verify_strict` exists to close. `A` is the identity
+        // point, so `[k]A` is the identity whatever the challenge scalar is,
+        // and the fixed pair `R = identity, S = 0` therefore satisfies the
+        // permissive equation over *every* signing input. A profile or a
+        // closure that names such a key would let any party produce enrollment
+        // evidence or a succession statement under it.
+        let mut weak = [0u8; 32];
+        weak[0] = 1;
+        let mut forged = [0u8; 64];
+        forged[0] = 1; // R = the identity encoding; S stays zero.
+
+        let text = signed();
+        let (head, _) = text.rsplit_once('.').unwrap();
+        let mutated = format!("{head}.{}", codec::b64url(&forged));
+        let jws = recognise(&mutated, POLICY, &[]).expect("the shape is untouched");
+
+        // First: the forgery is real. If a future `ed25519-dalek` stops
+        // accepting it under the permissive check, this assertion fails and
+        // says so, rather than leaving the one below asserting nothing.
+        {
+            use ed25519_dalek::Verifier as _;
+            let key = ed25519_dalek::VerifyingKey::from_bytes(&weak).expect("a valid point");
+            assert!(
+                key.verify(
+                    jws.signing_input(),
+                    &ed25519_dalek::Signature::from_bytes(&forged)
+                )
+                .is_ok(),
+                "the permissive equation no longer accepts the low-order forgery"
+            );
+        }
+        // Second: this crate does not.
+        assert_eq!(jws.verify(&weak), Err(JwsError::BadSignature));
     }
 
     #[test]

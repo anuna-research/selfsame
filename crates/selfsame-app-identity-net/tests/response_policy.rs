@@ -78,6 +78,57 @@ async fn identity_is_not_a_content_encoding_in_the_sense_that_matters() {
     assert!(!selfsame_app_identity_net::testing::has_content_encoding(&r));
 }
 
+#[tokio::test]
+async fn a_second_content_encoding_field_line_is_not_hidden_by_the_first() {
+    // Two field lines are two values in the header map, and reading only the
+    // first answered "no encoding" for a body that has one. `identity` first is
+    // the shape that hides it, and it is not exotic: a proxy appending its own
+    // encoding to a response that declared none produces exactly this.
+    for second in ["gzip", "br", "identity, gzip"] {
+        let r = response(
+            200,
+            &[
+                ("content-type", PROFILE_MEDIA_TYPE),
+                ("content-encoding", "identity"),
+                ("content-encoding", second),
+            ],
+            b"{}".to_vec(),
+        );
+        assert!(
+            selfsame_app_identity_net::testing::has_content_encoding(&r),
+            "a second `{second}` field line was not seen"
+        );
+    }
+
+    // Two field lines that both say `identity` are still no encoding.
+    let r = response(
+        200,
+        &[
+            ("content-type", PROFILE_MEDIA_TYPE),
+            ("content-encoding", "identity"),
+            ("content-encoding", "IDENTITY"),
+        ],
+        b"{}".to_vec(),
+    );
+    assert!(!selfsame_app_identity_net::testing::has_content_encoding(&r));
+}
+
+#[tokio::test]
+async fn a_content_encoding_that_is_not_utf8_counts_as_an_encoding() {
+    // A value that cannot be read as a string cannot be compared with
+    // `identity`. Treating the read failure as absence made a header nobody
+    // could read into evidence that the header said nothing — which is the one
+    // reading `CON-213` and `CON-220` step 3 cannot afford, since both refuse
+    // encoding outright.
+    let mut builder = http::Response::builder().status(200).header("content-type", PROFILE_MEDIA_TYPE);
+    builder = builder.header(
+        "content-encoding",
+        http::HeaderValue::from_bytes(&[0xff, 0xfe, b'g', b'z']).expect("a header value"),
+    );
+    let r = reqwest::Response::from(builder.body(b"{}".to_vec()).expect("a well-formed response"));
+    assert!(selfsame_app_identity_net::testing::has_content_encoding(&r));
+}
+
 // ── media type ─────────────────────────────────────────────────────────────
 
 #[tokio::test]

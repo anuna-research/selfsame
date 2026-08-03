@@ -127,9 +127,22 @@ pub(crate) fn client(deadline: Duration) -> Result<reqwest::Client, NetError> {
 ///
 /// The boundary is normalised, and only the boundary: the caller's path is used
 /// as given.
+///
+/// # Exactly one separator, not every one
+///
+/// The base loses **at most one** trailing `/`. `CON-201` gives a provider URL
+/// the `PathRule::Any` grammar — "any RFC 3986 path, including empty segments
+/// and a trailing `/`" — and `FINDING-002` records that this is deliberate:
+/// only `applicationId` segments must be non-empty, because `CON-201`'s own
+/// `credentialBaseUrl` example ends in `/`. So `https://state.example/api//` is
+/// a conforming declaration whose path really does end in an empty segment, and
+/// RFC 3986 keeps it. Trimming every trailing slash would request `/api/did:crdt:…`
+/// where the profile declared `/api//did:crdt:…`, which is a different resource
+/// and possibly a different service: the same silent miss the trailing-slash
+/// normalisation exists to prevent, arrived at from the other side.
 pub(crate) fn join(base: &str, path: &str) -> String {
     debug_assert!(path.starts_with('/'), "join takes an absolute path");
-    format!("{}{path}", base.trim_end_matches('/'))
+    format!("{}{path}", base.strip_suffix('/').unwrap_or(base))
 }
 
 /// Read a response body, refusing rather than truncating past the bound.
@@ -182,12 +195,27 @@ pub async fn bounded_body(
 }
 
 /// Whether a response carries a content encoding other than `identity`.
+///
+/// # Every value, and unreadable is encoded
+///
+/// Two ways a permissive reading of this header lets a prohibited encoding
+/// through, and `CON-213` and `CON-220` step 3 both refuse encoding outright, so
+/// either one is a check that can be walked past:
+///
+/// - **More than one field line.** `Content-Encoding: identity` followed by
+///   `Content-Encoding: gzip` is two values in the header map. Reading only the
+///   first answers "no encoding" for a body that has one, so every value is
+///   inspected.
+/// - **Octets that are not UTF-8.** A value that cannot be read as a string
+///   cannot be compared with `identity`, and a header a reader cannot read is
+///   not evidence that the header said nothing. It counts as an encoding.
 pub fn has_content_encoding(response: &reqwest::Response) -> bool {
-    response
-        .headers()
-        .get(reqwest::header::CONTENT_ENCODING)
-        .and_then(|v| v.to_str().ok())
-        .is_some_and(|v| !v.trim().eq_ignore_ascii_case("identity"))
+    response.headers().get_all(reqwest::header::CONTENT_ENCODING).iter().any(|value| {
+        match value.to_str() {
+            Ok(text) => !text.trim().eq_ignore_ascii_case("identity"),
+            Err(_) => true,
+        }
+    })
 }
 
 /// The `Content-Type` without parameters, lower-cased.
@@ -246,6 +274,26 @@ mod tests {
             join("https://state.example/", "/dids/did:crdt:abc/deltas"),
             "https://state.example/dids/did:crdt:abc/deltas"
         );
+    }
+
+    #[test]
+    fn a_declared_empty_path_segment_survives_the_join() {
+        // `CON-201` gives provider URLs the "any RFC 3986 path, including empty
+        // segments and a trailing `/`" grammar, so this base is conforming and
+        // its path genuinely ends in an empty segment. Trimming every trailing
+        // slash sent the request one segment short of the declared endpoint —
+        // a different resource, and a resolution or revocation that quietly
+        // reaches the wrong service or none.
+        assert_eq!(
+            join("https://state.example/api//", "/did:crdt:abc"),
+            "https://state.example/api//did:crdt:abc"
+        );
+        assert_eq!(
+            join("https://state.example/api/", "/did:crdt:abc"),
+            "https://state.example/api/did:crdt:abc"
+        );
+        // A base that is nothing but slashes keeps all but the boundary one.
+        assert_eq!(join("https://state.example//", "/x"), "https://state.example//x");
     }
 
     #[test]

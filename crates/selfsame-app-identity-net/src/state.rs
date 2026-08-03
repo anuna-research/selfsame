@@ -450,6 +450,24 @@ pub async fn submit_revocation(
     Ok(SubmissionReport { submission, acknowledged, unreachable })
 }
 
+/// Whether a response to a delta submission is an **acknowledgement**.
+///
+/// `202 Accepted` exactly, because that is the acknowledgement the pinned
+/// `CON-003` submission API defines and this predicate decides which of two
+/// lists a resolver lands in. `is_success()` would count a `200` or a `204` — a
+/// proxy's own answer, a node that accepted the request and not the delta — as
+/// an acknowledgement, and the resolver would then be dropped from
+/// `unreachable` and lose its place in the retry set. `CON-210` says a failed or
+/// unacknowledged submission "SHALL NOT abandon the revocation"; treating a
+/// non-acknowledging endpoint as done is how one would be quietly abandoned.
+///
+/// Nothing is lost by being strict: an acknowledgement is "evidence of nothing"
+/// either way, and only [`confirm_revocation`] can move the submission. Its own
+/// function so the rule is testable without a resolver to talk to.
+fn acknowledged(status: reqwest::StatusCode) -> bool {
+    status == reqwest::StatusCode::ACCEPTED
+}
+
 async fn submit_one(resolver: &StateResolver, did: &str, body: Vec<u8>) -> bool {
     // CON-003: `POST /dids/{did}/deltas`, which answers `202 Accepted`.
     let url = join(&resolver.url, &submission_path(did));
@@ -461,7 +479,7 @@ async fn submit_one(resolver: &StateResolver, did: &str, body: Vec<u8>) -> bool 
         .send()
         .await
     {
-        Ok(response) => response.status().is_success(),
+        Ok(response) => acknowledged(response.status()),
         Err(_) => false,
     }
 }
@@ -500,6 +518,22 @@ mod tests {
             .acknowledged("state-1")
             .acknowledged("anuna-public");
         assert!(!submission.is_confirmed());
+    }
+
+    #[test]
+    fn only_the_acknowledgement_con_003_defines_counts_as_one() {
+        use reqwest::StatusCode;
+        assert!(acknowledged(StatusCode::ACCEPTED));
+        // A `2xx` that is not the acknowledgement: a node that took the request
+        // and not the delta, or a proxy answering for one. Counting these
+        // dropped the resolver out of `unreachable` and out of the retry set,
+        // so the fan-out lost a target and nothing said so.
+        for other in [StatusCode::OK, StatusCode::CREATED, StatusCode::NO_CONTENT, StatusCode::PARTIAL_CONTENT] {
+            assert!(!acknowledged(other), "{other} is not an acknowledgement");
+        }
+        for refused in [StatusCode::BAD_REQUEST, StatusCode::CONFLICT, StatusCode::NOT_FOUND] {
+            assert!(!acknowledged(refused), "{refused}");
+        }
     }
 
     #[test]
@@ -605,6 +639,72 @@ mod tests {
         for octets in [&b"{}"[..], b"not json", br#"{"deltas":[]}"#, br#"{"target":"x"}"#] {
             assert!(replay_closure(octets, "did:crdt:whatever").is_err());
         }
+    }
+
+    #[test]
+    fn a_forged_proof_on_the_genesis_delta_buys_nothing() {
+        // `Document::new` bootstraps the replica with the genesis it derives
+        // from the root key, and `merge_verified_bundle` skips a delta it
+        // already holds *before* verifying its signature — so the received
+        // genesis's proof is never checked. That is not a way in, and this is
+        // why: `content_hash` covers `{did, op, parents, timestamp}` and not
+        // the proof, so a received genesis is skipped only when it is
+        // byte-for-byte the delta the root key already determined. Its content
+        // is authenticated by the self-certifying DID, which is what
+        // `did.as_str() != expected_did` above checks; the signature would be a
+        // second statement about a value that is already pinned.
+        //
+        // The check that matters is therefore the DID comparison, and the two
+        // ways of getting past it both fail below.
+        let key = ed25519_dalek::SigningKey::from_bytes(&[7u8; 32]);
+        let (document, genesis) =
+            selfsame_core::identity::sign_genesis(&key).expect("genesis signs");
+        let did = document.did.to_string();
+        let target = genesis.content_hash().expect("a delta hashes");
+        let closure = |deltas: Vec<SignedDelta>, target: DeltaHash| {
+            serde_json::to_vec(&SignedClosure { target, deltas }).expect("serialises")
+        };
+
+        let honest = replay_closure(&closure(vec![genesis.clone()], target.clone()), &did)
+            .expect("a signed closure replays");
+
+        // The same closure with the genesis proof emptied. It replays — and it
+        // replays to the *same document*, because the proof was the only thing
+        // that differed and nothing from the received delta was applied.
+        let mut blanked = genesis.clone();
+        blanked.proof.proof_value = String::new();
+        assert_eq!(
+            blanked.content_hash().expect("hashes"),
+            target,
+            "the proof is not part of the content hash"
+        );
+        let forged = replay_closure(&closure(vec![blanked], target.clone()), &did)
+            .expect("skipped, because it is the genesis already held");
+        assert_eq!(forged.did.to_string(), honest.did.to_string());
+        assert_eq!(forged.delta_count(), honest.delta_count());
+
+        // Way one: a genesis naming a different root key. It derives a
+        // different DID, which is not the one asked about.
+        let other = ed25519_dalek::SigningKey::from_bytes(&[8u8; 32]);
+        let (_, other_genesis) =
+            selfsame_core::identity::sign_genesis(&other).expect("genesis signs");
+        let other_target = other_genesis.content_hash().expect("hashes");
+        assert!(
+            replay_closure(&closure(vec![other_genesis], other_target), &did).is_err(),
+            "a closure for another identity was accepted under this DID"
+        );
+
+        // Way two: the right root key and anything else altered. The content
+        // hash moves, so the delta is no longer one the replica holds, and the
+        // skip does not apply — its signature is checked, and it is the
+        // original signature over different content.
+        let mut altered = genesis.clone();
+        altered.timestamp.wall_ms += 1;
+        let altered_target = altered.content_hash().expect("hashes");
+        assert!(
+            replay_closure(&closure(vec![altered], altered_target), &did).is_err(),
+            "an altered genesis was accepted without its signature verifying"
+        );
     }
 
     #[test]

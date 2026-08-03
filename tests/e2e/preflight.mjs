@@ -68,6 +68,22 @@ const SDK = androidHome();
 const sdkBin = (...p) => (SDK ? join(SDK, ...p) : null);
 
 /**
+ * What to tell someone whose `adb` is not callable.
+ *
+ * Two different situations with two different commands, and telling the second
+ * person to install what they already have is how a preflight loses its
+ * credibility. An SDK that carries `platform-tools` needs a PATH entry and
+ * nothing else, and saying where it is saves the search.
+ */
+function adbFix() {
+  const bundled = sdkBin('platform-tools', 'adb');
+  if (bundled && existsSync(bundled)) {
+    return `installed at ${bundled} but not on PATH — add ${join(SDK, 'platform-tools')} to PATH`;
+  }
+  return 'sdkmanager "platform-tools", then add $ANDROID_HOME/platform-tools to PATH';
+}
+
+/**
  * One prerequisite.
  *
  * `probe` returns a string on success — reported as evidence, so a passing
@@ -95,13 +111,16 @@ const CHECKS = [
   },
   {
     name: 'adb',
-    why: 'ar-crawl talks to the device over it',
-    probe: () =>
-      run('adb', ['version'])?.split('\n')[0] ??
-      (sdkBin('platform-tools', 'adb') && existsSync(sdkBin('platform-tools', 'adb'))
-        ? `${sdkBin('platform-tools', 'adb')} (not on PATH)`
-        : null),
-    fix: 'sdkmanager "platform-tools", then add $ANDROID_HOME/platform-tools to PATH',
+    why: 'ar-crawl talks to the device over it, and the driver invokes it by bare name',
+    // PATH, and only PATH. `driver.mjs` runs `execFileSync('adb', …)` for every
+    // device operation, so an adb that exists under the SDK and is not on PATH
+    // is an adb this harness cannot call. Reporting it as found was the one
+    // outcome preflight exists to prevent: the machine is declared ready and
+    // the run dies on `adb: command not found` a few minutes later, which is
+    // the confusing failure several minutes in that this file's own header
+    // says it is here to replace.
+    probe: () => run('adb', ['version'])?.split('\n')[0] ?? null,
+    fix: adbFix(),
   },
   {
     name: 'emulator',

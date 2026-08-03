@@ -76,7 +76,26 @@ const LABEL_HOME_SIGNING_KEY: &str = "home-signing-key";
 pub use bip39::Mnemonic;
 
 /// The 64-octet BIP-39 seed, zeroised on drop.
-pub type RecoverySeed = Zeroizing<[u8; 64]>;
+///
+/// A newtype rather than an alias for [`Zeroizing<[u8; 64]>`](Zeroizing), and
+/// the reason is the same one [`ApplicationNode`] and [`AccountNode`] are: an
+/// alias inherits the inner type's derived [`Debug`](core::fmt::Debug), so
+/// `{:?}` on the *root* of the whole hierarchy would print all sixty-four
+/// octets into whatever log or error report the caller was assembling. This is
+/// the one secret in `CON-202` from which every other one below it can be
+/// re-derived, so it is the one that least belongs in a log line.
+///
+/// It carries no accessor for the same reason the nodes do not: it exists only
+/// to be the IKM of [`application_node`], and nothing else in this profile has
+/// a use for the octets.
+pub struct RecoverySeed(Zeroizing<[u8; 64]>);
+
+impl RecoverySeed {
+    /// The raw seed, for the first KDF step only.
+    fn as_bytes(&self) -> &[u8; 64] {
+        &self.0
+    }
+}
 
 /// A private application node — 64 octets of KDF material.
 ///
@@ -146,6 +165,12 @@ impl core::fmt::Debug for HomeKey {
     }
 }
 
+impl core::fmt::Debug for RecoverySeed {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str("RecoverySeed(<redacted>)")
+    }
+}
+
 impl core::fmt::Debug for ApplicationNode {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_str("ApplicationNode(<redacted>)")
@@ -174,12 +199,12 @@ pub enum HierarchyError {
 /// every existing identity, so it becomes a new hierarchy version rather than an
 /// argument a caller can vary.
 pub fn recovery_seed(mnemonic: &Mnemonic) -> RecoverySeed {
-    Zeroizing::new(mnemonic.to_seed_normalized(""))
+    RecoverySeed(Zeroizing::new(mnemonic.to_seed_normalized("")))
 }
 
 /// The private application node for one canonical `applicationId`.
 pub fn application_node(recovery: &RecoverySeed, application: &ApplicationId) -> ApplicationNode {
-    ApplicationNode(kdf64(recovery.as_ref(), LABEL_APPLICATION, application.as_str()))
+    ApplicationNode(kdf64(recovery.as_bytes(), LABEL_APPLICATION, application.as_str()))
 }
 
 /// The private account node for one `(applicationId, accountScopeId)` pair.
@@ -353,7 +378,7 @@ mod tests {
         let a = application_node(&recovery, &app(A));
         let account = account_node(&a, &scope(1));
         let key = home_key(&account);
-        assert_ne!(&recovery[..32], key.seed().as_slice());
+        assert_ne!(&recovery.as_bytes()[..32], key.seed().as_slice());
         assert_ne!(&a.as_bytes()[..32], key.seed().as_slice());
         assert_ne!(&account.as_bytes()[..32], key.seed().as_slice());
     }
@@ -428,9 +453,26 @@ mod tests {
         let a = application_node(&recovery, &app(A));
         let account = account_node(&a, &scope(1));
         let key = home_key(&account);
-        for rendered in [format!("{a:?}"), format!("{account:?}"), format!("{key:?}")] {
+        for rendered in
+            [format!("{recovery:?}"), format!("{a:?}"), format!("{account:?}"), format!("{key:?}")]
+        {
             assert!(rendered.contains("redacted"), "{rendered}");
             assert!(!rendered.contains("0x"), "{rendered}");
         }
+    }
+
+    /// The recovery seed was a `Zeroizing<[u8; 64]>` alias, which inherits the
+    /// array's derived `Debug` — so `{:?}` printed all sixty-four octets of the
+    /// root secret, while every type below it in the hierarchy was redacted.
+    #[test]
+    fn the_recovery_seed_does_not_print_its_octets() {
+        let recovery = recovery_seed(&mnemonic(0));
+        let rendered = format!("{recovery:?}");
+        // The first octet of this seed, in the two spellings a derived `Debug`
+        // for `[u8; 64]` would produce.
+        let first = recovery.as_bytes()[0];
+        assert!(!rendered.contains(&format!("{first}")), "{rendered}");
+        assert!(!rendered.contains(&format!("{first:02x}")), "{rendered}");
+        assert_eq!(rendered, "RecoverySeed(<redacted>)");
     }
 }

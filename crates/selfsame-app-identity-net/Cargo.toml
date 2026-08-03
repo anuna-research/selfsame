@@ -34,3 +34,9 @@ serde_json = { workspace = true }
 [dev-dependencies]
 http = "1"
 ed25519-dalek = { workspace = true, features = ["std"] }
+# `test-util` for the paused clock. `CON-208`'s 1,500 ms cap is a property of
+# the code, and a wall-clock assertion measures the machine instead — which is
+# how a probe test came to fail CI at 9.76 s while the code was correct. On a
+# paused clock, time advances only when the runtime is idle, so the deadline is
+# observed rather than timed.
+tokio = { workspace = true, features = ["test-util"] }

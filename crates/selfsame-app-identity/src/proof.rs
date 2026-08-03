@@ -157,15 +157,29 @@ pub fn sign(challenge: &Challenge, device_key: &ed25519_dalek::SigningKey) -> [u
 ///
 /// Freshness and single use are [`NonceLedger`]'s, because they are state and
 /// this is not.
+///
+/// # Why the strict equation
+///
+/// `REQ-206` is a statement about *possession*: "Possession of the VC without
+/// the corresponding device private key SHALL confer no access." The permissive
+/// (cofactored) Ed25519 check cannot carry that sentence. A grant whose device
+/// DID encodes a low-order point — the identity, say — has `[k]A = identity`
+/// for every challenge, so the fixed pair `R = identity, S = 0` satisfies the
+/// equation over any `proof_input`, and the presenter needs no private key at
+/// all. The nonce, the bindings, and the domain separation above would all hold
+/// while the one thing this contract exists to establish did not.
+///
+/// [`crate::didkey::decode`] refuses such a point before it can become a device
+/// DID; this is the same refusal at the step that would otherwise be fooled, so
+/// a key reaching here by any other route is refused too.
 pub fn verify(
     challenge: &Challenge,
     signature: &[u8; 64],
     device_public_key: &[u8; 32],
 ) -> Result<(), ProofError> {
-    use ed25519_dalek::Verifier as _;
     let key = ed25519_dalek::VerifyingKey::from_bytes(device_public_key)
         .map_err(|_| ProofError::BadSignature)?;
-    key.verify(&proof_input(challenge), &ed25519_dalek::Signature::from_bytes(signature))
+    key.verify_strict(&proof_input(challenge), &ed25519_dalek::Signature::from_bytes(signature))
         .map_err(|_| ProofError::BadSignature)
 }
 
@@ -304,6 +318,38 @@ mod tests {
                 "key seed {other}"
             );
         }
+    }
+
+    // REQ-206: possession, or nothing.
+    #[test]
+    fn a_low_order_device_key_proves_possession_of_nothing() {
+        // `A` is the identity point, so `[k]A` is the identity for every
+        // challenge and the fixed pair `R = identity, S = 0` satisfies the
+        // permissive equation over any `proof_input`. A presenter holding a
+        // grant whose device DID encodes such a point would pass this check
+        // without ever having had the device private key — which is exactly
+        // what REQ-206 says must not confer access.
+        let mut weak = [0u8; 32];
+        weak[0] = 1;
+        let mut forged = [0u8; 64];
+        forged[0] = 1;
+
+        let c = challenge();
+        {
+            use ed25519_dalek::Verifier as _;
+            let key = ed25519_dalek::VerifyingKey::from_bytes(&weak).expect("a valid point");
+            assert!(
+                key.verify(&proof_input(&c), &ed25519_dalek::Signature::from_bytes(&forged))
+                    .is_ok(),
+                "the permissive equation no longer accepts the low-order forgery"
+            );
+        }
+        assert_eq!(verify(&c, &forged, &weak), Err(ProofError::BadSignature));
+
+        // …and the same forgery against a second, unrelated challenge, because
+        // the point of it is that the signed octets never mattered.
+        let elsewhere = Challenge { application_id: OTHER_APP.into(), ..challenge() };
+        assert_eq!(verify(&elsewhere, &forged, &weak), Err(ProofError::BadSignature));
     }
 
     #[test]

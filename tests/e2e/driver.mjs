@@ -299,6 +299,30 @@ function scriptedWallet(base, code) {
   }
 }
 
+/**
+ * The verification method the linked device should report, per wallet.
+ *
+ * The two wallets fragment differently, and the difference is real rather than
+ * incidental. The application calls `Session::new_device_fragment()`, which is
+ * 64 bits from the CSPRNG rendered as `dev-<16 hex>` — counting was dropped
+ * because a counter has to be allocated against state a restored wallet may not
+ * have. `examples/scripted_phone.rs` still adds its one device as `dev-1`,
+ * which is fine for a program that links exactly once.
+ *
+ * Asserting `#dev-1` for both reported every successful emulator run as a
+ * failure — the one outcome a harness must never produce, because it makes the
+ * thing it exists to detect indistinguishable from its own bug.
+ */
+function deviceMethodId(walletDid) {
+  const did = walletDid.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return WALLET === 'scripted'
+    ? { pattern: new RegExp(`^${did}#dev-1$`), description: `${walletDid}#dev-1` }
+    : {
+        pattern: new RegExp(`^${did}#dev-[0-9a-f]{16}$`),
+        description: `${walletDid}#dev-<16 hex, from Session::new_device_fragment>`,
+      };
+}
+
 /** The Tauri identifier from `src-tauri/tauri.conf.json`. */
 const PACKAGE = 'io.anuna.selfsame';
 
@@ -544,8 +568,13 @@ async function main() {
     die(`the two parties disagree:\n        wallet: ${walletDid}\n        device: ${seen.did}`);
   }
   if (!seen.fingerprintHex) die('the device linked without a fingerprint to compare');
-  if (seen.ownMethodId !== `${walletDid}#dev-1`) {
-    die(`the device's own method id is wrong: ${seen.ownMethodId}`);
+  const expected = deviceMethodId(walletDid);
+  if (!expected.pattern.test(seen.ownMethodId)) {
+    die(
+      `the device's own method id is wrong:\n` +
+        `        expected  ${expected.description}\n` +
+        `        got       ${seen.ownMethodId}`,
+    );
   }
 
   device.close();

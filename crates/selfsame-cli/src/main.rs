@@ -419,11 +419,25 @@ const QR_GRID: usize = 41 + 2 * QR_QUIET as usize;
 const QR_INDENT: &str = "  ";
 /// Columns needed to paint [`QR_GRID`] modules at two cells each, plus indent.
 const QR_WIDE_COLUMNS: usize = QR_INDENT.len() + QR_GRID * 2;
+/// Columns the **compact** drawing needs: one glyph per module column, plus the
+/// indent.
+const QR_COMPACT_COLUMNS: usize = QR_INDENT.len() + QR_GRID;
+/// Rows the compact drawing needs: two module rows to a terminal row.
+const QR_COMPACT_ROWS: usize = QR_GRID.div_ceil(2);
+
+/// Why a QR was not drawn.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum QrRefusal {
+    /// The text does not fit the version-6 symbol `NFR-004` pins.
+    OverVersionSix,
+    /// The terminal cannot show even the compact drawing.
+    TerminalTooSmall,
+}
 
 fn print_qr(text: &str) {
     let (columns, rows) = terminal_size();
     match qr_lines(text, columns, rows) {
-        Some(lines) => {
+        Ok(lines) => {
             for line in lines {
                 println!("{line}");
             }
@@ -439,17 +453,34 @@ fn print_qr(text: &str) {
         }
         // NFR-004 is violated: say so rather than silently rendering a bigger
         // code that a scanner may or may not read at this size.
-        None => eprintln!("  (this code does not fit a version-6 QR — NFR-004)"),
+        Err(QrRefusal::OverVersionSix) => {
+            eprintln!("  (this code does not fit a version-6 QR — NFR-004)")
+        }
+        // The other way NFR-004's "one screen" fails, and the one that used to
+        // print anyway: the symbol is fine and the window cannot hold it. A
+        // truncated or wrapped QR is not a degraded code, it is a destroyed
+        // one — so say what would fix it rather than draw something a scanner
+        // will refuse after the person has held their phone up to it.
+        Err(QrRefusal::TerminalTooSmall) => eprintln!(
+            "  (this terminal is {columns}×{rows}; the smallest scannable drawing \
+             needs {QR_COMPACT_COLUMNS}×{QR_COMPACT_ROWS} — enlarge the window and run this again)"
+        ),
     }
 }
 
-/// The terminal's `(columns, rows)`, or a conservative 80×24 where there is no
-/// terminal to ask.
+/// The terminal's `(columns, rows)`, or the smallest correct drawing's own size
+/// where there is no terminal to ask.
 ///
-/// A pipe or a CI log has no size and nobody scanning it, so the small answer
-/// costs nothing there and keeps the wide form off by default.
+/// A pipe or a CI log has no size and nobody scanning it. The fallback is
+/// therefore exactly [`QR_COMPACT_COLUMNS`]×[`QR_COMPACT_ROWS`]: the compact
+/// drawing is emitted whole, as it always was, and the wide form stays off by
+/// default. It is deliberately not a plausible terminal like 80×24 — that is a
+/// real screen size on which the 25-row symbol does *not* fit, and answering it
+/// for a pipe would mean either refusing to draw into a file or drawing a
+/// truncated symbol onto a small terminal, depending on which way the guess was
+/// wrong.
 fn terminal_size() -> (usize, usize) {
-    const FALLBACK: (usize, usize) = (80, 24);
+    const FALLBACK: (usize, usize) = (QR_COMPACT_COLUMNS, QR_COMPACT_ROWS);
     #[cfg(unix)]
     {
         let mut size: libc::winsize = unsafe { std::mem::zeroed() };
@@ -465,8 +496,7 @@ fn terminal_size() -> (usize, usize) {
     FALLBACK
 }
 
-/// The rendered rows for `text` on a terminal `columns` wide, or `None` if the
-/// text does not fit NFR-004's symbol.
+/// The rendered rows for `text` on a terminal of `columns`×`rows`, or why not.
 ///
 /// Split out from [`print_qr`] so the geometry is testable without capturing
 /// stdout — the previous version indexed past the end of a row for any cell in
@@ -490,10 +520,22 @@ fn lines_are_compact(columns: usize, rows: usize) -> bool {
     columns < QR_WIDE_COLUMNS || rows < QR_GRID
 }
 
-fn qr_lines(text: &str, columns: usize, rows: usize) -> Option<Vec<String>> {
+fn qr_lines(text: &str, columns: usize, rows: usize) -> Result<Vec<String>, QrRefusal> {
     use qrcode::{EcLevel, QrCode, Version};
 
-    let qr = QrCode::with_version(text, Version::Normal(6), EcLevel::Q).ok()?;
+    // Neither drawing fits, so there is nothing correct to return. The compact
+    // form is 49 glyphs plus the two-column indent and 25 rows: on the 80×24
+    // that used to be assumed for a pipe, the last row falls off the bottom and
+    // the top of the symbol scrolls away with the prose above it. Both
+    // dimensions are checked, because a symbol wrapped at the right margin and
+    // a symbol cut off at the last row are equally unscannable and equally
+    // convincing to look at.
+    if columns < QR_COMPACT_COLUMNS || rows < QR_COMPACT_ROWS {
+        return Err(QrRefusal::TerminalTooSmall);
+    }
+
+    let qr = QrCode::with_version(text, Version::Normal(6), EcLevel::Q)
+        .map_err(|_| QrRefusal::OverVersionSix)?;
     let width = qr.width();
     let dark: Vec<bool> = qr.to_colors().iter().map(|c| *c == qrcode::Color::Dark).collect();
 
@@ -559,7 +601,7 @@ fn qr_lines(text: &str, columns: usize, rows: usize) -> Option<Vec<String>> {
             lines.push(line);
         }
     }
-    Some(lines)
+    Ok(lines)
 }
 
 // ── the visual fingerprint (SPEC-002 CON-103) ───────────────────────────────
@@ -789,7 +831,7 @@ mod tests {
     fn the_compact_drawing_reproduces_the_encoder_matrix() {
         let code = a_code();
         let (side, dark) = encoded(&code);
-        let grid = painted(&qr_lines(&code, 80, 24).expect("version 6 fits"));
+        let grid = painted(&qr_lines(&code, QR_COMPACT_COLUMNS, QR_COMPACT_ROWS).expect("version 6 fits"));
 
         for y in 0..side {
             for x in 0..side {
@@ -866,7 +908,7 @@ mod tests {
                 secret: LinkSecret::from_bytes([seed; 16]),
             }
             .render();
-            for (columns, rows) in [(80, 24), (QR_WIDE_COLUMNS, QR_GRID)] {
+            for (columns, rows) in [(QR_COMPACT_COLUMNS, QR_COMPACT_ROWS), (QR_WIDE_COLUMNS, QR_GRID)] {
                 let lines = qr_lines(&code, columns, rows)
                     .expect("NFR-004: a link code must fit a version-6 QR");
                 assert!(!lines.is_empty());
@@ -889,10 +931,48 @@ mod tests {
             secret: LinkSecret::from_bytes([0x5a; 16]),
         }
         .render();
-        let lines = qr_lines(&code, 80, 24).unwrap();
+        let lines = qr_lines(&code, QR_COMPACT_COLUMNS, QR_COMPACT_ROWS).unwrap();
         assert_eq!(lines.len(), 25, "49 module rows, two per line, rounded up");
         let cells = lines[0].chars().filter(|c| *c == '▀').count();
         assert_eq!(cells, 49, "41 modules plus a quiet zone of 4 on each side");
+    }
+
+    /// A screen too small for even the compact drawing gets no QR at all.
+    ///
+    /// 49 glyph columns plus the two-column indent, and 25 rows. On the 80×24
+    /// that used to be assumed for a pipe the width fits and the height does
+    /// not — the twenty-fifth row scrolls the top of the symbol away, quiet
+    /// zone and all — and a narrower terminal wraps every row. Either way the
+    /// output looks like a QR and is not one, which is the same defect as the
+    /// two-module quiet zone: convincing on screen, refused by the scanner,
+    /// after the person has already held their phone up to it.
+    #[test]
+    fn a_terminal_too_small_for_the_compact_code_is_refused_rather_than_truncated() {
+        let code = LinkCode {
+            application: Application::CbclChat,
+            secret: LinkSecret::from_bytes([0x5a; 16]),
+        }
+        .render();
+
+        assert_eq!(QR_COMPACT_COLUMNS, QR_INDENT.len() + 49);
+        assert_eq!(QR_COMPACT_ROWS, 25);
+
+        assert_eq!(
+            qr_lines(&code, 80, 24),
+            Err(QrRefusal::TerminalTooSmall),
+            "24 rows cannot show 25"
+        );
+        assert_eq!(
+            qr_lines(&code, QR_COMPACT_COLUMNS - 1, QR_COMPACT_ROWS),
+            Err(QrRefusal::TerminalTooSmall),
+            "one column short wraps every row"
+        );
+
+        // Exactly the minimum is enough, and draws the whole symbol.
+        let lines = qr_lines(&code, QR_COMPACT_COLUMNS, QR_COMPACT_ROWS)
+            .expect("the smallest correct drawing");
+        assert_eq!(lines.len(), QR_COMPACT_ROWS);
+        assert_eq!(lines[0].chars().filter(|c| *c == '▀').count(), QR_GRID);
     }
 
     /// The prompt carries the value the phone asks about.
@@ -932,7 +1012,7 @@ mod tests {
             secret: LinkSecret::from_bytes([0x5a; 16]),
         }
         .render();
-        let lines = qr_lines(&code, 80, 24).unwrap();
+        let lines = qr_lines(&code, QR_COMPACT_COLUMNS, QR_COMPACT_ROWS).unwrap();
 
         // Rebuild the module grid: fg 30 is an upper dark module, bg 40 a lower.
         let mut grid: Vec<Vec<bool>> = Vec::new();
@@ -966,7 +1046,10 @@ mod tests {
     /// a larger symbol the user's scanner may not read at this size.
     #[test]
     fn an_oversized_payload_is_refused_rather_than_rendered_bigger() {
-        assert!(qr_lines(&"x".repeat(4096), 80, 24).is_none());
+        assert_eq!(
+            qr_lines(&"x".repeat(4096), QR_COMPACT_COLUMNS, QR_COMPACT_ROWS),
+            Err(QrRefusal::OverVersionSix)
+        );
     }
 
     /// Every cell sets both a foreground and a background, so the symbol has a
@@ -979,7 +1062,7 @@ mod tests {
             secret: LinkSecret::from_bytes([1u8; 16]),
         }
         .render();
-        for line in qr_lines(&code, 80, 24).unwrap() {
+        for line in qr_lines(&code, QR_COMPACT_COLUMNS, QR_COMPACT_ROWS).unwrap() {
             let cells = line.chars().filter(|c| *c == '▀').count();
             let fg = line.matches("\x1b[30m").count() + line.matches("\x1b[97m").count();
             let bg = line.matches("\x1b[40m").count() + line.matches("\x1b[107m").count();

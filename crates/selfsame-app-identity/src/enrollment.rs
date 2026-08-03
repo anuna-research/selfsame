@@ -56,6 +56,10 @@ pub const ENROLLMENT_JWS: JwsPolicy = JwsPolicy {
     cty: None,
     max_octets: 8_192,
     max_payload_depth: 4,
+    // "The physical evidence is a compact JWS over the exact UTF-8 RFC 8785
+    // serialization of that object." Exact, so whitespace or a reordered member
+    // is a different document and not this one.
+    canonical_payload: true,
 };
 
 /// `CON-214`: `expiresAt` is later than `issuedAt` by at most 120 seconds.

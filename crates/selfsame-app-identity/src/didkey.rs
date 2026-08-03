@@ -62,6 +62,14 @@ pub enum DidKeyError {
     /// The octets are not a valid Ed25519 point.
     #[error("did:key does not encode a valid Ed25519 public key")]
     NotAValidPoint,
+    /// The octets encode a low-order point, which proves possession of nothing.
+    ///
+    /// One of the eight points of order dividing eight. They are valid curve
+    /// points, so the check above passes, and they are useless as identifiers:
+    /// a signature under a low-order key can be produced by anyone who can name
+    /// it, which is everyone.
+    #[error("did:key encodes a low-order Ed25519 point")]
+    WeakPoint,
 }
 
 /// Encode an Ed25519 public key as a `did:key` identifier.
@@ -93,7 +101,17 @@ pub fn decode(did: &str) -> Result<[u8; 32], DidKeyError> {
     // A key that is not a valid point can never verify a signature, so accepting
     // one would mean carrying a device DID whose proof step is unsatisfiable —
     // a grant that looks issuable and is not usable.
-    ed25519_dalek::VerifyingKey::from_bytes(&key).map_err(|_| DidKeyError::NotAValidPoint)?;
+    let point =
+        ed25519_dalek::VerifyingKey::from_bytes(&key).map_err(|_| DidKeyError::NotAValidPoint)?;
+    // A low-order point is the opposite failure and the dangerous one: the proof
+    // step is not unsatisfiable, it is satisfiable *by anybody*. Under the
+    // permissive Ed25519 equation a fixed signature verifies over any message
+    // for such a key, so a grant naming one would carry a `CON-207` proof of
+    // possession that proves possession of nothing. `proof::verify` refuses it
+    // again at the verification step; this refuses it before it can be issued.
+    if point.is_weak() {
+        return Err(DidKeyError::WeakPoint);
+    }
     Ok(key)
 }
 
@@ -183,6 +201,47 @@ mod tests {
         body.extend_from_slice(&[0x02u8; 32]);
         let did = format!("did:key:z{}", codec::base58btc(&body));
         assert_eq!(decode(&did), Err(DidKeyError::NotAValidPoint));
+    }
+
+    #[test]
+    fn rejects_the_low_order_points() {
+        // All eight points of order dividing eight, in their canonical
+        // encodings. Each is a valid curve point — so the check above passes —
+        // and each makes `CON-207`'s proof of possession satisfiable by anyone,
+        // because under the permissive Ed25519 equation a fixed signature
+        // verifies over every message for such a key.
+        const LOW_ORDER: [[u8; 32]; 8] = [
+            // The identity, order 1.
+            [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+             0, 0, 0, 0],
+            // Order 2.
+            [0xec, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+             0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+             0xff, 0xff, 0xff, 0x7f],
+            // Order 4, both encodings.
+            [0; 32],
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+             0, 0, 0, 0x80],
+            // Order 8, all four.
+            [0xc7, 0x17, 0x6a, 0x70, 0x3d, 0x4d, 0xd8, 0x4f, 0xba, 0x3c, 0x0b, 0x76, 0x0d, 0x10,
+             0x67, 0x0f, 0x2a, 0x20, 0x53, 0xfa, 0x2c, 0x39, 0xcc, 0xc6, 0x4e, 0xc7, 0xfd, 0x77,
+             0x92, 0xac, 0x03, 0x7a],
+            [0xc7, 0x17, 0x6a, 0x70, 0x3d, 0x4d, 0xd8, 0x4f, 0xba, 0x3c, 0x0b, 0x76, 0x0d, 0x10,
+             0x67, 0x0f, 0x2a, 0x20, 0x53, 0xfa, 0x2c, 0x39, 0xcc, 0xc6, 0x4e, 0xc7, 0xfd, 0x77,
+             0x92, 0xac, 0x03, 0xfa],
+            [0x26, 0xe8, 0x95, 0x8f, 0xc2, 0xb2, 0x27, 0xb0, 0x45, 0xc3, 0xf4, 0x89, 0xf2, 0xef,
+             0x98, 0xf0, 0xd5, 0xdf, 0xac, 0x05, 0xd3, 0xc6, 0x33, 0x39, 0xb1, 0x38, 0x02, 0x88,
+             0x6d, 0x53, 0xfc, 0x05],
+            [0x26, 0xe8, 0x95, 0x8f, 0xc2, 0xb2, 0x27, 0xb0, 0x45, 0xc3, 0xf4, 0x89, 0xf2, 0xef,
+             0x98, 0xf0, 0xd5, 0xdf, 0xac, 0x05, 0xd3, 0xc6, 0x33, 0x39, 0xb1, 0x38, 0x02, 0x88,
+             0x6d, 0x53, 0xfc, 0x85],
+        ];
+        for (i, key) in LOW_ORDER.iter().enumerate() {
+            let did = encode(key);
+            assert_eq!(decode(&did), Err(DidKeyError::WeakPoint), "low-order point {i}");
+        }
+        // An ordinary key is unaffected.
+        assert!(decode(&encode(&public_key(3))).is_ok());
     }
 
     // TEST-209: the cross-field equality CON-205 requires.

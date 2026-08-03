@@ -100,6 +100,13 @@ pub enum AliasError {
     /// The JRD is not a document in the recognised language.
     #[error("WebFinger response is not recognised: {0}")]
     Jrd(#[from] JsonError),
+    /// The JRD parses as JSON and is not a JRD: `aliases` is not an array of
+    /// strings.
+    ///
+    /// RFC 7033 fixes the shape, so an element of another type is a document
+    /// this recogniser does not understand rather than one to read around.
+    #[error("WebFinger aliases is not an array of strings")]
+    MalformedJrd,
     /// The JRD's `subject` is not the queried URI.
     #[error("WebFinger subject does not equal the queried account URI")]
     SubjectMismatch,
@@ -271,6 +278,16 @@ pub struct Jrd {
 /// language in the `CON-201` sense; unknown members are ignored rather than
 /// refused. Only `subject` and `aliases` carry meaning for `CON-204`, and both
 /// are validated.
+///
+/// # `aliases` is an array of strings, or it is not an `aliases`
+///
+/// A non-string element rejects the whole document rather than being skipped.
+/// RFC 7033 defines the member as "an array of zero or more URI strings", so
+/// `["did:crdt:…", 7]` is not a JRD with one usable alias — it is a response
+/// this recogniser does not understand, and understanding half of it is the
+/// shape LangSec Principle 3 rules out. Dropping the malformed element would
+/// let the reciprocal binding below succeed against a document whose meaning
+/// two implementations could disagree about.
 pub fn recognise_jrd(octets: &[u8]) -> Result<Jrd, AliasError> {
     let limits = Limits { max_bytes: MAX_JRD_OCTETS, max_depth: 8 };
     let value = json::recognise(octets, limits)?;
@@ -279,11 +296,14 @@ pub fn recognise_jrd(octets: &[u8]) -> Result<Jrd, AliasError> {
         .and_then(Json::as_str)
         .ok_or(AliasError::SubjectMismatch)?
         .to_string();
-    let aliases = value
-        .get("aliases")
-        .and_then(Json::as_array)
-        .map(|items| items.iter().filter_map(Json::as_str).map(str::to_string).collect())
-        .unwrap_or_default();
+    let mut aliases = Vec::new();
+    if let Some(items) = value.get("aliases") {
+        // Present and not an array is malformed too, and for the same reason.
+        let items = items.as_array().ok_or(AliasError::MalformedJrd)?;
+        for item in items {
+            aliases.push(item.as_str().ok_or(AliasError::MalformedJrd)?.to_string());
+        }
+    }
     Ok(Jrd { subject, aliases })
 }
 
@@ -563,6 +583,41 @@ mod tests {
             ("links", Json::arr([Json::obj([("rel", Json::text("self"))])])),
         ]));
         assert_eq!(recognise_jrd(&body).unwrap().subject, uri);
+    }
+
+    #[test]
+    fn rejects_a_jrd_whose_aliases_are_not_all_strings() {
+        // RFC 7033: "an array of zero or more URI strings". A non-string
+        // element used to be dropped, so a JRD carrying the right DID beside a
+        // number bound reciprocally and reported no fault — an authority and a
+        // verifier reading the same octets differently, which is the hazard
+        // `CON-204`'s recogniser exists to remove.
+        let uri = stable_acct_uri(DID, AUTHORITY);
+        for aliases in [
+            Json::arr([Json::int(7), Json::text(DID)]),
+            Json::arr([Json::text(DID), Json::int(7)]),
+            Json::arr([Json::text(DID), Json::arr([Json::text(DID)])]),
+            // Present and not an array at all.
+            Json::text(DID),
+        ] {
+            let body = json::canonicalise(&Json::obj([
+                ("subject", Json::text(uri.clone())),
+                ("aliases", aliases),
+            ]));
+            assert_eq!(recognise_jrd(&body), Err(AliasError::MalformedJrd));
+        }
+
+        // An absent `aliases` is still a JRD with none — the reciprocal check
+        // is what refuses it, and it refuses it as a missing alias rather than
+        // as a malformed document.
+        let body = json::canonicalise(&Json::obj([("subject", Json::text(uri.clone()))]));
+        assert_eq!(recognise_jrd(&body).unwrap().aliases, Vec::<String>::new());
+        // …as is an empty one.
+        let body = json::canonicalise(&Json::obj([
+            ("subject", Json::text(uri)),
+            ("aliases", Json::arr([])),
+        ]));
+        assert!(recognise_jrd(&body).unwrap().aliases.is_empty());
     }
 
     #[test]

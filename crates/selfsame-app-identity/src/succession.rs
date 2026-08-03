@@ -77,6 +77,8 @@ pub const POINTER_JWS: JwsPolicy = JwsPolicy {
     cty: None,
     max_octets: 4_096,
     max_payload_depth: 3,
+    // "The body is a compact JWS over the exact RFC 8785 serialization of…".
+    canonical_payload: true,
 };
 
 /// The JWS policy for the outgoing per-account signature.
@@ -86,6 +88,10 @@ pub const OUTGOING_JWS: JwsPolicy = JwsPolicy {
     cty: None,
     max_octets: 4_096,
     max_payload_depth: 3,
+    // "…two compact JWS values over byte-identical RFC 8785 payloads." Both
+    // halves are required: byte-identical alone would be satisfied by two
+    // copies of the same non-canonical spelling.
+    canonical_payload: true,
 };
 
 /// The JWS policy for the incoming countersignature.
@@ -95,6 +101,7 @@ pub const COUNTERSIGN_JWS: JwsPolicy = JwsPolicy {
     cty: None,
     max_octets: 4_096,
     max_payload_depth: 3,
+    canonical_payload: true,
 };
 
 const POINTER_MEMBERS: &[&str] = &["successionVersion", "from", "to", "issuedAt", "expiresAt"];
