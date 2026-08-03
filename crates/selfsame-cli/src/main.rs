@@ -411,11 +411,30 @@ fn offer_confirmation(device_fp: &fingerprint::Fingerprint) -> Vec<String> {
     ]
 }
 
+/// Version 6 is 41 modules on a side (NFR-004); ISO/IEC 18004 requires a quiet
+/// zone of four modules on every side of it.
+const QR_QUIET: isize = 4;
+const QR_GRID: usize = 41 + 2 * QR_QUIET as usize;
+/// Every rendered row is indented to sit with the surrounding prose.
+const QR_INDENT: &str = "  ";
+/// Columns needed to paint [`QR_GRID`] modules at two cells each, plus indent.
+const QR_WIDE_COLUMNS: usize = QR_INDENT.len() + QR_GRID * 2;
+
 fn print_qr(text: &str) {
-    match qr_lines(text) {
+    let (columns, rows) = terminal_size();
+    match qr_lines(text, columns, rows) {
         Some(lines) => {
             for line in lines {
                 println!("{line}");
+            }
+            if lines_are_compact(columns, rows) {
+                // Say why it is the small one. A code that is merely harder to
+                // scan, with nothing on screen to say so, is the same failure
+                // as the short quiet zone was: wrong and reassuring.
+                eprintln!(
+                    "\n  (drawn small — this terminal is {columns}×{rows}; \
+                     {QR_WIDE_COLUMNS}×{QR_GRID} draws it sharper)"
+                );
             }
         }
         // NFR-004 is violated: say so rather than silently rendering a bigger
@@ -424,13 +443,54 @@ fn print_qr(text: &str) {
     }
 }
 
-/// The rendered rows, or `None` if the text does not fit NFR-004's symbol.
+/// The terminal's `(columns, rows)`, or a conservative 80×24 where there is no
+/// terminal to ask.
+///
+/// A pipe or a CI log has no size and nobody scanning it, so the small answer
+/// costs nothing there and keeps the wide form off by default.
+fn terminal_size() -> (usize, usize) {
+    const FALLBACK: (usize, usize) = (80, 24);
+    #[cfg(unix)]
+    {
+        let mut size: libc::winsize = unsafe { std::mem::zeroed() };
+        // SAFETY: `size` is a live, correctly-typed `winsize` for the duration
+        // of the call, which is the only thing TIOCGWINSZ writes. A stdout that
+        // is not a terminal returns non-zero and leaves it zeroed, which the
+        // guard below rejects.
+        let queried = unsafe { libc::ioctl(libc::STDOUT_FILENO, libc::TIOCGWINSZ, &mut size) };
+        if queried == 0 && size.ws_col > 0 && size.ws_row > 0 {
+            return (size.ws_col as usize, size.ws_row as usize);
+        }
+    }
+    FALLBACK
+}
+
+/// The rendered rows for `text` on a terminal `columns` wide, or `None` if the
+/// text does not fit NFR-004's symbol.
 ///
 /// Split out from [`print_qr`] so the geometry is testable without capturing
 /// stdout — the previous version indexed past the end of a row for any cell in
 /// the right-hand quiet zone, which no test could see because the only caller
 /// printed.
-fn qr_lines(text: &str) -> Option<Vec<String>> {
+///
+/// Two drawings of the same modules. Given the room, one module is **two spaces
+/// of background colour**: no glyph, so nothing about the symbol depends on how
+/// a font chooses to paint `▀`. That dependency is what made a provably correct
+/// symbol look wrong on a real terminal — each cell carried two module rows, so
+/// module height came out of the font's metrics, and at one-module detail the
+/// imprecision shows as seams. Below the required width the compact half-block
+/// form is kept, because the alternative at that size is wrapping, and a
+/// wrapped symbol is not a degraded QR but a destroyed one.
+/// Whether a terminal of `columns`×`rows` gets the compact drawing.
+///
+/// Height matters as much as width. NFR-004 asks for a code that fits one
+/// screen, and the wide form is [`QR_GRID`] rows tall: on a wide but short
+/// terminal it scrolls, and half a symbol scans no better than a blurry one.
+fn lines_are_compact(columns: usize, rows: usize) -> bool {
+    columns < QR_WIDE_COLUMNS || rows < QR_GRID
+}
+
+fn qr_lines(text: &str, columns: usize, rows: usize) -> Option<Vec<String>> {
     use qrcode::{EcLevel, QrCode, Version};
 
     let qr = QrCode::with_version(text, Version::Normal(6), EcLevel::Q).ok()?;
@@ -448,18 +508,15 @@ fn qr_lines(text: &str) -> Option<Vec<String>> {
     // a reader still cannot isolate the symbol from the terminal text around
     // it. Eyeballing the output is no help, because it looks correct — which is
     // exactly how it survived.
-    let quiet: isize = 4;
     let side = width as isize;
     let module = |x: isize, y: isize| -> bool {
         (0..side).contains(&x) && (0..side).contains(&y) && dark[(y * side + x) as usize]
     };
+    let grid = (side + 2 * QR_QUIET) as usize;
 
-    // Two module rows per terminal row, via a half-block whose *foreground* is
-    // the upper module and whose *background* is the lower one.
-    //
     // Colours are set explicitly rather than left to the terminal's palette. A
     // scanner expects dark modules on a light field; drawing with the default
-    // foreground would invert the symbol on a dark terminal — which is most
+    // background would invert the symbol on a dark terminal — which is most
     // terminals — and produce a code that renders beautifully and does not
     // scan. Explicit black-on-white is correct under either theme.
     //
@@ -473,17 +530,34 @@ fn qr_lines(text: &str) -> Option<Vec<String>> {
     const RESET: &str = "\x1b[0m";
 
     let mut lines = Vec::new();
-    let mut y = -quiet;
-    while y < side + quiet {
-        let mut line = String::from("  ");
-        for gx in -quiet..side + quiet {
-            line.push_str(if module(gx, y) { DARK_FG } else { LIGHT_FG });
-            line.push_str(if module(gx, y + 1) { DARK_BG } else { LIGHT_BG });
-            line.push('▀');
+    if !lines_are_compact(columns, rows) {
+        // One module per terminal row, painted as two spaces of background.
+        for row in 0..grid {
+            let y = row as isize - QR_QUIET;
+            let mut line = String::from(QR_INDENT);
+            for col in 0..grid {
+                let x = col as isize - QR_QUIET;
+                line.push_str(if module(x, y) { DARK_BG } else { LIGHT_BG });
+                line.push_str("  ");
+            }
+            line.push_str(RESET);
+            lines.push(line);
         }
-        line.push_str(RESET);
-        lines.push(line);
-        y += 2;
+    } else {
+        // Two module rows per terminal row, via a half-block whose *foreground*
+        // is the upper module and whose *background* is the lower one.
+        for row in (0..grid).step_by(2) {
+            let y = row as isize - QR_QUIET;
+            let mut line = String::from(QR_INDENT);
+            for col in 0..grid {
+                let x = col as isize - QR_QUIET;
+                line.push_str(if module(x, y) { DARK_FG } else { LIGHT_FG });
+                line.push_str(if module(x, y + 1) { DARK_BG } else { LIGHT_BG });
+                line.push('▀');
+            }
+            line.push_str(RESET);
+            lines.push(line);
+        }
     }
     Some(lines)
 }
@@ -537,6 +611,196 @@ fn print_lifehash(fp: &fingerprint::Fingerprint, indent: &str) {
 mod tests {
     use super::*;
     use selfsame_core::code::{LinkCode, LinkSecret};
+
+    // ── SPEC-001 NFR-004: the code has to survive being drawn ───────────────
+
+    /// A representative link code, the length every rendering test uses.
+    fn a_code() -> String {
+        LinkCode {
+            application: Application::CbclChat,
+            secret: LinkSecret::from_bytes([0x5au8; 16]),
+        }
+        .render()
+    }
+
+    /// Reconstruct the modules a rendered block actually paints, so a test can
+    /// compare the drawing against the encoder instead of trusting it.
+    ///
+    /// Returns `(rows, dark)` in rendered-grid coordinates — quiet zone
+    /// included, so module `(x, y)` of the symbol is `dark[y + QUIET][x + QUIET]`.
+    fn painted(lines: &[String]) -> Vec<Vec<bool>> {
+        let mut grid = Vec::new();
+        for line in lines {
+            let body = line.strip_prefix(QR_INDENT).expect("every row keeps its indent");
+            if body.contains('▀') {
+                // Compact: foreground is the upper module, background the lower.
+                let (mut upper, mut lower) = (Vec::new(), Vec::new());
+                let mut rest = body;
+                while let Some(i) = rest.find('▀') {
+                    let cell = &rest[..i];
+                    upper.push(cell.contains("\x1b[30m"));
+                    lower.push(cell.contains("\x1b[40m"));
+                    rest = &rest[i + '▀'.len_utf8()..];
+                }
+                grid.push(upper);
+                grid.push(lower);
+            } else {
+                // Wide: one row of modules, each two spaces of background.
+                let mut row = Vec::new();
+                for cell in body.split("\x1b[").skip(1) {
+                    match cell.split('m').next().expect("an escape has a final byte") {
+                        "40" => row.push(true),
+                        "107" => row.push(false),
+                        _ => {} // the trailing reset
+                    }
+                }
+                grid.push(row);
+            }
+        }
+        grid
+    }
+
+    /// The encoder's own matrix, to compare a rendering against.
+    fn encoded(text: &str) -> (usize, Vec<bool>) {
+        use qrcode::{EcLevel, QrCode, Version};
+        let qr = QrCode::with_version(text, Version::Normal(6), EcLevel::Q).unwrap();
+        let side = qr.width();
+        let dark = qr.to_colors().iter().map(|c| *c == qrcode::Color::Dark).collect();
+        (side, dark)
+    }
+
+    /// NFR-004 pins version 6, and [`QR_GRID`] hard-codes its 41 modules so the
+    /// wide form's column requirement is a constant. If the version ever moves,
+    /// this fails rather than silently mis-sizing the fallback threshold.
+    #[test]
+    fn the_symbol_is_forty_one_modules_on_a_side() {
+        let (side, _) = encoded(&a_code());
+        assert_eq!(side, 41, "version 6 is 41×41");
+        assert_eq!(QR_GRID, side + 8, "grid is the symbol plus a four-module quiet zone");
+        assert_eq!(QR_WIDE_COLUMNS, QR_INDENT.len() + QR_GRID * 2);
+    }
+
+    /// A terminal with room draws one module as two cells of background colour.
+    ///
+    /// The half-block form was *correct data drawn with a glyph*: each terminal
+    /// cell carried two module rows, so module height came out of the font's
+    /// metrics for `▀`. At one-module detail that shows as seams and uneven
+    /// rows — visible to a person and to a scanner, invisible to every test
+    /// that only checked the modules. Painting background colour onto spaces
+    /// removes the font from the picture entirely.
+    #[test]
+    fn a_wide_terminal_paints_modules_with_no_glyph_at_all() {
+        let lines = qr_lines(&a_code(), QR_WIDE_COLUMNS, QR_GRID).expect("version 6 fits");
+
+        assert_eq!(lines.len(), QR_GRID, "one terminal row per module row");
+        for (i, line) in lines.iter().enumerate() {
+            assert!(
+                !line.contains('▀'),
+                "row {i} still draws a glyph, so its height is the font's opinion: {line:?}"
+            );
+            let body = line.strip_prefix(QR_INDENT).expect("every row keeps its indent");
+            assert_eq!(
+                body.matches("\x1b[40m  ").count() + body.matches("\x1b[107m  ").count(),
+                QR_GRID,
+                "row {i} should paint {QR_GRID} modules, two spaces each"
+            );
+            assert!(
+                line.ends_with("\x1b[0m"),
+                "row {i} must reset, or the next thing printed inherits its colours"
+            );
+        }
+    }
+
+    /// The drawing is the symbol — checked against the encoder, not eyeballed.
+    #[test]
+    fn the_wide_drawing_reproduces_the_encoder_matrix() {
+        let code = a_code();
+        let (side, dark) = encoded(&code);
+        let grid = painted(&qr_lines(&code, QR_WIDE_COLUMNS, QR_GRID).expect("version 6 fits"));
+
+        for y in 0..side {
+            for x in 0..side {
+                assert_eq!(
+                    grid[y + QR_QUIET as usize][x + QR_QUIET as usize],
+                    dark[y * side + x],
+                    "module ({x}, {y}) is painted wrong"
+                );
+            }
+        }
+    }
+
+    /// ISO/IEC 18004 requires four light modules on every side. A symbol whose
+    /// modules are all correct and whose quiet zone is short renders perfectly
+    /// and does not scan, which is exactly how the two-module version survived.
+    #[test]
+    fn four_light_modules_surround_the_symbol() {
+        let grid = painted(&qr_lines(&a_code(), QR_WIDE_COLUMNS, QR_GRID).expect("version 6 fits"));
+        let quiet = QR_QUIET as usize;
+
+        for (y, row) in grid.iter().enumerate() {
+            assert_eq!(row.len(), QR_GRID, "row {y} is the full grid");
+            for (x, &is_dark) in row.iter().enumerate() {
+                let inside = (quiet..QR_GRID - quiet).contains(&x)
+                    && (quiet..QR_GRID - quiet).contains(&y);
+                if !inside {
+                    assert!(!is_dark, "({x}, {y}) is dark but lies in the quiet zone");
+                }
+            }
+        }
+    }
+
+    /// One column short of the requirement, the compact form is drawn instead.
+    ///
+    /// Wrapping is not a degraded QR, it is a destroyed one: every row past the
+    /// terminal's width continues on the next line and the symbol stops being a
+    /// square. Half the vertical resolution is worth keeping over that.
+    #[test]
+    fn a_narrow_terminal_falls_back_to_the_compact_code() {
+        let lines = qr_lines(&a_code(), QR_WIDE_COLUMNS - 1, QR_GRID).expect("version 6 fits");
+
+        assert_eq!(lines.len(), QR_GRID.div_ceil(2), "two module rows to a terminal row");
+        for (i, line) in lines.iter().enumerate() {
+            assert_eq!(line.matches('▀').count(), QR_GRID, "row {i} is the full grid");
+            // Columns occupied, not bytes: the escapes take up no width.
+            let columns = QR_INDENT.len() + line.matches('▀').count();
+            assert!(columns < QR_WIDE_COLUMNS, "row {i} must fit where the wide form would not");
+        }
+    }
+
+    /// A wide but short terminal gets the compact code too.
+    ///
+    /// The sharper drawing is [`QR_GRID`] rows tall. On a terminal with the
+    /// columns for it but not the rows, choosing it would scroll the top of the
+    /// symbol off screen — and a symbol you cannot see all of scans no better
+    /// than a blurry one. NFR-004's "one screen" is a scanning requirement, not
+    /// a tidiness one.
+    #[test]
+    fn a_wide_but_short_terminal_also_falls_back() {
+        assert!(lines_are_compact(QR_WIDE_COLUMNS, QR_GRID - 1), "one row short");
+        assert!(!lines_are_compact(QR_WIDE_COLUMNS, QR_GRID), "exactly enough is enough");
+
+        let lines = qr_lines(&a_code(), QR_WIDE_COLUMNS, QR_GRID - 1).expect("version 6 fits");
+        assert_eq!(lines.len(), QR_GRID.div_ceil(2), "the compact drawing");
+    }
+
+    /// The fallback is a different drawing of the same symbol, not a different
+    /// symbol — the modules have to survive halving the vertical resolution.
+    #[test]
+    fn the_compact_drawing_reproduces_the_encoder_matrix() {
+        let code = a_code();
+        let (side, dark) = encoded(&code);
+        let grid = painted(&qr_lines(&code, 80, 24).expect("version 6 fits"));
+
+        for y in 0..side {
+            for x in 0..side {
+                assert_eq!(
+                    grid[y + QR_QUIET as usize][x + QR_QUIET as usize],
+                    dark[y * side + x],
+                    "module ({x}, {y}) is painted wrong in the compact form"
+                );
+            }
+        }
+    }
 
     // ── SPEC-002 TEST-109: terminal geometry ────────────────────────────────
 
@@ -602,23 +866,30 @@ mod tests {
                 secret: LinkSecret::from_bytes([seed; 16]),
             }
             .render();
-            let lines = qr_lines(&code).expect("NFR-004: a link code must fit a version-6 QR");
-            assert!(!lines.is_empty());
+            for (columns, rows) in [(80, 24), (QR_WIDE_COLUMNS, QR_GRID)] {
+                let lines = qr_lines(&code, columns, rows)
+                    .expect("NFR-004: a link code must fit a version-6 QR");
+                assert!(!lines.is_empty());
+            }
         }
     }
 
-    /// NFR-004 stated as a test: a version-6 symbol is 41×41 modules, and with
-    /// the quiet zone the standard requires the render is 49 columns wide and
-    /// 25 rows tall — still one terminal screen, which is the point of the
-    /// requirement.
+    /// NFR-004 stated as a test, for the compact form: a version-6 symbol is
+    /// 41×41 modules, and with the quiet zone the standard requires the render
+    /// is 49 columns wide and 25 rows tall — one terminal screen, which is the
+    /// point of the requirement.
+    ///
+    /// The wide form is 49 rows and so needs a screen that tall; that is why
+    /// [`lines_are_compact`] tests height as well as width, rather than drawing
+    /// a sharper symbol that runs off the top.
     #[test]
-    fn the_render_is_the_size_nfr_004_requires() {
+    fn the_compact_render_is_the_size_nfr_004_requires() {
         let code = LinkCode {
             application: Application::CbclChat,
             secret: LinkSecret::from_bytes([0x5a; 16]),
         }
         .render();
-        let lines = qr_lines(&code).unwrap();
+        let lines = qr_lines(&code, 80, 24).unwrap();
         assert_eq!(lines.len(), 25, "49 module rows, two per line, rounded up");
         let cells = lines[0].chars().filter(|c| *c == '▀').count();
         assert_eq!(cells, 49, "41 modules plus a quiet zone of 4 on each side");
@@ -661,7 +932,7 @@ mod tests {
             secret: LinkSecret::from_bytes([0x5a; 16]),
         }
         .render();
-        let lines = qr_lines(&code).unwrap();
+        let lines = qr_lines(&code, 80, 24).unwrap();
 
         // Rebuild the module grid: fg 30 is an upper dark module, bg 40 a lower.
         let mut grid: Vec<Vec<bool>> = Vec::new();
@@ -695,7 +966,7 @@ mod tests {
     /// a larger symbol the user's scanner may not read at this size.
     #[test]
     fn an_oversized_payload_is_refused_rather_than_rendered_bigger() {
-        assert!(qr_lines(&"x".repeat(4096)).is_none());
+        assert!(qr_lines(&"x".repeat(4096), 80, 24).is_none());
     }
 
     /// Every cell sets both a foreground and a background, so the symbol has a
@@ -708,7 +979,7 @@ mod tests {
             secret: LinkSecret::from_bytes([1u8; 16]),
         }
         .render();
-        for line in qr_lines(&code).unwrap() {
+        for line in qr_lines(&code, 80, 24).unwrap() {
             let cells = line.chars().filter(|c| *c == '▀').count();
             let fg = line.matches("\x1b[30m").count() + line.matches("\x1b[97m").count();
             let bg = line.matches("\x1b[40m").count() + line.matches("\x1b[107m").count();
