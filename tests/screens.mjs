@@ -764,6 +764,68 @@ for (const shot of shots) {
   await page.close();
 }
 
+// ── SPEC-003 BUG-202: the scanner asks for the camera before using it ────
+//
+// Twice the linking screen told a user their phone had no camera while holding
+// a phone with a camera. First because no capability granted
+// `barcode-scanner:allow-scan`, so Tauri's ACL refused the call; then because
+// nothing ever requested the runtime permission, so the plugin threw "No
+// permission to use camera. Did you request it yet?".
+//
+// Both survived every check here for the same reason: the stub defines no
+// `barcodeScanner`, so `startLink`'s mobile branch — the half that only runs on
+// a phone — was never executed by anything. These two cases execute it, and
+// assert the two properties that were false on a device: that permission is
+// requested before scanning, and that a refusal says something the user can act
+// on rather than something about hardware.
+for (const [name, outcome] of [['denied', 'denied'], ['granted', 'granted']]) {
+  const page = await browser.newPage();
+  await page.setViewport({ width: 430, height: 900 });
+  await page.evaluateOnNewDocument(bridge(STATE_LINKED));
+  await page.evaluateOnNewDocument(`
+    window.__asked = 0;
+    window.__scanned = 0;
+    window.__TAURI__.barcodeScanner = {
+      checkPermissions: async () => 'prompt',
+      requestPermissions: async () => { window.__asked++; return '${outcome}'; },
+      scan: async () => { window.__scanned++; return { content: 'abc' }; },
+    };
+  `);
+  await page.goto(SRC, { waitUntil: 'networkidle0' });
+  await new Promise((r) => setTimeout(r, 250));
+
+  await page.evaluate(() => document.querySelector('[data-action="to-link"]').click());
+  await new Promise((r) => setTimeout(r, 300));
+
+  const seen = await page.evaluate(() => ({
+    asked: window.__asked,
+    scanned: window.__scanned,
+    note: document.querySelector('[data-scanner-note]')?.textContent ?? '',
+  }));
+
+  const label = `scanner-${name}`;
+
+  if (seen.asked !== 1) {
+    errors.push(`${label}: the camera permission was requested ${seen.asked} times, expected 1 — scan() does not ask on your behalf`);
+  } else if (outcome === 'denied') {
+    if (seen.scanned !== 0) {
+      errors.push(`${label}: scan() ran after the permission was refused`);
+    } else if (/no camera/i.test(seen.note)) {
+      errors.push(`${label}: a refused permission is reported as absent hardware — "${seen.note}"`);
+    } else if (!/settings/i.test(seen.note)) {
+      errors.push(`${label}: a refused permission must say where to change it, got "${seen.note}"`);
+    } else {
+      console.log(`${label.padEnd(14)} asks first, and names Settings when refused`);
+    }
+  } else if (seen.scanned !== 1) {
+    errors.push(`${label}: scan() ran ${seen.scanned} times after the permission was granted, expected 1`);
+  } else {
+    console.log(`${label.padEnd(14)} asks first, then scans`);
+  }
+
+  await page.close();
+}
+
 // ── SPEC-002 TEST-108: the front end recognises before it paints ─────────
 //
 // CON-102 makes `app.js` a recogniser for the `lifehash` field: a value that

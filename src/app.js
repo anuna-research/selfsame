@@ -403,40 +403,63 @@ function renderRestored(devices) {
 async function startLink() {
   const scanner = $("[data-scanner]");
   const note = $("[data-scanner-note]");
-  const mobile = window.__TAURI__?.barcodeScanner !== undefined;
-  if (mobile) {
-    note.textContent = "Point the camera at the code on your other screen.";
-    scanner.hidden = false;
-    show("link");
-    try {
-      const scanned = await window.__TAURI__.barcodeScanner.scan({
-        formats: ["QRCode"],
-        windowed: true,
-      });
-      await readCode(scanned.content);
-    } catch (e) {
-      // Falling back to typing is not an error state — REQ-011 makes the typed
-      // code a first-class route, and the button for it is already on this
-      // screen. *Why* we fell back is a different question, and it is the
-      // maintainer's rather than the user's.
-      //
-      // This used to be a bare `catch {}` that discarded the reason and
-      // asserted "No camera", which is a claim about hardware. The first
-      // Android build had a camera and no `barcode-scanner:allow-scan`
-      // capability, so every scan was rejected by the ACL and the screen
-      // blamed the phone. A swallowed error is how a one-line configuration
-      // omission spends a release looking like a missing sensor.
-      const reason = String(e?.message ?? e ?? "unknown");
-      console.error("barcode scan unavailable:", reason);
-      note.textContent = /denied|permission|not allowed/i.test(reason)
-        ? "Camera access is off for Selfsame. Enter the code by hand instead."
-        : "The camera isn't available. Enter the code by hand instead.";
-    }
-  } else {
+  const camera = window.__TAURI__?.barcodeScanner;
+
+  if (!camera) {
     // Desktop: the typed route is the route. Say so plainly rather than
     // showing a dead camera frame.
     scanner.hidden = true;
     show("type");
+    return;
+  }
+
+  note.textContent = "Point the camera at the code on your other screen.";
+  scanner.hidden = false;
+  show("link");
+
+  try {
+    // `scan` does not ask for the camera. It checks, and throws
+    //
+    //     No permission to use camera. Did you request it yet?
+    //
+    // if the answer is no. The asking is the caller's job, and not doing it is
+    // indistinguishable on screen from a phone with no camera at all — which
+    // is how this looked on the first two builds that reached a device.
+    let access = await camera.checkPermissions();
+    if (access !== "granted") {
+      access = await camera.requestPermissions();
+    }
+
+    if (access !== "granted") {
+      // Android stops offering the prompt after a second refusal, so naming
+      // where to change it is the difference between a recoverable state and a
+      // dead end. Typing stays available either way: REQ-011 makes it a route,
+      // not a consolation.
+      note.textContent =
+        "Camera access is off for Selfsame — turn it on in Settings, " +
+        "or enter the code by hand.";
+      return;
+    }
+
+    const scanned = await camera.scan({ formats: ["QRCode"], windowed: true });
+    await readCode(scanned.content);
+  } catch (e) {
+    // Falling back to typing is not an error state — REQ-011 makes the typed
+    // code a first-class route, and the button for it is already on this
+    // screen. *Why* we fell back is the maintainer's question, not the user's.
+    //
+    // This was once a bare `catch {}` that discarded the reason and asserted
+    // "No camera" — a claim about hardware. Two unrelated causes hid behind
+    // that one sentence on two successive builds: a missing capability, so
+    // Tauri's ACL refused `scan` before it reached the camera; and then a
+    // camera the application had never asked the user for. Neither was a
+    // sensor, and neither was distinguishable from the screen.
+    const reason = String(e?.message ?? e ?? "unknown");
+    console.error("barcode scan unavailable:", reason);
+    note.textContent = /denied|permission|not allowed/i.test(reason)
+      ? "Camera access is off for Selfsame — turn it on in Settings, " +
+        "or enter the code by hand."
+      : "The camera isn't available. Enter the code by hand instead.";
   }
 }
 
