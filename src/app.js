@@ -53,6 +53,11 @@ if (!bridge) {
 }
 const invoke = bridge;
 
+// IMPL-004 ADR-601 — the SPEC-004 surface. One-way: this file hands it the
+// primitives it needs, and imports nothing back. A cycle would work and would
+// make the boundary a convention rather than a fact.
+import { initAppIdentity } from "./app-identity.js";
+
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 
@@ -150,6 +155,19 @@ async function refresh() {
   const link = $('[data-action="to-link"]');
   link.disabled = !s.backup_confirmed;
   link.title = s.backup_confirmed ? "" : "Confirm your recovery phrase first";
+
+  // IMPL-004: applications beside devices, under one identity.
+  appIdentity.renderApplications(s.applications ?? []);
+  appIdentity.renderSummary(s.applications ?? []);
+
+  // CON-222: the wallet was opened by something. If the platform attributed a
+  // caller that does not match the CON-214 binding, that is where this stops —
+  // an arrival state rather than a screen anyone navigates to, which is why it
+  // is decided here and not behind a button.
+  if (s.pending_handoff && s.pending_handoff.caller_matches === false) {
+    appIdentity.showBindingMismatch(s.pending_handoff);
+    return;
+  }
 
   $("[data-endpoint]").textContent = await invoke("service_endpoint");
   show("home");
@@ -622,6 +640,10 @@ async function authorise() {
     // A comparison prompt — "check it now shows this" — so it carries the hex,
     // for the same reason SCREEN-001's question does.
     $("[data-linked-fingerprint]").textContent = result.fingerprint.hex;
+    // The nickname beside the hex, as on every other fingerprint surface. The
+    // hex is what is compared; the nickname is what makes comparing it
+    // possible without reading twelve characters twice.
+    $("[data-linked-label]").textContent = result.fingerprint.label;
     renderLifehash($("[data-linked-lifehash]"), result.fingerprint.lifehash);
     $("[data-linked-method]").textContent = result.method_id;
     $("[data-linked-publishing]").textContent =
@@ -728,6 +750,12 @@ const actions = {
   "back-to-device": () => openDevice(ui.device),
   unlink,
 };
+
+// IMPL-004 registers its own actions into the same map, so the delegated
+// listener below dispatches both surfaces without knowing there are two.
+const appIdentity = initAppIdentity({
+  $, $$, show, invoke, fail, clearErrors, message, renderLifehash, since, actions,
+});
 
 document.addEventListener("click", (e) => {
   const el = e.target.closest("[data-action]");

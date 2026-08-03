@@ -198,22 +198,72 @@ impl Session {
     /// Derived from the document rather than from a counter, so a restored
     /// phone continues the sequence instead of colliding with a method id that
     /// already exists in signed state.
-    pub fn next_device_fragment(&self, document: &Document) -> String {
-        let did = document.did.to_string();
-        let used: Vec<u32> = document
-            .resolve()
-            .ok()
-            .and_then(|r| r.did_document)
-            .map(|d| {
-                d.verification_method
-                    .iter()
-                    .filter_map(|vm| {
-                        vm.id.strip_prefix(&format!("{did}#dev-")).and_then(|n| n.parse().ok())
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-        format!("dev-{}", used.iter().max().map(|n| n + 1).unwrap_or(1))
+    /// A fresh device fragment: `dev-` and 64 random bits.
+    ///
+    /// # Why not a counter
+    ///
+    /// This was `dev-N`, allocated by counting the methods already present, and
+    /// counting is where the whole difficulty lived. `RevokeVerificationMethod`
+    /// is a 2P-Set remove and the pinned method computes
+    /// `authorized = added \ revoked`, so a revoked id is retired **for good**:
+    /// re-adding it puts it back in `added`, leaves it in `revoked`, and the
+    /// difference still excludes it. An allocator therefore has to count
+    /// history rather than live methods — and the first version counted the
+    /// resolved document, which by that same rule no longer lists a revoked
+    /// method. So unlinking `dev-1` freed the number, the next device was handed
+    /// an id that was already revoked, and it arrived dead. Every retry did the
+    /// same, so an identity that had ever unlinked its only device could never
+    /// link another.
+    ///
+    /// Counting history fixes it — but only while the history is complete, and
+    /// this design does not promise that. `restore_identity` fetches the closure
+    /// inside an `if let Ok(...)` and completes regardless, because the cache is
+    /// "a performance and offline affordance". Restore with the resolver
+    /// unreachable and the phone holds no deltas, so a derived counter says
+    /// `dev-1` on an identity that already has one: dead if that id was revoked,
+    /// and colliding with a *live* device if it was not. A locally stored
+    /// counter is worse still, since `REQ-021` exists precisely because a
+    /// restored phone holds no local state.
+    ///
+    /// Not counting removes the condition rather than satisfying it. A random
+    /// fragment is correct with no history at all.
+    ///
+    /// # Why 64 bits and not more
+    ///
+    /// This is an identifier inside one identity's verification-method set, not
+    /// a secret. It has to be unique among the handful of ids that identity will
+    /// ever hold, revoked ones included — it does not have to be unguessable,
+    /// because it is published in the DID document the moment it exists.
+    /// At 64 bits the birthday bound over a hundred devices is about 3e-16.
+    ///
+    /// The first version used 128, copied from the link secret without thinking
+    /// about it. That secret is drawn against an attacker who gets to try;
+    /// this is drawn against coincidence. Same generator, different question,
+    /// and the answer is half the width on a line a person reads.
+    ///
+    /// # Why not the key
+    ///
+    /// Deriving the fragment from the device's public key is the other obvious
+    /// way to avoid a counter, and it is worse than either. `ADR-004` has a
+    /// relinking device present the *same* key — "linking adds no new key
+    /// material" — so a key-derived fragment is the same fragment, which is the
+    /// revoked one, and there is no next one to pick. That makes the defect
+    /// above permanent by construction rather than by accident.
+    ///
+    /// It also publishes a correlation handle. Two identities that both link
+    /// one device would each carry `#<H(key)>`, and these documents go to
+    /// resolvers — so anyone reading both learns they share a device. A random
+    /// fragment says nothing about the key it names.
+    pub fn new_device_fragment() -> String {
+        use rand::RngCore as _;
+        let mut octets = [0u8; 8];
+        rand::rngs::OsRng.fill_bytes(&mut octets);
+        let mut out = String::with_capacity(4 + 16);
+        out.push_str("dev-");
+        for b in octets {
+            out.push_str(&format!("{b:02x}"));
+        }
+        out
     }
 
     /// Every verification method, revoked ones included, as the devices list
@@ -291,4 +341,40 @@ pub struct DeviceRow {
     /// True while this device's `AddVerificationMethod` is still unpublished —
     /// SCREEN-002's *"publishing — others can't see it yet"*.
     pub pending: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashSet;
+
+    /// A fragment is never reissued, so a revoked one can never come back.
+    ///
+    /// This is the property the counter kept getting wrong. It is stated over
+    /// the generator rather than over an allocator, because there is no longer
+    /// an allocator to state it over — which is the point of the change.
+    #[test]
+    fn every_fragment_is_new() {
+        let seen: HashSet<String> = (0..10_000).map(|_| Session::new_device_fragment()).collect();
+        assert_eq!(seen.len(), 10_000, "64 random bits collided, which they do not");
+    }
+
+    /// The shape a DID URL fragment has to have.
+    ///
+    /// `dev-` and 16 lower-case hex characters. Asserted because the fragment is
+    /// concatenated into `did:crdt:…#<fragment>` and that identifier is compared
+    /// as text by every verifier — a character outside the fragment grammar
+    /// would produce an id that is signed here and rejected elsewhere.
+    #[test]
+    fn a_fragment_is_dev_and_sixteen_hex_characters() {
+        for _ in 0..100 {
+            let f = Session::new_device_fragment();
+            let rest = f.strip_prefix("dev-").expect("the `dev-` prefix names what it is");
+            assert_eq!(rest.len(), 16, "64 bits as hex: {f}");
+            assert!(
+                rest.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)),
+                "lower-case hex only, so the id is stable under any case handling: {f}"
+            );
+        }
+    }
 }

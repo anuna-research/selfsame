@@ -2,8 +2,11 @@
 resolver = "2"
 members = [
     "crates/selfsame-core",
+    "crates/selfsame-app-identity",
+    "crates/selfsame-app-identity-net",
     "crates/selfsame-rendezvous",
     "crates/selfsame-cli",
+    "crates/selfsame-web-device",
     "src-tauri",
 ]
 
@@ -19,6 +22,7 @@ repository = "https://git.anuna.io/anuna-research/selfsame"
 
 [workspace.dependencies]
 selfsame-core = { path = "crates/selfsame-core", default-features = false }
+selfsame-app-identity = { path = "crates/selfsame-app-identity" }
 
 # ── pinned upstream dependencies (SPEC-001 ADR-010, ADR-013) ─────────────────
 #

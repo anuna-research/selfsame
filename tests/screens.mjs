@@ -46,28 +46,121 @@ mkdirSync(OUT, { recursive: true });
 // noise shaped like it. A synthetic buffer would satisfy the assertions below
 // and quietly stop the captures being worth comparing against the mockup.
 const LH = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'lifehash-fixtures.json'), 'utf8'));
-// ROOT_FP and DID_FP are DIFFERENT VALUES, and that is the point of the stub.
+// One identity fingerprint, and only one.
 //
-// `get_state` returns both: `root_fingerprint` is `fingerprint_key(root_pk)`
-// and `fingerprint` is `fingerprint_did(did)`. They are separate domains over
-// separate inputs, so they never agree. An earlier version of this file used
-// one constant for both, which made the app look self-consistent in every
-// screenshot when it is not: the *created* screen shows the DID fingerprint and
-// the *home* card shows the root-key one.
-const ROOT_FP = { hex: '5F 9A C9 07 2E 11', label: 'slate-heron-07', lifehash: LH['root_5F9AC9072E11'] };
+// `get_state` returns `fingerprint` — `fingerprint_did(did)` — and nothing
+// else. It used to also carry `root_fingerprint` (`fingerprint_key(root_pk)`),
+// a different 48-bit value that the home card headlined and no other surface
+// showed; both the field and the fixture for it are gone, because a spare
+// fingerprint is an invitation to headline the wrong one again. That applies to
+// a test fixture exactly as it applies to the state object: this file has to
+// send what the real command sends, or every assertion below is made against a
+// shape the app never produces.
+// The recovery phrase the stubbed `create_identity` returns.
+//
+// Hoisted out of the bridge so the fixture and the assertion on `03-phrase` are
+// the same list. Written twice, they could drift, and the drift would look like
+// a passing test for a screen showing eleven words.
+const WORDS = ['harbour','lichen','quarry','saddle','verbena','tundra','gravel','mussel','plover','basalt','ferment','willow'];
+
 const DID_FP = { hex: '2E 41 D0 88 6B 15', label: 'garnet-plover-31', lifehash: LH['did_2E41D0886B15'] };
 const KEY_FP = { hex: 'C0 7A 1E 42 9B 33', label: 'copper-lynx-42', lifehash: LH['key_C07A1E429B33'] };
 
+// ── IMPL-004 · the SPEC-004 surface ──────────────────────────────────────
+//
+// HOME_FP is a real fingerprint of the stub home DID CON-603 returns, with a
+// real LifeHash of that digest — same discipline as the constants above. The
+// DID's *provenance* is fixture (see FINDING-016: the wallet holds no material
+// to derive one), but everything rendered from it is genuinely computed.
+const HOME_DID = 'did:crdt:2a3557b5321f2990e2d8222d3e4571f4c8ca3b821593c2128f212a2b7c7b635d';
+// A DIFFERENT identity, and that is the point of the fixture. CON-202 gives each
+// application its own home below the recovery secret, and the applications
+// screen says so in as many words. Sharing one DID across both rows would make
+// a real cross-application linkability defect look correct on screen.
+const HOME_DID_2 = 'did:crdt:c17d0e93b426a8f5104e7b2c96d38af0521e6bc94d70382af659c1e04b7d28a3';
+const HOME_FP = { hex: '0C 57 68 F9 50 37', label: 'topaz-adder-57', lifehash: LH['home_0C5768F95037'] };
+
+// The account alias is the opaque one CON-203 derives from the home DID. The
+// account *scope* appears nowhere here and must appear nowhere on screen
+// (NFR-203) — the fixture cannot leak what it does not carry.
+const APPLICATIONS = [
+  {
+    application_id: 'https://photos.example/selfsame/application',
+    display_name: 'Photos',
+    account_alias: 'acct:ss-k4f7q2m9x3v6b8n1p5r0t2w4y6z8a1c3e5g7@accounts.photos.example',
+    username: 'alice',
+    home_did: HOME_DID,
+    fingerprint: HOME_FP,
+    permissions: [
+      { uri: 'https://photos.example/selfsame/application#device', title: 'Act as this account on this device', known: true },
+      { uri: 'https://photos.example/selfsame/application#upload', title: null, known: false },
+    ],
+    devices: [
+      { label: 'This phone', grant_id: `${HOME_DID}#grant-AAAA`, added_at: Math.floor(Date.now()/1000) - 86400, is_this_device: true },
+      { label: 'Laptop', grant_id: `${HOME_DID}#grant-BBBB`, added_at: Math.floor(Date.now()/1000) - 604800, is_this_device: false },
+    ],
+  },
+  {
+    application_id: 'https://notes.example/selfsame/application',
+    display_name: 'Notes',
+    // HP-7's cliff: the application has not supplied this account's scope, so
+    // there is no alias and no identity to open. REQ-217 forbids guessing one.
+    account_alias: null,
+    username: null,
+    home_did: HOME_DID_2,
+    fingerprint: HOME_FP,
+    permissions: [],
+    devices: [],
+  },
+];
+
+const STATE_APPS = {
+  has_identity: true,
+  backup_confirmed: true,
+  did: 'did:crdt:9f3a11c2e70b4d8a5c6f9012ab34cd56ef78901234abcd56ef7890123456abcd',
+  fingerprint: { hex: '2E 41 D0 88 6B 15', label: 'garnet-plover-31', lifehash: LH['did_2E41D0886B15'] },
+  pending_publications: 0,
+  devices: [],
+  applications: APPLICATIONS,
+};
+
+// CON-210: only a re-resolved verified closure moves a removal to confirmed.
+// Two states rather than a timer or a button — the screen asks, and the answer
+// decides.
+//
+// Both carry `wired_backend`, because both are renders of screens this build
+// cannot reach: `revoke_grant` refuses here (FINDING-016 — no home key to sign
+// with), so a removal never gets as far as pending. They are captured as
+// *design* renders and are labelled `wired-` for it. The state this build
+// actually reaches is `26-remove-refused`.
+const STATE_APPS_WIRED = { ...STATE_APPS, wired_backend: true };
+const STATE_APPS_SETTLED = { ...STATE_APPS_WIRED, revocation_settled: true };
+
+// CON-222: the wallet is opened by a caller whose attribution does not match
+// the CON-214 binding. An arrival state, so it needs no click path.
+const STATE_BAD_CALLER = {
+  ...STATE_APPS,
+  pending_handoff: {
+    caller_matches: false,
+    claimed: 'android:com.example.photos',
+    observed: 'com.attacker.lookalike',
+  },
+};
+
+// Two method-id shapes on purpose. Fragments are now 128 random bits
+// (`Session::new_device_fragment`), but identities linked before that change
+// carry `dev-N` and keep it — both are what `get_state` returns today. The long
+// one is here so the device screen is laid out against the width it now has to
+// hold, which the horizontal-overflow check below is what actually tests.
 const STATE_LINKED = {
   has_identity: true,
   backup_confirmed: true,
   did: 'did:crdt:9f3a11c2e70b4d8a5c6f9012ab34cd56ef78901234abcd56ef7890123456abcd',
   fingerprint: DID_FP,
-  root_fingerprint: ROOT_FP,
   pending_publications: 1,
   devices: [
     { method_id: 'did:crdt:9f3a…#dev-1', label: 'Chrome on macOS', nickname: 'copper-lynx-42', lifehash: LH['dev1_C07A1E429B33'], revoked: false, last_seen: Math.floor(Date.now()/1000) - 120, pending: false },
-    { method_id: 'did:crdt:9f3a…#dev-2', label: 'hark on workstation-01', nickname: 'amber-quoll-88', lifehash: LH['dev2_1B44E7902A05'], revoked: false, last_seen: null, pending: true },
+    { method_id: 'did:crdt:9f3a…#dev-6b1f0a97c4e8d25301af7e39b8c6d024', label: 'hark on workstation-01', nickname: 'amber-quoll-88', lifehash: LH['dev2_1B44E7902A05'], revoked: false, last_seen: null, pending: true },
     { method_id: 'did:crdt:9f3a…#dev-3', label: 'Firefox on the old laptop', nickname: 'walnut-stoat-19', lifehash: LH['dev3_77C10D3E5182'], revoked: true, last_seen: null, pending: false },
   ],
 };
@@ -80,7 +173,7 @@ const bridge = (state) => `
           case 'get_state': return ${JSON.stringify(state)};
           case 'service_endpoint': return 'http://127.0.0.1:8787';
           case 'create_identity': return {
-            words: ['harbour','lichen','quarry','saddle','verbena','tundra','gravel','mussel','plover','basalt','ferment','willow'],
+            words: ${JSON.stringify(WORDS)},
             did: ${JSON.stringify(STATE_LINKED.did)},
             fingerprint: ${JSON.stringify(DID_FP)},
           };
@@ -106,6 +199,58 @@ const bridge = (state) => `
           case 'unlink_device': return null;
           case 'reject_offer': return null;
           case 'flush_publications': return 0;
+
+          // ── IMPL-004 CON-601..606 ──────────────────────────────────────
+          //
+          // Every case below answers what the *registered* command answers,
+          // which is the rule IMPL-004 states for this bridge. Three of them
+          // refuse, because three of the real commands refuse: this build has
+          // no account authority, no SPEC-004 home key (FINDING-016), and no
+          // resolver.
+          //
+          // The bridge used to answer three commands the backend did not
+          // register at all, and answered two of them with success. That is how
+          // 'remove-pending' — "Signed on this device and sent." — was captured
+          // for a build in which the invoke rejected and nothing was signed. A
+          // stub more capable than the thing it stands for does not test the
+          // screen; it manufactures the state the screen claims.
+          case 'alias_preview': {
+            // CON-601 returns one closed token and no detail. 'ss-' is the
+            // CON-203 identifier's reserved prefix, which the core's
+            // alias::recognise_username refuses — so this refusal is one the
+            // real command also makes, for this exact input.
+            if (String(args.localpart ?? '').startsWith('ss-')) throw 'UsernameUnavailable';
+            return {
+              stableAlias: ${JSON.stringify(APPLICATIONS[0].account_alias)},
+              usernameAlias: args.localpart
+                ? 'acct:' + args.localpart + '@accounts.photos.example'
+                : null,
+            };
+          }
+          case 'home_fingerprint': return ${JSON.stringify(HOME_FP)};
+          // CON-604. There is no account authority in this build, so a name can
+          // be recognised and never reserved — and the wallet says so rather
+          // than showing it as held.
+          case 'provision_username': throw 'AccountProvisioningFailed';
+          case 'app_identity_derive': {
+            if (!args.accountScopeId) throw 'AccountScopeUnavailable';
+            return { homeDid: ${JSON.stringify(HOME_DID)}, publicKey: 'iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w', derived: false };
+          }
+          // CON-605. The real command refuses: signing a RevokeCredential delta
+          // needs the account's home key, and FINDING-016 is that this wallet
+          // holds none.
+          //
+          // 'wired_backend' is the single place this harness stands in for a
+          // backend it does not have, and it exists only to render the two
+          // screens CON-210 designs for a wired build. It is named rather than
+          // implied so a reader of a shot list cannot mistake those two
+          // captures for states this build reaches.
+          case 'revoke_grant':
+            if (!${JSON.stringify(state)}.wired_backend) throw 'RevocationUnavailable';
+            return null;
+          // CON-606. Never confirmed without a resolved, verified closure.
+          case 'revocation_status': return { confirmed: ${JSON.stringify(state)}.revocation_settled === true };
+
           default: return null;
         }
       },
@@ -131,7 +276,231 @@ const shots = [
   { name: '15-restored', state: STATE_LINKED, steps: ['begin-restore', 'fill-restore', 'restore'] },
   { name: '16-unlinked', state: STATE_LINKED, steps: ['open-device', 'to-unlink', 'fill-unlink-passcode', 'unlink'] },
   { name: '17-refused-code', state: STATE_LINKED, steps: ['to-link', 'fill-bad-code', 'read-code'] },
+
+  // ── IMPL-004 · TEST-601..613 ─────────────────────────────────────────
+  { name: '18-applications', expect: 'applications', state: STATE_APPS, steps: ['to-applications'] },
+  { name: '19-application', expect: 'application', state: STATE_APPS, steps: ['to-applications', 'open-application'] },
+  { name: '20-username-set', expect: 'username-set', state: STATE_APPS, steps: ['to-applications', 'open-application', 'to-username'] },
+  { name: '21-username-unprovisioned', expect: 'username-set', state: STATE_APPS, steps: ['to-applications', 'open-application', 'to-username', 'fill-username', 'set-username'] },
+  { name: '21b-username-taken', expect: 'username-taken', state: STATE_APPS, steps: ['to-applications', 'open-application', 'to-username', 'fill-taken-username', 'set-username'] },
+  { name: '22-fingerprint-compare', expect: 'fingerprint-compare', state: STATE_APPS, steps: ['to-applications', 'open-application', 'to-fingerprint'] },
+  { name: '23-consent-application', expect: 'consent-application', state: STATE_APPS, steps: ['to-applications', 'open-application', 'to-app-consent'] },
+  { name: '24-binding-mismatch', expect: 'binding-mismatch', state: STATE_BAD_CALLER, steps: [] },
+  { name: '25-remove-device', expect: 'remove-device', state: STATE_APPS, steps: ['to-applications', 'open-application', 'open-grant', 'to-remove-device'] },
+  // What this build actually does when the person presses "Remove it": the
+  // command refuses, and the refusal stays on the screen that offered it.
+  { name: '26-remove-refused', expect: 'remove-device', state: STATE_APPS, steps: ['to-applications', 'open-application', 'open-grant', 'to-remove-device', 'remove-device'] },
+  // The two CON-210 screens a *wired* build reaches. Marked `wired-` because
+  // they are renders of the design rather than states this build produces.
+  { name: '26b-wired-remove-pending', expect: 'remove-pending', state: STATE_APPS_WIRED, steps: ['to-applications', 'open-application', 'open-grant', 'to-remove-device', 'remove-device'] },
+  { name: '27-wired-remove-confirmed', expect: 'remove-confirmed', state: STATE_APPS_SETTLED, steps: ['to-applications', 'open-application', 'open-grant', 'to-remove-device', 'remove-device'] },
+  { name: '28-scope-unavailable', expect: 'scope-unavailable', state: STATE_APPS, steps: ['to-applications', 'open-unscoped-application'] },
+  // CON-221's other answer. "They're different" is the whole reason the
+  // comparison is asked, and it used to open the CON-222 caller-binding screen
+  // with two blank evidence fields.
+  { name: '29-fingerprint-mismatch', expect: 'fingerprint-mismatch', state: STATE_APPS, steps: ['to-applications', 'open-application', 'to-fingerprint', 'fingerprint-differs'] },
 ];
+
+// ── Negative-output assertions (IMPL-004 TEST-605 / 611 / 613) ───────────
+//
+// The half most easily lost. A suite that only checks a screen renders will
+// pass a screen that renders *and also* offers a skip, so these assert the
+// ABSENCE of an affordance and name the requirement each absence serves.
+//
+// `forbidden` is a list of [selector, why] pairs evaluated against the visible
+// screen. `requiredText` is a substring that must appear.
+const SCREEN_RULES = {
+  '18-applications': {
+    // NFR-203: the account scope never reaches a screen.
+    forbidden: [['[data-account-scope]', 'NFR-203 forbids rendering an accountScopeId']],
+    // The screen says each application gets its own identity below the recovery
+    // words. That is CON-202, and it is the property SPEC-004 exists to deliver,
+    // so the fixture behind it has to actually hold.
+    distinctHomeDids: true,
+  },
+  '21-username-unprovisioned': {
+    // A name recognised and not reserved is not a name you hold. The screen
+    // must say so rather than returning as though it were claimed.
+    requiredText: 'AccountProvisioningFailed',
+  },
+  '10-linked': {
+    // Every fingerprint surface carries the hex *and* its nickname — the home
+    // card, `consent`, and the CON-221 comparison all do. This screen showed
+    // the hex alone, and it is the one that asks the person to compare against
+    // another device: `selfsame link` prints both, so the two screens did not
+    // match. The hex stays the compared value; the nickname is what makes
+    // comparing it possible without reading twelve characters twice.
+    requiredTextAll: [DID_FP.hex, DID_FP.label],
+  },
+  // ── SPEC-001 content assertions ────────────────────────────────────────
+  //
+  // Until now these twenty screens were rendered and never read: the harness
+  // checked that a screen appeared, not what it said. That is how a missing
+  // half of a security comparison survived every green run on `10-linked`.
+  //
+  // What is asserted here is deliberately narrow — the values a person acts on
+  // and the claims that must be true of the build showing them. Decorative copy
+  // is left alone, because an assertion on wording that may legitimately change
+  // trains people to edit the test rather than read it.
+
+  '03-phrase': {
+    // The recovery secret. Twelve words, all of them: a screen that dropped one
+    // would be unrecoverable and would look completely normal, and the person
+    // finds out only when they try to restore.
+    requiredTextAll: WORDS,
+  },
+  '05-created': {
+    // hex and nickname together, as on every fingerprint surface.
+    requiredTextAll: [DID_FP.hex, DID_FP.label],
+  },
+  '06-home': {
+    // The home card's own comparison values, plus the identifier beneath them.
+    requiredTextAll: [DID_FP.hex, DID_FP.label],
+  },
+  '08-consent': {
+    // The security-critical one. SCREEN-001 has the person compare this
+    // fingerprint against the other device before authorising, and the CLI
+    // prints the same pair — so both halves must be here or the comparison is
+    // a guess. The device's self-description must also carry its untrusted
+    // treatment: REQ-222's rule that a name never carries the decision.
+    requiredTextAll: [KEY_FP.hex, KEY_FP.label, 'Chrome on macOS', 'its own words, unchecked'],
+  },
+  '11-rejected': {
+    requiredText: 'Nothing was authorised.',
+    forbiddenText: [
+      ['Linked', 'a rejected offer must not read as a link'],
+      ['was added', 'a rejected offer must not read as a link'],
+    ],
+  },
+  '12-device': {
+    // The device is identified by its nickname and its method id; both are how
+    // a person tells one device from another before unlinking it.
+    requiredTextAll: ['copper-lynx-42', 'did:crdt:9f3a…#dev-1'],
+  },
+  '15-restored': {
+    requiredTextAll: [DID_FP.hex, DID_FP.label],
+  },
+  '16-unlinked': {
+    // CON-006: the change is signed here and *published* separately, so the
+    // screen may not report that contacts have stopped trusting the device
+    // until publishing has happened. It says what was signed and what is still
+    // in flight, and the assertion keeps those two facts distinct.
+    requiredTextAll: ['Signed on this phone', 'Publishing the change'],
+  },
+  '17-refused-code': {
+    // SCREEN-002 S4: one line, and no `RejectReason` detail. Naming the check
+    // that failed would hand an attacker an oracle over the acceptance
+    // predicate, one guess at a time.
+    forbiddenText: [
+      ['transcript', 'the refusal must not name which check failed'],
+      ['signature', 'the refusal must not name which check failed'],
+      ['expired', 'the refusal must not name which check failed'],
+      ['genesis', 'the refusal must not name which check failed'],
+      ['RejectReason', 'an internal type never reaches a screen'],
+    ],
+  },
+  '21b-username-taken': {
+    requiredText: "That username isn't available.",
+  },
+  '24-binding-mismatch': {
+    // Both evidence fields must actually carry values. The sibling defect on
+    // the CON-221 path opened this very screen with both blank, which reads as
+    // a rendering failure rather than as the security refusal it is.
+    requiredTextAll: ['android:com.example.photos', 'com.attacker.lookalike'],
+  },
+  '25-remove-device': {
+    // Names the device *and* the account, so a person removing one of several
+    // knows which is about to stop working. `open-grant` opens the first row,
+    // which the fixture calls "This phone".
+    requiredTextAll: ['This phone', 'Photos'],
+  },
+  '27-wired-remove-confirmed': {
+    requiredText: 'This phone',
+  },
+  '19-application': {
+    forbidden: [['[data-grant-id]', 'a grant ID is held to act on, not rendered']],
+  },
+  '20-username-set': {
+    // NFR-201: the correlation warning is the only control over a voluntarily
+    // reused public name, so it is not optional.
+    requiredText: 'publicly discoverable',
+  },
+  '22-fingerprint-compare': {
+    // The wallet's onboarding teaches "same fingerprint everywhere, or it
+    // isn't yours" — SPEC-001's human backstop. This screen legitimately shows
+    // a different value, because REQ-201 gives every application account its
+    // own. Saying so is what keeps a correct value from reading as an attack,
+    // and keeps a person from learning that mismatches are sometimes fine.
+    requiredText: 'not',
+    requiredTextAll: ['account identity', 'home key fingerprint'],
+    // REQ-230 forbids offering a skip. Not "hides" — the control must not exist.
+    forbidden: [
+      ['[data-action="skip-fingerprint"]', 'REQ-230 forbids offering a skip'],
+      ['[data-action="to-home"]', 'REQ-230: a bare exit is a skip wearing another label'],
+    ],
+  },
+  '23-consent-application': {
+    // REQ-222: the application's own name may never carry the decision.
+    requiredText: 'its own words, unchecked',
+  },
+  '26-remove-refused': {
+    // The claim that had nothing behind it. `revoke_grant` refuses in this
+    // build, and the person must be told that nothing was signed rather than
+    // advanced to a screen that says it was.
+    requiredText: 'RevocationUnavailable',
+    forbiddenText: [
+      ['Signed on this device', 'nothing was signed, so nothing may say it was'],
+      ['Removing', 'a removal that was refused is not in progress'],
+    ],
+  },
+  '29-fingerprint-mismatch': {
+    // REQ-230 gives the comparison no skip; its refusal gets no retry, for the
+    // same reason. And it must not be the CON-222 caller-binding screen, whose
+    // evidence fields nothing on this path fills in.
+    forbidden: [
+      ['[data-action="to-fingerprint"]', 'a retry here is the skip REQ-230 forbids, one screen later'],
+      ['[data-mismatch-expected]', 'this is not the CON-222 caller-binding failure'],
+      ['[data-mismatch-actual]', 'this is not the CON-222 caller-binding failure'],
+    ],
+    requiredText: 'Nothing has been bound',
+  },
+    '26b-wired-remove-pending': {
+    // CON-210 forbids reporting success before a verified closure.
+    forbidden: [
+      ['[data-action="remove-done"]', 'CON-210 forbids a success affordance while pending'],
+      ['.steps__ok', 'CON-210: a completion tick is a success claim'],
+    ],
+    // A claim is a claim whether it is a control or a sentence. This screen
+    // once said "this will keep trying until one does" and "it is retained and
+    // retried" — both obligations CON-210 places on a *wired* implementation,
+    // neither of them true of this build, which submits once and checks once.
+    //
+    // Copy drifts back more easily than controls do, because it reads as
+    // reassurance rather than as an assertion. So the words are asserted too,
+    // and the day retry is implemented this list is what has to be edited
+    // deliberately rather than forgotten.
+    forbiddenText: [
+      ['keep trying', 'nothing retries in this build'],
+      ['retried', 'nothing retries in this build'],
+      ['retained', 'nothing retains the delta in this build'],
+      ['will be removed', 'CON-210 forbids asserting the outcome while pending'],
+    ],
+    requiredText: 'because nothing has',
+  },
+  '28-scope-unavailable': {
+    // REQ-217 forbids guessing and forbids prompting, so no *remedial* control
+    // may exist: no field, no retry, nothing that implies the scope can be
+    // supplied from here. `.btn` is this app's action class and is forbidden;
+    // `.back` is navigation and is required, because a screen with no exit is a
+    // defect rather than compliance — the requirement is about not offering a
+    // remedy that does not exist, not about trapping the person who found it.
+    forbidden: [
+      ['.btn', 'REQ-217 forbids offering a remedial action here'],
+      ['input', 'REQ-217 forbids prompting for a scope'],
+    ],
+    requiredText: 'Sign into the application first',
+  },
+};
 
 // `protocolTimeout` is raised because a screenshot on a loaded machine can take
 // longer than the 30 s default, and a flaky presentation check is worse than a
@@ -193,6 +562,29 @@ for (const shot of shots) {
       });
     } else if (step === 'open-device') {
       await page.evaluate(() => document.querySelector('.device')?.click());
+    } else if (step === 'open-application') {
+      await page.evaluate(() => document.querySelector('.application')?.click());
+    } else if (step === 'open-unscoped-application') {
+      // The second fixture application has no scope available — HP-7's cliff.
+      await page.evaluate(() => document.querySelectorAll('.application')[1]?.click());
+    } else if (step === 'open-grant') {
+      await page.evaluate(() => document.querySelector('.grant')?.click());
+    } else if (step === 'fill-username') {
+      await page.evaluate(() => {
+        const el = document.querySelector('#username-input');
+        if (el) { el.value = 'alice'; el.dispatchEvent(new Event('input')); }
+      });
+    } else if (step === 'fill-taken-username') {
+      // `ss-` is the CON-203 identifier's reserved prefix. The core's
+      // `alias::recognise_username` refuses it, so this is a name the real
+      // command also answers `UsernameUnavailable` to — and "or it is
+      // reserved" on the screen is true of it. The earlier fixture used
+      // `admin`, which the core accepts, so the shot asserted a refusal
+      // nothing produced.
+      await page.evaluate(() => {
+        const el = document.querySelector('#username-input');
+        if (el) { el.value = 'ss-admin'; el.dispatchEvent(new Event('input')); }
+      });
     } else {
       await page.evaluate((a) => document.querySelector(`[data-action="${a}"]`)?.click(), step);
     }
@@ -269,10 +661,56 @@ for (const shot of shots) {
     }
   }
 
+  // IMPL-004 negative-output and required-text assertions.
+  const rules = SCREEN_RULES[shot.name];
+  if (rules) {
+    for (const [selector, why] of rules.forbidden ?? []) {
+      const present = await page.evaluate((sel) => {
+        const screen = document.querySelector('.screen:not([hidden])');
+        return !!screen && !!screen.querySelector(sel);
+      }, selector);
+      if (present) errors.push(`${shot.name}: \`${selector}\` is present — ${why}`);
+    }
+    const shown = await page.evaluate(() =>
+      document.querySelector('.screen:not([hidden])')?.innerText ?? '');
+    if (rules.requiredText && !shown.includes(rules.requiredText)) {
+      errors.push(`${shot.name}: missing required text "${rules.requiredText}"`);
+    }
+    for (const phrase of rules.requiredTextAll ?? []) {
+      if (!shown.includes(phrase)) {
+        errors.push(`${shot.name}: missing required text "${phrase}"`);
+      }
+    }
+    for (const [phrase, why] of rules.forbiddenText ?? []) {
+      if (shown.toLowerCase().includes(phrase.toLowerCase())) {
+        errors.push(`${shot.name}: says "${phrase}" — ${why}`);
+      }
+    }
+    // A claim can also be contradicted by the data behind it rather than by
+    // the copy. The applications screen says each application gets its own
+    // identity below the recovery words (CON-202) — so the state it renders
+    // has to actually give them different ones, or the screen is telling the
+    // truth about a system the fixture is not modelling.
+    if (rules.distinctHomeDids) {
+      const dids = (shot.state.applications ?? []).map((a) => a.home_did);
+      if (new Set(dids).size !== dids.length) {
+        errors.push(
+          `${shot.name}: the fixture shares one home DID across ${dids.length} applications, ` +
+          `while the screen claims each gets its own (CON-202)`);
+      }
+    }
+  }
+
   const pics = pictures.length ? `  lifehash×${pictures.length}` : '';
   console.log(`${shot.name.padEnd(14)} screen=${visible.join(',') || 'NONE'}${pics}${overflow ? '  ⚠ horizontal overflow' : ''}`);
   if (visible.length !== 1) errors.push(`${shot.name}: ${visible.length} screens visible (${visible})`);
   if (overflow) errors.push(`${shot.name}: horizontal overflow at 430px`);
+  // "Exactly one screen visible" passes for ANY single screen, so a shot whose
+  // navigation silently does nothing still looks green while capturing `home`.
+  // `expect` names the screen the steps must actually reach.
+  if (shot.expect && visible[0] !== shot.expect) {
+    errors.push(`${shot.name}: reached ${visible[0] ?? 'NONE'}, expected ${shot.expect}`);
+  }
 
   try {
     await page.screenshot({ path: `${OUT}/${shot.name}.png` });
@@ -435,6 +873,55 @@ for (const shot of shots) {
     console.log('no-bridge      renders an explanation rather than a black screen');
   }
   await page.close();
+}
+
+// ── every invoke names a command the handler registers ──────────────────────
+//
+// The structural countermeasure for the defect that produced most of version
+// 0.7.0. The frontend called `provision_username`, `revoke_grant` and
+// `revocation_status`; the Tauri handler registered none of them; every call
+// rejected with a "command not found" the screens could not distinguish from
+// any other failure, and `remove-pending` asserted a signature and a submission
+// that had not happened.
+//
+// No amount of care catches that, because both halves look correct in
+// isolation — and this harness made it *harder* to see, since its bridge
+// answered all three. So the two lists are compared by a check rather than by a
+// reader. A command called and not registered fails the build; one registered
+// and not called is reported, because a declared contract nothing reaches is
+// worth knowing about and is not always a defect (CON-603 is stubbed and has no
+// screen yet).
+//
+// It is a text scan of two files, which is the right weight for what it decides.
+// It reads the generated-handler block rather than a hand-kept list, so a
+// command added without a caller — or a caller added without a command — is
+// visible the same day.
+{
+  const src = (p) => readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', p), 'utf8');
+  const handler = src('src-tauri/src/lib.rs');
+  const open = handler.indexOf('generate_handler![');
+  const block = handler.slice(open, handler.indexOf('])', open));
+  const registered = new Set([...block.matchAll(/(?:commands|app_identity)::(\w+)/g)].map((m) => m[1]));
+
+  const called = new Map();
+  for (const file of ['src/app.js', 'src/app-identity.js']) {
+    for (const m of src(file).matchAll(/invoke\(\s*["'](\w+)["']/g)) {
+      called.set(m[1], (called.get(m[1]) ?? []).concat(file));
+    }
+  }
+
+  if (!registered.size) {
+    errors.push('invoke-surface: found no generate_handler! block — the check has stopped checking');
+  }
+  for (const [command, files] of called) {
+    if (!registered.has(command)) {
+      errors.push(`invoke-surface: ${files.join(', ')} calls "${command}", which lib.rs does not register — the call rejects and any screen after it claims a state nothing produced`);
+    }
+  }
+  const unreached = [...registered].filter((c) => !called.has(c)).sort();
+  if (!errors.some((e) => e.startsWith('invoke-surface'))) {
+    console.log(`invoke-surface every invoke resolves; ${unreached.length} registered and unreached (${unreached.join(', ')})`);
+  }
 }
 
 await browser.close();

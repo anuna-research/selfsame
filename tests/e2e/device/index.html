@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Selfsame — link this device</title>
+    <!--
+      EXP-002 layer two: the browser device client.
+
+      This is a fixture, not a product, and it is deliberately plain — the
+      thing under test is `selfsame-web-device`'s wasm surface and the wire it
+      speaks, not a visual design. What it does share with the real surfaces is
+      the selector discipline: every value the driver reads is behind a stable
+      `data-*` hook that is never derived from a display label, so changing the
+      copy cannot break the harness and changing the harness cannot silently
+      start reading the wrong element.
+    -->
+    <style>
+      body {
+        font: 16px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+        margin: 0;
+        padding: 2rem;
+        max-width: 46rem;
+      }
+      h1 { font-size: 1.1rem; font-weight: 600; }
+      .code {
+        font-size: 1.4rem;
+        letter-spacing: 0.04em;
+        padding: 0.75rem 1rem;
+        border: 1px solid currentColor;
+        display: inline-block;
+        margin: 0.5rem 0 1.5rem;
+        word-break: break-all;
+      }
+      dl { display: grid; grid-template-columns: max-content 1fr; gap: 0.35rem 1rem; }
+      dt { opacity: 0.6; }
+      dd { margin: 0; word-break: break-all; }
+      [hidden] { display: none !important; }
+      .bad { border-left: 3px solid currentColor; padding-left: 1rem; }
+    </style>
+  </head>
+  <body>
+    <h1>Link this device</h1>
+
+    <!-- Waiting: the code is up, the offer is written, nothing has answered. -->
+    <section data-state="waiting" hidden>
+      <p>Type this into Selfsame on your phone:</p>
+      <p class="code" data-link-code></p>
+      <p data-status>Waiting for your phone…</p>
+    </section>
+
+    <!--
+      Linked. `data-did` is the assertion the whole harness exists to make: it
+      must equal what the phone independently reports. `data-fingerprint-hex` is
+      the value SCREEN-002 S3 has the person compare, and it is carried
+      separately from the label because the hex is the datum and the nickname is
+      a recognition aid.
+    -->
+    <section data-state="linked" hidden>
+      <p>Linked.</p>
+      <dl>
+        <dt>identity</dt><dd data-did></dd>
+        <dt>fingerprint</dt><dd data-fingerprint-hex></dd>
+        <dt>nickname</dt><dd data-fingerprint-label></dd>
+        <dt>this device</dt><dd data-own-method-id></dd>
+      </dl>
+    </section>
+
+    <!--
+      Refused. One line and no detail, which is SCREEN-002 S4's rule and is
+      enforced upstream: `Device::accept` returns `DeviceError::Refused`
+      carrying nothing, so there is no detail here to leak even by accident.
+    -->
+    <section data-state="refused" hidden>
+      <p class="bad" data-refusal></p>
+    </section>
+
+    <!-- A failure of the fixture itself, kept distinct from a refusal so the
+         harness never reads "the rendezvous was down" as "the reply was bad". -->
+    <section data-state="broken" hidden>
+      <p class="bad" data-error></p>
+    </section>
+
+    <script type="module" src="./device.js"></script>
+  </body>
+</html>

@@ -1,0 +1,42 @@
+[package]
+name = "selfsame-app-identity-net"
+description = "The effectful shell of SPEC-004: origin-bound profile discovery, WebFinger reciprocal binding, bounded parallel capability probes, did:crdt closure resolution, and best-effort revocation submission"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# ── The other side of the purity boundary ────────────────────────────────────
+#
+# `selfsame-app-identity` is the pure core and may link no I/O. This crate is
+# where the I/O lives, and it exists so that the boundary is a *place* rather
+# than a convention: everything here fetches octets and immediately hands them
+# to a recogniser from the core, so no code path anywhere turns an HTTP response
+# into a decision without passing through the same predicate a wasm verifier
+# would run.
+#
+# `reqwest` carries no compression features on purpose. `CON-213` and `CON-220`
+# both reject content encoding, and a client that transparently decompressed
+# would make that check unobservable — the response would arrive already
+# decoded, with nothing left to refuse.
+[dependencies]
+selfsame-app-identity = { workspace = true }
+selfsame-core = { workspace = true }
+did-crdt = { workspace = true }
+
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+tokio = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+http = "1"
+ed25519-dalek = { workspace = true, features = ["std"] }
+# `test-util` for the paused clock. `CON-208`'s 1,500 ms cap is a property of
+# the code, and a wall-clock assertion measures the machine instead — which is
+# how a probe test came to fail CI at 9.76 s while the code was correct. On a
+# paused clock, time advances only when the runtime is idle, so the deadline is
+# observed rather than timed.
+tokio = { workspace = true, features = ["test-util"] }

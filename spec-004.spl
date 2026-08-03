@@ -1,0 +1,173 @@
+(meta plan
+  (title "SPEC-004 — Application- and Account-Scoped Identity")
+  (description "The governed prototype of EXP-001: which of the twenty-six contracts are ready for adversarial review, and what the rest are waiting on."))
+
+;; ─────────────────────────────────────────────────────────────────────────────
+;; This theory answers one question: which contracts can go to a cross-model
+;; adversarial reviewer now, and which cannot, and why not.
+;;
+;; It is deliberately not a task list. The work is done; what is left is review,
+;; and review is expensive, so the interesting output is the *partition* — 18
+;; contracts a reviewer can start on today, 8 that would waste their time
+;; because they are waiting on something no review can supply.
+;;
+;; Load with:  elephant theory create spec-004 && (replay the asserts below)
+;; Read with:  elephant status -t spec-004
+;;             elephant why-not '(ready-for-review con-210)' -t spec-004
+;; ─────────────────────────────────────────────────────────────────────────────
+
+;; ── vocabulary ───────────────────────────────────────────────────────────────
+;;
+;; Coined rather than reused because none of the built-in discovery families
+;; carries "a contract's core is implemented" — `completed` would flatten the
+;; distinction between the pure half and the shell, which is the distinction
+;; this whole theory turns on.
+
+(define contract-implemented/1  (arg c symbol) (kind evidence)
+  (desc "the pure core of contract ?c is implemented and tested"))
+(define shell-implemented/1     (arg c symbol) (kind evidence)
+  (desc "the effectful half of contract ?c is implemented"))
+(define corpus-case/1           (arg c symbol) (kind evidence)
+  (desc "contract ?c has at least one CON-226 corpus case"))
+(define needs-external-stack/1  (arg c symbol) (kind evidence)
+  (desc "contract ?c cannot complete without PROTO-002, PROTO-003, PROTO-004, or a platform harness"))
+(define blocked-on-upstream/1   (arg c symbol) (kind evidence)
+  (desc "contract ?c is blocked on a defect in a pinned dependency"))
+(define ready-for-review/1      (arg c symbol)
+  (desc "contract ?c is ready for cross-model adversarial review"))
+
+;; ── rules ────────────────────────────────────────────────────────────────────
+;;
+;; Defeasible, and the defeaters are the point: implementation plus a corpus
+;; case is the *default* path to readiness, and two things override it.
+
+(normally r-ready (and (contract-implemented ?c) (corpus-case ?c)) (ready-for-review ?c))
+(meta r-ready (source "SPEC-004-application-scoped-identity#Tier-1 Gate"))
+
+;; A contract whose remaining half needs a protocol stack that does not exist
+;; is not ready however complete its core is. Sending it to a reviewer would ask
+;; them to review an absence.
+(normally r-external (needs-external-stack ?c) (not (ready-for-review ?c)))
+(meta r-external (source "SPEC-004-application-scoped-identity#REQ-214"))
+(prefer r-external r-ready)
+
+;; An upstream defect blocks regardless of how finished the contract looks,
+;; because the reviewer would be reviewing against a dependency that does not
+;; behave as the contract assumes.
+(normally r-upstream (blocked-on-upstream ?c) (not (ready-for-review ?c)))
+(meta r-upstream (source "EXP-001-findings#FINDING-005"))
+(prefer r-upstream r-ready)
+
+;; ── facts: every contract has a pure implementation ─────────────────────────
+
+(given (contract-implemented con-201)) (given (contract-implemented con-202))
+(given (contract-implemented con-203)) (given (contract-implemented con-204))
+(given (contract-implemented con-205)) (given (contract-implemented con-206))
+(given (contract-implemented con-207)) (given (contract-implemented con-208))
+(given (contract-implemented con-209)) (given (contract-implemented con-210))
+(given (contract-implemented con-211)) (given (contract-implemented con-212))
+(given (contract-implemented con-213)) (given (contract-implemented con-214))
+(given (contract-implemented con-215)) (given (contract-implemented con-216))
+(given (contract-implemented con-217)) (given (contract-implemented con-218))
+(given (contract-implemented con-219)) (given (contract-implemented con-220))
+(given (contract-implemented con-221)) (given (contract-implemented con-222))
+(given (contract-implemented con-223)) (given (contract-implemented con-224))
+(given (contract-implemented con-225)) (given (contract-implemented con-226))
+
+;; ── facts: the five contracts that needed a shell have one ──────────────────
+
+(given (shell-implemented con-204))   ; WebFinger
+(given (shell-implemented con-206))   ; closure resolution at step 4
+(given (shell-implemented con-208))   ; bounded parallel probes
+(given (shell-implemented con-210))   ; delta submission and the projection
+(given (shell-implemented con-220))   ; origin-bound profile discovery
+
+;; ── facts: corpus coverage, one group per contract ──────────────────────────
+
+(given (corpus-case con-201)) (given (corpus-case con-202)) (given (corpus-case con-203))
+(given (corpus-case con-204)) (given (corpus-case con-205)) (given (corpus-case con-206))
+(given (corpus-case con-207)) (given (corpus-case con-208)) (given (corpus-case con-209))
+(given (corpus-case con-210)) (given (corpus-case con-211)) (given (corpus-case con-212))
+(given (corpus-case con-213)) (given (corpus-case con-214)) (given (corpus-case con-215))
+(given (corpus-case con-216)) (given (corpus-case con-217)) (given (corpus-case con-218))
+(given (corpus-case con-219)) (given (corpus-case con-220)) (given (corpus-case con-221))
+(given (corpus-case con-222)) (given (corpus-case con-223)) (given (corpus-case con-224))
+(given (corpus-case con-225)) (given (corpus-case con-226))
+
+;; ── facts: what is waiting on something this repository does not have ───────
+;;
+;; The four pairing bindings need PROTO-003's SPAKE2 primitives. Their ordering,
+;; binding, and closure obligations *are* implemented and tested — what is
+;; missing is the primitive underneath, so a reviewer looking at the composition
+;; would find it complete and the thing composed absent.
+
+(given (needs-external-stack con-213))
+(given (needs-external-stack con-216))
+(given (needs-external-stack con-217))
+(given (needs-external-stack con-218))
+
+;; The two platform adapters need a real OS and a hostile-sibling harness.
+;; TEST-239 says so, and no amount of pure-core review substitutes.
+
+(given (needs-external-stack con-222))
+(given (needs-external-stack con-223))
+
+;; ── facts: upstream defects ─────────────────────────────────────────────────
+;;
+;; FINDING-005. CON-210 permits an application endpoint to accept unauthenticated
+;; deltas *because* "a forged delta fails the signature check", and at the pinned
+;; did:crdt revision the obviously-named `merge` does not check signatures.
+;; Reviewing CON-210 before that is settled reviews an argument whose premise is
+;; false.
+
+(given (blocked-on-upstream con-210))
+
+;; The Tier-1 gate's own item: `resolve()` emits publicKeyMultibase and the crate
+;; contains no publicKeyJwk, so CON-203's document shape and CON-206 step 6 are
+;; not producible today.
+
+(given (blocked-on-upstream con-203))
+
+;; ── the first review round came back ────────────────────────────────────────
+;;
+;; The partition above was the input to a cross-model adversarial review, and
+;; the review returned nineteen findings — which is the theory working, not the
+;; theory being wrong: it said which contracts were worth a reviewer's time, and
+;; they were.
+;;
+;; Two of the findings are recorded as discoveries rather than as contract
+;; defects, because neither is about a contract. Both are about the *frontier*
+;; between the surface and the commands under it: the frontend invoked three
+;; commands the Tauri handler registered nowhere, and the screen harness stubbed
+;; those same three more capably than the backend implements them. Between them
+;; they made a screen's claim unfalsifiable — the assertion ran against the
+;; fixture, and the fixture was the only thing that could satisfy it.
+
+(given (finding review-2026-08-01-nineteen-defects))
+
+(given (discovered frontend-invoked-three-unregistered-commands))
+(given (discovered stub-bridge-more-capable-than-backend))
+
+;; The two P1s, repaired and covered by tests observed to fail first.
+
+(given (verified con-206-device-key-binding))
+(given (verified con-214-android-caller-attribution))
+
+;; IMPL-004 0.7.0 declares CON-604..606 and a twelfth screen. Its own
+;; Amendment Channels block reserves approval to the human owner, so the
+;; amendment is written and the gate is open — recorded rather than assumed.
+
+(given (blocked-by impl-004-v070 owner-approval))
+
+;; ─────────────────────────────────────────────────────────────────────────────
+;; Conclusion, at the time of writing: 18 contracts ready for adversarial
+;; review, 8 blocked — 6 on external stacks, 2 on upstream defects.
+;;
+;; Closure fingerprint (elephant.closure.v1, 105 conclusions):
+;;   sha256:a8afba8bcc6c2df072ca5ae89d86231d0dd93315bedb5654430ffe8d1de83f33
+;;
+;; That fingerprint is the value PROTO-001 Phase 4 asks every member of a shared
+;; theory to agree on before process lessons are drawn from it. This theory has
+;; one member, so agreement is trivial and the number is recorded for the next
+;; one rather than for this one.
+;; ─────────────────────────────────────────────────────────────────────────────

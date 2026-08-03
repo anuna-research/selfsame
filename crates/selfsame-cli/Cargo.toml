@@ -13,6 +13,8 @@ path = "src/main.rs"
 
 [dependencies]
 selfsame-core = { workspace = true }
+selfsame-app-identity = { workspace = true }
+selfsame-app-identity-net = { path = "../selfsame-app-identity-net" }
 did-crdt = { workspace = true }
 
 ed25519-dalek = { workspace = true, features = ["std", "rand_core"] }
@@ -22,3 +24,10 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }
 qrcode = { version = "0.14", default-features = false }
+# Only for the terminal's column count (TIOCGWINSZ). Already in the graph via
+# `rpassword`, so this is a new edge rather than a new crate.
+libc = "0.2"
+tokio = { workspace = true }
+bip39 = { version = "2", default-features = false, features = ["std"] }
+rpassword = "7"
+zeroize = "1.9.0"

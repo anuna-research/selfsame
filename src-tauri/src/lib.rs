@@ -34,7 +34,8 @@
 //! [OQ-005]: ../../../../anuna-ssi/specs/SPEC-001-device-key-provisioning.md
 //! [OQ-007]: ../../../../anuna-ssi/specs/SPEC-001-device-key-provisioning.md
 
-pub mod commands;
+pub mod app_identity;
+mod commands;
 pub mod custody;
 pub mod net;
 pub mod session;
@@ -70,6 +71,12 @@ pub fn run() {
             commands::flush_publications,
             commands::forget_identity,
             commands::service_endpoint,
+            app_identity::alias_preview,
+            app_identity::home_fingerprint,
+            app_identity::app_identity_derive,
+            app_identity::provision_username,
+            app_identity::revoke_grant,
+            app_identity::revocation_status,
         ])
         .run(tauri::generate_context!())
         .expect("Selfsame failed to start");

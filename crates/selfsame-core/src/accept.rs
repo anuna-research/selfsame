@@ -88,7 +88,11 @@ pub struct AcceptedIdentity {
     pub fingerprint: Fingerprint,
     /// The root public key the DID commits to.
     pub root_public_key: [u8; 32],
-    /// This client's verification-method id — `did:crdt:…#dev-1`.
+    /// This client's verification-method id — `did:crdt:…#dev-<fragment>`.
+    ///
+    /// Found by matching this client's key against the resolved methods, not
+    /// by any convention about the fragment: the phone chooses it, older
+    /// identities carry `dev-1`, and newer ones carry 64 random bits.
     pub own_method_id: String,
     /// The signed deltas, retained verbatim so the client can re-verify offline
     /// and republish without a network round trip (NFR-006).

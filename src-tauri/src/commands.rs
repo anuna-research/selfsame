@@ -44,6 +44,17 @@ impl serde::Serialize for UiError {
     }
 }
 
+/// A closed error token, straight through.
+///
+/// `IMPL-004`'s refusal screens each render exactly one token from
+/// `CON-226`'s set and nothing else, so the token *is* the message. This
+/// conversion exists so those commands cannot accidentally grow a second
+/// sentence explaining which check failed — there is nowhere to put one.
+impl From<&'static str> for UiError {
+    fn from(token: &'static str) -> Self {
+        UiError(token.to_owned())
+    }
+}
 impl From<CustodyError> for UiError {
     fn from(e: CustodyError) -> Self {
         UiError(e.to_string())
@@ -387,13 +398,11 @@ pub async fn authorise(passcode: String, session: State<'_, AppSession>) -> Resu
     };
 
     let root_pk = Custody::root_public_key()?;
-    // The fragment is chosen against the *whole* identity, so a new device
-    // cannot collide with a method id that already exists in signed state.
-    let fragment = {
-        let s = session.0.lock().unwrap_or_else(|p| p.into_inner());
-        let document = s.document(&root_pk).map_err(UiError::from)?;
-        s.next_device_fragment(&document)
-    };
+    // 64 random bits, so the fragment collides with nothing — including with a
+    // method id this identity has already revoked, which is the case that used
+    // to break relinking. It needs no lock, no document, and no history: see
+    // `Session::new_device_fragment` for why counting was the wrong shape.
+    let fragment = Session::new_device_fragment();
 
     let device_key = offer.device_key;
     let label = offer.device_description.clone();
