@@ -30,6 +30,10 @@
 //! check on purpose: it tests the property that was violated, not the one
 //! implementation that violated it.
 //!
+//! A store that *errors* is left alone — see [`verdict`]. Unavailable storage
+//! has always been loud, and often transient; only silent discard earns a
+//! refusal to start.
+//!
 //! Trace: SPEC-001-device-key-provisioning#REQ-024.
 
 /// Keychain service name. Shared by every entry this application owns.
@@ -232,6 +236,10 @@ pub fn require_presence(reason: &str) -> Result<(), StoreError> {
 /// custodian whose storage silently discards writes is worse than one that will
 /// not launch: the first loses identities and blames the user, the second says
 /// what is wrong while nothing is at stake.
+///
+/// It is deliberately narrow — [`verdict`] refuses only a store that *lies*,
+/// never one that is merely unavailable, so a locked keyring or a headless
+/// session still starts the app and reports the problem where it is used.
 pub fn init(app: &tauri::App) -> Result<(), StoreError> {
     backend::adopt(app)?;
     assert_durable()
@@ -247,28 +255,57 @@ pub fn init(app: &tauri::App) -> Result<(), StoreError> {
 pub fn assert_durable() -> Result<(), StoreError> {
     const TOKEN: &str = "selfsame-durability-probe";
 
-    let write = set(PROBE_ENTRY, TOKEN);
-    let read = get(PROBE_ENTRY);
+    let wrote = set(PROBE_ENTRY, TOKEN).is_ok();
+    let read_back = get(PROBE_ENTRY).ok().map(|v| v.map(|s| s == TOKEN));
     // Always attempt removal, including on the failure paths — a probe left
     // behind is litter in the user's keychain.
     let _ = delete(PROBE_ENTRY);
 
-    write.map_err(|e| StoreError::NotDurable(format!("The store rejected a test write: {e}")))?;
+    verdict(wrote, read_back)
+}
 
-    match read {
-        Err(e) => Err(StoreError::NotDurable(format!(
-            "The store rejected a test read: {e}"
-        ))),
-        Ok(None) => Err(StoreError::NotDurable(
+/// The decision the probe implies, separated from the I/O that gathered it.
+///
+/// `read_back` is `None` when the store returned an *error* rather than an
+/// answer, `Some(None)` when it answered that nothing is there, and
+/// `Some(Some(matched))` when it returned a value.
+///
+/// # An error is not the failure this guards against
+///
+/// A store that refuses a write, or refuses a read, is **unavailable** — and
+/// that was never the invisible failure. `keyring` has always returned those
+/// errors and they have always surfaced where the storage is used, naming the
+/// storage. A headless Linux runner is exactly this case: with no session bus,
+/// Secret Service answers *"Unable to autolaunch a dbus-daemon without a
+/// $DISPLAY"*. So is a desktop whose keyring is merely locked.
+///
+/// Refusing to start on those would take an app that used to run and fail
+/// honestly at the point of use, and stop it booting instead — for a condition
+/// that is loud already, and often transient.
+///
+/// What shipped in SPEC-003 BUG-201 was the opposite: the store took the write,
+/// reported `Ok(())`, and did not have it. Nothing anywhere raised an error.
+/// That is the one condition worth refusing to start for, and it is the only
+/// one this returns `NotDurable` for.
+fn verdict(wrote: bool, read_back: Option<Option<bool>>) -> Result<(), StoreError> {
+    match (wrote, read_back) {
+        // The store errored at one end or the other. Unavailable, not lying.
+        (false, _) | (_, None) => Ok(()),
+
+        // Took the write, reported success, does not have it.
+        (true, Some(None)) => Err(StoreError::NotDurable(
             "A value written to secure storage was not there when read back. On \
              Android this means the selfsame-store plugin is not registered and \
              `keyring` has fallen back to its in-memory testing mock."
                 .into(),
         )),
-        Ok(Some(found)) if found != TOKEN => Err(StoreError::NotDurable(
+
+        // Took the write and has something else under the key.
+        (true, Some(Some(false))) => Err(StoreError::NotDurable(
             "Secure storage returned a different value from the one written.".into(),
         )),
-        Ok(Some(_)) => Ok(()),
+
+        (true, Some(Some(true))) => Ok(()),
     }
 }
 
@@ -282,14 +319,49 @@ mod tests {
         assert_ne!(PROBE_ENTRY, ROOT_ENTRY);
     }
 
-    /// On the host the backend is a real keychain, so the guard passes. This is
-    /// the positive case; `tests/android_custody.rs` supplies the negative one
-    /// by installing the store Android actually links.
+    // The verdict is tested rather than the probe, so these say the same thing
+    // on a developer's laptop and on a headless runner. `assert_durable`'s I/O
+    // half is covered end to end by `tests/android_custody.rs`, which drives it
+    // through a store that really does discard writes.
+
+    /// The condition that shipped: accepted, reported success, gone.
     #[test]
-    fn a_real_keychain_satisfies_the_durability_guard() {
-        assert!(
-            assert_durable().is_ok(),
-            "the host keychain should round-trip a probe value",
-        );
+    fn a_store_that_takes_the_write_and_loses_it_is_refused() {
+        assert!(matches!(
+            verdict(true, Some(None)),
+            Err(StoreError::NotDurable(_)),
+        ));
+    }
+
+    /// Wrote one value, read another. Also lying, differently.
+    #[test]
+    fn a_store_that_returns_a_different_value_is_refused() {
+        assert!(matches!(
+            verdict(true, Some(Some(false))),
+            Err(StoreError::NotDurable(_)),
+        ));
+    }
+
+    /// The only passing case.
+    #[test]
+    fn a_store_that_returns_what_it_was_given_is_accepted() {
+        assert!(verdict(true, Some(Some(true))).is_ok());
+    }
+
+    /// A headless Linux runner: no session bus, so Secret Service errors on the
+    /// write. Unavailable is not the failure this guards against, and refusing
+    /// to start for it would stop CI — and any locked keyring — booting an app
+    /// that would otherwise run and report the problem where it happens.
+    #[test]
+    fn a_store_that_refuses_the_write_is_not_called_a_liar() {
+        assert!(verdict(false, Some(None)).is_ok());
+        assert!(verdict(false, None).is_ok());
+    }
+
+    /// The same, from the read end: the write may have landed and the read
+    /// failed for its own reasons. Nothing here says the store discarded it.
+    #[test]
+    fn a_store_that_refuses_the_read_is_not_called_a_liar() {
+        assert!(verdict(true, None).is_ok());
     }
 }

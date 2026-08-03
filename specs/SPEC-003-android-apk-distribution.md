@@ -587,6 +587,25 @@ catches the backends that answer honestly, and only the ones somebody thought
 to ask. Writing a value and looking for it catches any store that does not keep
 what it is given, including ones that do not exist yet.
 
+**The guard's first version was too broad, and CI caught it.** It treated any
+unhappy probe as a refusal to start, including a store that returned an
+*error*. On a headless runner that is the normal case — with no session bus,
+Secret Service answers *"Unable to autolaunch a dbus-daemon without a
+$DISPLAY"* — so the `rust` job went red on the very check meant to prevent a
+silent failure. A locked desktop keyring would have done the same to a user.
+
+The distinction the second version draws is the one that matters. A store that
+**errors** is *unavailable*, and that was never the invisible failure: `keyring`
+has always returned those errors and they have always surfaced where storage is
+used, naming storage. A store that takes the write, reports `Ok(())`, and does
+not have it is *lying*, and nothing anywhere raises an error — which is exactly
+what shipped. Only the second refuses to start.
+
+That split also made the check environment-independent to test: the decision is
+a pure function of what the probe observed, so its cases are enumerated in unit
+tests that say the same thing on a laptop and on a bare runner, and the I/O half
+is covered end to end by the mock-store regression test.
+
 ### What is verified, and what is not
 
 `src-tauri/tests/android_custody.rs` installs the identical mock store the
