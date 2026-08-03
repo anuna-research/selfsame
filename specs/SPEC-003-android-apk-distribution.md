@@ -2,7 +2,7 @@
 id: SPEC-003
 title: Android APK Build and Distribution
 status: implemented
-version: 1.2.0
+version: 1.3.0
 last-updated: 2026-08-03
 implemented-date: 2026-07-30
 ---
@@ -57,6 +57,11 @@ manifest ·
 not committed
 
 **Open:**
+- **`BUG-202`: the QR scanner was refused by the capability ACL** — the project
+  had no `capabilities/` directory, so every plugin command was denied by
+  default and the linking screen reported absent hardware. Capability added and
+  the swallowed error surfaced; not yet run on a device
+  ([[SPEC-003-android-apk-distribution#BUG-202]]). Owner: HOC.
 - **`BUG-201`: the published APK could never create a home key** — `keyring` has
   no Android backend and falls through to its testing mock, so every write to
   the root record was accepted and discarded. A Keystore-backed store and a
@@ -82,9 +87,10 @@ all capitals.
 Artefacts are numbered from **201** in every prefix, continuing the banding
 rationale recorded in [[SPEC-002-visual-key-fingerprint]].
 
-This document adds three dead links — [[Cloudflare R2]], and [[Keyring]] and
+This document adds four dead links — [[Cloudflare R2]], and [[Keyring]] and
 [[AndroidKeyStore]] from
-[[SPEC-003-android-apk-distribution#BUG-201]] — and defers all three under the
+[[SPEC-003-android-apk-distribution#BUG-201]], and [[Tauri]] from
+[[SPEC-003-android-apk-distribution#BUG-202]] — and defers all four under the
 same rule: vendor and tool pages are vault-wide vocabulary and belong in the
 shared `anuna-ssi` vault rather than duplicated into this repository's local
 `specs/`. Owner: HOC. The remaining dead targets are the ones already tabulated
@@ -624,6 +630,115 @@ Owner: HOC.
 
 ---
 
+## BUG-202: the QR scanner was refused by the capability ACL
+
+**Found 2026-08-03, on the same install that found
+[[SPEC-003-android-apk-distribution#BUG-201]]. Cause identified, fix applied,
+not yet confirmed on a device.**
+
+The linking screen reported **"No camera. Enter the code by hand instead."** on
+a phone with a working camera.
+
+### What was wrong
+
+[[Tauri]] 2 divides commands in two, and the halves have opposite defaults:
+
+| Kind | Registered by | Default |
+|---|---|---|
+| Application command | `invoke_handler` | **allowed** to every window |
+| Plugin command | a plugin's `Builder` | **denied** until a capability grants it |
+
+Every command this UI calls is an application command except one:
+`barcodeScanner.scan()`. This repository had no `capabilities/` directory at
+all — the generated `gen/schemas/capabilities.json` was `{}` — so identity
+creation, linking, revocation and the rest worked, and the single plugin call
+was refused by the access-control layer before it reached the camera.
+
+`CAMERA` sitting in the merged manifest is what made the wrong reading
+convincing: the permission the *operating system* checks was present and
+correct throughout. [[SPEC-003-android-apk-distribution#OBS-202]] tabulates
+that manifest, and the Status section below already drew the distinction the
+right way round — the manifest proves the plugin is *wired*, not that it
+*functions*. This is what the gap between those two claims looks like from the
+user's side.
+
+### The fix
+
+`src-tauri/capabilities/mobile-scanner.json`, granting exactly one permission.
+
+Two properties of it are load-bearing rather than stylistic:
+
+- **`"platforms": ["android", "iOS"]`.** The scanner is a mobile-only
+  dependency, so a desktop build does not know `barcode-scanner:allow-scan`
+  exists and an unscoped capability fails `tauri::generate_context!` on Linux —
+  which is the `rust` CI job. A capability that fixes the phone and breaks the
+  build is not a fix.
+- **`core:default` is deliberately absent.** It is in every Tauri template and
+  it is not needed here: the application has never had a capability file and
+  every screen works. Granting a broad default permission set to a root-key
+  custodian in order to repair a scanner would widen the ACL in the wrong
+  direction for an unrelated reason.
+
+### Why a device was required to find it
+
+The handler was a bare `catch` that discarded the error and substituted a
+sentence about hardware:
+
+```js
+} catch {
+    note.textContent = "No camera. Enter the code by hand instead.";
+```
+
+A permission rejection, a user declining the camera, a plugin that failed to
+load, and a genuinely absent sensor all rendered identically — and the one that
+was true was not recoverable from anything on screen. `REQ-011` makes the typed
+code a first-class route, so falling back is correct behaviour; asserting a
+cause is not. The reason is now logged, and the two cases a user can act on are
+told apart. The fallback is unchanged.
+
+This is the same shape as [[SPEC-003-android-apk-distribution#BUG-201]] —
+a failure that reported something plausible about the wrong layer — and the two
+were found within minutes of each other by the same act of installing the
+thing.
+
+### Two smaller findings from the same install
+
+Recorded here rather than as their own entries: neither is a defect against a
+stated requirement, and both were fixed in the same change.
+
+- **Safe-area insets.** `index.html` has set `viewport-fit=cover` from the
+  start, which stops the system reserving space for cutouts. Only
+  `safe-area-inset-bottom` was ever applied, and only in one rule, so the top
+  of every screen ran under the status bar and the side padding took no account
+  of a corner radius. All four insets are now named in `:root` and applied
+  together on `.screen` and `.busy`. Base values are unchanged, so desktop does
+  not move.
+- **The application icon.** The launcher showed the Tauri default.
+  `src/styles.css` has said since the visual system landed that the boundary
+  mark *"serves as logo, app icon, loading state, and identity avatar without
+  being redrawn"*; three of those four were true. `src-tauri/icons/icon.svg` is
+  now Impression A3 at 58% of the canvas — enough margin for Android's
+  adaptive-icon crop — regenerated to PNG by `node tests/icons.mjs`.
+
+### What is verified, and what is not
+
+`npm run screens` is clean and `cargo build -p selfsame` against the pinned
+siblings compiles the capability and the icons through `generate_context!`.
+The `android` job proves the permission identifier resolves.
+
+**None of the three is confirmed on a device.** CI cannot prove the camera
+opens, that the insets are non-zero, or that the launcher shows the mark. One
+caveat before a device screenshot is read as a failure of the inset work: if
+Tauri's generated Android activity does not opt into edge-to-edge, the WebView
+reports every inset as zero and the system reserves the space itself — which
+would make the CSS inert rather than wrong, and put the fix in Kotlin inside a
+`gen/android` that [[SPEC-003-android-apk-distribution#ADR-204]] keeps
+generated.
+
+Owner: HOC.
+
+---
+
 ## Status
 
 `implemented`. The pipeline runs on every push to `main`
@@ -653,8 +768,15 @@ an experiment should be. Its history is on pull requests #4 and #6.
 ## Changelog
 
 <details>
-<summary>Revision history — 1.2.0</summary>
+<summary>Revision history — 1.3.0</summary>
 
+- 1.3.0 — [[SPEC-003-android-apk-distribution#BUG-202]]: the project had no
+  `capabilities/` directory, so Tauri denied the one plugin command the UI
+  calls and the linking screen reported absent hardware. Capability added,
+  scoped to mobile; the swallowed error surfaced. Two smaller findings from the
+  same install folded into that entry — safe-area insets applied on all four
+  edges rather than one, and the boundary mark installed as the application
+  icon. No requirement, contract, or decision changed.
 - 1.2.0 — [[SPEC-003-android-apk-distribution#BUG-201]]: the published APK could
   never create a home key, because `keyring` has no Android backend and falls
   through to its testing mock. Keystore-backed store added

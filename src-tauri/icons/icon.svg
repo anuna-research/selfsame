@@ -1,0 +1,39 @@
+<!--
+  The boundary mark, as the application icon.
+
+  Impression A3: a solid half, a hollow half drawn as a stroke, and one bore
+  punched concentrically through both. `styles.css` calls it "the only drawn
+  form in the product, so it serves as logo, app icon, loading state, and
+  identity avatar without being redrawn" — this file is the app-icon half of
+  that sentence finally being true.
+
+  **This geometry is a second copy.** The first is the `mask-image` data URI on
+  `.mark` in `src/styles.css`, and the two must not drift: an icon that is not
+  the mark on the home screen is a different brand in the one place a user
+  looks first. The paths below are that data URI, URL-decoded, with the fill
+  and stroke set to the green token on the shell token instead of a white mask.
+
+  Note for editors: this is an XML comment, so it cannot contain two hyphens in
+  a row. That is why the CSS custom properties are named in prose above rather
+  than written out — a literal token name here makes the whole file undecodable,
+  and the error surfaces as "the source image cannot be decoded" with no line
+  number.
+
+  The mark is 58% of the canvas rather than full-bleed because Android's
+  adaptive launcher icons crop to roughly the central two thirds, and iOS
+  rounds the corners. At 58% the bore stays clear of every mask a launcher
+  applies.
+
+  Regenerate the PNGs beside this file with:
+
+      node tests/icons.mjs
+-->
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <rect width="1024" height="1024" fill="#0b0f0d"/>
+  <svg x="215" y="215" width="594" height="594" viewBox="15 5 100 100">
+    <path fill="#63c08a" fill-rule="evenodd"
+          d="M65 12 A43 43 0 0 1 65 98 Z M43 55 A22 22 0 1 0 87 55 A22 22 0 1 0 43 55 Z"/>
+    <path fill="none" stroke="#63c08a" stroke-width="11"
+          d="M65 12 A43 43 0 0 0 65 98"/>
+  </svg>
+</svg>

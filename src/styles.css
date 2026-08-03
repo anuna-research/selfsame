@@ -41,6 +41,28 @@
   --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
 
   --tap: 44px; /* Fitts's Law floor for a primary control */
+
+  /*
+   * Display cutouts, rounded corners and the gesture bar.
+   *
+   * `index.html` sets `viewport-fit=cover`, which is what makes these
+   * meaningful: the webview is laid out edge to edge and the system stops
+   * reserving space, so anything that does not add these sits underneath a
+   * status bar or a home indicator. Only the bottom inset was ever applied,
+   * and only in one rule — so on a phone the top of every screen ran under the
+   * status bar and the primary action on several of them sat within a
+   * thumb-width of the corner radius.
+   *
+   * Named here rather than written inline so the four are applied together.
+   * A layout that adds `safe-area-inset-bottom` and forgets `-top` looks
+   * correct in a simulator with no cutout and wrong on the device it was for.
+   *
+   * The fallback is `0px` and not `0`: `calc()` rejects a unitless zero.
+   */
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
 }
 
 * {
@@ -77,7 +99,14 @@ body {
   display: flex;
   flex-direction: column;
   gap: 18px;
-  padding: 34px 26px calc(30px + env(safe-area-inset-bottom));
+  /*
+   * The base values are the mockup's; the insets are what the device adds on
+   * top. Written as four `calc()`s rather than a shorthand plus overrides so
+   * that every edge is visibly accounted for at the one place the screen's
+   * padding is set.
+   */
+  padding: calc(34px + var(--safe-top)) calc(26px + var(--safe-right))
+    calc(30px + var(--safe-bottom)) calc(26px + var(--safe-left));
   overflow: hidden;
 }
 
@@ -834,6 +863,14 @@ textarea:focus {
   justify-content: center;
   gap: 16px;
   z-index: 20;
+  /*
+   * The scrim covers the cutout deliberately — a dimmed status bar reads as
+   * part of the overlay, and stopping short of it would look like a bug. The
+   * padding keeps the mark and its line of text inside the safe area while the
+   * background keeps going.
+   */
+  padding: calc(16px + var(--safe-top)) calc(16px + var(--safe-right))
+    calc(16px + var(--safe-bottom)) calc(16px + var(--safe-left));
 }
 
 .busy[hidden] {
