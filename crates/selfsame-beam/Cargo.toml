@@ -1,0 +1,16 @@
+[package]
+name = "selfsame-beam"
+description = "Selfsame Path-B Rustler binding for BEAM applications"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "cbcl_selfsame_erl"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+selfsame-app-identity.workspace = true
+rustler = { version = "0.36", default-features = false, features = ["nif_version_2_15"] }
