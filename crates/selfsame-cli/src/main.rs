@@ -23,6 +23,7 @@
 //! [SCREEN-002]: ../../../../anuna-ssi/specs/SCREEN-002-link-panel.md
 
 mod app_identity;
+mod path_b_sidecar;
 mod store;
 
 use std::io::Write;
@@ -64,6 +65,7 @@ fn main() -> Result<()> {
         Some("verify") => verify(&args[1..]),
         Some("unlink") => unlink(),
         Some("app-identity") => app_identity::run(&args[1..]),
+        Some("path-b-resolve") => path_b_sidecar::run(),
         Some("--help") | Some("-h") | None => {
             print_usage();
             Ok(())

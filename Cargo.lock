@@ -3826,6 +3826,7 @@ dependencies = [
 name = "selfsame-app-identity-net"
 version = "0.1.0"
 dependencies = [
+ "base64ct",
  "did-crdt",
  "ed25519-dalek",
  "http",
@@ -3909,8 +3910,10 @@ dependencies = [
  "did-crdt",
  "ed25519-dalek",
  "reqwest 0.12.28",
+ "selfsame-app-identity",
  "selfsame-core",
  "selfsame-rendezvous",
+ "serde",
  "serde_json",
  "tokio",
  "wasm-bindgen",

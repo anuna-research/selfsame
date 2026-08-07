@@ -322,6 +322,23 @@ pub fn accept_grant(
     expect: &Expectation<'_>,
     evidence: &Evidence<'_>,
 ) -> Result<Acceptance, AcceptError> {
+    accept_grant_inner(grant_bytes, expect, evidence, true)
+}
+
+/// Re-validate a credential through `CON-206` steps 1--12 only.
+///
+/// This is intentionally crate-private: it is solely the restart rehydration
+/// primitive for a previously proof-bound Path-B session. It cannot be used as
+/// a fresh presentation API because the public Path-B entry requires proof.
+pub(crate) fn rehydrate_accepted_grant(
+    grant_bytes: &[u8], expect: &Expectation<'_>, evidence: &Evidence<'_>,
+) -> Result<Acceptance, AcceptError> {
+    accept_grant_inner(grant_bytes, expect, evidence, false)
+}
+
+fn accept_grant_inner(
+    grant_bytes: &[u8], expect: &Expectation<'_>, evidence: &Evidence<'_>, require_proof: bool,
+) -> Result<Acceptance, AcceptError> {
     // ── 1 ──────────────────────────────────────────────────────────────────
     if grant_bytes.len() > grant::MAX_GRANT_OCTETS {
         return Err(AcceptError::at(AcceptStep::Size, "grant exceeds 64 KiB"));
@@ -466,19 +483,15 @@ pub fn accept_grant(
     }
 
     // ── 13 ─────────────────────────────────────────────────────────────────
-    let (challenge, signature, session) = evidence
-        .proof
-        .ok_or_else(|| AcceptError::at(AcceptStep::Proof, "no device proof supplied"))?;
-    proof::matches_binding(
-        challenge,
-        &grant.application,
-        grant.account.as_str(),
-        &proof::grant_hash(grant_bytes),
-        session,
-    )
-    .map_err(|e: ProofError| AcceptError::at(AcceptStep::Proof, e.to_string()))?;
-    proof::verify(challenge, signature, &grant.device_public_key)
-        .map_err(|e| AcceptError::at(AcceptStep::Proof, e.to_string()))?;
+    if require_proof {
+        let (challenge, signature, session) = evidence
+            .proof
+            .ok_or_else(|| AcceptError::at(AcceptStep::Proof, "no device proof supplied"))?;
+        proof::matches_binding(challenge, &grant.application, grant.account.as_str(), &proof::grant_hash(grant_bytes), session)
+            .map_err(|e: ProofError| AcceptError::at(AcceptStep::Proof, e.to_string()))?;
+        proof::verify(challenge, signature, &grant.device_public_key)
+            .map_err(|e| AcceptError::at(AcceptStep::Proof, e.to_string()))?;
+    }
 
     Ok(Acceptance {
         grant,
@@ -559,6 +572,38 @@ fn check_validity(grant: &DeviceGrant, expect: &Expectation<'_>) -> Result<(), A
             AcceptStep::Validity,
             "grant lifetime exceeds the profile's maxGrantLifetimeSeconds",
         ));
+    }
+    Ok(())
+}
+
+/// Re-check the standing-only portion of a previously accepted grant.
+///
+/// This deliberately contains only `CON-206` steps 10--12.  It is crate
+/// private because callers must not be able to manufacture a recognised grant
+/// from untrusted credential bytes and then omit signature and proof checks.
+pub(crate) fn check_standing(
+    grant: &DeviceGrant,
+    expect: &Expectation<'_>,
+    issuer: &IssuerState,
+    projection: Option<Projection>,
+) -> Result<(), AcceptError> {
+    check_status(grant, expect, issuer, projection)?;
+    check_validity(grant, expect)?;
+    for permission in &grant.permissions {
+        if !expect.profile.allowed_permissions.iter().any(|p| p == permission) {
+            return Err(AcceptError::at(
+                AcceptStep::Permissions,
+                "grant carries a permission the profile does not declare",
+            ));
+        }
+    }
+    for required in expect.operation_permissions {
+        if !grant.permissions.iter().any(|p| p == required) {
+            return Err(AcceptError::at(
+                AcceptStep::Permissions,
+                "grant does not carry a permission the operation requires",
+            ));
+        }
     }
     Ok(())
 }

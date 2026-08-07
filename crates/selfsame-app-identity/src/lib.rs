@@ -85,6 +85,7 @@ pub mod hierarchy;
 pub mod json;
 pub mod jws;
 pub mod pairing;
+pub mod path_b;
 pub mod platform;
 pub mod profile;
 pub mod proof;
@@ -104,4 +105,3 @@ pub type UnixSeconds = i64;
 
 /// The profile version this build speaks (`CON-201`).
 pub const PROFILE_VERSION: i64 = 1;
-

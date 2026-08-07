@@ -174,6 +174,14 @@ pub enum PairingError {
     /// The ceremony is in the terminal burned state.
     #[error("the ceremony is burned")]
     Burned,
+    /// The wallet received a PAKE frame before the person approved the claimed
+    /// pairing target required by PROTO-003 CON-409.
+    #[error("the claimed pairing target was not approved before PAKE")]
+    PairingTargetUnapproved,
+    /// An approval was requested before the resolved pairing target had been
+    /// disclosed to the person.
+    #[error("the claimed pairing target was not disclosed before approval")]
+    PairingTargetUndisclosed,
     /// `CON-216`: the five preconditions are not all met.
     #[error("the pairing bootstrap preconditions are not met")]
     PreconditionsUnmet,
@@ -313,6 +321,44 @@ pub struct RecordClaim {
     pub nameplate: String,
 }
 
+/// The target a resolving wallet must disclose before it may begin PAKE.
+///
+/// This value is constructed only by [`resolve_pairing_target`], after the
+/// pure-core profile/digest/provider checks. It deliberately does **not** claim
+/// that the record signature or profile digest authenticates the application:
+/// signed-record recognition, expiry, and transport remain PROTO-003 work
+/// outside this policy prototype.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PairingTarget {
+    application_id: String,
+    origin: String,
+    provider_id: String,
+    nameplate: String,
+}
+
+impl PairingTarget {
+    /// The record-named canonical application identifier shown to the person.
+    pub fn application_id(&self) -> &str {
+        &self.application_id
+    }
+
+    /// The HTTPS origin shown beside the claimed application identifier.
+    pub fn origin(&self) -> &str {
+        &self.origin
+    }
+
+    /// The selected provider identifier, retained for audit/UI binding.
+    pub fn provider_id(&self) -> &str {
+        &self.provider_id
+    }
+
+    /// The provider-local nameplate, retained as ceremony context and never
+    /// shown as an endpoint-selection affordance.
+    pub fn nameplate(&self) -> &str {
+        &self.nameplate
+    }
+}
+
 /// `CON-216`'s "on resolution" checks against the authenticated profile.
 ///
 /// > A `providerId` matching zero or several descriptors, an unresolvable
@@ -340,6 +386,25 @@ pub fn resolve_record<'a>(
         return Err(PairingError::ProviderNotUnique);
     }
     Ok(descriptor)
+}
+
+/// Resolve the policy-level target that must be disclosed to a wallet user.
+///
+/// This is intentionally narrower than a conforming CON-409 resolver: the
+/// shell must first authenticate the record's bytes, signature, expiry, and
+/// transport response. The pure core then checks the record/profile relation
+/// and returns exactly the claimed values the wallet must disclose.
+pub fn resolve_pairing_target(
+    record: &RecordClaim,
+    profile: &ApplicationProfile,
+) -> Result<PairingTarget, PairingError> {
+    resolve_record(record, profile)?;
+    Ok(PairingTarget {
+        application_id: profile.application_id.as_str().to_owned(),
+        origin: profile.application_id.origin().to_owned(),
+        provider_id: record.provider_id.clone(),
+        nameplate: record.nameplate.clone(),
+    })
 }
 
 // ── CON-213: the transport policy and the origin binding ───────────────────
@@ -457,6 +522,11 @@ pub const ROLES_A_DESCRIPTOR_DOES_NOT_SUPPLY: &[&str] =
 pub enum GatedAction {
     /// Show the code to a person. Gated by `CON-216`'s five preconditions.
     DisplayCode,
+    /// Claim the record-selected nameplate, after the wallet's target approval.
+    ClaimNameplate,
+    /// Send or accept `pA`, `pB`, `cA`, or `cB`. This policy core does not
+    /// implement the frames or SPAKE2.
+    PakeFrame,
     /// Derive or select an application-account branch.
     DeriveApplicationBranch,
     /// Request a PROTO-002 mailbox slot.
@@ -489,6 +559,12 @@ pub struct Ceremony {
     /// This party's own confirmation came back through the relay: evidence the
     /// peer holds it, and half of `CON-217`'s mutual confirmation.
     peer_confirmed: bool,
+    /// The wallet has disclosed the record-named claimed target and the person
+    /// has explicitly approved pairing with it. This is deliberately not
+    /// CON-214 application authentication or application-account consent.
+    pairing_target_approved: bool,
+    /// The exact target that was disclosed before a wallet may record approval.
+    disclosed_pairing_target: Option<PairingTarget>,
     application_authenticated: bool,
     initiator_confirmations_seen: u32,
     state: State,
@@ -504,6 +580,8 @@ impl Ceremony {
             preconditions: BootstrapPreconditions::default(),
             confirmed: false,
             peer_confirmed: false,
+            pairing_target_approved: false,
+            disclosed_pairing_target: None,
             application_authenticated: false,
             initiator_confirmations_seen: 0,
             state: State::Live,
@@ -533,6 +611,49 @@ impl Ceremony {
     ) -> Result<(), PairingError> {
         self.require_live()?;
         set(&mut self.preconditions);
+        Ok(())
+    }
+
+    /// Record the claimed target that the wallet disclosed to the person.
+    ///
+    /// Callers obtain this value from [`resolve_pairing_target`]; keeping the
+    /// constructor private means an approval cannot be associated with an
+    /// arbitrary caller-created application/origin tuple.
+    pub fn record_pairing_target_disclosure(
+        &mut self,
+        target: PairingTarget,
+    ) -> Result<(), PairingError> {
+        self.require_live()?;
+        self.disclosed_pairing_target = Some(target);
+        Ok(())
+    }
+
+    /// Record the wallet's explicit approval of the disclosed pairing target.
+    ///
+    /// This is the CON-409 / TEST-234 boundary for a bearer code: it permits
+    /// PAKE traffic only after the person has seen the *claimed* target. It
+    /// does not authenticate the application and cannot authorize a grant;
+    /// [`record_application_authenticated`](Self::record_application_authenticated)
+    /// remains a distinct later transition.
+    pub fn record_pairing_target_approval(&mut self) -> Result<(), PairingError> {
+        self.require_live()?;
+        if self.disclosed_pairing_target.is_none() {
+            return Err(PairingError::PairingTargetUndisclosed);
+        }
+        self.pairing_target_approved = true;
+        Ok(())
+    }
+
+    /// Record that the person declined the disclosed target.
+    ///
+    /// Decline has no retry transition inside this ceremony: it burns before a
+    /// nameplate claim, PAKE frame, mailbox action, or grant can occur.
+    pub fn decline_pairing_target(&mut self) -> Result<(), PairingError> {
+        self.require_live()?;
+        if self.disclosed_pairing_target.is_none() {
+            return Err(PairingError::PairingTargetUndisclosed);
+        }
+        self.burn();
         Ok(())
     }
 
@@ -575,6 +696,13 @@ impl Ceremony {
         confirmation: Confirmation,
     ) -> Result<(), PairingError> {
         self.require_live()?;
+        if self.role == Role::Wallet && !self.pairing_target_approved {
+            // A frame before disclosure/approval violates the one permitted
+            // ordering. Burn rather than leave an attacker an opportunity to
+            // replay the same frame after the person acts.
+            self.burn();
+            return Err(PairingError::PairingTargetUnapproved);
+        }
         if confirmation.binding_hash != self.binding_hash {
             self.burn();
             return Err(PairingError::PairingDowngrade(
@@ -601,8 +729,21 @@ impl Ceremony {
     }
 
     /// Record that `CON-214` evidence verified for this ceremony.
+    ///
+    /// The wallet may reach this later authorization stage only after it has
+    /// disclosed and obtained approval for the claimed target, then accepted
+    /// the application's PAKE confirmation. This does not prove that a real
+    /// mailbox exchange occurred — that requires the still-unimplemented
+    /// PROTO-003/PROTO-002 transport — but prevents this pure policy model from
+    /// representing CON-214 as an earlier substitute for either boundary.
     pub fn record_application_authenticated(&mut self) -> Result<(), PairingError> {
         self.require_live()?;
+        if self.role == Role::Wallet && !self.pairing_target_approved {
+            return Err(PairingError::PairingTargetUnapproved);
+        }
+        if !self.confirmed {
+            return Err(PairingError::Unconfirmed);
+        }
         self.application_authenticated = true;
         Ok(())
     }
@@ -625,6 +766,16 @@ impl Ceremony {
                     Ok(())
                 } else {
                     Err(PairingError::PreconditionsUnmet)
+                }
+            }
+            // The application prepares `pA` before a wallet resolves the
+            // record; the wallet may claim or exchange any PAKE frame only
+            // after target disclosure and explicit approval.
+            GatedAction::ClaimNameplate | GatedAction::PakeFrame => {
+                if self.role == Role::Wallet && !self.pairing_target_approved {
+                    Err(PairingError::PairingTargetUnapproved)
+                } else {
+                    Ok(())
                 }
             }
             // CON-217: "Neither may … derive an application branch, request a
@@ -801,6 +952,20 @@ mod tests {
         c
     }
 
+    fn disclosed_target() -> PairingTarget {
+        PairingTarget {
+            application_id: "https://photos.example/selfsame/application".into(),
+            origin: "https://photos.example".into(),
+            provider_id: "au-primary".into(),
+            nameplate: "482715".into(),
+        }
+    }
+
+    fn approve_disclosed_target(ceremony: &mut Ceremony) {
+        ceremony.record_pairing_target_disclosure(disclosed_target()).unwrap();
+        ceremony.record_pairing_target_approval().unwrap();
+    }
+
     // ── CON-216 ────────────────────────────────────────────────────────────
 
     #[test]
@@ -974,6 +1139,80 @@ mod tests {
     }
 
     #[test]
+    fn wallet_requires_pairing_target_approval_before_accepting_a_pake_frame() {
+        // PROTO-003 CON-409 / SPEC-004 TEST-234: `C` is a bearer capability,
+        // not intended-application authentication. The wallet must disclose
+        // the claimed target and receive this separate approval before it
+        // claims a nameplate or accepts an application PAKE frame.
+        let mut c = ready(Role::Wallet);
+        assert_eq!(
+            c.accept_confirmation(Confirmation { role: Role::Application, binding_hash: BINDING }),
+            Err(PairingError::PairingTargetUnapproved),
+        );
+        assert!(c.is_burned(), "an early PAKE frame must not be retryable");
+
+        let mut approved = ready(Role::Wallet);
+        assert_eq!(
+            approved.record_pairing_target_approval(),
+            Err(PairingError::PairingTargetUndisclosed),
+        );
+        approve_disclosed_target(&mut approved);
+        approved
+            .accept_confirmation(Confirmation { role: Role::Application, binding_hash: BINDING })
+            .unwrap();
+        assert_eq!(
+            approved.may(GatedAction::DisplayConsent),
+            Err(PairingError::ApplicationUnauthenticated),
+            "pairing-target approval must not become CON-214 authentication",
+        );
+        assert_eq!(
+            approved.may(GatedAction::SendGrantBundle),
+            Err(PairingError::ApplicationUnauthenticated),
+            "pairing-target approval must not authorize a grant",
+        );
+
+        let mut before_approval = ready(Role::Wallet);
+        for action in [GatedAction::ClaimNameplate, GatedAction::PakeFrame] {
+            assert_eq!(
+                before_approval.may(action),
+                Err(PairingError::PairingTargetUnapproved),
+                "{action:?} bypassed target approval",
+            );
+        }
+        approve_disclosed_target(&mut before_approval);
+        for action in [GatedAction::ClaimNameplate, GatedAction::PakeFrame] {
+            assert!(before_approval.may(action).is_ok(), "{action:?} remained closed after approval");
+        }
+    }
+
+    #[test]
+    fn declining_a_disclosed_pairing_target_burns_the_ceremony() {
+        let mut c = ready(Role::Wallet);
+        c.record_pairing_target_disclosure(disclosed_target()).unwrap();
+        c.decline_pairing_target().unwrap();
+        assert!(c.is_burned());
+        assert_eq!(
+            c.accept_confirmation(Confirmation { role: Role::Application, binding_hash: BINDING }),
+            Err(PairingError::Burned),
+        );
+        assert_eq!(c.may(GatedAction::SendGrantBundle), Err(PairingError::Burned));
+    }
+
+    #[test]
+    fn application_authentication_cannot_precede_wallet_target_approval_and_pake() {
+        let mut c = ready(Role::Wallet);
+        assert_eq!(
+            c.record_application_authenticated(),
+            Err(PairingError::PairingTargetUnapproved),
+        );
+        approve_disclosed_target(&mut c);
+        assert_eq!(c.record_application_authenticated(), Err(PairingError::Unconfirmed));
+        c.accept_confirmation(Confirmation { role: Role::Application, binding_hash: BINDING })
+            .unwrap();
+        assert!(c.record_application_authenticated().is_ok());
+    }
+
+    #[test]
     fn a_party_is_not_confirmed_by_its_own_outbound_mac() {
         // PROTO-003 CON-405: "Role B SHALL NOT [accept] application data before
         // validating `cA`. Role A SHALL NOT accept the PAKE or mailbox output
@@ -982,6 +1221,9 @@ mod tests {
         // peer at all, which is the whole of the guarantee.
         for role in [Role::Wallet, Role::Application] {
             let mut c = ready(role);
+            if role == Role::Wallet {
+                approve_disclosed_target(&mut c);
+            }
             c.accept_confirmation(Confirmation { role, binding_hash: BINDING }).unwrap();
             assert_eq!(
                 c.may(GatedAction::RequestMailboxSlot),
@@ -997,6 +1239,7 @@ mod tests {
         // "A valid PAKE confirmation is necessary transport authentication but
         // is never sufficient application authentication or authorization."
         let mut c = ready(Role::Wallet);
+        approve_disclosed_target(&mut c);
         assert_eq!(c.may(GatedAction::DisplayConsent), Err(PairingError::Unconfirmed));
 
         // The wallet is role B: it is confirmed by validating the application's
@@ -1021,6 +1264,7 @@ mod tests {
         // in CON-214 authenticates the application origin". A completed PAKE is
         // not that evidence — any application that can run a ceremony has one.
         let mut c = ready(Role::Wallet);
+        approve_disclosed_target(&mut c);
         c.accept_confirmation(Confirmation { role: Role::Application, binding_hash: BINDING })
             .unwrap();
         for action in [GatedAction::DeriveApplicationBranch, GatedAction::SendGrantBundle] {
@@ -1039,6 +1283,7 @@ mod tests {
     #[test]
     fn a_confirmation_over_another_binding_burns_the_ceremony() {
         let mut c = ready(Role::Wallet);
+        approve_disclosed_target(&mut c);
         let err = c
             .accept_confirmation(Confirmation { role: Role::Wallet, binding_hash: [9u8; 32] })
             .unwrap_err();
@@ -1054,6 +1299,7 @@ mod tests {
         // REQ-229. A second attempt is a second guess at the code, so it burns
         // the ceremony rather than being ignored.
         let mut c = ready(Role::Wallet);
+        approve_disclosed_target(&mut c);
         let initiator = Confirmation { role: Role::Application, binding_hash: BINDING };
         assert!(c.accept_confirmation(initiator).is_ok());
         assert_eq!(c.accept_confirmation(initiator), Err(PairingError::Burned));

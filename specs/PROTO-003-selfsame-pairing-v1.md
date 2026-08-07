@@ -3,10 +3,10 @@ id: PROTO-003
 title: Selfsame Pairing Protocol v1 — routable num-word-word SPAKE2
 status: draft
 tier: 1
-version: 0.5.0
+version: 0.5.2
 audience: application developer, SDK implementer, wallet implementer, infrastructure operator, security reviewer
 author: Anuna Research (drafted with Codex, 2026-07-30; amended with Claude, 2026-07-31)
-last-updated: 2026-07-31
+last-updated: 2026-08-07
 owner-repo: selfsame
 affects-repos: selfsame, hark, cbcl-bus, adopting applications, independent pairing implementations
 review-gate: not-approved — Tier-1; independent cryptographic vectors, cross-model adversarial review, privacy review, production-operator review, and human cryptography sign-off are outstanding
@@ -43,8 +43,11 @@ verifier, the agreed key, an offer, a grant, a DID, or an account identifier.
 address of a short-lived signed record the application publishes, naming the
 application and the exact session it chose from its own profile. Because the
 address is a 128-bit function of `C`, no observer can enumerate live ceremonies;
-because the record is signed and its contents re-enter the PAKE transcript, no
-host can redirect one. No client broadcasts a code to candidate services.
+the record is a short-lived, code-holder-authored routing hint. A wallet shows
+its claimed application origin and requires an explicit, separate pairing
+approval before proceeding; this prevents a silent redirect, but does not make
+the bearer code authenticate an intended application. No client broadcasts a
+code to candidate services.
 
 **Structure.**
 
@@ -114,22 +117,27 @@ cannot create a downgrade ·
 - The protocol value is `C`, sixteen octets. Twelve BIP-39 English words and the
   base64url bootstrap are renderings of it; no rendering is the value.
 - `C` carries 128 bits and is used only as the SPAKE2 password and as the
-  meeting-point address seed. It is never a bearer key, a mailbox secret, or an
-  AEAD key.
+  meeting-point address seed. It is never used directly as a bearer
+  cryptographic key, a mailbox secret, or an AEAD key. Possession can still
+  authorize one PAKE attempt, so a wallet-generated `C` is a bearer capability
+  in that limited, human-ceremony sense.
 - The human code contains no route, nameplate, provider, endpoint, or
   application identifier. Machine carriers transport `C` directly and never
   words.
 - Routing is one signed, ephemeral record at an address derived from `C`. It is
-  an unauthenticated hint: its contents re-enter the PAKE transcript, so a host
-  can withhold but cannot redirect.
+  an unauthenticated hint: its contents enter the PAKE transcript, but a code
+  holder can make a self-consistent substitution. Visible target disclosure and
+  explicit pairing-target approval prevent silent redirection; they do not
+  authenticate an intended application.
 - The address space is 128 bits, so live ceremonies cannot be enumerated. The
   record is signed, not encrypted, and its `applicationId` is visible to anyone
   already holding `C`.
 - Either party may generate and display the code. The application always selects
   the provider, allocates the nameplate, publishes the record, and is SPAKE2
   role A; the wallet is always role B.
-- A wallet-generated code has no intended recipient. Its lifetime is bounded and
-  the resolved origin is shown before consent.
+- A wallet-generated code has no intended recipient. Its lifetime is bounded;
+  the claimed target/origin is shown and explicitly approved before any
+  nameplate claim or PAKE frame. That approval grants no application authority.
 - The pairing provider stores no password-equivalent verifier and performs no
   group operation, MAC verification, grant decision, or application lookup.
 - The PAKE transcript binds the application, complete provider descriptor,
@@ -423,11 +431,11 @@ assignment, transcript identities, frame order, or any derived key.
 
 A wallet-generated code has no intended recipient and is therefore a bearer
 capability. A wallet SHALL bound its lifetime to at most 600 seconds, SHALL
-evaluate at most one resolved record per code, and SHALL display the
-authenticated `applicationId` resolved under CON-409 before the person is asked
-to approve anything. An application-generated code carries the person's own
-session context; a wallet-generated one does not, and consent is its only
-signal.
+evaluate at most one resolved record per code, and SHALL display the claimed
+canonical `applicationId` and its HTTPS origin under CON-409 before the person
+is asked to approve pairing. An application-generated code carries the person's
+own session context; a wallet-generated one does not, and pairing-target
+approval is the only signal available before application authentication.
 
 Trace:
 [[PROTO-003-selfsame-pairing-v1#TEST-409]],
@@ -443,8 +451,9 @@ lower-case ASCII with hyphens before use. A UI SHALL display all twelve words
 in full and MAY group them visually without adding a parsed character.
 
 The application identity shown beside a manual code is ceremony context, not a
-rendezvous configuration field. The UI SHALL show the authenticated
-application origin and SHALL NOT expose or request the selected provider URL.
+rendezvous configuration field. The UI SHALL show the claimed canonical
+application origin, clearly distinguish it from an authenticated application
+identity, and SHALL NOT expose or request the selected provider URL.
 
 ### NFR-402: Parsing and allocation are bounded
 
@@ -479,10 +488,10 @@ Trace: [[PROTO-003-selfsame-pairing-v1#TEST-414]]
 
 **Status:** PROPOSED.
 
-The application ID and authenticated profile answer *which application and
-which candidate providers*. The numeric route answers *which descriptor in
-that profile*. The nameplate answers *which active session*. The words answer
-*whether the two endpoints share the out-of-band password*.
+The record-named application ID and its profile answer *which claimed
+application and which candidate providers*. The numeric route answers *which
+descriptor in that profile*. The nameplate answers *which active session*. The
+words answer *whether the two endpoints share the out-of-band password*.
 
 Making one short number globally identify an arbitrary provider is rejected.
 It would require a mandatory directory, a centrally allocated provider prefix,
@@ -619,9 +628,11 @@ for what exists, and stores one ephemeral write per ceremony at a location only
 the two parties can compute. Because [[PROTO-003-selfsame-pairing-v1#ADR-406]]
 makes the code 128 bits, the address space is unenumerable: an observer cannot
 sweep it to build an index of live pairings, which is the attack that makes the
-same construction unacceptable at 22 bits. Because the record is signed, a host
-can withhold it but cannot substitute it — and a substituted `applicationId`
-would in any case diverge `binding_hash` and fail confirmation.
+same construction unacceptable at 22 bits. The signature lets a resolver reject
+a transport mutation made without `C`, but it does not authenticate an intended
+application: a code holder can publish a self-consistent substitute. The wallet
+therefore makes the claimed target visible and requires pairing-target approval
+before it starts PAKE.
 
 Rejected:
 
@@ -688,8 +699,10 @@ own application and obtain a grant in that application's own branch. The harm
 ceiling is enrolling in an application the person did not intend, and consent is
 the entire defence. Because that consent screen is the only signal — where an
 application-initiated flow also has the person's own context to confirm against —
-a wallet-issued code SHOULD carry a shorter lifetime and the wallet SHOULD name
-the resolved, authenticated origin before the person commits.
+a wallet-issued code SHOULD carry a shorter lifetime and the wallet SHALL name
+the claimed target/origin and obtain explicit pairing-target approval before a
+nameplate claim or PAKE frame. That approval is not application authentication
+or application-account consent.
 
 Rejected: making the initiator role A. It forks the transcript for no protocol
 gain. Rejected: letting the wallet select the provider when it initiates. It
@@ -861,8 +874,22 @@ A pairing-capable rendezvous descriptor contains these additional fields:
 }
 ```
 
-`pairingUrl` uses the canonical HTTPS-origin `base-url` grammar in
-[[PROTO-002-selfsame-rendezvous-v1#CON-301]]. `pairingProtocol` is exactly
+`pairingUrl` uses the canonical HTTPS provider-base grammar below. It names
+the base under which this provider serves this protocol and MAY carry one
+absolute, slash-prefixed path prefix; it has no query, fragment, userinfo,
+percent-encoding or trailing slash. This is deliberately distinct from the
+mailbox descriptor's origin-only `url` in
+[[PROTO-002-selfsame-rendezvous-v1#CON-301]]: one operated service may expose
+the blind mailbox at its origin and the pairing relay below `/selfsame` without
+colliding with another protocol at `/pair/v1`.
+
+```abnf
+pairing-base-url = base-url [ pairing-path ]
+pairing-path     = "/" path-segment *( "/" path-segment )
+path-segment     = 1*( ALPHA / DIGIT / "-" / "_" / "." )
+```
+
+`pairingProtocol` is exactly
 `selfsame-pairing-v1`. `pairingRoute` is exactly two ASCII digits and is unique
 among every rendezvous descriptor in one profile. The complete descriptor,
 including all three pairing fields, is covered by its RFC 8785 descriptor
@@ -1168,7 +1195,10 @@ blocking in [[PROTO-003-selfsame-pairing-v1#Tier-1 Gate]].
 
 ### CON-405: Provider session and four-frame relay
 
-The pairing base URL is `pairingUrl || "/pair/v1"`. All requests use HTTPS,
+The pairing base URL is `pairingUrl || "/pair/v1"`. For example, a descriptor
+whose `pairingUrl` is `https://cbcl.chat/selfsame` uses
+`https://cbcl.chat/selfsame/pair/v1`; an origin-only descriptor retains
+`https://provider.example/pair/v1`. All requests use HTTPS,
 `Cache-Control: no-store`, `Pragma: no-cache`, no cookies, no redirects, no
 content encoding, no client TLS certificate, and no ambient application
 credential. Role tokens are ephemeral relay capabilities, not application or
@@ -1448,13 +1478,27 @@ The resolving party MUST, in order:
 8. construct the [[PROTO-003-selfsame-pairing-v1#CON-403]] binding before
    claiming the nameplate.
 
-A resolved record is an **unauthenticated hint**. Its signature proves only that
-whoever holds `C` wrote it; it establishes no application authority. A
-substituted `applicationId`, `profileDigest`, `providerId`, or `nameplate`
-produces a different `binding_hash` and fails confirmation, so a hostile host
-can withhold but cannot redirect. Application authenticity comes from
-[[SPEC-004-application-scoped-identity#CON-214]] after the mailbox opens, never
-from this record.
+A resolved record is an **unauthenticated, bearer-routable hint**. Its signature
+proves only that whoever holds `C` wrote it; it establishes neither application
+authority nor an intended recipient. In particular, a party that knows `C` can
+publish a coherent record for a different application and complete the PAKE for
+that record: the resulting `binding_hash` is internally consistent, so PAKE
+confirmation cannot detect that substitution.
+
+Before claiming a nameplate or sending a PAKE frame, the wallet SHALL display
+the record's canonical `applicationId` and its HTTPS origin, state that the
+identity is a claimed pairing target rather than a verified application
+identity, and require an explicit person action to continue. Declining SHALL
+burn the ceremony under [[PROTO-003-selfsame-pairing-v1#REQ-406]]. This
+pairing-target approval is separate from — and SHALL NOT be treated as — the
+application-account consent required later by
+[[SPEC-004-application-scoped-identity#CON-214]].
+
+Accordingly, the record and its binding prevent a transport that lacks `C` from
+silently mutating a resolved record, but they do not prevent a code holder from
+redirecting the ceremony after visible disclosure. Application authenticity
+comes from [[SPEC-004-application-scoped-identity#CON-214]] after the mailbox
+opens, never from this record.
 
 #### Transport
 
@@ -1678,11 +1722,15 @@ implemented providers. Reuse route `03`, nameplate `482715`, and both words
 across two applications. Require different binding hashes, PAKE messages,
 keys, and mailbox slots.
 
-Within one profile, route `03` reaches only its declared descriptor. Swapping
-the profile, provider ID, descriptor digest, URL, route, or application ID
-fails confirmation. Blocking the selected provider fails the ceremony and
-creates completely fresh material at a newly selected provider. No request
-reaches a global or undeclared fallback.
+Within one honest profile, route `03` reaches only its declared descriptor.
+Mutating a bound profile, provider ID, descriptor digest, URL, route, or
+application ID after either honest party has fixed its binding fails
+confirmation. Separately, demonstrate that a code holder can produce a
+self-consistent alternate record; require claimed-target disclosure and explicit
+pairing-target approval before PAKE, and require that approval alone yields no
+application authority or grant. Blocking the selected provider fails the
+ceremony and creates completely fresh material at a newly selected provider. No
+request reaches a global or undeclared fallback.
 
 ### TEST-409: QR, spoken, and same-device convergence
 
@@ -1750,17 +1798,24 @@ no descriptor, a `providerId` matching two, and a `profileDigest` that does not
 equal the digest of the fetched profile. Assert zero semantic action on every
 rejection — no claim, no frame, no probe beyond the profile fetch.
 
-Substitute a hostile record naming a different `applicationId`, `providerId`, or
-`nameplate` while keeping a valid signature. Require the ceremony to reach
-confirmation and fail there, proving the record is a hint that a divergent
-`binding_hash` catches rather than a trusted routing decision.
+Substitute a validly signed hostile record naming a different `applicationId`,
+`providerId`, or `nameplate`. Require the wallet to display that claimed target
+and require an explicit pairing-target approval before any claim or PAKE frame.
+On decline, require a burned ceremony and zero claim, frame, or grant. On
+approval, require the record's values to enter `binding_hash`, but do not claim
+that confirmation detects the substitution: a code holder can produce a
+self-consistent binding. Require the downstream application-authentication and
+application-account-consent checks to remain mandatory.
 
 Run a complete ceremony in **both** initiation directions with fresh randomness.
 Require identical role assignment, transcript identities, frame order, derived
 keys, and acceptance decisions; require the traces to differ only in which party
 generated and displayed the code. Require a wallet-generated code to expire
 within 600 seconds, to admit at most one resolved record, and to surface the
-resolved `applicationId` before any consent affordance.
+claimed target/origin and obtain pairing-target approval before any nameplate
+claim or PAKE frame. Require that approval to produce neither an enrollment
+decision nor a grant, and that the later application-authentication and
+application-account-consent checks remain mandatory.
 
 Require the twelve-word rendering and the `c` bootstrap to round-trip to the
 identical sixteen octets. Reject an abbreviated word, a word absent from the
@@ -2163,6 +2218,27 @@ Standards constraints that are easy to miss:
   mnemonic and MUST NOT be entered as one.
 
 ## Changelog
+
+- **0.5.2 — 2026-08-07 — draft, normative.** Permits an optional canonical
+  path prefix in `pairingUrl`, while leaving the mailbox `url` origin-only.
+  This lets a provider expose the blind [[PROTO-003-selfsame-pairing-v1#CON-405]]
+  relay at `/selfsame/pair/v1` without colliding with an unrelated legacy
+  `/pair/v1` protocol on the same origin. Affected: [[PROTO-003-selfsame-pairing-v1#CON-401]],
+  [[PROTO-003-selfsame-pairing-v1#CON-405]], [[PROTO-003-selfsame-pairing-v1#REQ-401]].
+  No pairing-code grammar, SPAKE2, token, frame, TTL, or key-schedule value changes.
+  The Tier-1 review and human approval gates remain open.
+
+- **0.5.1 — 2026-08-07 — draft, normative.** Corrects the bearer-code claim in
+  CON-409 and the corresponding TEST-413 expectation. A `meet_key` signature
+  proves knowledge of `C`, not application authority or the person's intended
+  counterparty; therefore a code holder can publish a coherent substituted
+  record and pass PAKE confirmation. The protocol now requires visible claimed
+  origin disclosure and a separate, explicit pairing-target approval before a
+  nameplate claim or PAKE frame. This prevents silent redirect; it does not
+  create cryptographic intended-application authentication. The full
+  application-authentication and account-consent chain remains mandatory after
+  the mailbox opens. No wire format, KDF, or PAKE construction changes. This
+  correction leaves every Tier-1 gate box open and requires independent review.
 
 - **0.5.0 — 2026-07-31 — draft, normative.** Resolves OQ-402 and records what
   the analysis turned up. No wire format, code grammar, SPAKE2 input, or
