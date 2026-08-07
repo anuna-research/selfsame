@@ -234,6 +234,27 @@ fn step_6_rejects_a_kid_belonging_to_a_different_did() {
 }
 
 #[test]
+fn step_6_rejects_a_kid_that_extends_the_issuer_did_before_its_fragment() {
+    // Keep the altered kid in assertionMethod and sign with its key so this
+    // specifically proves CON-206 step 6's structural issuer binding.
+    let c = Ceremony::accepted();
+    let extended_kid = format!("{}-lookalike#jwk-0", c.home_did);
+    let mut issuer = c.issuer.clone();
+    issuer.assertion_methods[0].id = extended_kid.clone();
+    let header = Json::obj([
+        ("alg", Json::text("EdDSA")),
+        ("typ", Json::text("vc+jwt")),
+        ("cty", Json::text("vc")),
+        ("kid", Json::text(extended_kid)),
+    ]);
+    let mutated = jws::sign(&header, &payload_of(&c), &c.home_key);
+    let evidence = Evidence { issuer: Some(&issuer), ..c.evidence() };
+    let err = accept_grant(mutated.as_bytes(), &c.expectation(), &evidence)
+        .expect_err("a kid must separate the issuer DID and fragment with '#'");
+    assert_eq!(err.step, AcceptStep::IssuerKey);
+}
+
+#[test]
 fn step_7_rejects_a_signature_by_the_wrong_key() {
     let c = Ceremony::accepted();
     let impostor = Ceremony::build(1, 1, 3, APPLICATION_ID);

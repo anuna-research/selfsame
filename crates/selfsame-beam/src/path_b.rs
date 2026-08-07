@@ -171,19 +171,33 @@ pub struct StandingGrantResource {
 /// performative.  The application id is recognised from canonical profile
 /// bytes; callers cannot splice or compose a permission URI themselves.
 pub fn derive_operation_permission(profile_bytes: &[u8], performative: &str) -> Result<String, String> {
+    let fragment = operation_permission_fragment(performative)?;
     let profile = ApplicationProfile::recognise(profile_bytes).map_err(|_| String::from("profile"))?;
-    let fragment = match performative {
-        "hello" => "channel-join",
-        "history" | "keyget" | "groupinfoget" | "fetchdialect" | "channels" | "sealedgrantget" | "pairgrantget" => "chat-read",
-        "keypub" | "welcome" | "deliver" | "groupinfo" | "epochclaim" | "epocharm" | "epochrelease" => "mls-commit",
-        // CON-002 closes the remaining accepted client-originated verbs here.
-        _ => "chat-send",
-    };
     let permission = format!("{}#{fragment}", profile.application_id.as_str());
     if !profile.allowed_permissions.iter().any(|allowed| allowed == &permission) {
         return Err(String::from("undeclared"));
     }
     Ok(permission)
+}
+
+/// Fixed operation-to-fragment table. Every recognised CBCL performative is
+/// listed deliberately; unknown or profile-unratified verbs fail closed.
+fn operation_permission_fragment(performative: &str) -> Result<&'static str, String> {
+    match performative {
+        "hello" => Ok("channel-join"),
+        "history" | "keyget" | "groupinfoget" | "fetchdialect" | "channels" | "sealedgrantget" | "pairgrantget" => Ok("chat-read"),
+        "keypub" | "welcome" | "deliver" | "groupinfo" | "epochclaim" | "epocharm" | "epochrelease" => Ok("mls-commit"),
+        "tell" | "ask" | "reply" | "error" | "cite" | "propose" | "vote" | "presence" => Ok("chat-send"),
+        // CON-002 must ratify fragments for these accepted membership verbs.
+        "bye" | "invite" | "addagent" | "removeagent" | "adddialect" | "removedialect"
+        | "sealedgrant" | "pairgrant" | "identityconfirm"
+        // Hub- and ceremony-only verbs are never member capabilities.
+        | "keypkg" | "invited" | "identityhold" | "identityclear" | "epochgranted"
+        | "roomcaps" | "roomcfg" | "agent-removed" | "sealedgrantok" | "paircode"
+        | "grant" | "grantchallenge" | "grantproof" | "grantpub" | "account-linked"
+        | "other" => Err(String::from("unmapped-performative")),
+        _ => Err(String::from("unmapped-performative")),
+    }
 }
 
 /// `cbcl_selfsame_erl:operation_permission/2`.
@@ -751,5 +765,18 @@ mod tests {
             closure_age_seconds: 0, also_known_as: vec![],
         };
         assert_eq!(issuer_state(&closure).source, selfsame_app_identity::accept::ClosureSource::StateResolver);
+    }
+
+    #[test]
+    fn operation_permission_refuses_unknown_and_con_002_unmapped_member_verbs() {
+        // This guards CON-002's open fragment assignment from silently becoming
+        // `chat-send` at the BEAM authentication boundary.
+        for performative in ["future-control", "invite", "addagent", "removeagent", "sealedgrant", "pairgrant"] {
+            // The public derivation returns the same refusal before it attempts
+            // profile recognition, proving an unmapped verb cannot inherit a
+            // permission from any profile contents.
+            assert_eq!(derive_operation_permission(b"{}", performative), Err(String::from("unmapped-performative")));
+            assert_eq!(operation_permission_fragment(performative), Err(String::from("unmapped-performative")), "{performative} must not inherit a capability");
+        }
     }
 }

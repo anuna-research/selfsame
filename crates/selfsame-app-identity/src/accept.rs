@@ -394,7 +394,7 @@ fn accept_grant_inner(
     }
     // The `kid` has to belong to the DID whose closure was resolved, or a valid
     // signature by an unrelated issuer would pass.
-    if !jws.kid.starts_with(&issuer.did) {
+    if !jws.kid.strip_prefix(&issuer.did).is_some_and(|suffix| suffix.starts_with('#')) {
         return Err(AcceptError::at(AcceptStep::IssuerKey, "kid does not belong to the issuer DID"));
     }
 
