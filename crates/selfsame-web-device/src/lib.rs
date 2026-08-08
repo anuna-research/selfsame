@@ -44,10 +44,78 @@
 
 use ed25519_dalek::SigningKey;
 use wasm_bindgen::prelude::*;
+use serde::Deserialize;
 
 use selfsame_core::code::{LinkCode, LinkSecret};
 use selfsame_core::record::{Application, Offer};
 use selfsame_core::{accept, seal, LinkContext, UnixSeconds};
+use selfsame_app_identity::accept::{ClosureSource, IssuerState, Projection};
+use selfsame_app_identity::alias::{AcctUri, Jrd};
+use selfsame_app_identity::path_b::{rehydrate_verified_grant, GrantRequest, VerifiedGrant};
+use selfsame_app_identity::profile::ApplicationProfile;
+use selfsame_app_identity::accept::{VerificationMethod};
+use selfsame_app_identity::profile::Ed25519Jwk;
+use selfsame_app_identity::path_b::{union_resolver_revocations, ResolverRevocations};
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct BrowserClosure { resolver_id: String, did: String, did_recomputed_ok: bool, deltas_verified: bool, causally_complete: bool, deactivated: bool, assertion_methods: Vec<BrowserMethod>, revoked_credential_ids: Vec<String>, closure_age_seconds: i64, also_known_as: Vec<String> }
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct BrowserMethod { id: String, kind: String, public_key: Vec<u8>, has_private_component: bool }
+
+/// Browser JSON facade for a distributed Path-B VC. Every JSON object is closed;
+/// resolver facts originate in the browser's own resolver path, never a hub.
+///
+/// The argument list is the published wasm-bindgen ABI, so it is the shape an
+/// adopting client's generated binding is written against: collapsing it into a
+/// parameter object would be a breaking change to every embedder, and to the
+/// provenance digest each one records for the artefact. Same disposition as
+/// `grant::build` and `grant::issue`.
+#[allow(clippy::too_many_arguments)]
+#[wasm_bindgen]
+pub fn verify_path_b_peer_json(profile: &[u8], account: &str, device_key: &[u8], permissions_json: &str, now: f64, clock_skew_seconds: i64, jrd: &[u8], grant: &[u8], closures_json: &str) -> Result<String, JsError> {
+    let result = (|| -> Result<VerifiedGrant, DeviceError> {
+        let profile = ApplicationProfile::recognise(profile).map_err(|_| DeviceError::Refused)?;
+        let account = AcctUri::parse(account).map_err(|_| DeviceError::Refused)?;
+        let device_key: [u8;32] = device_key.try_into().map_err(|_| DeviceError::Refused)?;
+        let permissions: Vec<String> = serde_json::from_str(permissions_json).map_err(|_| DeviceError::Refused)?;
+        let permission_refs: Vec<&str> = permissions.iter().map(String::as_str).collect();
+        let jrd = selfsame_app_identity::alias::recognise_jrd(jrd).map_err(|_| DeviceError::Refused)?;
+        let closures: Vec<BrowserClosure> = serde_json::from_str(closures_json).map_err(|_| DeviceError::Refused)?;
+        let first = closures.first().ok_or(DeviceError::Refused)?;
+        let observations: Vec<ResolverRevocations<'_>> = closures.iter().map(|c| ResolverRevocations { resolver_id: &c.resolver_id, revoked_credential_ids: &c.revoked_credential_ids }).collect();
+        let revoked = union_resolver_revocations(&profile, &observations).map_err(|_| DeviceError::Refused)?;
+        if closures.iter().any(|c| c.did != first.did || c.did_recomputed_ok != first.did_recomputed_ok || c.deltas_verified != first.deltas_verified || c.causally_complete != first.causally_complete || c.deactivated != first.deactivated || c.assertion_methods.len() != first.assertion_methods.len() || c.also_known_as != first.also_known_as) { return Err(DeviceError::Refused); }
+        let methods = first.assertion_methods.iter().map(|m| { let key: [u8;32] = m.public_key.as_slice().try_into().map_err(|_| DeviceError::Refused)?; Ok(VerificationMethod { id: m.id.clone(), kind: m.kind.clone(), jwk: Ed25519Jwk { public_key:key, x:String::new() }, has_private_component:m.has_private_component }) }).collect::<Result<Vec<_>,DeviceError>>()?;
+        let issuer = IssuerState { did:first.did.clone(), did_recomputed_ok:first.did_recomputed_ok, deltas_verified:first.deltas_verified, causally_complete:first.causally_complete, deactivated:first.deactivated, assertion_methods:methods, revoked_credential_ids:revoked, closure_age_seconds:closures.iter().map(|c|c.closure_age_seconds).max().unwrap(), source:ClosureSource::StateResolver, also_known_as:first.also_known_as.clone() };
+        verify_path_b_peer(&profile, &account, &device_key, &permission_refs, now as UnixSeconds, clock_skew_seconds, &issuer, &jrd, None, grant)
+    })();
+    result.map(|g| format!(r#"{{"accountDid":{},"grantId":{},"validUntil":{}}}"#, json_string(&g.account_did), json_string(&g.grant_id), g.valid_until)).map_err(|_| JsError::new("Path-B grant refused"))
+}
+
+/// Verify a distributed Path-B grant for a peer without consulting any hub.
+///
+/// The browser supplies only its own already-resolved, locally verified closure
+/// and reciprocal JRD. This replays CON-206 steps 1--12 over the opaque VC; it
+/// intentionally has no hub assertion, cache fallback, or proof-bypass flag.
+///
+/// Kept argument-for-argument with the JSON facade above: the two are one
+/// contract seen from two sides, and a divergence between them is exactly the
+/// defect a reader of either would not see.
+#[allow(clippy::too_many_arguments)]
+pub fn verify_path_b_peer(
+    profile: &ApplicationProfile, account: &AcctUri, device_key: &[u8; 32],
+    permissions: &[&str], now: UnixSeconds, clock_skew_seconds: i64,
+    issuer: &IssuerState, jrd: &Jrd, projection: Option<Projection>, grant: &[u8],
+) -> Result<VerifiedGrant, DeviceError> {
+    if issuer.source != ClosureSource::StateResolver { return Err(DeviceError::Refused); }
+    let now = i64::try_from(now).map_err(|_| DeviceError::Refused)?;
+    rehydrate_verified_grant(
+        &GrantRequest::new(profile, account, device_key, permissions, now, clock_skew_seconds),
+        issuer, jrd, projection, grant,
+    ).map_err(|_| DeviceError::Refused)
+}
 
 /// The application this client links for.
 ///

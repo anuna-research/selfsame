@@ -26,8 +26,11 @@ crate-type = ["cdylib", "rlib"]
 # JavaScript. Recorded as EXP-002 Q2.
 [dependencies]
 selfsame-core = { workspace = true }
+selfsame-app-identity = { workspace = true }
 ed25519-dalek = { workspace = true, features = ["std"] }
 wasm-bindgen = "0.2"
+serde = { workspace = true }
+serde_json = { workspace = true }
 
 # The integration test stands up the real rendezvous service on loopback and
 # plays the phone against it, so it needs what the phone needs. None of this

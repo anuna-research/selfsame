@@ -1,0 +1,19 @@
+{
+  "status": "non-normative",
+  "domainVersion": "v2",
+  "bindingCanonicalJson": "{\"applicationId\":\"https://photos.example/selfsame/application\",\"roleA\":\"application\",\"roleB\":\"wallet\"}",
+  "bindingHash": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+  "c": "AAAAAAAAAAAAAAAAAAAAAA",
+  "words": ["abandon", "abandon", "abandon", "abandon", "abandon", "abandon", "abandon", "abandon", "abandon", "abandon", "abandon", "about"],
+  "m": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+  "n": "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI",
+  "wBytes": "AwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwM",
+  "pA": "BAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQ",
+  "pB": "BQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQU",
+  "sharedElement": "BgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgY",
+  "transcriptHash": "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc",
+  "k": "CAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAg",
+  "cA": "CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk",
+  "cB": "CgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgo",
+  "mailboxSecret": "CwsLCwsLCwsLCwsLCwsLCw"
+}

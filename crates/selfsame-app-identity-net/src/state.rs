@@ -81,16 +81,128 @@
 //! a verified closure — can move it.
 
 use std::time::Duration;
+use base64ct::{Base64UrlUnpadded, Encoding};
 
-use did_crdt::core::delta::{DeltaHash, DeltaOp, SignedDelta};
+use did_crdt::core::delta::{DeltaHash, DeltaOp, SignedDelta, VerificationRelationship};
 use did_crdt::core::document::Document;
 use did_crdt::core::recon::ClosureBundle;
 
 use selfsame_app_identity::accept::ClosureSource;
+use selfsame_app_identity::path_b::{
+    union_resolver_revocations, ResolverRevocations, MINIMUM_RESOLVER_QUORUM,
+};
 use selfsame_app_identity::profile::{ApplicationProfile, StateResolver};
 use selfsame_app_identity::revocation::Submission;
 
 use crate::{bounded_body, client, join, NetError};
+
+/// Verify a Path-B resolver quorum and return the sorted, duplicate-free union
+/// of its revocation G-Sets.
+///
+/// This is intentionally a pure post-resolution operation.  [`resolve_closure`]
+/// owns network I/O and one-closure fallback semantics for generic CON-206
+/// callers; Path B has the stricter CBCL admission rule: at least two distinct,
+/// profile-declared resolvers must have produced locally verified closures.
+/// A repeated observation, undeclared resolver, or insufficient quorum fails
+/// closed rather than selecting a convenient single answer.
+pub fn path_b_union_revocations(
+    profile: &ApplicationProfile,
+    observations: &[ResolverRevocations<'_>],
+) -> Result<Vec<String>, NetError> {
+    union_resolver_revocations(profile, observations)
+        .map_err(|_| NetError::Refused("Path-B resolver quorum was not independently established"))
+}
+
+/// Independently verified resolver closures for a CBCL Path-B decision.
+///
+/// This value is intentionally document-level rather than a BEAM map. A
+/// service/sidecar must derive the closed typed NIF closure map from these
+/// verified documents; neither raw resolver octets nor a bundle can enter it.
+pub struct PathBResolverQuorum {
+    /// Resolver id and its locally replayed, signature-verified DID document.
+    pub closures: Vec<(String, Document)>,
+    /// An outcome for every resolver the profile declared, in profile order.
+    pub outcomes: Vec<(String, ResolverOutcome)>,
+}
+
+/// Closed, NIF-ready facts derived only from a locally replayed closure.
+#[allow(missing_docs)]
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct PathBClosureFacts {
+    pub resolver_id: String,
+    pub did: String,
+    pub did_recomputed_ok: bool,
+    pub deltas_verified: bool,
+    pub causally_complete: bool,
+    pub deactivated: bool,
+    pub assertion_methods: Vec<PathBAssertionMethod>,
+    pub revoked_credential_ids: Vec<String>,
+    pub closure_age_seconds: i64,
+    pub also_known_as: Vec<String>,
+}
+#[allow(missing_docs)]
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct PathBAssertionMethod { pub id: String, pub kind: String, pub public_key: Vec<u8>, pub has_private_component: bool }
+
+impl PathBResolverQuorum {
+    /// Convert verified documents to the exact closed resolver facts expected by
+    /// the isolated NIF. No input closure map can enter this conversion.
+    pub fn nif_closures(&self) -> Result<Vec<PathBClosureFacts>, NetError> {
+        self.closures.iter().map(|(resolver_id, document)| {
+            // The projection is built HERE, from did-crdt's neutral accessors,
+            // rather than asked of the document. Path B is this application's
+            // protocol; a generic DID CRDT should not carry a type named for it,
+            // and the decision of which relationship counts is ours.
+            //
+            // Assertion methods are taken by relationship alone and are NOT
+            // filtered by revocation: the verifier distinguishes a method that
+            // exists and is revoked from one that never existed, which is why
+            // `Document::resolve` — which drops revoked methods and yields
+            // nothing at all for a deactivated DID — is not the right source.
+            let assertion_methods = document.verification_methods().into_iter()
+                .filter(|entry| entry.relationships.contains(&VerificationRelationship::AssertionMethod))
+                .map(|entry| {
+                    let raw = entry.public_key_multibase.strip_prefix('u').ok_or(NetError::Refused("Path-B assertion key is not base64url multibase"))
+                        .and_then(|text| Base64UrlUnpadded::decode_vec(text).map_err(|_| NetError::Refused("Path-B assertion key is malformed")))?;
+                    if raw.len() != 32 { return Err(NetError::Refused("Path-B assertion key is not Ed25519 length")); }
+                    Ok(PathBAssertionMethod { id: entry.id, kind: "JsonWebKey".into(), public_key: raw, has_private_component: false })
+                }).collect::<Result<Vec<_>, NetError>>()?;
+            Ok(PathBClosureFacts { resolver_id: resolver_id.clone(), did: document.did.to_string(), did_recomputed_ok: true, deltas_verified: true, causally_complete: true, deactivated: document.is_deactivated(), assertion_methods, revoked_credential_ids: document.revoked_credential_ids(), closure_age_seconds: 0, also_known_as: vec![] })
+        }).collect()
+    }
+}
+
+/// Fetch every profile-declared resolver for a Path-B check, with no bundle or
+/// cache fallback, and return a verified quorum.
+///
+/// The function does not select a convenient resolver: every roster member is
+/// attempted, all usable replies are replayed through the DID method, and at
+/// least two distinct successful replies are required. The caller can retain
+/// `outcomes` for audit while passing only verified closure facts to the NIF.
+pub async fn resolve_path_b_quorum(
+    profile: &ApplicationProfile,
+    did: &str,
+) -> Result<PathBResolverQuorum, NetError> {
+    recognise_did(did)?;
+    if profile.state_resolvers.len() < MINIMUM_RESOLVER_QUORUM {
+        return Err(NetError::Refused("Path-B profile declares fewer than two state resolvers"));
+    }
+    let mut closures = Vec::new();
+    let mut outcomes = Vec::with_capacity(profile.state_resolvers.len());
+    for resolver in &profile.state_resolvers {
+        match fetch_closure(resolver, did).await {
+            Ok(document) => {
+                outcomes.push((resolver.id.clone(), ResolverOutcome::Resolved));
+                closures.push((resolver.id.clone(), document));
+            }
+            Err(error) => outcomes.push((resolver.id.clone(), outcome_of(&error))),
+        }
+    }
+    if closures.len() < MINIMUM_RESOLVER_QUORUM {
+        return Err(NetError::Refused("Path-B resolver quorum was not independently established"));
+    }
+    Ok(PathBResolverQuorum { closures, outcomes })
+}
 
 /// Recognise a `did:crdt` identifier before it is interpolated into a URL.
 ///
@@ -799,4 +911,5 @@ mod tests {
         assert!(bundle_is_admissible(&[], Acceptance::First).is_ok());
         assert!(bundle_is_admissible(&[], Acceptance::Repeat).is_err());
     }
+
 }

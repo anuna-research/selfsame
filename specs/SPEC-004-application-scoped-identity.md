@@ -3,10 +3,10 @@ id: SPEC-004
 title: Application- and Account-Scoped Identity — deterministic home keys, acct aliases, portable device grants, and provider discovery
 status: draft
 tier: 1
-version: 0.13.0
+version: 0.13.1
 audience: agent, human, application developer, infrastructure provider
 author: Anuna Research (drafted with Codex, 2026-07-30; amended with Claude, 2026-07-31)
-last-updated: 2026-07-31
+last-updated: 2026-08-07
 owner-repo: selfsame
 affects-repos: selfsame, anuna-ssi, did-crdt, adopting applications
 review-gate: not-approved — Tier-1; all ADRs are PROPOSED; cross-model adversarial review, independent KDF/SPAKE2/AEAD vectors, privacy review, and human cryptography/security sign-off are outstanding
@@ -437,12 +437,15 @@ person to edit a URI, domain, DID document, or provider configuration.
    profile digest, provider, and nameplate.
 3. The other party receives `C` by QR, by twelve spoken or typed words, or by
    OS handoff. The wallet derives the meeting-point address from `C`, resolves
-   and verifies the record, authenticates that application's profile against
-   the record's digest, selects the named descriptor, and runs SPAKE2 as role B
-   through the selected blind relay; it never runs an independent provider
-   election. On the normal path it is never asked for an application identity;
-   only if every [[PROTO-003-selfsame-pairing-v1#CON-409]] transport tier fails
-   does it fall back to asking the person for the application's origin.
+   and verifies the record, fetches the profile from its claimed canonical
+   origin, and requires the profile digest to match. It displays that claimed
+   target/origin and requires explicit pairing-target approval before claiming
+   a nameplate or running SPAKE2 as role B through the selected blind relay.
+   This approval authenticates neither the application nor an account and never
+   grants authority. The wallet never runs an independent provider election. On
+   the normal path it is never asked for an application identity; only if every
+   [[PROTO-003-selfsame-pairing-v1#CON-409]] transport tier fails does it fall
+   back to asking the person for the application's origin.
 4. After both sides verify explicit confirmation MACs, they derive the
    128-bit PROTO-002 mailbox secret from the PAKE key. The application writes
    the encrypted offer and the wallet reads it.
@@ -3448,9 +3451,11 @@ resolving party ignores it.
 **Where the wallet generates and displays the code** under
 [[PROTO-003-selfsame-pairing-v1#ADR-408]], steps 1–5 happen after the person
 carries `C` to the application, and the wallet polls the CON-409 address until
-the record appears or the code expires. The wallet SHALL show the resolved,
-authenticated `applicationId` before presenting any consent affordance, because
-a wallet-generated code carries none of the person's own session context.
+the record appears or the code expires. The wallet SHALL show the claimed
+canonical `applicationId` and HTTPS origin, and obtain explicit pairing-target
+approval before a nameplate claim or PAKE frame, because a wallet-generated code
+carries none of the person's own session context. This approval is distinct from
+downstream CON-214 application authentication and application-account consent.
 
 **On resolution**, the resolving party performs
 [[PROTO-003-selfsame-pairing-v1#CON-409]]'s ordered checks, obtaining the
@@ -4752,28 +4757,37 @@ verifier, PAKE/mailbox key, application/account identifier, offer, or grant.
 
 Create three unrelated application IDs, each with at least two providers and
 overlapping routes and nameplates. For each, deliver **only** the twelve words,
-with no QR and no application identity. Require the wallet to reach the correct
-application and descriptor purely by resolving the CON-409 record, to
-authenticate that profile against the record's digest, and to complete pairing
-without user endpoint selection or Anuna infrastructure.
+with no QR and no application identity. Require the wallet to reach the
+record-named claimed target and descriptor purely by resolving the CON-409
+record, to fetch its profile from that claimed origin and require its digest to
+match the record, and to complete pairing without user endpoint selection or
+Anuna infrastructure.
 
 Run each application in both initiation directions and require identical
 results.
 
 Substitute a validly signed record naming another application's `applicationId`,
-`profileDigest`, `providerId`, or nameplate. Every substitution reaches
-confirmation and fails there, proving the record is a hint the binding catches
-rather than a trusted routing decision. Assert the wallet never searches another
+`profileDigest`, `providerId`, or nameplate. Require the wallet to disclose the
+claimed canonical application origin and require an explicit pairing-target
+approval before a nameplate claim or PAKE frame. Declining burns the ceremony
+with zero claim, frame, or grant. On approval, require the substituted values to
+enter the binding, but do not claim that PAKE confirmation detects the
+substitution: a holder of the bearer code can create a self-consistent record.
+Require the downstream CON-214 application-authentication and account-consent
+checks before any grant, and assert the wallet never searches another
 application, profile, or provider.
 
 Then exercise the CON-409 tier-3 fallback explicitly. With every tier-1 relay
 removed and the tier-2 transport unreachable, require the wallet to attempt both
 before offering origin entry, to reach the same descriptor and the same binding
 once the person supplies the origin, and to complete pairing identically. Require
-that origin entry is never offered while a tier remains untried, that a mistyped
-origin resolving a different application fails at confirmation rather than
-producing a grant, and that the canonical `applicationId` used in the binding
-comes from the fetched profile and not from what the person typed.
+that origin entry is never offered while a tier remains untried. If a mistyped
+origin resolves a different application, require claimed-target disclosure and
+explicit pairing-target approval before PAKE; if approved, PAKE may confirm but
+no grant may issue without the later CON-214 application-authentication and
+separate application-account-consent checks. Require that the canonical
+`applicationId` used in the binding comes from the fetched profile and not from
+what the person typed.
 
 ### TEST-235: Carrier equivalence and full authorization chain
 
@@ -5166,13 +5180,9 @@ dispatch decision. Those conditions are covered as exclusions below.
 An accepted authorization has one unbroken, locally verified chain:
 
 ```text
-authenticated application origin
+claimed application/profile routing context resolved from the C-derived record
           |
-          | signs CON-214: app + account + device key + permission
-          |                + provider + offer + nonce + expiry
-          v
-application/profile context resolved from the C-derived record
-          |
+          | visible target disclosure + pairing-target approval
           | app and wallet run mutually confirmed SPAKE2
           | pairing provider relays only opaque pA,pB,cA,cB
           v
@@ -5180,6 +5190,11 @@ confirmed PAKE key -> derived PROTO-002 mailbox secret
           |
           | encrypted, transcript-bound offer
           | rendezvous transports only opaque immutable ciphertext
+          v
+authenticated application origin (CON-214)
+          |
+          | signs app + account + device key + permission
+          |       + provider + offer + nonce + expiry
           v
 application-account home controller
           |
@@ -5294,7 +5309,7 @@ mechanism.
 
 | Threat | Required response |
 |---|---|
-| Network man in the middle | TLS authenticates endpoints; PROTO-003 binds the application/profile/descriptor/route/nameplate and requires both confirmation MACs; CON-214 signatures, ceremony AEAD, home signatures, VC audience, and device proof detect later substitution. TEST-229 and TEST-233 mutate each layer and assert zero unauthorized side effects. |
+| Network man in the middle | TLS authenticates endpoints; PROTO-003 binds both PAKE endpoints to the claimed application/profile/descriptor/route/nameplate and requires both confirmation MACs. An attacker without `C` cannot silently mutate that binding; a code holder can make a self-consistent claimed target and is controlled by visible target approval, CON-214 signatures, ceremony AEAD, home signatures, VC audience, and device proof. TEST-229 and TEST-233 mutate each layer and assert zero unauthorized side effects. |
 | Passive provider attempts an offline word dictionary | SPAKE2 frames and confirmation do not expose a password verifier. TEST-233 captures complete provider state and requires no offline guess predicate. |
 | Active nameplate guess or pre-claim | The nameplate provides no security and is no longer public: it lives in a record at a 128-bit address, so live ceremonies cannot be enumerated. Atomic single claim, client peer locking, 600-second expiry, rate limiting, and permanent burn bound the residual and make interference a visible restart. |
 | Malicious pairing provider terminates SPAKE2 | CON-217 requires the application and wallet as roles A/B and CON-218 rejects provider-generated frames or a password-verifier mode. Provider compromise yields no password equivalent or accepted key. |
@@ -5302,7 +5317,7 @@ mechanism.
 | Malicious same-device app copies another developer's public profile | A public profile supplies no authority. The attacker lacks the origin-anchored enrollment signature and matching platform binding; CON-214 rejects before branch lookup or consent, and CON-220 means the signing key never comes from the caller. |
 | Link-handler or custom-scheme interception | CON-215 permits only verified installed-wallet dispatch and forbids browser/custom-scheme fallback. Any ambiguity burns every ceremony value under REQ-225. |
 | Callback interception or forged `completed` result | Callback carries no secret or credential and is outside the authorization chain. Only a verified rendezvous bundle plus CON-206/CON-207 authorizes. |
-| Concurrent application/account/ceremony mix-up | The PAKE binding first commits application/profile/descriptor/route/nameplate; enrollment evidence and the encrypted transcript then bind account scope, device key, permission, offer, request ID, and ceremony ID. Cross-splices fail TEST-229 and TEST-234. |
+| Concurrent application/account/ceremony mix-up | The PAKE binding first commits both endpoints to the claimed application/profile/descriptor/route/nameplate; enrollment evidence and the encrypted transcript then bind account scope, device key, permission, offer, request ID, and ceremony ID. Cross-splices after an honest binding fail TEST-229 and TEST-234; a self-consistent code-holder target still requires visible approval and the downstream authorization chain. |
 | Application A colludes with application B | Their public Selfsame artifacts provide no equality test; other shared account data remains outside scope. |
 | Account A1 is confused with A2 in one application | The authenticated account context selects the scope and expected `acct:` alias; issuer, grant, proof, status, and state checks reject every cross-account artifact. |
 | Application reuses or replaces an account scope | Atomic uniqueness and immutability checks reject reuse; missing scope fails as `AccountScopeUnavailable` rather than creating a new identity. |
@@ -5871,6 +5886,18 @@ component precedents but no surveyed system with the complete Selfsame
 combination; that is an engineering conclusion, not a legal novelty claim.
 
 ## Changelog
+
+- **0.13.1 — 2026-08-07 — draft, normative.** Follows PROTO-003 0.5.1's
+  correction to the CON-409 bearer-code model. A record signature and PAKE
+  confirmation bind peers to a claimed target but cannot establish that target
+  as the person's intended application when a code holder can make a
+  self-consistent record. The linking flow, CON-216, TEST-234, authorization
+  diagram, and threat analysis therefore require visible target disclosure and
+  explicit pairing-target approval before a nameplate claim or PAKE frame; that
+  approval neither authenticates an application nor issues a grant. CON-214 and
+  separate application-account consent remain mandatory. No key hierarchy,
+  credential format, wire format, or cryptographic construction changes. Every
+  Tier-1 gate box remains open.
 
 - **0.13.0 — 2026-07-31 — draft, normative.** Closes the remaining open
   questions. Every OQ now has a normative resolution; what blocks the gate is
