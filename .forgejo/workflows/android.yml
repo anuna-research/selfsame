@@ -109,9 +109,17 @@ jobs:
           did_sha=e3867c77387c21bd26c82f7d19b0f58eeedfc163
           cbcl_sha=$(cat cbcl-rs.sha)
           [ -d ../did-crdt ] || git clone https://git.anuna.io/anuna-research/did-crdt.git ../did-crdt
+          # Always fetch: a warm workspace keeps the clone from a previous run,
+          # so a pin newer than that clone resolves to "reference is not a tree"
+          # and the failure reads as a bad pin rather than a stale checkout.
+          git -C ../did-crdt fetch --quiet --tags origin
           git -C ../did-crdt checkout --detach "${did_sha}"
           test "$(git -C ../did-crdt rev-parse HEAD)" = "${did_sha}"
           [ -d ../cbcl-rs ] || git clone https://git.anuna.io/anuna-research/cbcl-rs.git ../cbcl-rs
+          # Always fetch: a warm workspace keeps the clone from a previous run,
+          # so a pin newer than that clone resolves to "reference is not a tree"
+          # and the failure reads as a bad pin rather than a stale checkout.
+          git -C ../cbcl-rs fetch --quiet --tags origin
           git -C ../cbcl-rs checkout --detach "${cbcl_sha}"
           test "$(git -C ../cbcl-rs rev-parse HEAD)" = "${cbcl_sha}"
 
