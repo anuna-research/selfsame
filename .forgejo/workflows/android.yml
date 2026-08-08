@@ -106,7 +106,7 @@ jobs:
       - name: Clone the pinned siblings
         run: |
           set -euo pipefail
-          did_sha=adb5c7ac1423173f00201cddffa60fe672fb2a53
+          did_sha=e3867c77387c21bd26c82f7d19b0f58eeedfc163
           cbcl_sha=$(cat cbcl-rs.sha)
           [ -d ../did-crdt ] || git clone https://git.anuna.io/anuna-research/did-crdt.git ../did-crdt
           git -C ../did-crdt checkout --detach "${did_sha}"

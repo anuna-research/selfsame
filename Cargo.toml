@@ -37,7 +37,7 @@ selfsame-app-identity = { path = "crates/selfsame-app-identity" }
 # pinned by the revision recorded in crates/selfsame-core/tests/vectors.rs.
 # .forgejo/workflows/ci.yml clones both from those pins.
 #
-# did-crdt is pinned at adb5c7ac1423173f00201cddffa60fe672fb2a53 by SPEC-001
+# did-crdt is pinned at e3867c77387c21bd26c82f7d19b0f58eeedfc163 by SPEC-001
 # ADR-010: its DID derivation and `u`-multibase encoding are adopted verbatim,
 # and any change to either is a breaking change to the specification.
 # `crates/selfsame-core/tests/pinned_derivation.rs` fails if the derivation

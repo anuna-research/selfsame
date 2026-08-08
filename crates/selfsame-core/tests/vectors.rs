@@ -175,7 +175,7 @@ fn build() -> Vectors {
 
     Vectors {
         spec: "SPEC-001 v0.3.0".to_owned(),
-        did_crdt_revision: "adb5c7ac1423173f00201cddffa60fe672fb2a53".to_owned(),
+        did_crdt_revision: "e3867c77387c21bd26c82f7d19b0f58eeedfc163".to_owned(),
         con_007_root_derivation: con_007,
         adr_010_did_derivation: adr_010,
         con_001_link_code: con_001,

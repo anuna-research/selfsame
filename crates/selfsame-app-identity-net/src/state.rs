@@ -83,7 +83,7 @@
 use std::time::Duration;
 use base64ct::{Base64UrlUnpadded, Encoding};
 
-use did_crdt::core::delta::{DeltaHash, DeltaOp, SignedDelta};
+use did_crdt::core::delta::{DeltaHash, DeltaOp, SignedDelta, VerificationRelationship};
 use did_crdt::core::document::Document;
 use did_crdt::core::recon::ClosureBundle;
 
@@ -149,14 +149,25 @@ impl PathBResolverQuorum {
     /// the isolated NIF. No input closure map can enter this conversion.
     pub fn nif_closures(&self) -> Result<Vec<PathBClosureFacts>, NetError> {
         self.closures.iter().map(|(resolver_id, document)| {
-            let state = document.path_b_state();
-            let assertion_methods = state.assertion_methods.into_iter().map(|(id, encoded)| {
-                let raw = encoded.strip_prefix('u').ok_or(NetError::Refused("Path-B assertion key is not base64url multibase"))
-                    .and_then(|text| Base64UrlUnpadded::decode_vec(text).map_err(|_| NetError::Refused("Path-B assertion key is malformed")))?;
-                if raw.len() != 32 { return Err(NetError::Refused("Path-B assertion key is not Ed25519 length")); }
-                Ok(PathBAssertionMethod { id, kind: "JsonWebKey".into(), public_key: raw, has_private_component: false })
-            }).collect::<Result<Vec<_>, NetError>>()?;
-            Ok(PathBClosureFacts { resolver_id: resolver_id.clone(), did: state.did, did_recomputed_ok: true, deltas_verified: true, causally_complete: true, deactivated: state.deactivated, assertion_methods, revoked_credential_ids: state.revoked_credential_ids, closure_age_seconds: 0, also_known_as: vec![] })
+            // The projection is built HERE, from did-crdt's neutral accessors,
+            // rather than asked of the document. Path B is this application's
+            // protocol; a generic DID CRDT should not carry a type named for it,
+            // and the decision of which relationship counts is ours.
+            //
+            // Assertion methods are taken by relationship alone and are NOT
+            // filtered by revocation: the verifier distinguishes a method that
+            // exists and is revoked from one that never existed, which is why
+            // `Document::resolve` — which drops revoked methods and yields
+            // nothing at all for a deactivated DID — is not the right source.
+            let assertion_methods = document.verification_methods().into_iter()
+                .filter(|entry| entry.relationships.contains(&VerificationRelationship::AssertionMethod))
+                .map(|entry| {
+                    let raw = entry.public_key_multibase.strip_prefix('u').ok_or(NetError::Refused("Path-B assertion key is not base64url multibase"))
+                        .and_then(|text| Base64UrlUnpadded::decode_vec(text).map_err(|_| NetError::Refused("Path-B assertion key is malformed")))?;
+                    if raw.len() != 32 { return Err(NetError::Refused("Path-B assertion key is not Ed25519 length")); }
+                    Ok(PathBAssertionMethod { id: entry.id, kind: "JsonWebKey".into(), public_key: raw, has_private_component: false })
+                }).collect::<Result<Vec<_>, NetError>>()?;
+            Ok(PathBClosureFacts { resolver_id: resolver_id.clone(), did: document.did.to_string(), did_recomputed_ok: true, deltas_verified: true, causally_complete: true, deactivated: document.is_deactivated(), assertion_methods, revoked_credential_ids: document.revoked_credential_ids(), closure_age_seconds: 0, also_known_as: vec![] })
         }).collect()
     }
 }

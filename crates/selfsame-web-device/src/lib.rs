@@ -66,6 +66,13 @@ struct BrowserMethod { id: String, kind: String, public_key: Vec<u8>, has_privat
 
 /// Browser JSON facade for a distributed Path-B VC. Every JSON object is closed;
 /// resolver facts originate in the browser's own resolver path, never a hub.
+///
+/// The argument list is the published wasm-bindgen ABI, so it is the shape an
+/// adopting client's generated binding is written against: collapsing it into a
+/// parameter object would be a breaking change to every embedder, and to the
+/// provenance digest each one records for the artefact. Same disposition as
+/// `grant::build` and `grant::issue`.
+#[allow(clippy::too_many_arguments)]
 #[wasm_bindgen]
 pub fn verify_path_b_peer_json(profile: &[u8], account: &str, device_key: &[u8], permissions_json: &str, now: f64, clock_skew_seconds: i64, jrd: &[u8], grant: &[u8], closures_json: &str) -> Result<String, JsError> {
     let result = (|| -> Result<VerifiedGrant, DeviceError> {
@@ -92,6 +99,11 @@ pub fn verify_path_b_peer_json(profile: &[u8], account: &str, device_key: &[u8],
 /// The browser supplies only its own already-resolved, locally verified closure
 /// and reciprocal JRD. This replays CON-206 steps 1--12 over the opaque VC; it
 /// intentionally has no hub assertion, cache fallback, or proof-bypass flag.
+///
+/// Kept argument-for-argument with the JSON facade above: the two are one
+/// contract seen from two sides, and a divergence between them is exactly the
+/// defect a reader of either would not see.
+#[allow(clippy::too_many_arguments)]
 pub fn verify_path_b_peer(
     profile: &ApplicationProfile, account: &AcctUri, device_key: &[u8; 32],
     permissions: &[&str], now: UnixSeconds, clock_skew_seconds: i64,
