@@ -4,21 +4,24 @@ Prepared 2026-08-10 for [[SPEC-004-application-scoped-identity]]'s Tier-1 gate.
 The subject is the **key-derivation amendment only**, not the whole
 specification.
 
-> ## Round 1 has been run — read this before reusing the prompt
+> ## Two rounds have been run — this prompt is superseded
 >
-> This prompt was used on 2026-08-10 against commit `35fb051` and returned two
-> P1 and three P2 findings, dispositioned in
-> [[review-disposition-0.14.0-draft]] and repaired in `b45b08b`.
+> Round 1 (Codex, cross-model) ran against `35fb051` and returned two P1 and
+> three P2 findings, dispositioned in [[review-disposition-0.14.0-draft]] and
+> repaired in `b45b08b`. **Round 2 — three fresh-context passes with distinct
+> lenses — then found roughly two dozen P1 defects in the repaired text**, and
+> `89ec39f` withdrew `REQ-232`, the `named` lookup, `CON-201`'s
+> `accountScopeLookup` member and `TEST-245`. See [[review-round-2-findings]].
 >
-> **What it assessed is therefore no longer what is there**, and the gate box is
-> not discharged. A second round is needed against the repaired text. Before
-> reusing this prompt, regenerate the attached diff and tell the reviewer — only
-> *after* it has returned findings — that `REQ-217` now fixes the account
-> selector as the human-readable alias, that the scope has been ruled not to be
-> a secret, and that `CON-202` has gained a version grammar and a second error
-> token. Attack angles 3 and 4 below are where a further error is most likely:
-> angle 3's subject is now a ruling that closes a reading rather than a change
-> that removes it, and angle 4's is text written in response to a finding.
+> **The amendment is now materially smaller**: the re-root, `ADR-223`,
+> `REQ-213`, `TEST-244`, `OQ-208`, and the threat-model widening. The scope
+> paragraph below still enumerates the withdrawn clauses and must be rewritten
+> before reuse, along with the attachment line counts and a regenerated diff.
+>
+> One instruction below is worth carrying forward unchanged: withhold prior
+> findings until the reviewer has returned its own. Round 2's passes were given
+> the current text and no list, and that is why they found a defect class round
+> 1 had not — a mandated value with no wire to carry it.
 
 ## Why this pass exists
 

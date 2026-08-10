@@ -1,5 +1,21 @@
 # SPEC-004 v0.14.0-draft — cross-model review and its disposition
 
+> ## Superseded — most of these repairs were withdrawn
+>
+> This record describes round 1 (Codex, cross-model) against `35fb051` and the
+> repairs made in `b45b08b`. **A second round of three fresh-context passes then
+> found roughly two dozen P1 defects, and `89ec39f` withdrew `REQ-232`, the
+> `named` lookup mode, `CON-201`'s `accountScopeLookup` member and `TEST-245`
+> entirely.** See [[review-round-2-findings]].
+>
+> F1 and F2 below therefore document repairs to clauses that no longer exist.
+> They are kept because they record *why* the design was attempted and what it
+> cost — the reasoning that led to `OQ-208` — not because they describe the
+> current text. F3, F4 and F5 concerned `CON-202`, `ADR-223` and `TEST-244`;
+> those clauses survive, though `TEST-244` was repaired again in round 2 and the
+> error tokens F4 introduced went with `REQ-232`.
+
+
 - **Artefact:** [[SPEC-004-application-scoped-identity]] v0.14.0-draft, the
   key-derivation amendment only.
 - **Prompt:** [[reviewer-prompt-0.14.0-draft]], in the scope it sets.
