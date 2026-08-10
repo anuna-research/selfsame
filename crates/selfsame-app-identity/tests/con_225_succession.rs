@@ -45,9 +45,9 @@ impl Fixture {
     fn new() -> Self {
         let m = mnemonic(0);
         let scope = AccountScopeId::from_octets([SCOPE_BYTE; 32]);
-        let outgoing = hierarchy::derive(&m, &ApplicationId::parse(APPLICATION_ID).unwrap(), &scope);
+        let outgoing = hierarchy::derive_from_mnemonic(&m, &ApplicationId::parse(APPLICATION_ID).unwrap(), &scope);
         let incoming =
-            hierarchy::derive(&m, &ApplicationId::parse(OTHER_APPLICATION_ID).unwrap(), &scope);
+            hierarchy::derive_from_mnemonic(&m, &ApplicationId::parse(OTHER_APPLICATION_ID).unwrap(), &scope);
 
         // The incoming application's own profile, whose `applicationId` is the
         // pointer's `to`.

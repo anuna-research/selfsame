@@ -137,7 +137,7 @@ fn derive(args: &[String]) -> Result<()> {
     // not need to outlive the parse.
     phrase.zeroize();
 
-    let home = hierarchy::derive(&parsed, &application, &scope);
+    let home = hierarchy::derive_from_mnemonic(&parsed, &application, &scope);
     let did = home.home_did().map_err(|e| anyhow!("did:crdt derivation failed: {e}"))?;
 
     println!("  application  {application}");

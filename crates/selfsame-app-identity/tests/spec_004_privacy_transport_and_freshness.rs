@@ -201,7 +201,7 @@ fn changing_every_provider_endpoint_changes_no_derived_identity() {
     // application node, account node, and home key do not change."
     let app = ApplicationId::parse(APPLICATION_ID).unwrap();
     let scope = AccountScopeId::from_octets([1u8; 32]);
-    let before = hierarchy::derive(&mnemonic(0), &app, &scope);
+    let before = hierarchy::derive_from_mnemonic(&mnemonic(0), &app, &scope);
 
     // A profile with entirely different operators for every role.
     let moved = with_member(
@@ -215,7 +215,7 @@ fn changing_every_provider_endpoint_changes_no_derived_identity() {
     ))
     .unwrap();
 
-    let after = hierarchy::derive(&mnemonic(0), &app, &scope);
+    let after = hierarchy::derive_from_mnemonic(&mnemonic(0), &app, &scope);
 
     assert_eq!(before.public_key(), after.public_key());
     assert_eq!(before.home_did().unwrap(), after.home_did().unwrap());

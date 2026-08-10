@@ -9,6 +9,7 @@ author: Anuna Research (drafted with Codex, 2026-07-30; amended with Claude, 202
 last-updated: 2026-08-10
 owner-repo: selfsame
 affects-repos: selfsame, anuna-ssi, did-crdt, adopting applications
+prototype-authorised: 2026-08-10 by the repository owner, for hierarchy version 2 only — see Tier-1 Gate
 review-gate: not-approved — Tier-1; all ADRs are PROPOSED; cross-model adversarial review, independent KDF/SPAKE2/AEAD vectors, privacy review, and human cryptography/security sign-off are outstanding. **0.14.0 is `-draft` because it does not yet satisfy this document's own Amendment Channels**: a key-derivation change requires new vectors plus renewed security sign-off *for the amendment*, and neither exists. It is a proposal for review, not an accepted version, and the version number does not advance until both land
 depends-on: did:crdt Method Specification; PROTO-002 Selfsame Rendezvous Protocol v1; PROTO-003 Selfsame Pairing Protocol v1; PROTO-004 Selfsame Ceremony Envelope v1; W3C VC Data Model 2.0; W3C VC JOSE/COSE; W3C DID Core 1.0; optional W3C Bitstring Status List 1.0 projection; RFC 7565; RFC 7033; RFC 3986; RFC 4648; RFC 5234; RFC 5869; RFC 7515; RFC 8032; RFC 8439; RFC 8785; RFC 9382; RFC 9496
 ---
@@ -5731,6 +5732,43 @@ relationship/resolver amendment above lands.
 
 No implementation task may be marked ready until all boxes are checked:
 
+### Prototype authorisation — hierarchy version 2 only
+
+**Recorded 2026-08-10 on the instruction of the repository owner (HOC).** This
+document's §Scope puts *"implementation work in any affected repository"* out of
+scope, and `review-gate` is `not-approved`. This entry is the exception the
+owner is entitled to make, in the form
+[[SPEC-053-key-root-identity#GATE-01]] names — *"or its owner records a
+prototype authorisation covering this adoption"* — and in the form already used
+for [[EXP-003-proto-003-pairing-reference]] on 2026-08-07.
+
+**Authorised:** implementing hierarchy version 2 —
+[[SPEC-004-application-scoped-identity#CON-202]]'s re-rooted derivation,
+[[SPEC-004-application-scoped-identity#ADR-223]]'s sealed `hierarchy_root`, the
+custody format change that retains it, and the
+[[SPEC-004-application-scoped-identity#CON-226]] vectors that pin it. This
+closes `FINDING-016`, which made the person-facing surface unbuildable.
+
+**Not authorised**, and stated because an authorisation that does not say what it
+excludes is read as covering everything:
+
+- **Deployment or shipment.** This is a prototype. Every remaining box below is
+  open, and nothing here permits an identity anyone relies on.
+- **The rest of this specification.** The grant, acceptance, ceremony, pairing,
+  revocation and platform contracts are untouched by this authorisation.
+- **The withdrawn 0.14.0 cluster.** `REQ-232`, the `named` lookup and
+  `accountScopeLookup` are removed from this document and are not to be
+  implemented from any earlier draft.
+- **[[SPEC-004-application-scoped-identity#OQ-208]]'s successor design.** The
+  derived account index is a design note under review and is not part of this
+  authorisation.
+
+**What this does not discharge.** A prototype authorisation permits building; it
+asserts nothing about correctness. The implementation it covers has been
+reviewed by nobody, and the boxes below stand unchanged — in particular the
+0.14.0 box accepting the widened at-rest asset, which is a question about
+consequences rather than about code.
+
 - [ ] A fresh-context cross-model adversarial review covers KDF separation,
       DID/VC key representation, holder binding, alias equivalence, provider
       selection, revocation, application authentication, network MITM,
@@ -6366,10 +6404,12 @@ combination; that is an engineering conclusion, not a legal novelty claim.
   created here, it is recorded in Explicit exclusions, and it is a gate box
   rather than an assurance.
 
-  *Corpus.* `test-vectors/spec-004-v1.json` requires regeneration at the
-  version-2 salt and deletion of the version-1 values; its new SHA-256 is **not
-  yet recorded** and this entry is incomplete until it is. The filename's `v1`
-  names the corpus profile, not the hierarchy version, and the two now differ.
+  *Corpus.* `test-vectors/spec-004-v1.json` regenerated at the version-2 salt;
+  the version-1 values are gone rather than retained beside the new ones. Its
+  SHA-256 is
+  `b0be85945b4b0f9ca0b9f6ff4e01dc0e69cfd4a2753f0b6ab0cf93f6bce30803`. The
+  filename's `v1` names the corpus profile, not the hierarchy version, and the
+  two now differ.
 
   Every Tier-1 gate box remains open, and two were added.
 

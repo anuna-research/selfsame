@@ -282,7 +282,7 @@ impl Ceremony {
             .expect("the example profile is recognised");
         let app = ApplicationId::parse(application_id).expect("canonical");
         let scope = AccountScopeId::from_octets([scope_byte; 32]);
-        let home = hierarchy::derive(&mnemonic(entropy), &app, &scope);
+        let home = hierarchy::derive_from_mnemonic(&mnemonic(entropy), &app, &scope);
         let home_did = home.home_did().expect("did:crdt derivation");
         let home_key = home.signing_key().clone();
 

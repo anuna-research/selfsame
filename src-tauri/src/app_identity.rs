@@ -8,7 +8,7 @@
 //! |---|---|---|
 //! | [`alias_preview`] | `selfsame_app_identity::alias` | real |
 //! | [`home_fingerprint`] | `selfsame_core::fingerprint` | real |
-//! | [`app_identity_derive`] | — | **stubbed**, see below |
+//! | [`app_identity_derive`] | `selfsame_app_identity::hierarchy` | real |
 //! | [`provision_username`] | — | **refuses**: no account authority is wired |
 //! | [`revoke_grant`] | — | **refuses**: no home key to sign with |
 //! | [`revocation_status`] | — | never confirmed: no closure is resolved |
@@ -45,49 +45,34 @@
 //! one of which `alias::recognise_username` refuses. A preview that approves a
 //! name the authority must reject is a promise the wallet cannot keep.
 //!
-//! # Why derivation is a stub
+//! # Why derivation works now, and did not before
 //!
-//! `SPEC-004`'s hierarchy roots at the BIP-39 seed
-//! (`hierarchy::recovery_seed`). `SPEC-001`'s custody stores
-//! `derive::root_seed(mnemonic, PERSONA_ZERO)` and states plainly that *"The
-//! phrase is not stored"* — a one-way KDF from which the BIP-39 seed cannot be
-//! recovered. So this wallet holds no material from which a SPEC-004 home DID
-//! can be derived, for any application, ever, without the person re-entering
-//! twelve words.
+//! `SPEC-004`'s hierarchy rooted at the BIP-39 seed, and `SPEC-001`'s custody
+//! seals `derive::root_seed(mnemonic, PERSONA_ZERO)` while stating plainly that
+//! *"The phrase is not stored"* — a one-way KDF from which the BIP-39 seed
+//! cannot be recovered. So this wallet held no material from which a SPEC-004
+//! home DID could be derived, for any application, ever, without the person
+//! re-entering twelve words. That was `FINDING-016`.
 //!
-//! That is `FINDING-016`, and it is a gap between two specifications rather
-//! than a defect in either. Closing it is either a custody format change or a
-//! threat-model change, and neither belongs inside a presentation commit — so
-//! [`app_identity_derive`] returns a fixture and says so in its own name.
+//! `ADR-223` closed it by re-rooting the hierarchy at `hierarchy_root`, a
+//! **sibling** of the SPEC-001 persona root rather than a child of the seed:
+//! both descend from the BIP-39 seed under different HKDF labels, neither
+//! derives the other, and custody seals it beside the root seed at creation and
+//! restore. [`app_identity_derive`] therefore takes a passcode and no mnemonic.
+//!
+//! An identity sealed before hierarchy version 2 cannot be upgraded in place —
+//! the root is a function of a seed custody never retained — so it returns
+//! `NoHierarchyRoot` and the person restores from their phrase, which reseals
+//! both roots.
 
-use selfsame_app_identity::alias;
+use selfsame_app_identity::{alias, codec};
+
+use crate::custody::Custody;
 use selfsame_core::fingerprint;
 
 use crate::commands::{Fp, UiError};
 
 type Result<T> = std::result::Result<T, UiError>;
-
-/// The stub home DID `CON-603` returns until `FINDING-016` closes.
-///
-/// A real `did:crdt` identifier — 64 lowercase hex — so everything computed
-/// from it (the alias, the fingerprint, the LifeHash) is a genuine computation
-/// over a well-formed input. Only its *provenance* is fixture.
-///
-/// It is the DID [`STUB_PUBLIC_KEY`] actually derives, which the earlier pair
-/// was not: `DerivedHome::public_key` is documented as "its Ed25519 public key",
-/// and two unrelated values under those two names hand a caller an identity that
-/// contradicts itself. A caller that recomputed the DID from the key — which is
-/// the whole point of a self-certifying identifier — would get a different
-/// answer and have no way to tell whether the fixture or its own derivation was
-/// wrong. [`the_stub_pair_is_internally_consistent`] holds them together.
-const STUB_HOME_DID: &str =
-    "did:crdt:2a3557b5321f2990e2d8222d3e4571f4c8ca3b821593c2128f212a2b7c7b635d";
-
-/// The stub public key that accompanies it, base64url, 32 octets.
-///
-/// The Ed25519 public half of the all-`0x01` seed — a published private key, so
-/// nothing signed under it can be mistaken for an assertion by anybody.
-const STUB_PUBLIC_KEY: &str = "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w";
 
 /// Recognise a `did:crdt` identifier, using the method's own parser.
 ///
@@ -180,20 +165,25 @@ pub async fn home_fingerprint(home_did: String) -> Result<Fp> {
 
 /// `CON-603` — derive the home DID for one application account.
 ///
-/// **Stubbed.** Returns [`STUB_HOME_DID`] regardless of input. See the module
+/// **Stubbed.** Returns [`FIXTURE_HOME_DID`] regardless of input. See the module
 /// documentation and `FINDING-016`.
 ///
-/// The inputs are nevertheless recognised, because the grammar is part of the
-/// contract and a stub that accepted anything would leave the recognisers
-/// untested until the day the real derivation lands — which is the day they
-/// most need to already work.
+/// The inputs are recognised before anything is unsealed, because the grammar
+/// is part of the contract and recognition before action is Constitutional
+/// Principle 14 — a malformed identifier must not reach a passcode prompt.
+///
+/// **No longer stubbed.** This derives from the sealed hierarchy root under
+/// `CON-202` hierarchy version 2. It takes a passcode because the root is
+/// sealed; it takes no mnemonic because `ADR-223` exists precisely so that it
+/// does not need one.
 #[tauri::command]
 pub async fn app_identity_derive(
     application_id: String,
     account_scope_id: Option<String>,
+    passcode: String,
 ) -> Result<DerivedHome> {
     // CON-201's canonical application identifier.
-    selfsame_app_identity::profile::ApplicationId::parse(&application_id)
+    let application = selfsame_app_identity::profile::ApplicationId::parse(&application_id)
         .map_err(|_| UiError::from("HandoffMalformed"))?;
 
     // REQ-217: a missing scope is `AccountScopeUnavailable`, and this command
@@ -203,13 +193,18 @@ pub async fn app_identity_derive(
         return Err(UiError::from("AccountScopeUnavailable"));
     };
     // CON-211: 43 canonical base64url characters, or refuse. Never normalise.
-    selfsame_app_identity::scope::AccountScopeId::parse(&scope)
+    let scope = selfsame_app_identity::scope::AccountScopeId::parse(&scope)
         .map_err(|_| UiError::from("ScopeNotCanonical"))?;
 
+    let home = Custody::use_hierarchy_root(&passcode, |root| {
+        selfsame_app_identity::hierarchy::derive(root, &application, &scope)
+    })?;
+
+    let home_did = home.home_did().map_err(|_| UiError::from("HandoffMalformed"))?;
     Ok(DerivedHome {
-        home_did: STUB_HOME_DID.to_owned(),
-        public_key: STUB_PUBLIC_KEY.to_owned(),
-        derived: false,
+        home_did,
+        public_key: codec::b64url(&home.public_key()),
+        derived: true,
     })
 }
 
@@ -344,7 +339,7 @@ mod tests {
         ] {
             assert!(recognise_home_did(bad).is_err(), "`{bad}` was recognised");
         }
-        assert!(recognise_home_did(STUB_HOME_DID).is_ok());
+        assert!(recognise_home_did(FIXTURE_HOME_DID).is_ok());
     }
 
     #[tokio::test]
@@ -366,7 +361,7 @@ mod tests {
             "a/b",
         ] {
             let out =
-                alias_preview(STUB_HOME_DID.into(), AUTHORITY.into(), Some(bad.to_string())).await;
+                alias_preview(FIXTURE_HOME_DID.into(), AUTHORITY.into(), Some(bad.to_string())).await;
             // The empty string is "no username asked for", not a bad one.
             if bad.is_empty() {
                 assert!(out.is_ok() && out.unwrap().username_alias.is_none());
@@ -376,7 +371,7 @@ mod tests {
         }
 
         for good in ["alice", "a", "alice.b_c-d", "a1-b_c.d", &"x".repeat(32)] {
-            let out = alias_preview(STUB_HOME_DID.into(), AUTHORITY.into(), Some(good.to_string()))
+            let out = alias_preview(FIXTURE_HOME_DID.into(), AUTHORITY.into(), Some(good.to_string()))
                 .await
                 .unwrap_or_else(|e| panic!("`{good}` should preview: {e}"));
             assert_eq!(
@@ -398,7 +393,7 @@ mod tests {
             let shell = tokio::runtime::Runtime::new()
                 .unwrap()
                 .block_on(alias_preview(
-                    STUB_HOME_DID.into(),
+                    FIXTURE_HOME_DID.into(),
                     AUTHORITY.into(),
                     Some(candidate.to_string()),
                 ))
@@ -409,7 +404,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_preview_without_a_localpart_carries_only_the_opaque_alias() {
-        let out = alias_preview(STUB_HOME_DID.into(), AUTHORITY.into(), None).await.unwrap();
+        let out = alias_preview(FIXTURE_HOME_DID.into(), AUTHORITY.into(), None).await.unwrap();
         assert!(out.stable_alias.starts_with("acct:ss-"));
         assert!(out.stable_alias.ends_with(AUTHORITY));
         assert!(out.username_alias.is_none(), "no localpart, no username alias");
@@ -420,7 +415,7 @@ mod tests {
         // CON-212: setting a username changes nothing about the opaque alias.
         // A screen that showed one where it meant the other would be telling
         // the person their private alias is the public one.
-        let out = alias_preview(STUB_HOME_DID.into(), AUTHORITY.into(), Some("alice".into()))
+        let out = alias_preview(FIXTURE_HOME_DID.into(), AUTHORITY.into(), Some("alice".into()))
             .await
             .unwrap();
         assert_eq!(out.username_alias.as_deref(), Some("acct:alice@accounts.photos.example"));
@@ -429,16 +424,16 @@ mod tests {
 
     #[tokio::test]
     async fn a_malformed_authority_or_localpart_is_refused() {
-        assert!(alias_preview(STUB_HOME_DID.into(), "NOT-LOWER".into(), None).await.is_err());
-        assert!(alias_preview(STUB_HOME_DID.into(), AUTHORITY.into(), Some("a b".into()))
+        assert!(alias_preview(FIXTURE_HOME_DID.into(), "NOT-LOWER".into(), None).await.is_err());
+        assert!(alias_preview(FIXTURE_HOME_DID.into(), AUTHORITY.into(), Some("a b".into()))
             .await
             .is_err());
     }
 
     #[tokio::test]
     async fn the_fingerprint_is_the_did_domain_one_every_verifier_computes() {
-        let fp = home_fingerprint(STUB_HOME_DID.into()).await.unwrap();
-        assert_eq!(fp.hex, fingerprint::fingerprint_did(STUB_HOME_DID).hex());
+        let fp = home_fingerprint(FIXTURE_HOME_DID.into()).await.unwrap();
+        assert_eq!(fp.hex, fingerprint::fingerprint_did(FIXTURE_HOME_DID).hex());
         // CON-102: the picture is 4,096 base64 characters, always.
         assert_eq!(fp.lifehash.len(), 4_096);
     }
@@ -450,6 +445,7 @@ mod tests {
         let err = app_identity_derive(
             "https://photos.example/selfsame/application".into(),
             None,
+            "irrelevant".into(),
         )
         .await
         .unwrap_err();
@@ -461,6 +457,7 @@ mod tests {
         let err = app_identity_derive(
             "https://photos.example/selfsame/application".into(),
             Some("not-canonical".into()),
+            "irrelevant".into(),
         )
         .await
         .unwrap_err();
@@ -480,7 +477,7 @@ mod tests {
         // happen rather than shown a generic failure — or, as before, shown a
         // success screen for it.
         let err = provision_username(
-            STUB_HOME_DID.into(),
+            FIXTURE_HOME_DID.into(),
             AUTHORITY.into(),
             "alice".into(),
         )
@@ -522,7 +519,7 @@ mod tests {
         // `AccountProvisioningFailed` — the person picks another name rather
         // than being told the authority was unreachable.
         assert_eq!(
-            provision_username(STUB_HOME_DID.into(), AUTHORITY.into(), "Alice".into())
+            provision_username(FIXTURE_HOME_DID.into(), AUTHORITY.into(), "Alice".into())
                 .await
                 .unwrap_err()
                 .to_string(),
@@ -530,31 +527,57 @@ mod tests {
         );
     }
 
+    /// A well-formed `did:crdt` identifier used as a test fixture.
+    ///
+    /// Until `ADR-223` this was what `app_identity_derive` *returned*, because
+    /// the wallet held no material to derive from (`FINDING-016`). It is now
+    /// only a fixture: a real 64-hex identifier, so everything computed from it
+    /// — the alias, the fingerprint, the LifeHash — is a genuine computation
+    /// over a well-formed input.
+    const FIXTURE_HOME_DID: &str =
+        "did:crdt:2a3557b5321f2990e2d8222d3e4571f4c8ca3b821593c2128f212a2b7c7b635d";
+
+    /// The public key it derives from — the Ed25519 public half of the all-`0x01`
+    /// seed, a published private key, so nothing signed under it can be mistaken
+    /// for an assertion by anybody.
+    const FIXTURE_PUBLIC_KEY: &str = "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w";
+
     #[test]
-    fn the_stub_pair_is_internally_consistent() {
+    fn the_fixture_pair_is_internally_consistent() {
         // `did:crdt` is self-certifying: the identifier *is* a commitment to the
         // root key. A fixture whose two halves do not derive one another is not
         // a simplified identity, it is an impossible one — and the first caller
         // to check the commitment gets a contradiction with no way to tell which
         // half is wrong.
-        let key = selfsame_app_identity::codec::decode_b64url_32(STUB_PUBLIC_KEY)
-            .expect("the stub key is 32 base64url octets");
+        let key = selfsame_app_identity::codec::decode_b64url_32(FIXTURE_PUBLIC_KEY)
+            .expect("the fixture key is 32 base64url octets");
         let derived =
-            selfsame_core::identity::derive_did(&key).expect("the stub key derives a DID");
-        assert_eq!(derived.as_str(), STUB_HOME_DID);
+            selfsame_core::identity::derive_did(&key).expect("the fixture key derives a DID");
+        assert_eq!(derived.as_str(), FIXTURE_HOME_DID);
     }
 
     #[tokio::test]
-    async fn the_stub_says_it_is_a_stub() {
-        // FINDING-016. The day this flips to `true` is the day the finding
-        // closes, and a caller can tell today rather than assuming.
-        let out = app_identity_derive(
-            "https://photos.example/selfsame/application".into(),
+    async fn recognition_precedes_any_unsealing() {
+        // Constitutional Principle 14: a malformed identifier must be refused
+        // before it can reach a passcode prompt. Both cases below carry a
+        // passcode that would be wrong anyway; the point is that neither
+        // failure is `BadPasscode`, because custody is never opened.
+        let bad_app = app_identity_derive(
+            "HTTP://Photos.Example/App".into(),
             Some("AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE".into()),
+            "irrelevant".into(),
         )
         .await
-        .unwrap();
-        assert!(!out.derived, "a fixture must not present itself as a derivation");
-        assert_eq!(out.home_did, STUB_HOME_DID);
+        .unwrap_err();
+        assert_eq!(bad_app.to_string(), "HandoffMalformed");
+
+        let missing_scope = app_identity_derive(
+            "https://photos.example/selfsame/application".into(),
+            None,
+            "irrelevant".into(),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(missing_scope.to_string(), "AccountScopeUnavailable");
     }
 }

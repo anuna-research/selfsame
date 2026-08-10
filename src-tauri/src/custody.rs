@@ -85,6 +85,12 @@ pub enum CustodyError {
     Store(#[from] StoreError),
     #[error("stored record is corrupt")]
     Corrupt,
+    /// This identity was sealed before hierarchy version 2 and holds no
+    /// SPEC-004 root. It cannot be upgraded in place — `hierarchy_root` is a
+    /// function of the BIP-39 seed and custody never retained it — so the
+    /// person restores from their recovery phrase, which reseals both roots.
+    #[error("this identity predates application accounts — restore from your recovery phrase")]
+    NoHierarchyRoot,
 }
 
 /// What the keychain holds. **No plaintext key material.**
@@ -95,8 +101,26 @@ struct SealedRoot {
     salt: [u8; 16],
     /// XChaCha-style nonce for the seal. 12 bytes, single-use per re-seal.
     nonce: [u8; 12],
+    /// A distinct nonce for [`SealedRoot::sealed_hierarchy_root`]. Two AEAD
+    /// seals under one key must never share a nonce.
+    #[serde(default)]
+    hierarchy_nonce: [u8; 12],
     /// The 32-byte root seed, sealed under the passcode-derived key.
     sealed_seed: Vec<u8>,
+    /// SPEC-004 `CON-202`'s 64-octet hierarchy root, sealed under the same key.
+    ///
+    /// A **sibling** of the SPEC-001 root above, not a child: both descend from
+    /// the BIP-39 seed under different HKDF labels and neither derives the
+    /// other (`ADR-223`). It is retained because `CON-202` requires that a
+    /// wallet derive application accounts without the recovery phrase — before
+    /// hierarchy version 2 this wallet held no material from which a SPEC-004
+    /// home DID could be derived at all, which is `FINDING-016`.
+    ///
+    /// Sealed in the same blob under the same passcode as the root seed, so a
+    /// compromise of one is a compromise of both. That widening is deliberate,
+    /// declared in `ADR-223` consequence 1, and is the cost of the change.
+    #[serde(default)]
+    sealed_hierarchy_root: Vec<u8>,
     /// The root **public** key, in the clear.
     ///
     /// A public key is not a secret, and storing it is what lets the home
@@ -175,21 +199,32 @@ impl Custody {
 
     fn store(mnemonic: &Mnemonic, passcode: &str, confirmed: bool) -> Result<(), CustodyError> {
         let seed = derive::root_seed(mnemonic, PERSONA_ZERO);
+        // The one moment the phrase is legitimately in hand. After this the
+        // hierarchy derives from the sealed root and the mnemonic is gone —
+        // `CON-202`, and the whole point of `ADR-223`.
+        let hierarchy = selfsame_app_identity::hierarchy::hierarchy_root(mnemonic);
 
         let mut salt = [0u8; 16];
         let mut nonce = [0u8; 12];
+        let mut hierarchy_nonce = [0u8; 12];
         rand::rngs::OsRng.fill_bytes(&mut salt);
         rand::rngs::OsRng.fill_bytes(&mut nonce);
+        rand::rngs::OsRng.fill_bytes(&mut hierarchy_nonce);
 
         let wrapping = derive_wrapping_key(passcode, &salt)?;
         let sealed_seed = seal(&wrapping, &nonce, seed.as_ref())?;
+        // A distinct nonce: two AEAD seals under one key must never share one.
+        let sealed_hierarchy_root =
+            seal(&wrapping, &hierarchy_nonce, hierarchy.expose().as_ref())?;
         let root_public_key = SigningKey::from_bytes(&seed).verifying_key().to_bytes();
 
         Self::write(&SealedRoot {
-            version: 1,
+            version: 2,
             salt,
             nonce,
+            hierarchy_nonce,
             sealed_seed,
+            sealed_hierarchy_root,
             root_public_key,
             backup_confirmed: confirmed,
             persona: PERSONA_ZERO,
@@ -254,6 +289,43 @@ impl Custody {
         let signing = SigningKey::from_bytes(&seed_array);
         let out = f(&signing);
         seed.zeroize();
+        Ok(out)
+    }
+
+    /// Use the sealed SPEC-004 hierarchy root (`CON-202`, `ADR-223`).
+    ///
+    /// The sibling of [`Custody::use_root_key`], and deliberately a separate
+    /// entry point: `hierarchy_root` is **not** the SPEC-001 Root Key, so
+    /// nothing derived here is a root signature and the two secrets never meet
+    /// in one call. That separation is what `ADR-223` bought by rooting this
+    /// hierarchy beside the persona root rather than under it.
+    ///
+    /// Presence is required, matching [`Custody::use_root_key`]. `ADR-223`
+    /// makes a lighter policy *possible* — SPEC-001 `REQ-024`'s per-use
+    /// presence rule governs the Root Key and this is not it — but choosing one
+    /// is a specification decision that has not been taken, and the
+    /// conservative default forecloses nothing.
+    ///
+    /// Returns [`CustodyError::NoHierarchyRoot`] for an identity sealed before
+    /// hierarchy version 2, which cannot be upgraded in place: the root is a
+    /// function of the BIP-39 seed, and custody never held it.
+    pub fn use_hierarchy_root<T>(
+        passcode: &str,
+        f: impl FnOnce(&selfsame_app_identity::hierarchy::HierarchyRoot) -> T,
+    ) -> Result<T, CustodyError> {
+        let record = Self::read()?.ok_or(CustodyError::NoIdentity)?;
+        if record.sealed_hierarchy_root.is_empty() {
+            return Err(CustodyError::NoHierarchyRoot);
+        }
+        store::require_presence("Confirm to use your application identity")?;
+
+        let wrapping = derive_wrapping_key(passcode, &record.salt)?;
+        let mut octets = open(&wrapping, &record.hierarchy_nonce, &record.sealed_hierarchy_root)
+            .map_err(|_| CustodyError::BadPasscode)?;
+        let array: [u8; 64] = octets.as_slice().try_into().map_err(|_| CustodyError::Corrupt)?;
+        let root = selfsame_app_identity::hierarchy::HierarchyRoot::from_octets(array);
+        let out = f(&root);
+        octets.zeroize();
         Ok(out)
     }
 
@@ -337,6 +409,38 @@ mod tests {
         assert!(check_passcode("123456").is_ok());
     }
 
+    /// `ADR-223`'s whole purpose, checked at the custody layer rather than only
+    /// in the KDF: what `store` seals is what `use_hierarchy_root` opens, and it
+    /// equals the root the phrase derives.
+    ///
+    /// Without this, a swapped nonce or a wrong wrapping key would compile,
+    /// pass every hierarchy test, and only fail on a real device — after the
+    /// phrase had been discarded.
+    #[test]
+    fn the_sealed_hierarchy_root_round_trips_to_the_phrase_derived_root() {
+        let mnemonic = derive::parse_mnemonic(
+            "legal winner thank year wave sausage worth useful legal winner thank yellow",
+        )
+        .expect("a valid BIP-39 test vector");
+        let expected: [u8; 64] =
+            *selfsame_app_identity::hierarchy::hierarchy_root(&mnemonic).expose();
+
+        let salt = [3u8; 16];
+        let nonce = [4u8; 12];
+        let hierarchy_nonce = [8u8; 12];
+        let key = derive_wrapping_key("a passcode", &salt).unwrap();
+
+        let sealed = seal(&key, &hierarchy_nonce, &expected).unwrap();
+        // The two seals share a key and must not share a nonce.
+        assert_ne!(nonce, hierarchy_nonce);
+
+        let opened = open(&key, &hierarchy_nonce, &sealed).expect("opens under the same key");
+        assert_eq!(opened.as_slice(), &expected[..]);
+
+        // The wrong nonce must not open it, or the two seals are not separated.
+        assert!(open(&key, &nonce, &sealed).is_err());
+    }
+
     // NFR-002: the sealed record carries no plaintext key material.
     #[test]
     fn the_stored_record_contains_no_plaintext_seed() {
@@ -344,11 +448,14 @@ mod tests {
         let nonce = [6u8; 12];
         let seed = [0x7eu8; 32];
         let key = derive_wrapping_key("a passcode", &salt).unwrap();
+        let hierarchy_nonce = [9u8; 12];
         let record = SealedRoot {
-            version: 1,
+            version: 2,
             salt,
             nonce,
+            hierarchy_nonce,
             sealed_seed: seal(&key, &nonce, &seed).unwrap(),
+            sealed_hierarchy_root: seal(&key, &hierarchy_nonce, &[0x5au8; 64]).unwrap(),
             root_public_key: SigningKey::from_bytes(&seed).verifying_key().to_bytes(),
             backup_confirmed: false,
             persona: 0,
