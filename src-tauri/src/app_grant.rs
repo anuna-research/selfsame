@@ -48,10 +48,11 @@
 //! grant, no durable write, no partial bundle.
 
 use selfsame_app_identity::{
-    alias::{self, AcctUri},
+    alias::AcctUri,
     authorise::{self, AuthoriseError, Observation},
-    ceremony, grant, hierarchy,
+    ceremony, grant, hierarchy, issuer,
 };
+use selfsame_app_identity_net::state::SignedClosure;
 
 use crate::commands::{now, UiError};
 use crate::custody::Custody;
@@ -74,6 +75,19 @@ pub struct AuthorisedGrant {
     pub issuer: String,
     /// When the grant stops being valid, seconds since the epoch.
     pub valid_until: i64,
+    /// Whether the issuer's deltas reached a declared `stateResolvers` entry.
+    ///
+    /// Always `false` today, and reported rather than hidden. `CON-206` step 4
+    /// prefers a resolver and treats the bundled closure as *"a bootstrap for a
+    /// first ceremony on a degraded network, not a standing arrangement"* — a
+    /// verifier may lean on the bundle only at a grant's first acceptance with
+    /// no resolver reachable.
+    ///
+    /// Publication needs a conforming `did:crdt` resolver, and none is deployed:
+    /// that is `G6` of the Path-B readiness review. A caller can see from this
+    /// field that it is relying on the bootstrap, which is better than a
+    /// silence it would have to infer.
+    pub published: bool,
 }
 
 /// What a person is being asked to approve, before they approve it.
@@ -185,14 +199,23 @@ pub async fn app_grant_issue(
     rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut grant_token);
 
     // Presence, then the key — which exists only inside this closure.
-    let (compact, home_did, account) = Custody::use_hierarchy_root(&passcode, |root| {
+    let (compact, identity) = Custody::use_hierarchy_root(&passcode, |root| {
         let home = hierarchy::derive(root, &decided.profile.application_id, &decided.scope);
-        let home_did = home.home_did().map_err(|_| UiError::from("GrantIssuanceFailed"))?;
-        let account = AcctUri::parse(&alias::stable_acct_uri(
-            &home_did,
+
+        // `CON-203`, both stages. Until this existed the wallet signed with a
+        // key whose `did:crdt` document had never been constructed, so every
+        // grant it produced was unverifiable at `CON-206` step 4 — F3 of the
+        // review.
+        let identity = issuer::create(
+            home.signing_key(),
             &decided.profile.account_authority,
-        ))
+            (decided.valid_from as u64) * 1_000,
+        )
         .map_err(|_| UiError::from("GrantIssuanceFailed"))?;
+
+        let home_did = identity.did.clone();
+        let account =
+            AcctUri::parse(&identity.acct_uri).map_err(|_| UiError::from("GrantIssuanceFailed"))?;
 
         let compact = grant::issue(
             home.signing_key(),
@@ -206,21 +229,33 @@ pub async fn app_grant_issue(
             decided.valid_from,
             decided.valid_until,
         );
-        Ok::<_, UiError>((compact, home_did, account))
+        Ok::<_, UiError>((compact, identity))
     })??;
+
+    // Serialised here rather than in the pure crate, which excludes `serde` on
+    // purpose — a second, more permissive JSON parser beside the strict one is
+    // the shotgun-parser shape LangSec Principle 5 rules out. The shape is
+    // `did_crdt`'s own and `SignedClosure` is the reader for it, so writer and
+    // reader cannot drift.
+    let closure = serde_json::to_vec(&SignedClosure {
+        target: identity.closure.target.clone(),
+        deltas: identity.closure.deltas.clone(),
+    })
+    .map_err(|_| UiError::from("GrantIssuanceFailed"))?;
 
     let bundle = ceremony::build_bundle(
         &decided.offer.ceremony_id,
         &decided.offer.request_id,
         &compact,
-        None,
+        Some(&closure),
     )
     .map_err(|_| UiError::from("GrantIssuanceFailed"))?;
 
     Ok(AuthorisedGrant {
         bundle,
-        account: account.as_str().to_owned(),
-        issuer: home_did,
+        account: identity.acct_uri,
+        issuer: identity.did,
         valid_until: decided.valid_until,
+        published: false,
     })
 }

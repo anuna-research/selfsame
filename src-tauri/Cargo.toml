@@ -18,6 +18,7 @@ tauri-build = { version = "2", features = [] }
 selfsame-core = { workspace = true }
 # IMPL-004 CON-601/603 — the SPEC-004 pure core. No network crate enters here.
 selfsame-app-identity = { workspace = true }
+selfsame-app-identity-net = { path = "../crates/selfsame-app-identity-net" }
 did-crdt = { workspace = true }
 
 tauri = { version = "2", features = [] }
