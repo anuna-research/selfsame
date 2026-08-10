@@ -115,6 +115,39 @@ pub struct PendingIssuance {
     expires_at: i64,
 }
 
+/// What the shell observed for itself, as against what the offer asserts.
+///
+/// Mirrors [`authorise::Observation`] and exists for the same reason: every
+/// field is something the caller obtained independently of the offer payload,
+/// and grouping them says so at the call site. It also keeps the commands under
+/// clippy's argument bound — which is a real signal here rather than a lint to
+/// silence, since a command taking eight loose values is one whose caller can
+/// transpose two of them.
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CeremonyObservation {
+    /// The `profileDigest` this ceremony is bound to, from `PROTO-003`'s record.
+    pub ceremony_profile_digest: String,
+    /// The provider the shell selected, per `CON-208`.
+    pub provider_id: String,
+    /// `SHA-256` of that descriptor, base64url.
+    pub descriptor_digest: String,
+    /// The caller identity the platform reported, where it reports one.
+    pub platform_binding_id: Option<String>,
+}
+
+impl CeremonyObservation {
+    fn as_observation(&self, now: i64) -> Observation<'_> {
+        Observation {
+            ceremony_profile_digest: &self.ceremony_profile_digest,
+            provider_id: &self.provider_id,
+            descriptor_digest: &self.descriptor_digest,
+            platform_binding_id: self.platform_binding_id.as_deref(),
+            now,
+        }
+    }
+}
+
 /// What a person is being asked to approve, before they approve it.
 ///
 /// `CON-221` and the consent screens need this *before* any signature exists,
@@ -145,23 +178,11 @@ pub struct GrantRequestView {
 pub async fn app_grant_review(
     offer: Vec<u8>,
     profile: Vec<u8>,
-    ceremony_profile_digest: String,
-    provider_id: String,
-    descriptor_digest: String,
-    platform_binding_id: Option<String>,
+    observed: CeremonyObservation,
 ) -> Result<GrantRequestView> {
-    let decided = authorise::authorise(
-        &offer,
-        &profile,
-        &Observation {
-            ceremony_profile_digest: &ceremony_profile_digest,
-            provider_id: &provider_id,
-            descriptor_digest: &descriptor_digest,
-            platform_binding_id: platform_binding_id.as_deref(),
-            now: now() as i64,
-        },
-    )
-    .map_err(token)?;
+    let decided =
+        authorise::authorise(&offer, &profile, &observed.as_observation(now() as i64))
+            .map_err(token)?;
 
     Ok(GrantRequestView {
         application_id: decided.profile.application_id.as_str().to_owned(),
@@ -222,10 +243,7 @@ pub struct ConfirmationRequest {
 pub async fn app_grant_prepare(
     offer: Vec<u8>,
     profile: Vec<u8>,
-    ceremony_profile_digest: String,
-    provider_id: String,
-    descriptor_digest: String,
-    platform_binding_id: Option<String>,
+    observed: CeremonyObservation,
     passcode: String,
     session: tauri::State<'_, crate::commands::AppSession>,
 ) -> Result<ConfirmationRequest> {
@@ -233,18 +251,9 @@ pub async fn app_grant_prepare(
 
     // Every recognition, verification, binding and freshness check is the pure
     // core's, and it has already run by the time a key is touched.
-    let decided = authorise::authorise(
-        &offer,
-        &profile,
-        &Observation {
-            ceremony_profile_digest: &ceremony_profile_digest,
-            provider_id: &provider_id,
-            descriptor_digest: &descriptor_digest,
-            platform_binding_id: platform_binding_id.as_deref(),
-            now: now() as i64,
-        },
-    )
-    .map_err(token)?;
+    let decided =
+        authorise::authorise(&offer, &profile, &observed.as_observation(now() as i64))
+            .map_err(token)?;
 
     // `CON-205`: independent for every grant, and never derived from the device
     // key, the scope, a timestamp, or recovery material.
