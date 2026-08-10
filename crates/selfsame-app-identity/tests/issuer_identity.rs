@@ -120,3 +120,41 @@ fn the_identifier_and_alias_do_not_depend_on_the_clock() {
     assert_eq!(early.did, late.did);
     assert_eq!(early.acct_uri, late.acct_uri);
 }
+
+/// The gate, pinned so that removing it is a decision rather than an edit.
+///
+/// `CON-206` step 6 requires the grant's `kid` — `{did}#jwk-0` — to name a
+/// `JsonWebKey` in `assertionMethod`. Genesis creates `{did}#key-0`, an
+/// `Ed25519Signature2020` method in `Authentication`, and `did_crdt`'s
+/// `SuiteType` has no `JsonWebKey` variant, so no delta at the pinned revision
+/// closes the gap.
+///
+/// `CON-203` records the same thing from the other side: the projection *"MAY be
+/// a deterministic DID resolver representation of the existing root key"* and
+/// *"The corresponding `did:crdt` method change is a Tier-1-gated dependency."*
+///
+/// When that box closes, this test fails — which is the point. It is the one
+/// place that has to change, and it should change deliberately.
+#[test]
+fn the_closure_cannot_yet_authorise_the_key_its_grants_name() {
+    let created = issuer::create(&home_key(7, 9), ACCOUNT_AUTHORITY, NOW_MS).expect("constructs");
+    assert!(
+        !created.authorises_grants,
+        "if this now passes, did:crdt has gained the JsonWebKey projection — \
+         open the CON-206 step 6 path deliberately rather than by deleting this"
+    );
+}
+
+/// The genesis authorises a fragment the grant does not use, which is the
+/// mechanism behind the gate above rather than a restatement of it.
+#[test]
+fn the_genesis_fragment_is_not_the_one_a_grant_is_signed_under() {
+    let created = issuer::create(&home_key(8, 10), ACCOUNT_AUTHORITY, NOW_MS).expect("constructs");
+
+    // What a grant signs under, from `grant::header`.
+    let grant_kid = format!("{}#jwk-0", created.did);
+    // What `selfsame-core` puts in the genesis.
+    let genesis_method = format!("{}#key-0", created.did);
+
+    assert_ne!(grant_kid, genesis_method);
+}

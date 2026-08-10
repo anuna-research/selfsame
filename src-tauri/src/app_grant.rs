@@ -107,6 +107,12 @@ pub struct PendingIssuance {
     ceremony_id: String,
     request_id: String,
     valid_until: i64,
+    /// The offer's own expiry. A preparation started shortly before it, or a
+    /// prompt left open, must not still release a long-lived grant afterwards —
+    /// so the deadline travels with the pending state and is compared at
+    /// release. Without it `Response::TimedOut` is unreachable and any later
+    /// `confirmed = true` becomes `Confirmed`.
+    expires_at: i64,
 }
 
 /// What a person is being asked to approve, before they approve it.
@@ -181,17 +187,30 @@ fn token(e: AuthoriseError) -> UiError {
 }
 
 /// What the confirmation screen must show, and whether it must show anything.
-#[derive(Debug, serde::Serialize)]
+#[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConfirmationRequest {
     /// `"required"`, `"notRequired"`, or `"failClosed"`.
     pub applicability: String,
-    /// **The value the person compares.** `SPEC-002` `REQ-103` makes the hex the
-    /// normative rendering; the LifeHash beside it is a recognition aid and is
-    /// never the thing being compared.
-    pub comparison_value: Option<String>,
+    /// **The value the person compares**, and the recognition aids shown beside
+    /// it.
+    ///
+    /// `SPEC-002` `REQ-103` makes `hex` the normative rendering; the LifeHash
+    /// and the label are never the thing being compared. All three are returned
+    /// together because the screen cannot compute them: the issuer DID stays
+    /// private until confirmation, so the shell cannot call `home_fingerprint`,
+    /// and deriving a second rendering in the frontend is exactly the
+    /// duplicate-implementation this repository refuses. `CON-221` requires the
+    /// LifeHash beside the hex, so withholding it makes the screen
+    /// unimplementable rather than merely plainer.
+    pub fingerprint: Option<crate::commands::Fp>,
     /// The account this would be, for the screen to name.
     pub account: String,
+    /// The ceremony this preparation belongs to.
+    ///
+    /// Returned so [`app_grant_confirm`] can be told which preparation the
+    /// person actually looked at.
+    pub ceremony_id: String,
 }
 
 /// Issue the grant. The one place a `SPEC-004` credential is signed.
@@ -247,6 +266,15 @@ pub async fn app_grant_prepare(
         )
         .map_err(|_| UiError::from("GrantIssuanceFailed"))?;
 
+        // `CON-206` step 6 would refuse every bundle built from this closure:
+        // the grant's `kid` is `#jwk-0` and the document authorises `#key-0`.
+        // Refusing here is the whole difference between a gate and a hope — a
+        // grant that fails at the recipient surfaces later and somewhere else,
+        // and by then a person believes they linked a device.
+        if !identity.authorises_grants {
+            return Err(UiError::from("IssuerKeyProjectionUnavailable"));
+        }
+
         let home_did = identity.did.clone();
         let account =
             AcctUri::parse(&identity.acct_uri).map_err(|_| UiError::from("GrantIssuanceFailed"))?;
@@ -270,7 +298,7 @@ pub async fn app_grant_prepare(
     // and an unreachable authority is `Unknown` rather than an assumption of
     // first use. Failing closed here costs a retry; guessing costs the one
     // comparison that stands between a person and a substituted issuer.
-    let authority = authority_state(&identity.acct_uri).await;
+    let authority = authority_state(&identity.acct_uri, &identity.did).await;
     let applicability = Applicability::decide(authority, &identity.did);
 
     let request = ConfirmationRequest {
@@ -280,11 +308,14 @@ pub async fn app_grant_prepare(
             Applicability::FailClosed => "failClosed",
         }
         .to_owned(),
-        comparison_value: match &applicability {
-            Applicability::Required(d) => Some(d.comparison_value()),
+        fingerprint: match &applicability {
+            Applicability::Required(_) => {
+                Some(selfsame_core::fingerprint::fingerprint_did(&identity.did).into())
+            }
             _ => None,
         },
         account: identity.acct_uri.clone(),
+        ceremony_id: decided.offer.ceremony_id.clone(),
     };
 
     if matches!(applicability, Applicability::FailClosed) {
@@ -292,12 +323,27 @@ pub async fn app_grant_prepare(
     }
 
     let mut guard = session.0.lock().unwrap_or_else(|p| p.into_inner());
+
+    // A second preparation must not silently displace a prompt the person is
+    // looking at: confirming the displayed request would then release a
+    // different signed bundle. An overlapping ceremony is refused rather than
+    // allowed to overwrite, and the earlier one is left intact — it expires on
+    // its own.
+    if let Some(existing) = &guard.pending_issuance {
+        if existing.expires_at > decided.valid_from
+            && existing.ceremony_id != decided.offer.ceremony_id
+        {
+            return Err(UiError::from("CeremonyInProgress"));
+        }
+    }
+
     guard.pending_issuance = Some(PendingIssuance {
         compact,
         identity,
         ceremony_id: decided.offer.ceremony_id,
         request_id: decided.offer.request_id,
         valid_until: decided.valid_until,
+        expires_at: decided.offer.expires_at,
     });
 
     Ok(request)
@@ -310,6 +356,7 @@ pub async fn app_grant_prepare(
 /// still comes through here so there is one place a bundle is written.
 #[tauri::command]
 pub async fn app_grant_confirm(
+    ceremony_id: String,
     confirmed: bool,
     session: tauri::State<'_, crate::commands::AppSession>,
 ) -> Result<AuthorisedGrant> {
@@ -317,10 +364,26 @@ pub async fn app_grant_confirm(
         let mut guard = session.0.lock().unwrap_or_else(|p| p.into_inner());
         // Taken, not borrowed: one preparation yields at most one bundle, and a
         // second call finds nothing rather than re-releasing the same grant.
-        guard.pending_issuance.take().ok_or_else(|| UiError::from("NothingToConfirm"))?
+        let pending =
+            guard.pending_issuance.take().ok_or_else(|| UiError::from("NothingToConfirm"))?;
+        // And it must be the ceremony the person was shown. Without this the
+        // caller is confirming "whatever is pending", which is a different
+        // question from the one on the screen.
+        if pending.ceremony_id != ceremony_id {
+            return Err(UiError::from("NothingToConfirm"));
+        }
+        pending
     };
 
-    let response = if confirmed { Response::Confirmed } else { Response::Rejected };
+    // `CON-221`'s timeout is a real outcome, not a UI nicety: a prompt left open
+    // past the ceremony's own expiry must not still yield a grant.
+    let response = if now() as i64 >= pending.expires_at {
+        Response::TimedOut
+    } else if confirmed {
+        Response::Confirmed
+    } else {
+        Response::Rejected
+    };
     if !confirm::outcome(response).may_proceed {
         // The signed credential is dropped with `pending`. It was never
         // transmitted, so having signed it conferred nothing.
@@ -361,22 +424,28 @@ pub async fn app_grant_confirm(
 /// authority to fail closed rather than be read as first use, and collapsing
 /// "no binding" with "could not ask" is exactly the substitution the comparison
 /// exists to catch.
-async fn authority_state(acct_uri: &str) -> AuthorityState {
+async fn authority_state(acct_uri: &str, home_did: &str) -> AuthorityState {
     let Ok(acct) = AcctUri::parse(acct_uri) else { return AuthorityState::Unknown };
-    match selfsame_app_identity_net::webfinger::fetch(&acct).await {
-        Ok(jrd) => {
-            if jrd.aliases.is_empty() {
-                AuthorityState::NoBinding
-            } else {
-                AuthorityState::Bound
-            }
-        }
-        // A 404 is a genuine "no binding"; anything else is "could not ask".
-        Err(e) if is_not_found(&e) => AuthorityState::NoBinding,
+
+    // `fetch` alone recognises syntax. A JRD that parses but whose `subject`
+    // names another account — stale, cache-mixed, or substituted — would
+    // otherwise read as `Bound` and suppress the one-time comparison while
+    // proving nothing about *this* account. `fetch_and_verify` requires the
+    // reciprocal binding `CON-204` defines, in both directions.
+    match selfsame_app_identity_net::webfinger::fetch_and_verify(
+        &acct,
+        home_did,
+        &[acct_uri.to_owned()],
+    )
+    .await
+    {
+        Ok(_) => AuthorityState::Bound,
+        // The authority answered and holds nothing: a first enrolment.
+        Err(selfsame_app_identity_net::NetError::NotFound) => AuthorityState::NoBinding,
+        // Everything else — unreachable, refused, or an answer that does not
+        // bind this account — is "could not ask". `CON-221` requires that to
+        // fail closed rather than be read as first use, and a semantic mismatch
+        // is precisely the substitution the comparison exists to catch.
         Err(_) => AuthorityState::Unknown,
     }
-}
-
-fn is_not_found(e: &selfsame_app_identity_net::NetError) -> bool {
-    matches!(e, selfsame_app_identity_net::NetError::NotFound)
 }

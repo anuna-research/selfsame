@@ -24,6 +24,30 @@
 //! it could become one — the URI is computed here from the DID that stage one
 //! produced, not accepted from a caller.
 //!
+//! # The closure this produces cannot yet authorise the key its grants name
+//!
+//! **This is why issuance is gated, and the gate is not a formality.**
+//!
+//! `CON-206` step 6 requires the grant's `kid` to name a `JsonWebKey` in the
+//! issuer's `assertionMethod`, and `grant::header` signs under
+//! `{did}#jwk-0`. What genesis creates is `{did}#key-0`, an
+//! `Ed25519Signature2020` method in `Authentication` — so every bundle this
+//! module could produce fails step 6.
+//!
+//! It cannot be repaired here. `did_crdt`'s `SuiteType` has two variants,
+//! neither of which is `JsonWebKey`, so no delta at the pinned revision creates
+//! a method of the required type. `CON-203` says as much in its own words: the
+//! projection *"MAY be a deterministic DID resolver representation of the
+//! existing root key"* and *"The corresponding `did:crdt` method change is a
+//! Tier-1-gated dependency."* That dependency is an open box in this
+//! specification's gate.
+//!
+//! So [`create`] builds what it can and [`IssuerIdentity::authorises_grants`]
+//! reports honestly that the result is not yet sufficient. The caller refuses
+//! rather than emitting a bundle no verifier can accept — a grant that fails at
+//! the recipient is worse than one that was never issued, because the failure
+//! surfaces later and somewhere else.
+//!
 //! # What this does not do
 //!
 //! It does not publish. `CON-206` step 4 prefers a declared `stateResolvers`
@@ -59,6 +83,18 @@ pub struct IssuerIdentity {
     /// a verifier cannot confirm fails step 9 rather than step 5, which is a
     /// harder failure to read.
     pub deltas: Vec<SignedDelta>,
+    /// Whether the closure can authorise the key this account's grants are
+    /// signed under.
+    ///
+    /// `false` at the pinned `did:crdt` revision, always, and the reason is
+    /// upstream rather than here: `CON-206` step 6 wants a `JsonWebKey` at
+    /// `#jwk-0` in `assertionMethod`, and the method cannot express one. See
+    /// this module's header.
+    ///
+    /// It is a field rather than an assumption so that a caller has to look at
+    /// it, and so the day the upstream box closes there is exactly one place
+    /// that stops returning `false`.
+    pub authorises_grants: bool,
     /// The closure a `CON-219` bundle carries as `issuerClosure`.
     ///
     /// `did_crdt`'s own type, deliberately: the method defines this shape, and
@@ -113,5 +149,10 @@ pub fn create(
     let deltas = vec![genesis, alias_delta];
     let closure = ClosureBundle { target, deltas: deltas.clone() };
 
-    Ok(IssuerIdentity { did, acct_uri, deltas, closure })
+    // The genesis authorises `#key-0` for authentication; a grant is signed
+    // under `#jwk-0` and step 6 wants a `JsonWebKey` there. No delta at this
+    // revision closes that gap — see the module header.
+    let authorises_grants = false;
+
+    Ok(IssuerIdentity { did, acct_uri, deltas, closure, authorises_grants })
 }

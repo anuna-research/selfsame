@@ -182,9 +182,87 @@ Publication needs a conforming `did:crdt` resolver and none is deployed: `G6` of
 [[selfsame-path-b-readiness-2026-08-10]]. The field exists so a caller can see it
 is relying on the bootstrap instead of inferring it from silence.
 
+## Round 2 — the repairs were reviewed, and four of five held
+
+A second cross-model pass over Group B returned four P1 and one P2. All five
+accepted and repaired. Their verdict on F3 is the one that matters:
+
+> *"The generated issuer closure cannot authorize the key named by its grants, so
+> the primary issuance path remains unverifiable."*
+
+### R1 — P1 — the document was built and still cannot authorise a grant
+
+F3 constructed a `did:crdt` document, and not the one `CON-206` needs. Genesis
+creates `{did}#key-0`, an `Ed25519Signature2020` method in `Authentication`;
+`grant::header` signs under `{did}#jwk-0`; step 6 requires that exact identifier
+to name a **`JsonWebKey`** in `assertionMethod`. Every bundle the path could
+produce fails step 6.
+
+**It cannot be repaired in this repository.** `did_crdt`'s `SuiteType` has two
+variants and neither is `JsonWebKey`, so no delta at the pinned revision creates
+a method of the required type. `CON-203` says the same from the other side — the
+projection *"MAY be a deterministic DID resolver representation of the existing
+root key"*, and *"The corresponding `did:crdt` method change is a Tier-1-gated
+dependency"* — which is an open box in this specification's own gate.
+
+So the reviewer's second option was the only one available: **issuance is
+gated.** `IssuerIdentity::authorises_grants` is `false`, and the shell refuses
+with `IssuerKeyProjectionUnavailable` rather than emitting a bundle no verifier
+can accept. A grant that fails at the recipient is worse than one never issued,
+because the failure surfaces later, somewhere else, after a person believes they
+linked a device.
+
+Two tests pin it, including one that **fails when the upstream box closes** —
+so opening the path is a decision someone takes rather than an edit someone
+makes.
+
+**F3 is therefore not closed.** The identity now exists and is correct as far as
+it goes; what it cannot yet do is authorise the key its own grants are signed
+under.
+
+### R2 — P1 — a syntactic JRD suppressed the one-time comparison
+
+`authority_state` treated any successful JRD with a non-empty `aliases` array as
+`Bound`. A stale or cache-mixed response whose `subject` names another account
+would therefore suppress `CON-221`'s prompt while proving nothing about *this*
+account. Now `fetch_and_verify` requires `CON-204`'s reciprocal binding in both
+directions, and a semantic mismatch is `Unknown` — which fails closed, because a
+mismatch is precisely the substitution the comparison exists to catch.
+
+### R3 — P1 — confirmation was not bound to what was displayed
+
+`pending_issuance` was overwritten unconditionally and `app_grant_confirm` took
+no identifier, so an overlapping preparation could replace the slot and
+confirming the displayed request would release a different signed bundle. A
+second live ceremony is now refused rather than allowed to displace the first,
+and confirmation names the ceremony it is answering.
+
+### R4 — P1 — `Response::TimedOut` was unreachable
+
+No deadline was stored, so any later `confirmed = true` became `Confirmed`. A
+preparation begun shortly before expiry — WebFinger takes time — or a prompt left
+open could still yield a long-lived grant after the ceremony had timed out. The
+offer's expiry now travels with the pending state and is compared at release.
+
+### R5 — P2 — the screen could not draw what the contract requires
+
+The response carried only the hex. The issuer DID stays private until
+confirmation, so the shell cannot call `home_fingerprint`, and deriving a second
+rendering in the frontend is the duplicate implementation this repository
+refuses — leaving `CON-221`'s required LifeHash undrawable. The full `Fp` is now
+returned.
+
+### The pattern, again
+
+R1 is the third instance of one error in this line of work: I verified what I
+built rather than what the consumer needs. The F3 tests checked that the DID was
+the one the key derives and that the alias update was causally ordered — both
+true, and neither asks the question `CON-206` asks, which is whether the
+document authorises the key the grant is signed under.
+
 ## Standing
 
-The repairs are unreviewed. Round 1 assessed `a793724`; everything since is new
+The Group A and Group B repairs are unreviewed; round 2 assessed Group B only. Round 1 assessed `a793724`; everything since is new
 code written in response to findings, which is the condition under which this
 session has introduced defects before — twice in `authorise` alone, both caught
 by tests written minutes later.
