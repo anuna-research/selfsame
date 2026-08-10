@@ -73,6 +73,7 @@
 
 pub mod accept;
 pub mod alias;
+pub mod authorise;
 pub mod ceremony;
 pub mod codec;
 pub mod confirm;

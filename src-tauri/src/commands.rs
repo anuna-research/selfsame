@@ -84,7 +84,7 @@ const APP: Application = Application::CbclChat;
 
 pub struct AppSession(pub Mutex<Session>);
 
-fn now() -> u64 {
+pub(crate) fn now() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())

@@ -34,7 +34,8 @@
 //! [OQ-005]: ../../../../anuna-ssi/specs/SPEC-001-device-key-provisioning.md
 //! [OQ-007]: ../../../../anuna-ssi/specs/SPEC-001-device-key-provisioning.md
 
-pub mod app_identity;
+pub mod app_grant;
+mod app_identity;
 mod commands;
 pub mod custody;
 pub mod net;
@@ -82,6 +83,8 @@ pub fn run() {
             app_identity::alias_preview,
             app_identity::home_fingerprint,
             app_identity::app_identity_derive,
+            app_grant::app_grant_review,
+            app_grant::app_grant_issue,
             app_identity::provision_username,
             app_identity::revoke_grant,
             app_identity::revocation_status,
