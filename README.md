@@ -35,7 +35,7 @@ Code/
 └── cbcl-rs/      git clone https://git.anuna.io/anuna-research/cbcl-rs
 ```
 
-`did-crdt` is pinned at `e3867c77387c21bd26c82f7d19b0f58eeedfc163` — its DID
+`did-crdt` is pinned at `9a53bff1ed3eb88680fe19db0366ffd13d6b240a` — its DID
 derivation is adopted verbatim and a change to it is a breaking change to the
 protocol. `crates/selfsame-core/tests/pinned_derivation.rs` fails if it drifts,
 and `tests/vectors.rs` records the revision the test vectors were generated
