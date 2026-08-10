@@ -207,7 +207,7 @@ fn the_root_key_renders_into_the_resolved_document_with_its_relationships() {
     let method = &document.verification_method[0];
     assert_eq!(method.id, h.method_id);
     assert_eq!(method.controller, h.did);
-    assert!(!method.public_key_multibase.is_empty());
+    assert!(!method.public_key_multibase.as_deref().unwrap_or_default().is_empty());
 
     // Some relationship set renders. Which relationships genesis grants is the
     // method's business; that they render at all is what CON-206 step 6 needs.
@@ -239,7 +239,7 @@ fn the_jsonwebkey_projection_is_still_not_producible() {
          positive TEST-224 assertion, and delete this test"
     );
     assert!(
-        !method.public_key_multibase.is_empty(),
+        !method.public_key_multibase.as_deref().unwrap_or_default().is_empty(),
         "the pinned revision represents keys as publicKeyMultibase"
     );
 

@@ -1,6 +1,6 @@
 {
   "spec": "SPEC-001 v0.3.0",
-  "did_crdt_revision": "e3867c77387c21bd26c82f7d19b0f58eeedfc163",
+  "did_crdt_revision": "9a53bff1ed3eb88680fe19db0366ffd13d6b240a",
   "con_007_root_derivation": [
     {
       "entropy_hex": "00000000000000000000000000000000",

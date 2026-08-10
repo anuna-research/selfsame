@@ -343,7 +343,8 @@ fn verify(args: &[String]) -> Result<()> {
     let resolved = document.resolve()?.did_document.ok_or_else(|| anyhow!("deactivated"))?;
 
     let wanted = mb::encode(&device_key);
-    let method = resolved.verification_method.iter().find(|vm| vm.public_key_multibase == wanted);
+    let method =
+        resolved.verification_method.iter().find(|vm| vm.public_key_multibase.as_deref() == Some(wanted.as_str()));
 
     println!("\n  {did}");
     println!("  Fingerprint  {}", fingerprint::fingerprint_did(did).hex());

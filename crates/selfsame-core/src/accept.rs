@@ -201,7 +201,7 @@ pub fn accept(
     let own_method_id = resolved
         .verification_method
         .iter()
-        .find(|vm| vm.public_key_multibase == own_multibase)
+        .find(|vm| vm.public_key_multibase.as_deref() == Some(own_multibase.as_str()))
         .map(|vm| vm.id.clone())
         .ok_or(RejectReason::OwnKeyNotAuthorised)?;
 

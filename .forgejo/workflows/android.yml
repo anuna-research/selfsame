@@ -106,8 +106,19 @@ jobs:
       - name: Clone the pinned siblings
         run: |
           set -euo pipefail
-          did_sha=e3867c77387c21bd26c82f7d19b0f58eeedfc163
-          cbcl_sha=$(cat cbcl-rs.sha)
+          # Read out of vectors.rs, exactly as ci.yml does and for the same
+          # reason it gives: that file records the revision the test vectors
+          # were generated against, so it is the source of truth, and a copy
+          # here is a second place for it to be wrong.
+          #
+          # It was a copy, and it went wrong: this job kept building against
+          # the previous pin after ci.yml had moved on, so `rust` passed and
+          # `android` failed to compile selfsame-core — a failure that reads
+          # like a target problem and is actually a stale sibling.
+          did_sha="$(grep -oE '[0-9a-f]{40}' crates/selfsame-core/tests/vectors.rs | head -1)"
+          cbcl_sha="$(tr -d '[:space:]' < cbcl-rs.sha)"
+          echo "did-crdt @ ${did_sha}"
+          echo "cbcl-rs  @ ${cbcl_sha}"
           [ -d ../did-crdt ] || git clone https://git.anuna.io/anuna-research/did-crdt.git ../did-crdt
           # Always fetch: a warm workspace keeps the clone from a previous run,
           # so a pin newer than that clone resolves to "reference is not a tree"

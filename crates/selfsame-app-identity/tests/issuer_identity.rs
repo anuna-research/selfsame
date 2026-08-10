@@ -66,8 +66,8 @@ fn the_closure_carries_the_genesis_and_the_alias_update() {
     let key = home_key(3, 4);
     let created = issuer::create(&key, ACCOUNT_AUTHORITY, NOW_MS).expect("constructs");
 
-    assert_eq!(created.deltas.len(), 2);
-    assert_eq!(created.closure.deltas.len(), 2);
+    assert_eq!(created.deltas.len(), 3);
+    assert_eq!(created.closure.deltas.len(), 3);
 }
 
 /// The alias update commits to a frontier that already contains the genesis.
@@ -88,8 +88,11 @@ fn the_alias_update_is_causally_after_the_genesis() {
         "the alsoKnownAs update must name the genesis as a parent"
     );
 
-    // And the closure's target is the head, not the root.
-    let head = created.deltas[1].content_hash().expect("a delta hashes");
+    // And the closure's target is the head. Since the assertion method was
+    // added last, that is the third delta rather than the alias update — a
+    // target naming anything but the head would hand a recipient a bundle it
+    // could verify and still not have all of.
+    let head = created.deltas[2].content_hash().expect("a delta hashes");
     assert_eq!(created.closure.target, head);
 }
 
@@ -121,40 +124,69 @@ fn the_identifier_and_alias_do_not_depend_on_the_clock() {
     assert_eq!(early.acct_uri, late.acct_uri);
 }
 
-/// The gate, pinned so that removing it is a decision rather than an edit.
+/// The whole point of F3, asked the way `CON-206` step 6 asks it.
 ///
-/// `CON-206` step 6 requires the grant's `kid` — `{did}#jwk-0` — to name a
-/// `JsonWebKey` in `assertionMethod`. Genesis creates `{did}#key-0`, an
-/// `Ed25519Signature2020` method in `Authentication`, and `did_crdt`'s
-/// `SuiteType` has no `JsonWebKey` variant, so no delta at the pinned revision
-/// closes the gap.
-///
-/// `CON-203` records the same thing from the other side: the projection *"MAY be
-/// a deterministic DID resolver representation of the existing root key"* and
-/// *"The corresponding `did:crdt` method change is a Tier-1-gated dependency."*
-///
-/// When that box closes, this test fails — which is the point. It is the one
-/// place that has to change, and it should change deliberately.
+/// Not "does a document exist" — F3's original tests answered that and the path
+/// was still unverifiable. This resolves the document and looks for exactly what
+/// a verifier looks for: a `JsonWebKey` at `{did}#jwk-0`, present in
+/// `assertionMethod`.
 #[test]
-fn the_closure_cannot_yet_authorise_the_key_its_grants_name() {
-    let created = issuer::create(&home_key(7, 9), ACCOUNT_AUTHORITY, NOW_MS).expect("constructs");
-    assert!(
-        !created.authorises_grants,
-        "if this now passes, did:crdt has gained the JsonWebKey projection — \
-         open the CON-206 step 6 path deliberately rather than by deleting this"
-    );
+fn the_resolved_document_authorises_the_key_grants_are_signed_under() {
+    let key = home_key(7, 9);
+    let created = issuer::create(&key, ACCOUNT_AUTHORITY, NOW_MS).expect("constructs");
+    assert!(created.authorises_grants);
+
+    // Replayed the way a recipient does: bootstrap from the genesis key, which
+    // recomputes the self-certifying identifier, then merge the bundle with
+    // every signature verified. Anything weaker would test the wallet's own
+    // in-memory document rather than what actually travels.
+    let genesis = created
+        .closure
+        .deltas
+        .iter()
+        .find(|d| d.parents.is_empty())
+        .expect("a closure has one genesis");
+    let did_crdt::core::delta::DeltaOp::AddVerificationMethod { public_key_multibase, .. } =
+        &genesis.op
+    else {
+        panic!("the genesis adds a verification method");
+    };
+    let (mut doc, _) =
+        did_crdt::core::document::Document::new(public_key_multibase).expect("genesis is admissible");
+    assert_eq!(doc.did.as_str(), created.did, "the closure recomputes the DID it claims");
+    doc.merge_verified_bundle(did_crdt::core::recon::ClosureBundle {
+        target: created.closure.target.clone(),
+        deltas: created.closure.deltas.clone(),
+    })
+    .expect("every delta in the closure verifies");
+
+    let resolved = doc.resolve().expect("resolves").did_document.expect("not deactivated");
+
+    let expected = format!("{}#jwk-0", created.did);
+    let method = resolved
+        .verification_method
+        .iter()
+        .find(|m| m.id == expected)
+        .expect("the issuer key resolves at #jwk-0");
+
+    assert_eq!(method.r#type, "JsonWebKey");
+    assert!(resolved.assertion_method.iter().any(|r| r.as_str() == Some(expected.as_str())));
+    assert!(method.public_key_jwk.is_some());
+
+    // And it is this account's key, not some other.
+    let jwk = method.public_key_jwk.as_ref().unwrap();
+    let expected_x = selfsame_app_identity::codec::b64url(&key.verifying_key().to_bytes());
+    assert_eq!(jwk["x"], expected_x);
 }
 
-/// The genesis authorises a fragment the grant does not use, which is the
-/// mechanism behind the gate above rather than a restatement of it.
+/// The genesis key still only authenticates, and that is deliberate.
+///
+/// The identifier is a hash of the genesis operation including its
+/// relationships, so widening it there would move every DID ever derived. The
+/// assertion capability is a separate method over the same key, which is why
+/// there are three deltas and not two.
 #[test]
-fn the_genesis_fragment_is_not_the_one_a_grant_is_signed_under() {
+fn the_genesis_key_is_not_the_one_that_asserts() {
     let created = issuer::create(&home_key(8, 10), ACCOUNT_AUTHORITY, NOW_MS).expect("constructs");
-
-    // What a grant signs under, from `grant::header`.
-    let grant_kid = format!("{}#jwk-0", created.did);
-    // What `selfsame-core` puts in the genesis.
-    let genesis_method = format!("{}#key-0", created.did);
-
-    assert_ne!(grant_kid, genesis_method);
+    assert_eq!(created.deltas.len(), 3);
 }

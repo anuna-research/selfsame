@@ -178,7 +178,7 @@ async fn the_whole_happy_path_runs_over_the_three_routes() {
     let document = profile::resolve_closure(&deltas, &root_pk).unwrap();
     let resolved = document.resolve().unwrap().did_document.unwrap();
     let wanted = identity::key_multibase(&device().verifying_key().to_bytes());
-    assert!(resolved.verification_method.iter().any(|vm| vm.public_key_multibase == wanted));
+    assert!(resolved.verification_method.iter().any(|vm| vm.public_key_multibase.as_deref() == Some(wanted.as_str())));
 
     // ── HP-5: revoke, and the closure stops authorising the device ───────
     let revoke = identity::revoke_device(
@@ -209,7 +209,7 @@ async fn the_whole_happy_path_runs_over_the_three_routes() {
     let document = profile::resolve_closure(&deltas, &root_pk).unwrap();
     let resolved = document.resolve().unwrap().did_document.unwrap();
     assert!(
-        !resolved.verification_method.iter().any(|vm| vm.public_key_multibase == wanted),
+        !resolved.verification_method.iter().any(|vm| vm.public_key_multibase.as_deref() == Some(wanted.as_str())),
         "REQ-010: a revoked method must leave the authorised set"
     );
     // The label survives revocation, so the revoke screen can still name what

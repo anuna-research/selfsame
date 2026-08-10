@@ -36,6 +36,7 @@
 
 use did_crdt::core::delta::{
     default_relationships, DeltaOp, SignedDelta, SigningKey as DidSigningKey, SuiteType,
+    VerificationRelationship,
 };
 use did_crdt::core::document::Document;
 use did_crdt::core::hlc::HlcTimestamp;
@@ -172,6 +173,45 @@ pub fn declare_profile(
         DeltaOp::SetDocumentData {
             key: PROFILE_KEY.to_owned(),
             value: serde_json::Value::String(PROFILE_VALUE.to_owned()),
+        },
+        now_ms,
+    )
+}
+
+/// Authorise the identity's own key to make assertions — `SPEC-004` `CON-206`
+/// step 6.
+///
+/// A `did:crdt` genesis creates `#key-0` with `Authentication` alone, and the
+/// DID is a hash of that operation *including its relationships* — so the
+/// genesis cannot be changed without changing every identifier ever derived.
+/// There is also no operation that adds a relationship to an existing method.
+///
+/// So an identity that must **issue credentials** authorises its own key a
+/// second time, under a fresh fragment, carrying `AssertionMethod`. The key
+/// material is identical; what differs is what the document says it may do.
+///
+/// The resolver then projects that method into the `JsonWebKey` twin the W3C VC
+/// JOSE/COSE profile requires, at `#jwk-0`, because it is the first
+/// assertion-capable method. `CON-206` step 6 resolves there.
+///
+/// This is only for identities that issue. A `SPEC-001` root key authenticates
+/// and controls; it does not assert, and calling this on one would widen its
+/// authority for no reason.
+pub fn add_assertion_method(
+    doc: &Document,
+    controller: &SigningKey,
+    fragment: &str,
+    now_ms: u64,
+) -> Result<SignedDelta, IdentityError> {
+    let public = controller.verifying_key().to_bytes();
+    sign_on_frontier(
+        doc,
+        controller,
+        DeltaOp::AddVerificationMethod {
+            id: format!("{}#{fragment}", doc.did),
+            public_key_multibase: key_multibase(&public),
+            suite_type: SuiteType::Ed25519Signature2020,
+            relationships: vec![VerificationRelationship::AssertionMethod],
         },
         now_ms,
     )
