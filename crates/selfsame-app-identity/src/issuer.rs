@@ -24,29 +24,26 @@
 //! it could become one — the URI is computed here from the DID that stage one
 //! produced, not accepted from a caller.
 //!
-//! # The closure this produces cannot yet authorise the key its grants name
+//! # Three deltas, because a genesis key cannot assert
 //!
-//! **This is why issuance is gated, and the gate is not a formality.**
+//! `CON-206` step 6 requires the grant's `kid` to name a **`JsonWebKey`** in the
+//! issuer's `assertionMethod`, and `grant::header` signs under `{did}#jwk-0`.
+//! Genesis creates `{did}#key-0`, an `Ed25519Signature2020` method in
+//! `Authentication`, and neither half of that can be changed: the DID is a hash
+//! of the genesis operation *including its relationships*, and `did:crdt` has no
+//! operation that adds a relationship to an existing method.
 //!
-//! `CON-206` step 6 requires the grant's `kid` to name a `JsonWebKey` in the
-//! issuer's `assertionMethod`, and `grant::header` signs under
-//! `{did}#jwk-0`. What genesis creates is `{did}#key-0`, an
-//! `Ed25519Signature2020` method in `Authentication` — so every bundle this
-//! module could produce fails step 6.
+//! So the identity authorises its own key a second time under a fresh fragment,
+//! carrying `AssertionMethod`. Same key material; what differs is what the
+//! document says it may do. The resolver then projects that method into the
+//! `JsonWebKey` twin the VC JOSE/COSE profile requires, at `#jwk-0`, because it
+//! is the first assertion-capable method — and step 6 resolves there.
 //!
-//! It cannot be repaired here. `did_crdt`'s `SuiteType` has two variants,
-//! neither of which is `JsonWebKey`, so no delta at the pinned revision creates
-//! a method of the required type. `CON-203` says as much in its own words: the
-//! projection *"MAY be a deterministic DID resolver representation of the
-//! existing root key"* and *"The corresponding `did:crdt` method change is a
-//! Tier-1-gated dependency."* That dependency is an open box in this
-//! specification's gate.
-//!
-//! So [`create`] builds what it can and [`IssuerIdentity::authorises_grants`]
-//! reports honestly that the result is not yet sufficient. The caller refuses
-//! rather than emitting a bundle no verifier can accept — a grant that fails at
-//! the recipient is worse than one that was never issued, because the failure
-//! surfaces later and somewhere else.
+//! An earlier version of this module produced only genesis and the alias update
+//! and gated issuance, because the projection did not exist upstream. It does
+//! now, and the gate opens on evidence rather than on assumption:
+//! [`IssuerIdentity::authorises_grants`] is computed by resolving the document
+//! and looking for what step 6 will look for, not asserted by a constant.
 //!
 //! # What this does not do
 //!
@@ -68,6 +65,20 @@ use selfsame_core::identity;
 
 use crate::alias;
 
+/// The fragment the assertion-capable method is authorised under.
+///
+/// Not `#jwk-0`: that identifier belongs to the resolver's projection, and a
+/// delta claiming it would be asserting a rendering rather than a key. The
+/// projection numbers twins by position among asserting methods, so this one
+/// becomes `#jwk-0` by being the only one.
+const ASSERTION_FRAGMENT: &str = "key-1";
+
+/// Where `CON-206` step 6 expects the issuer's key to resolve.
+const GRANT_METHOD_FRAGMENT: &str = "#jwk-0";
+
+/// The verification-method type that step 6 requires.
+const JSON_WEB_KEY_TYPE: &str = "JsonWebKey";
+
 /// A newly created application-account identity, ready to issue from.
 pub struct IssuerIdentity {
     /// The `did:crdt` identifier, recomputable by a verifier from the genesis.
@@ -83,17 +94,14 @@ pub struct IssuerIdentity {
     /// a verifier cannot confirm fails step 9 rather than step 5, which is a
     /// harder failure to read.
     pub deltas: Vec<SignedDelta>,
-    /// Whether the closure can authorise the key this account's grants are
-    /// signed under.
+    /// Whether the resolved document authorises the key this account's grants
+    /// are signed under.
     ///
-    /// `false` at the pinned `did:crdt` revision, always, and the reason is
-    /// upstream rather than here: `CON-206` step 6 wants a `JsonWebKey` at
-    /// `#jwk-0` in `assertionMethod`, and the method cannot express one. See
-    /// this module's header.
-    ///
-    /// It is a field rather than an assumption so that a caller has to look at
-    /// it, and so the day the upstream box closes there is exactly one place
-    /// that stops returning `false`.
+    /// **Computed, not assumed.** [`create`] resolves the document it just built
+    /// and looks for exactly what `CON-206` step 6 looks for: a `JsonWebKey` at
+    /// `{did}#jwk-0` present in `assertionMethod`. A constant here would be a
+    /// claim about the pinned `did:crdt` revision that nothing rechecks; a
+    /// resolution is the same question the verifier will ask.
     pub authorises_grants: bool,
     /// The closure a `CON-219` bundle carries as `issuerClosure`.
     ///
@@ -145,14 +153,34 @@ pub fn create(
     let alias_delta = identity::set_also_known_as(&doc, home_key, &acct_uri, now_ms)
         .map_err(|_| IssuerError::Construction)?;
 
-    let target = alias_delta.content_hash().map_err(|_| IssuerError::Construction)?;
-    let deltas = vec![genesis, alias_delta];
+    // Stage three: authorise this key to assert, so the resolver has something
+    // to project as `#jwk-0`. Genesis cannot carry `AssertionMethod` without
+    // changing the identifier, so it is a separate method over the same key.
+    doc.merge_verified_delta(alias_delta.clone()).ok();
+    let assertion_delta =
+        identity::add_assertion_method(&doc, home_key, ASSERTION_FRAGMENT, now_ms + 1)
+            .map_err(|_| IssuerError::Construction)?;
+
+    let target = assertion_delta.content_hash().map_err(|_| IssuerError::Construction)?;
+    let deltas = vec![genesis, alias_delta, assertion_delta.clone()];
     let closure = ClosureBundle { target, deltas: deltas.clone() };
 
-    // The genesis authorises `#key-0` for authentication; a grant is signed
-    // under `#jwk-0` and step 6 wants a `JsonWebKey` there. No delta at this
-    // revision closes that gap — see the module header.
-    let authorises_grants = false;
+    // Ask the document the question the verifier will ask, rather than
+    // asserting the answer. If `did:crdt`'s projection is absent or changes
+    // shape, this reports `false` and the caller refuses — which is how F3's
+    // defect should have surfaced the first time.
+    doc.merge_verified_delta(assertion_delta).ok();
+    let authorises_grants = doc
+        .resolve()
+        .ok()
+        .and_then(|r| r.did_document)
+        .is_some_and(|d| {
+            let expected = format!("{did}{GRANT_METHOD_FRAGMENT}");
+            d.assertion_method.iter().any(|r| r.as_str() == Some(expected.as_str()))
+                && d.verification_method
+                    .iter()
+                    .any(|m| m.id == expected && m.r#type == JSON_WEB_KEY_TYPE)
+        });
 
     Ok(IssuerIdentity { did, acct_uri, deltas, closure, authorises_grants })
 }

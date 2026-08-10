@@ -163,7 +163,7 @@ fn a_genesis_parented_device_converges_with_the_rest_of_the_identity() {
     let resolved = doc.resolve().unwrap().did_document.unwrap();
     let wanted = identity::key_multibase(&offer.device_key);
     assert!(
-        resolved.verification_method.iter().any(|vm| vm.public_key_multibase == wanted),
+        resolved.verification_method.iter().any(|vm| vm.public_key_multibase.as_deref() == Some(wanted.as_str())),
         "the concurrently-added device must appear in the merged document"
     );
     // …and the pre-existing device is still there, which is what "converges"

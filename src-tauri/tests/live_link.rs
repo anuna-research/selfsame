@@ -115,7 +115,7 @@ async fn authorise_a_waiting_client() {
         .unwrap();
     let wanted = identity::key_multibase(&offer.device_key);
     assert!(
-        resolved.verification_method.iter().any(|vm| vm.public_key_multibase == wanted),
+        resolved.verification_method.iter().any(|vm| vm.public_key_multibase.as_deref() == Some(wanted.as_str())),
         "REQ-015: the client's key must be authorised in the published closure"
     );
     println!("  verified     the client's key is authorised");
@@ -149,7 +149,7 @@ async fn authorise_a_waiting_client() {
             .unwrap();
         let resolved = after.resolve().unwrap().did_document.unwrap();
         assert!(
-            !resolved.verification_method.iter().any(|vm| vm.public_key_multibase == wanted),
+            !resolved.verification_method.iter().any(|vm| vm.public_key_multibase.as_deref() == Some(wanted.as_str())),
             "REQ-010: a revoked method must leave the authorised set"
         );
         // REQ-021: the label survives revocation, so the revoke screen can name
