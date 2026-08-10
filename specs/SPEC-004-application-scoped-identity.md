@@ -1005,21 +1005,47 @@ mode only.
   state. The default, and required of any application whose account existence
   is itself confidential.
 - `named` — the scope and hierarchy version are returned to any caller that
-  names the account, with no authentication. Permitted because **the scope
-  confers no authority**: it selects a child of a hierarchy the caller cannot
-  derive without the recovery secret. A caller given a scope it has no root for
-  derives a home DID that fails the reciprocal binding in
-  [[SPEC-004-application-scoped-identity#CON-204]], and a hostile responder
-  that returns a wrong scope causes a refusal, never an impersonation. The
-  failure direction is denial of service, which this specification accepts, and
-  never takeover, which it does not.
+  names the account, with no authentication.
 
-An application declaring `named` SHALL rate-limit the lookup, and accepts that
-account existence and the account-to-scope mapping become publicly enumerable
-by name. That disclosure is the mode's whole cost and SHALL be weighed against
-what the application already publishes: where the account name and its
+**The selector is the account's human-readable alias**
+([[SPEC-004-application-scoped-identity#CON-212]],
+[[SPEC-004-application-scoped-identity#REQ-218]]), and nothing else. An
+application declaring `named` SHALL therefore require every account to hold one,
+and SHALL declare `authenticated` if any account may exist without a name. No
+other value can serve: the `accountScopeId` is what is being looked up, and the
+stable alias of [[SPEC-004-application-scoped-identity#CON-203]] is a function of
+the home DID the caller is trying to derive. Both are circular. A restored wallet
+holds the recovery phrase and the person's memory of their own name, and this
+requirement asks for nothing more.
+
+The alias is mutable, and that is admissible **because it is a lookup key rather
+than a derivation input**. A rename re-points the mapping and changes no derived
+value. This is the same property that makes deriving *from* a username
+inadmissible ([[SPEC-004-application-scoped-identity#ADR-210]]) and looking up
+*by* one fine, and the distinction is the whole reason this works.
+
+**The `accountScopeId` is not a secret, and no security property rests on its
+confidentiality.** This is stated here rather than left implied, because the
+construction invites the opposite reading: `accountScopeId` is a required KDF
+context for `account_node`, so an attacker holding a stolen `hierarchy_root` and
+lacking only the scope cannot derive an account key, and a reader may conclude
+that withholding the scope is a control. **It is not one, and SHALL NOT be
+treated as one.** The recovery secret is the only secret in this hierarchy. A
+party that holds `hierarchy_root` is already in possession of the identity;
+whether it must additionally fetch a scope is a speed bump, not a boundary, and
+[[SPEC-004-application-scoped-identity#ADR-223]] states the blast radius on that
+basis in both modes.
+
+What the mode does cost is **disclosure and enumeration**: account existence and
+the account-to-scope mapping become publicly queryable by name, so an attacker
+who knows or can guess a person's account name learns that the account exists and
+what its scope and hierarchy version are. An application declaring `named` SHALL
+rate-limit the lookup and SHALL weigh that disclosure against what it already
+publishes — where the account name and its
 [[SPEC-004-application-scoped-identity#CON-204]] binding are already public, it
-adds nothing; where accounts are private, `named` is the wrong mode.
+adds little; where account existence is confidential, `named` is the wrong mode.
+A hostile responder that returns a wrong scope causes a derivation the reciprocal
+binding refuses, which is a denial of service and not an impersonation.
 
 `named` exists because an application whose *only* account credential is the
 Selfsame identity cannot authenticate a caller who has just restored and has no
@@ -1340,12 +1366,19 @@ person's own wallet may do that.
 
 **Fail closed, and do not guess.** A party that cannot obtain an account's
 hierarchy version from its record or a protected backup SHALL fail with
-`DerivationProvenanceUnavailable`
-([[SPEC-004-application-scoped-identity#CON-202]]), derive nothing, and leave
-the account untouched. It SHALL NOT assume the version its own code implements,
-try several versions and select whichever produces a resolvable DID — which
-would make a resolver's availability a derivation input — prompt the person for
-a version, or create a replacement identity.
+`DerivationProvenanceUnavailable`; one that obtains a value it does not
+recognise, or one failing the representation rule, SHALL fail with
+`DerivationVersionUnsupported`
+([[SPEC-004-application-scoped-identity#CON-202]]). In both cases it SHALL
+derive nothing and leave the account untouched, and it SHALL NOT assume the
+version its own code implements, coerce a near-miss spelling, try several
+versions and select whichever produces a resolvable DID — which would make a
+resolver's availability a derivation input — prompt the person for a version, or
+create a replacement identity.
+
+Assuming the current version is the specific failure this requirement exists to
+forbid: it is the one guess that always succeeds in producing *an* identity, and
+on an empty restore it produces the wrong one silently.
 
 **Detect substitution, not only absence.** Before using a derived home key for
 an account it has seen before, a wallet SHALL recompute the home DID and
@@ -2258,13 +2291,27 @@ octets is the same width as every interior node of the tree, so
    yielded one persona's Ed25519 root signing key and **no SPEC-004 material at
    all** — precisely because the hierarchy rooted at a seed custody did not
    hold. *After* version 2 the same compromise additionally yields
-   `hierarchy_root`, and with it every `application_node`, `account_node` and
-   `home_signing_seed` under that persona, for every application, past and
-   future, unrevocably. The blast radius did **not** already exist; it is
-   created here. `EXP-001-findings` says the same thing about every resolution
-   of `FINDING-016`: *"the choice widens what a passcode compromise yields, so
-   it wants the security sign-off the Tier-1 gate already requires."* Recorded
-   in the threat model rather than only here.
+   `hierarchy_root`, and with it every `application_node` under that persona,
+   for every application, past and future, unrevocably. The blast radius did
+   **not** already exist; it is created here. `EXP-001-findings` says the same
+   thing about every resolution of `FINDING-016`: *"the choice widens what a
+   passcode compromise yields, so it wants the security sign-off the Tier-1 gate
+   already requires."* Recorded in the threat model rather than only here.
+
+   **Counted conservatively, that is every account key as well.** Reaching an
+   `account_node` from an `application_node` additionally requires that
+   account's `accountScopeId`, so an attacker holding only the sealed root
+   cannot *immediately* derive account keys for accounts whose scopes it has not
+   obtained. That gap SHALL NOT be counted as a mitigation.
+   [[SPEC-004-application-scoped-identity#REQ-217]] rules that the scope is not
+   a secret and that no security property rests on its confidentiality; under
+   `accountScopeLookup: named` it is returned to anyone who can name the
+   account, and under `authenticated` the attacker obtains it by another route
+   or waits. Either way it is a delay, not a boundary. The honest statement of
+   the radius is the full one in both modes: **a compromised `hierarchy_root` is
+   a compromised identity.** An earlier draft of this consequence asserted the
+   full radius without noticing the scope was missing from the derivation; it is
+   stated deliberately now, on the ruling above, rather than by omission.
 2. **What it still does not yield.** Neither the mnemonic nor `bip39_seed` is
    retained, so a custody compromise does not produce a recovery phrase, and
    `hierarchy_root` is not derivable from the persona root or vice versa.
@@ -2712,11 +2759,35 @@ home_signing_seed =
   KDF(account_node, "home-signing-key", "", 32)
 ```
 
-**Closed error token.** A deriving party that cannot establish the hierarchy
-version for an account it is restoring SHALL fail with
-`DerivationProvenanceUnavailable` and derive nothing. It is the only token this
-contract defines, it is opaque, and it distinguishes no downstream condition —
-see [[SPEC-004-application-scoped-identity#REQ-232]] for when it is raised.
+**The hierarchy version's representation.** `hierarchyVersion` is a JSON number,
+an integer, with no leading zero, no sign, no fraction and no exponent. In this
+version of the specification the only recognised value is exactly `2`. The
+strings `"2"` and `"v2"`, the number `2.0`, and any other spelling are **not**
+that value and SHALL NOT be coerced to it. Fixing this is not pedantry: the
+value selects a derivation tree, two implementations that disagree about
+whether `"2"` is `2` derive different identities from the same record, and a
+coercion that silently succeeds is worse than a refusal because it produces a
+wrong identity rather than an error.
+
+**Closed error tokens.** This contract defines two, both opaque and neither
+distinguishing any downstream condition:
+
+- `DerivationProvenanceUnavailable` — the hierarchy version for an account
+  being restored **cannot be obtained** at all: absent from the record and from
+  any protected backup.
+- `DerivationVersionUnsupported` — a hierarchy version **was obtained** and this
+  implementation does not define that tree. Raised for a well-formed value this
+  version does not recognise, such as `3`, and for any value failing the
+  representation rule above.
+
+The two are separate because the situations differ in what a person can do about
+them. A missing version may be recoverable from another carrier; an unsupported
+one means the account was derived by software newer than the reader, and no
+retry, resolver, or backup changes that. Collapsing them would tell an operator
+to go looking for a record that exists and is simply too new.
+
+A party raising either SHALL derive nothing and leave the account untouched. See
+[[SPEC-004-application-scoped-identity#REQ-232]].
 
 `home_signing_seed` is interpreted as an RFC 8032 Ed25519 private seed. It SHALL
 be used only for the application-account home DID's assertion and control
@@ -5429,8 +5500,10 @@ CON-212, CON-214, CON-215, CON-219, CON-220, CON-221, CON-222, CON-223, and
 CON-225, and each of CON-206's thirteen numbered steps, and require at least one
 corpus case whose `expect.reject` names it. A token or step with no case fails
 this test — it is not reported as a warning. CON-202 joined this list in
-0.14.0 with `DerivationProvenanceUnavailable`; a contract that defines a token
-and is absent from the enumeration has a refusal no corpus case can express.
+0.14.0 with `DerivationProvenanceUnavailable` and `DerivationVersionUnsupported`;
+a contract that defines a token and is absent from the enumeration has a refusal
+no corpus case can express. The two CON-202 tokens require separate cases: a
+corpus that covered only one would let an implementation collapse them.
 
 Require all seven OQ-207 item 5 groups and the KDF, alias, VC, holder-binding,
 revocation, account-scope, and username groups to be present in the one file.
@@ -5472,12 +5545,19 @@ corpus that carried one would invite an implementation to derive from it.
 derived value under one persona to be a prefix, suffix, or truncation of the
 corresponding value under the other.
 
-*Negative — version separation.* Derive under the version-1 salt
-(`selfsame/application-account-key-hierarchy/v1`) and the version-2 salt over
-otherwise identical inputs and require unrelated output at every node,
-confirming that a partial version bump cannot produce a tree that is half of
-each. The v1 salt appears here as a test fixture only; CON-202 no longer defines
-that hierarchy.
+*Negative — version separation, against the real version 1.* Compute the
+**actual** hierarchy-version-1 value — `KDF` under the salt
+`selfsame/application-account-key-hierarchy/v1` rooted at `bip39_seed` — and the
+version-2 value — `KDF` under the `/v2` salt rooted at `hierarchy_root` — from
+one mnemonic, `applicationId` and `accountScopeId`, and require unrelated output
+at every node.
+
+Both the salt **and the root** must differ, because both did. Varying only the
+salt while feeding `hierarchy_root` to each computes a hybrid that never existed
+in either version: it would satisfy the stated separation claim while leaving
+the real v1 tree untested, which is the failure mode this clause exists to
+avoid. The v1 salt and the seed-rooted derivation appear here as test fixtures
+only; CON-202 no longer defines that hierarchy.
 
 *Structural — the seed is not reachable.* Assert on the **public derivation
 signature**, not on runtime behaviour: the entry point that produces
@@ -5497,14 +5577,29 @@ This is the acceptance test for the flow the hierarchy exists to serve, and no
 earlier test covers it: every other derivation test drives the KDF directly or
 assumes stored state.
 
-*Positive — the whole restore.* Enrol an account and record its home DID. Erase
-**all** wallet-local state. Re-create the wallet from the twelve recovery words
-alone. Authenticate to — or, under `accountScopeLookup: named`, merely name —
-the application, obtain `{accountScopeId, hierarchyVersion}` from its account
-record, derive, and require the **byte-identical home DID**, an accepted
+*Positive — the whole restore.* Enrol an account, give it a human-readable
+alias, and record its home DID. Erase **all** wallet-local state. Re-create the
+wallet from the twelve recovery words alone. Authenticate to the application —
+or, under `accountScopeLookup: named`, name **the account** by that alias —
+obtain `{accountScopeId, hierarchyVersion}` from its account record, derive, and
+require the **byte-identical home DID**, an accepted
 [[SPEC-004-application-scoped-identity#CON-204]] binding, and **no** new
 enrolment, no fingerprint prompt, and no person-visible question about scopes,
-versions, or personas.
+versions, or personas. The person supplies twelve words and their own account
+name; that is the complete list of what they are asked for.
+
+*Positive — several accounts at one application.* Enrol two accounts at one
+`applicationId` with distinct aliases and distinct scopes, and record both home
+DIDs. After the same total erasure, name each account in turn and require each
+lookup to return that account's own scope and each derivation to reproduce that
+account's own home DID. A lookup keyed on the application rather than the
+account cannot distinguish them, and this case is what detects it.
+
+*Negative — an unnamed account under `named`.* Require an application declaring
+`accountScopeLookup: named` to be rejected at profile recognition, or its
+account creation to be refused, if an account may exist with no human-readable
+alias — there is no other selector, so such an account would be unrecoverable
+by the mode its own profile declares.
 
 *Positive — persona is not carried.* Assert that the restore above completes
 with the account record supplying no persona index, and that the wallet derives
@@ -5522,6 +5617,16 @@ back to the version its code implements, and does **not** derive under several
 versions and select whichever produces a resolvable DID — assert the second by
 running it with every resolver unreachable and requiring the same refusal, since
 a resolver-dependent implementation would behave differently.
+
+*Negative — an unsupported or misspelled version fails closed, and differently.*
+Present records carrying `hierarchyVersion` values of `3`, `"2"`, `"v2"` and
+`2.0` in turn, and require `DerivationVersionUnsupported` for each, with nothing
+derived. Require specifically that `"2"` and `2.0` are **not** coerced to `2`:
+a coercion succeeds in producing an identity, and on an empty restore it
+produces the wrong one silently. Require the token to differ from
+`DerivationProvenanceUnavailable`, since a value that was obtained and is too
+new is not a value that is missing, and an operator told the wrong one goes
+looking for a record that already exists.
 
 *Negative — substitution is detected.* For an account the wallet has seen
 before, substitute a well-formed but incorrect hierarchy version and require the
@@ -5731,9 +5836,14 @@ mechanism.
   branch. Recovery-secret rotation is outside v1 and must be specified before
   production.
 - **Compromise of a custodian's sealed `hierarchy_root` compromises every
-  application branch under that persona** — every `application_node`,
-  `account_node` and `home_signing_seed`, for every application the holder can
-  name, past and future, unrevocably. Hierarchy version 1 had no such asset:
+  application branch under that persona** — every `application_node` directly,
+  and every `account_node` and `home_signing_seed` once the holder obtains the
+  corresponding `accountScopeId`, which
+  [[SPEC-004-application-scoped-identity#REQ-217]] rules is not a secret and
+  which `accountScopeLookup: named` returns to anyone who can name the account.
+  The scope's confidentiality is **not** claimed as a control and SHALL NOT be
+  relied upon as one. For every application the holder can name, past and
+  future, unrevocably. Hierarchy version 1 had no such asset:
   the hierarchy rooted at a seed no custodian retained, so a custody compromise
   reached no SPEC-004 material at all. Version 2 creates this asset in order to
   make derivation possible without the recovery phrase, and
@@ -6456,6 +6566,42 @@ combination; that is an engineering conclusion, not a legal novelty claim.
   yet recorded** and this entry is incomplete until it is. `CON-226`'s corpus is
   never edited to match an implementation. Note the filename's `v1` names the
   corpus profile, not the hierarchy version, and the two now differ.
+
+  *Cross-model review, 2026-08-10.* A different-family reviewer assessed this
+  amendment and returned two P1 and three P2 findings. All five were accepted;
+  four changed the document and one was dispositioned as a design ruling by the
+  owner.
+
+  - **P1 — `named` defined no account selector**, and `TEST-245` compounded it
+    by permitting a caller to name the *application*. An application with two
+    accounts could not be restored: nothing distinguished them. `REQ-217` now
+    fixes the selector as the account's human-readable alias
+    ([[SPEC-004-application-scoped-identity#CON-212]]) and requires an
+    application declaring `named` to give every account one; `TEST-245` gains a
+    two-account case and an unnamed-account refusal. The alias is mutable and
+    that is admissible because it is a lookup key, never a derivation input.
+  - **P1 — the "scope confers no authority" claim was false** against an
+    attacker holding a stolen `hierarchy_root` and lacking only the scope: for
+    that attacker the scope is the missing KDF context, and `named` hands it
+    over. **Dispositioned by the owner as a design ruling rather than repaired:
+    the `accountScopeId` is not a secret, and no security property rests on its
+    confidentiality.** `REQ-217` now states that ruling explicitly, so the
+    reading is closed rather than left for the next reviewer to re-derive, and
+    records what the mode does cost — disclosure and enumeration by account
+    name. The recovery secret is the only secret in this hierarchy.
+  - **P2 — the blast-radius statements over-claimed** by omitting that
+    `account_node` additionally requires the scope. `ADR-223` consequence 1 and
+    the threat model now state the derivation accurately *and* keep the full
+    radius, on the ruling above: the gap is a delay, not a boundary, and is not
+    counted as a mitigation.
+  - **P2 — `hierarchyVersion` had no representation or unsupported-value rule.**
+    `CON-202` now fixes it as a JSON integer, recognises only `2`, forbids
+    coercing `"2"`, `"v2"` or `2.0`, and adds a second closed token,
+    `DerivationVersionUnsupported`, distinct from the missing-value token
+    because a version too new to read is not a version that is absent.
+  - **P2 — `TEST-244`'s version-separation clause tested a hybrid.** It varied
+    only the salt, but hierarchy version 1 also rooted at `bip39_seed`. The
+    clause now varies salt *and* root, so it compares the real v1 tree.
 
   Every Tier-1 gate box remains open, and three were added.
 
