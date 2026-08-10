@@ -75,6 +75,16 @@ pub enum NetError {
     /// A response arrived and is not one the contract admits.
     #[error("response refused: {0}")]
     Refused(&'static str),
+    /// The authority answered, and holds no record for this resource.
+    ///
+    /// Distinct from [`NetError::Refused`] because `CON-221` turns on the
+    /// difference: "the authority holds no binding" is a first enrolment, and
+    /// "the authority could not be asked" must fail closed. A type that could
+    /// not tell them apart would force an implementation either to treat every
+    /// outage as first use — the substitution the fingerprint comparison exists
+    /// to catch — or to refuse every genuine first enrolment.
+    #[error("the account authority holds no record for that account")]
+    NotFound,
     /// The response body exceeded the contract's octet bound.
     #[error("response exceeded the declared octet bound")]
     TooLarge,

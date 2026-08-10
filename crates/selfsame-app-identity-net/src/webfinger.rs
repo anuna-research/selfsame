@@ -70,6 +70,12 @@ pub async fn fetch(acct: &AcctUri) -> Result<Jrd, NetError> {
     if !response.status().is_success() {
         // An authority that holds no record answers 404, and that is the
         // ordinary "not provisioned yet" case CON-206 step 9 fails closed on.
+        // 404 is the authority answering "no such account", which `CON-221`
+        // reads as a first enrolment. Every other unsuccessful status is the
+        // authority failing to answer, which must fail closed instead.
+        if response.status() == reqwest::StatusCode::NOT_FOUND {
+            return Err(NetError::NotFound);
+        }
         return Err(NetError::Refused("the account authority returned no record"));
     }
     if has_content_encoding(&response) {

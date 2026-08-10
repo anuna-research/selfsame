@@ -50,7 +50,9 @@
 use selfsame_app_identity::{
     alias::AcctUri,
     authorise::{self, AuthoriseError, Observation},
-    ceremony, grant, hierarchy, issuer,
+    ceremony,
+    confirm::{self, Applicability, AuthorityState, Response},
+    grant, hierarchy, issuer,
 };
 use selfsame_app_identity_net::state::SignedClosure;
 
@@ -88,6 +90,23 @@ pub struct AuthorisedGrant {
     /// field that it is relying on the bootstrap, which is better than a
     /// silence it would have to infer.
     pub published: bool,
+}
+
+/// A grant that is signed and deliberately not yet handed over.
+///
+/// `CON-221` requires the person to compare fingerprints *"after deriving the
+/// home DID and before writing the grant bundle"*. Signing is not writing the
+/// bundle, and holding the credential here rather than re-deriving means one
+/// presence prompt rather than two.
+///
+/// If the person rejects, this is dropped and nothing was ever transmitted, so
+/// no authority was conferred by having signed it.
+pub struct PendingIssuance {
+    compact: String,
+    identity: issuer::IssuerIdentity,
+    ceremony_id: String,
+    request_id: String,
+    valid_until: i64,
 }
 
 /// What a person is being asked to approve, before they approve it.
@@ -161,13 +180,27 @@ fn token(e: AuthoriseError) -> UiError {
     })
 }
 
+/// What the confirmation screen must show, and whether it must show anything.
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfirmationRequest {
+    /// `"required"`, `"notRequired"`, or `"failClosed"`.
+    pub applicability: String,
+    /// **The value the person compares.** `SPEC-002` `REQ-103` makes the hex the
+    /// normative rendering; the LifeHash beside it is a recognition aid and is
+    /// never the thing being compared.
+    pub comparison_value: Option<String>,
+    /// The account this would be, for the screen to name.
+    pub account: String,
+}
+
 /// Issue the grant. The one place a `SPEC-004` credential is signed.
 ///
 /// `REQ-002`'s gate applies for the same reason it applies to SPEC-001 linking:
 /// an identity whose recovery phrase has not been written down must not be the
 /// issuer of authority that outlives the device holding it.
 #[tauri::command]
-pub async fn app_grant_issue(
+pub async fn app_grant_prepare(
     offer: Vec<u8>,
     profile: Vec<u8>,
     ceremony_profile_digest: String,
@@ -175,7 +208,8 @@ pub async fn app_grant_issue(
     descriptor_digest: String,
     platform_binding_id: Option<String>,
     passcode: String,
-) -> Result<AuthorisedGrant> {
+    session: tauri::State<'_, crate::commands::AppSession>,
+) -> Result<ConfirmationRequest> {
     Custody::require_backup_confirmed()?;
 
     // Every recognition, verification, binding and freshness check is the pure
@@ -232,30 +266,117 @@ pub async fn app_grant_issue(
         Ok::<_, UiError>((compact, identity))
     })??;
 
+    // `CON-221`: determined from **authority state**, never from local cache,
+    // and an unreachable authority is `Unknown` rather than an assumption of
+    // first use. Failing closed here costs a retry; guessing costs the one
+    // comparison that stands between a person and a substituted issuer.
+    let authority = authority_state(&identity.acct_uri).await;
+    let applicability = Applicability::decide(authority, &identity.did);
+
+    let request = ConfirmationRequest {
+        applicability: match &applicability {
+            Applicability::Required(_) => "required",
+            Applicability::NotRequired => "notRequired",
+            Applicability::FailClosed => "failClosed",
+        }
+        .to_owned(),
+        comparison_value: match &applicability {
+            Applicability::Required(d) => Some(d.comparison_value()),
+            _ => None,
+        },
+        account: identity.acct_uri.clone(),
+    };
+
+    if matches!(applicability, Applicability::FailClosed) {
+        return Err(UiError::from("AuthorityUnreachable"));
+    }
+
+    let mut guard = session.0.lock().unwrap_or_else(|p| p.into_inner());
+    guard.pending_issuance = Some(PendingIssuance {
+        compact,
+        identity,
+        ceremony_id: decided.offer.ceremony_id,
+        request_id: decided.offer.request_id,
+        valid_until: decided.valid_until,
+    });
+
+    Ok(request)
+}
+
+/// Release the bundle, once the person has compared what `CON-221` asks them to.
+///
+/// Separate from [`app_grant_prepare`] because the comparison is a person's, and
+/// a single command could only have asked them after the fact. `NotRequired`
+/// still comes through here so there is one place a bundle is written.
+#[tauri::command]
+pub async fn app_grant_confirm(
+    confirmed: bool,
+    session: tauri::State<'_, crate::commands::AppSession>,
+) -> Result<AuthorisedGrant> {
+    let pending = {
+        let mut guard = session.0.lock().unwrap_or_else(|p| p.into_inner());
+        // Taken, not borrowed: one preparation yields at most one bundle, and a
+        // second call finds nothing rather than re-releasing the same grant.
+        guard.pending_issuance.take().ok_or_else(|| UiError::from("NothingToConfirm"))?
+    };
+
+    let response = if confirmed { Response::Confirmed } else { Response::Rejected };
+    if !confirm::outcome(response).may_proceed {
+        // The signed credential is dropped with `pending`. It was never
+        // transmitted, so having signed it conferred nothing.
+        return Err(UiError::from("ConfirmationRejected"));
+    }
+
     // Serialised here rather than in the pure crate, which excludes `serde` on
     // purpose — a second, more permissive JSON parser beside the strict one is
     // the shotgun-parser shape LangSec Principle 5 rules out. The shape is
     // `did_crdt`'s own and `SignedClosure` is the reader for it, so writer and
     // reader cannot drift.
     let closure = serde_json::to_vec(&SignedClosure {
-        target: identity.closure.target.clone(),
-        deltas: identity.closure.deltas.clone(),
+        target: pending.identity.closure.target.clone(),
+        deltas: pending.identity.closure.deltas.clone(),
     })
     .map_err(|_| UiError::from("GrantIssuanceFailed"))?;
 
     let bundle = ceremony::build_bundle(
-        &decided.offer.ceremony_id,
-        &decided.offer.request_id,
-        &compact,
+        &pending.ceremony_id,
+        &pending.request_id,
+        &pending.compact,
         Some(&closure),
     )
     .map_err(|_| UiError::from("GrantIssuanceFailed"))?;
 
     Ok(AuthorisedGrant {
         bundle,
-        account: identity.acct_uri,
-        issuer: identity.did,
-        valid_until: decided.valid_until,
+        account: pending.identity.acct_uri,
+        issuer: pending.identity.did,
+        valid_until: pending.valid_until,
         published: false,
     })
+}
+
+/// Ask the account authority whether it already holds a binding (`CON-204`).
+///
+/// Every failure is `Unknown`, deliberately. `CON-221` requires an unreachable
+/// authority to fail closed rather than be read as first use, and collapsing
+/// "no binding" with "could not ask" is exactly the substitution the comparison
+/// exists to catch.
+async fn authority_state(acct_uri: &str) -> AuthorityState {
+    let Ok(acct) = AcctUri::parse(acct_uri) else { return AuthorityState::Unknown };
+    match selfsame_app_identity_net::webfinger::fetch(&acct).await {
+        Ok(jrd) => {
+            if jrd.aliases.is_empty() {
+                AuthorityState::NoBinding
+            } else {
+                AuthorityState::Bound
+            }
+        }
+        // A 404 is a genuine "no binding"; anything else is "could not ask".
+        Err(e) if is_not_found(&e) => AuthorityState::NoBinding,
+        Err(_) => AuthorityState::Unknown,
+    }
+}
+
+fn is_not_found(e: &selfsame_app_identity_net::NetError) -> bool {
+    matches!(e, selfsame_app_identity_net::NetError::NotFound)
 }
