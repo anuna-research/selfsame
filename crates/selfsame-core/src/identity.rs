@@ -57,6 +57,13 @@ pub const PROFILE_KEY: &str = "profile";
 /// The profile this build enforces.
 pub const PROFILE_VALUE: &str = "anuna-ssi/v1/single-controller";
 
+/// The document-data key `CON-203` sets to the account's `acct:` alias.
+///
+/// An array, because the DID Document member is one, and `CON-203`'s example
+/// carries exactly one entry: a verifier accepts `alsoKnownAs` only when the
+/// document-data update setting it is present in the verified signed closure.
+pub const ALSO_KNOWN_AS_KEY: &str = "alsoKnownAs";
+
 /// Maximum user-visible device label, in characters (REQ-021).
 pub const MAX_DEVICE_LABEL_CHARS: usize = 64;
 
@@ -165,6 +172,41 @@ pub fn declare_profile(
         DeltaOp::SetDocumentData {
             key: PROFILE_KEY.to_owned(),
             value: serde_json::Value::String(PROFILE_VALUE.to_owned()),
+        },
+        now_ms,
+    )
+}
+
+/// Set `alsoKnownAs` to one `acct:` URI — `SPEC-004` `CON-203` stage two.
+///
+/// `CON-203` builds an application-account identity in two stages, and is
+/// explicit about the order: create the genesis and compute the DID from the
+/// public key, *then* apply a root-signed document-data update setting
+/// `alsoKnownAs`. The alias is never an input to genesis or to identifier
+/// derivation, because the alias hashes the DID and a DID that hashed the alias
+/// would have no fixed point.
+///
+/// It lives here rather than in `selfsame-app-identity` for the same reason
+/// `derive_did` does: this module owns `did:crdt` delta construction, and a
+/// second place that built deltas would be a second answer to what a signed
+/// delta is.
+///
+/// The signer is the identity's own controlling key — for `SPEC-004` that is
+/// the application-account home key, not a `SPEC-001` root.
+pub fn set_also_known_as(
+    doc: &Document,
+    controller: &SigningKey,
+    acct_uri: &str,
+    now_ms: u64,
+) -> Result<SignedDelta, IdentityError> {
+    sign_on_frontier(
+        doc,
+        controller,
+        DeltaOp::SetDocumentData {
+            key: ALSO_KNOWN_AS_KEY.to_owned(),
+            value: serde_json::Value::Array(vec![serde_json::Value::String(
+                acct_uri.to_owned(),
+            )]),
         },
         now_ms,
     )

@@ -83,6 +83,7 @@ pub mod didkey;
 pub mod enrollment;
 pub mod grant;
 pub mod hierarchy;
+pub mod issuer;
 pub mod json;
 pub mod jws;
 pub mod pairing;

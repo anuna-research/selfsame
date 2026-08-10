@@ -391,6 +391,10 @@ fn outcome_of(error: &NetError) -> ResolverOutcome {
         // An answer arrived and was not usable. `TooLarge` belongs here too: the
         // resolver is up and serving, it is serving something inadmissible.
         NetError::Refused(why) => ResolverOutcome::Reached(why),
+        // The resolver answered and holds nothing. Reached, not unreachable:
+        // `CON-206` treats "reached and unusable" as closing the bundle path,
+        // and a resolver that says it has no closure has been reached.
+        NetError::NotFound => ResolverOutcome::Reached("the resolver holds no closure"),
         NetError::TooLarge => ResolverOutcome::Reached("the closure exceeded its octet bound"),
         NetError::Recognition(_) => ResolverOutcome::Reached("the closure did not verify"),
     }

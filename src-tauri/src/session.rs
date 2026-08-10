@@ -59,6 +59,12 @@ pub struct Session {
     /// The offer SCREEN-001 is currently displaying, with the secret that
     /// reached it. Dropped on cancel, on authorise, and on expiry.
     pub pending_offer: Option<PendingOffer>,
+    /// A `SPEC-004` grant that is signed and waiting on `CON-221`'s comparison.
+    ///
+    /// Held rather than re-derived so the person meets one presence prompt
+    /// rather than two, and dropped on rejection — it was never transmitted, so
+    /// having signed it conferred nothing.
+    pub pending_issuance: Option<crate::app_grant::PendingIssuance>,
 }
 
 /// An offer that has been fetched, recognised, and signature-verified, and is
@@ -78,7 +84,7 @@ impl Session {
             .ok()
             .and_then(|t| serde_json::from_str(&t).ok())
             .unwrap_or_default();
-        Self { path: Some(path), state, pending_offer: None }
+        Self { path: Some(path), state, pending_offer: None, pending_issuance: None }
     }
 
     fn save(&self) {
