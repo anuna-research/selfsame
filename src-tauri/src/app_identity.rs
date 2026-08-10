@@ -10,7 +10,7 @@
 //! | [`home_fingerprint`] | `selfsame_core::fingerprint` | real |
 //! | [`app_identity_derive`] | `selfsame_app_identity::hierarchy` | real |
 //! | [`provision_username`] | — | **refuses**: no account authority is wired |
-//! | [`revoke_grant`] | — | **refuses**: no home key to sign with |
+//! | [`revoke_grant`] | — | **refuses**: no resolver to read a frontier from or submit to |
 //! | [`revocation_status`] | — | never confirmed: no closure is resolved |
 //!
 //! # A refusal is a computation; a missing command is not
@@ -241,10 +241,28 @@ pub async fn provision_username(
 
 /// `CON-605` — sign and submit a `RevokeCredential` delta (`CON-210`).
 ///
-/// **Always refuses in this build.** `CON-210` steps 2 to 4 sign the delta with
-/// the account's home key, and `FINDING-016` is that this wallet holds no
-/// material from which a SPEC-004 home key can be derived. A wallet that cannot
-/// sign cannot submit, and `RevocationUnavailable` says so.
+/// **Always refuses in this build**, and the reason changed under it.
+///
+/// It used to be `FINDING-016`: steps 2 to 4 sign the delta with the account's
+/// home key, and this wallet held no material from which one could be derived.
+/// `ADR-223` closed that. [`app_grant`](crate::app_grant) derives an
+/// application-account home key inside `Custody::use_hierarchy_root` and signs a
+/// credential with it, in this build — so step 4 is no longer what stops this.
+///
+/// What stops it is the resolver. `CON-210` step 1 resolves and verifies the
+/// issuer's causally complete `did:crdt` state **and frontier**; step 3 sets
+/// that frontier as the delta's parents; step 5 submits to every
+/// profile-declared resolver. None of the three has anywhere to go: no
+/// conforming signed-closure resolver is deployed, which is `G6` of the Path-B
+/// readiness review, and the profile that would declare one is unratified. A
+/// delta with no frontier has no parents to name, so this cannot even construct
+/// the operation, let alone submit it.
+///
+/// `RevocationUnavailable` is therefore still the honest answer, and still the
+/// same token — the refusal did not move, only its cause. That distinction is
+/// worth writing down: the stale reason named a blocker that has since been
+/// fixed, and a reader who checked it would have concluded this command was
+/// ready to work.
 ///
 /// The screen that used to follow this call — `remove-pending` — opens "Signed
 /// on this device and sent." Registering the honest refusal is what makes that
