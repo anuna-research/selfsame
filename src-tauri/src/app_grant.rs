@@ -124,15 +124,6 @@ pub async fn app_grant_review(
     )
     .map_err(token)?;
 
-    // Reported, not consumed: a person looking at a consent screen has decided
-    // nothing, and a review that burned the id would make the offer unusable by
-    // the act of showing it.
-    if crate::replay::is_consumed(&decided.offer.request_id, decided.valid_from)
-        .map_err(|_| UiError::from("GrantIssuanceFailed"))?
-    {
-        return Err(UiError::from("EnrollmentReplay"));
-    }
-
     Ok(GrantRequestView {
         application_id: decided.profile.application_id.as_str().to_owned(),
         permissions: decided.offer.requested_permissions,
@@ -187,18 +178,6 @@ pub async fn app_grant_issue(
         },
     )
     .map_err(token)?;
-
-    // `CON-214` step 5, and it happens **before** the key is touched. A ledger
-    // updated after signing has already let the second signature happen.
-    crate::replay::consume(
-        &decided.offer.request_id,
-        decided.offer.expires_at,
-        decided.valid_from,
-    )
-    .map_err(|e| match e {
-        crate::replay::ReplayError::Replay => UiError::from("EnrollmentReplay"),
-        _ => UiError::from("GrantIssuanceFailed"),
-    })?;
 
     // `CON-205`: independent for every grant, and never derived from the device
     // key, the scope, a timestamp, or recovery material.

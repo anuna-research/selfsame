@@ -35,7 +35,6 @@
 //! [OQ-007]: ../../../../anuna-ssi/specs/SPEC-001-device-key-provisioning.md
 
 pub mod app_grant;
-pub mod replay;
 mod app_identity;
 mod commands;
 pub mod custody;
