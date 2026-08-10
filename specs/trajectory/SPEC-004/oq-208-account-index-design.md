@@ -56,10 +56,23 @@ cryptographic entropy."*
 ## The proposal
 
 ```text
+LP(b) = U32BE(len(b)) || b                      ; b is an octet string
+LP(s) = LP(UTF8(s))                             ; for a Unicode string
+
 account_node = KDF(application_node, "account", U32BE(i), 64)      i = 0, 1, 2 …
+
+  where the HKDF info is exactly  LP("account") || LP(U32BE(i))
+                                = 00 00 00 07 "account" 00 00 00 04 <4 octets>
 ```
 
 `accountScopeId` is deleted. The index never leaves the wallet.
+
+`CON-202` today defines `LP` over Unicode strings only, so a four-octet index has
+no defined framing and each implementation would pick its own — the exact
+divergence `LP`'s injectivity argument exists to prevent. **Broadening `LP` to
+octet strings** fixes it without adding a second operator, and the injectivity
+argument carries over unchanged: the leading length still fixes how many octets
+follow, so no two distinct `(label, context)` pairs encode alike.
 
 **Removing the random value is a privacy gain, not a loss.** A 32-octet random
 that `REQ-217` must forbid from DIDs, logs, JRDs, hints and analytics is a
@@ -81,6 +94,7 @@ direction, and what changes.
 | which account this ceremony is for | app → wallet | implied by `accountScopeId` | `accountHomeDid`, OPTIONAL — absent means *create a new account* | `CON-219` member added; `issuerClosure` is the precedent that an OPTIONAL member is representable here |
 | which account was created | wallet → app | `grant.issuer` (`CON-205`) | **unchanged** — already the home DID | none |
 | enrollment signature coverage | app backend | `offer_core`, 13 members incl. the scope | `offer_core`, 13 members incl. the OPTIONAL DID | `CON-214` signs different bytes; `payloadVersion` → 2 |
+| index refusal at creation | app → wallet | — | `CON-204` failure path, new token `AccountIndexTaken` | one closed error token; the failure path itself already exists |
 | account liveness, leg 1 | wallet ↔ authority | — | `CON-204` WebFinger | none — existing contract |
 | account liveness, leg 2 | wallet ↔ resolver | — | DID resolution at `stateResolvers` | none — existing, but see the dependency below |
 
@@ -116,31 +130,85 @@ unchanged.
 
 ### Four rules
 
-1. **Scan the whole window, never stop at the first miss.** Accounts can sit at
-   `{0, 2}`. `N` is a **specification constant, 16** — not a profile value: it
-   bounds wallet scan cost, not application policy, and a profile member would be
-   a `profileVersion` bump for nothing.
+1. **Scan the whole window, never stop at the first miss** — and the window is a
+   **normative limit, not merely a scan bound**. Accounts can sit at `{0, 2}`.
+   `N = 16` is a specification constant, and an application SHALL refuse to
+   create a seventeenth Selfsame-enabled account for one person, with a defined
+   rejection; [[SPEC-004-application-scoped-identity#REQ-216]]'s *"any number of
+   authenticated application accounts"* is amended to match.
+
+   Stating it only as a scan bound is not enough, and rule 2 does not cover the
+   gap: an account at index 16 makes a scan **complete** while silently omitting
+   it, so the fail-closed rule never fires. That is the silent omission this
+   design exists to prevent, arriving through the ceiling instead of through an
+   outage.
+
+   This is a product decision as much as a drafting one. An application that
+   needs more than sixteen accounts per person cannot adopt the derived index,
+   and should use the authenticated-lookup alternative, which keeps the
+   coordinator and has no such limit.
 2. **Fail closed on the whole scan.** If any index cannot be checked — a resolver
    down, a leg unreachable — return *incomplete* and **no list**. Never a partial
    list. A scan that silently omits an account whose resolver was down, and
    reports success, is the silent orphan this entire line of work exists to
    prevent.
-3. **No gap bookkeeping.** The window scan is the only mechanism. A recorded gap
-   is wallet-local state, and a restore destroys wallet-local state — the exact
-   error the withdrawn `REQ-232` made.
+3. **No gap bookkeeping — but the authority never withdraws a stable-alias JRD.**
+   The window scan stays the only wallet-side mechanism, because a recorded gap
+   is wallet-local state and a restore destroys wallet-local state, which is the
+   error the withdrawn `REQ-232` made. What the scan needs instead is that a
+   **deleted** account stays distinguishable from a **half-created** one, and an
+   obligation on the authority supplies it at no wallet cost:
+
+   | State | leg 1 — JRD | leg 2 — DID doc | scan reads | index |
+   |---|---|---|---|---|
+   | live | present | present | live | in use |
+   | deleted | **retained** | present | live | **burned, never reused** |
+   | half-created | absent | present | not live | free — reused, self-healing |
+
+   Retaining the JRD after deletion burns that index permanently, which is
+   exactly `REQ-217`'s *"a value SHALL never be reassigned to another account"*
+   achieved through a public record rather than a private one. Without it, a
+   deleted account's index is indistinguishable from a free one, and reusing it
+   recreates that account's DID, alias and authorisation namespace — so a
+   surviving pre-deletion grant would read as valid for the new account.
+
+   No privacy is lost: the JRD was already public, and retaining it discloses
+   only that an account existed, which it already disclosed.
 4. **A wallet with local state trusts it, but re-scans on restore and on any
    refusal of a presented key.** Self-correcting without being chatty.
 
-### Concurrent creation converges rather than conflicting
+### Concurrent creation needs arbitration
 
-Two devices creating "a new account" both derive `i = 0` from the same phrase and
-`applicationId`, so both produce the **same** home DID. That is idempotent, not a
-collision, and the index negotiation an earlier draft of this note called for is
-unnecessary.
+An earlier draft of this note claimed concurrent creation *"converges rather than
+conflicting"*. That is true only when both devices are creating **the same**
+account. For two **distinct** accounts at one application — work and personal,
+enrolled concurrently from devices restored to the same phrase — both scans see
+`i = 0` free and both derive the same DID and stable alias.
+[[SPEC-004-application-scoped-identity#CON-204]] *"SHALL reject an alias already
+bound to another account or DID"*, so one creation fails, or the two accounts
+share one identity, which [[SPEC-004-application-scoped-identity#REQ-216]]
+forbids.
 
-A half-created account — DID published, application binding never written —
-fails `CON-204`'s second leg and reads as not-live, so the next creation reuses
-that index. The failure mode is self-healing.
+**Arbitration happens at provisioning, using machinery that already exists.**
+
+```text
+  wallet   scan → lowest free i → derive → sign grant → bundle
+  app      CON-204 provisioning:
+             alias already bound to a DIFFERENT account?
+               yes → refuse: AccountIndexTaken
+                     (CON-204 already revokes the grant on a provisioning failure)
+               no  → provision, publish the JRD, then CON-206
+  wallet   on AccountIndexTaken: i ← i+1, re-derive, re-sign, retry
+```
+
+The application is the arbiter because it is the only party that sees both
+creations. It cannot *propose* an index — the index space is wallet-internal and
+it has no view of it — but it can refuse one, which is all arbitration requires.
+
+`CON-204` already specifies the failure path: *"SHALL return
+`AccountProvisioningFailed`, SHALL NOT retry acceptance, and SHALL revoke the
+exact grant ID"* — so a superseded grant does not linger. The retry is bounded
+by the ceiling below.
 
 ## Footprint
 
@@ -165,7 +233,14 @@ A large diff, and a **smaller specification**. Most of it is deletion.
 
   NEW
   ├─ CON-227                    the recovery scan: window, both legs, partial-result rule
-  └─ REQ-233                    the ceiling N and the never-stop-at-first-miss rule
+  ├─ REQ-233                    the ceiling N as a normative account limit, the
+  │                             never-stop-at-first-miss rule, and the creation refusal
+  └─ AccountIndexTaken          one closed error token on CON-204's existing failure path
+
+  ADDED BY THE CROSS-MODEL REVIEW (see [[oq-208-review-disposition]])
+  ├─ CON-204                    SHALL NOT withdraw a stable-alias JRD on account deletion
+  ├─ CON-202                    LP broadened to octet strings
+  └─ REQ-216                    "any number of accounts" → at most 16 per person
 ```
 
 ## Two things to amend deliberately, not argue around
@@ -197,7 +272,16 @@ before it each looked clean until reviewed, and two were withdrawn after landing
 in a specification. Nothing here should be trusted on the strength of the
 argument above.
 
-Specifically not yet done: no adversarial review, and no cross-model round. The
+**One cross-model round has been run** against `8e06ad7`, returning three P1 and
+one P2 — all accepted, all repaired above, and dispositioned in
+[[oq-208-review-disposition]]. Its finding was structural: every P1 was a
+consequence of removing the coordinator, and the repairs buy back what a
+coordinator supplies for free — arbitration, non-reuse, and an unbounded account
+count, of which the last is now capped rather than bought. **What that round
+assessed is therefore no longer what is here.**
+
+Specifically not yet done: no further round against the repairs, and no
+Anthropic-family pass since. The
 carriage table is checked against `CON-204`, `CON-205`, `CON-206`, `CON-214` and
 `CON-219`, but **not** against PROTO-002/003/004, which own the envelopes these
 payloads travel inside — an `accountScopeId` consumer hiding in one of those
