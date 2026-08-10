@@ -3,13 +3,14 @@ id: SPEC-004
 title: Application- and Account-Scoped Identity — deterministic home keys, acct aliases, portable device grants, and provider discovery
 status: draft
 tier: 1
-version: 0.13.1
+version: 0.14.0-draft
 audience: agent, human, application developer, infrastructure provider
-author: Anuna Research (drafted with Codex, 2026-07-30; amended with Claude, 2026-07-31)
-last-updated: 2026-08-07
+author: Anuna Research (drafted with Codex, 2026-07-30; amended with Claude, 2026-07-31; hierarchy re-rooted with Claude, 2026-08-10)
+last-updated: 2026-08-10
 owner-repo: selfsame
 affects-repos: selfsame, anuna-ssi, did-crdt, adopting applications
-review-gate: not-approved — Tier-1; all ADRs are PROPOSED; cross-model adversarial review, independent KDF/SPAKE2/AEAD vectors, privacy review, and human cryptography/security sign-off are outstanding
+review-gate: not-approved — Tier-1; all ADRs are PROPOSED; cross-model adversarial review, independent KDF/SPAKE2/AEAD vectors, privacy review, and human cryptography/security sign-off are outstanding. **0.14.0 is `-draft` because it does not yet satisfy this document's own Amendment Channels**: a key-derivation change requires new vectors plus renewed security sign-off *for the amendment*, and neither exists. It is a proposal for review, not an accepted version, and the version number does not advance until both land
+amends: IMPL-004 CON-603 becomes non-conforming under REQ-232 and must gain the hierarchy-version record before it can implement this version
 depends-on: did:crdt Method Specification; PROTO-002 Selfsame Rendezvous Protocol v1; PROTO-003 Selfsame Pairing Protocol v1; PROTO-004 Selfsame Ceremony Envelope v1; W3C VC Data Model 2.0; W3C VC JOSE/COSE; W3C DID Core 1.0; optional W3C Bitstring Status List 1.0 projection; RFC 7565; RFC 7033; RFC 3986; RFC 4648; RFC 5234; RFC 5869; RFC 7515; RFC 8032; RFC 8439; RFC 8785; RFC 9382; RFC 9496
 ---
 
@@ -57,6 +58,9 @@ own either building.
 
 ```text
                          one private recovery secret
+                                      |
+         hierarchy_root (ADR-223)  ← sealed; what a wallet holds
+              a sibling of SPEC-001's persona root, not its child
                                       |
                     application/account hierarchy (CON-202)
                          /                            \
@@ -123,7 +127,10 @@ enrollment rather than authenticate the wallet ·
 [[SPEC-004-application-scoped-identity#ADR-221]] name the credential vocabulary
 from a controlled origin and make its digest the authority ·
 [[SPEC-004-application-scoped-identity#ADR-222]] succeed an application
-identifier with a doubly signed, unpublished statement.
+identifier with a doubly signed, unpublished statement ·
+[[SPEC-004-application-scoped-identity#ADR-223]] root the hierarchy at its own
+sibling of the SPEC-001 persona root, so a wallet that seals only that root can
+derive without the recovery phrase.
 
 **Load-bearing.**
 [[SPEC-004-application-scoped-identity#REQ-201]] one secret produces a different
@@ -555,14 +562,30 @@ freshness policy; OQ-201 must fix those bounds before production.
 
 ### User restores
 
-Given the same recovery words, the same BIP-39 passphrase policy, and the same
-canonical `applicationId`, a restored Selfsame installation first derives the
-same private application node. To recover a particular account home, it also
-requires that account's exact `accountScopeId`, restored automatically from the
-authenticated application account record or protected Selfsame backup as
-specified by [[SPEC-004-application-scoped-identity#REQ-217]]. Those inputs
-reproduce the same account node, home seed, DID, and `acct:` URI. Provider
-endpoint changes do not change identity.
+A restored installation holds the twelve recovery words and nothing else. From
+them it re-derives the hierarchy root
+([[SPEC-004-application-scoped-identity#CON-202]]) under the persona it is
+unlocked as, and with the same canonical `applicationId` it reaches the same
+private application node.
+
+To recover a particular account home it needs two further values, and it obtains
+both from the same place at the same moment: that account's exact
+`accountScopeId` and the hierarchy version it was derived under, returned
+together by the application's account record or a protected Selfsame backup as
+specified by [[SPEC-004-application-scoped-identity#REQ-217]] and
+[[SPEC-004-application-scoped-identity#REQ-232]]. Where the application declares
+`accountScopeLookup: named`, naming the account is enough and no prior
+authentication is required — which is what lets an application whose only
+account credential *is* the Selfsame identity answer a wallet that has just
+restored and holds no key yet.
+
+Those inputs reproduce the same account node, home seed, DID, and `acct:` URI.
+The person is asked for their words and nothing else: no scope, no version, no
+persona, no provider. Provider endpoint changes do not change identity.
+
+The persona index is never carried in this exchange. A restored wallet derives
+under the persona it was unlocked as, and refuses one offered by an application
+— [[SPEC-004-application-scoped-identity#REQ-232]].
 
 ## Requirements
 
@@ -861,17 +884,28 @@ Trace: [[SPEC-004-application-scoped-identity#TEST-218]],
 ### REQ-213: Derivation does not depend on an infrastructure provider
 
 Application-account home key derivation SHALL depend only on recovery input,
-the KDF version, canonical `applicationId`, and canonical `accountScopeId`. It
-SHALL NOT depend on account authority, rendezvous, state, or status-projection
-provider ID, endpoint URL, region, projection index, device key, or a provider
-health response.
+the hierarchy version, the persona index, canonical `applicationId`, and
+canonical `accountScopeId`. It SHALL NOT depend on account authority,
+rendezvous, state, or status-projection provider ID, endpoint URL, region,
+projection index, device key, or a provider health response.
+
+Neither of the two added inputs is an infrastructure fact: the hierarchy version
+is a property of this specification, and the persona index is a property of the
+person's own wallet. The prohibition list — the part of this requirement that
+carries its intent — is unchanged, and a conforming implementation still derives
+with no provider reachable. The account record supplies the version and the
+scope, which are account facts rather than provider facts: the same record
+returns the same values from any operator the application moves to.
 
 Changing providers therefore SHALL NOT rotate the home DID or `acct:`
 localpart. The application is responsible for preserving or republishing the
 account and state records when it changes operators. Restoring the account
-scope itself follows [[SPEC-004-application-scoped-identity#REQ-217]].
+scope itself follows [[SPEC-004-application-scoped-identity#REQ-217]]; the
+version and persona under which an account was derived follow
+[[SPEC-004-application-scoped-identity#REQ-232]].
 
-Trace: [[SPEC-004-application-scoped-identity#TEST-219]]
+Trace: [[SPEC-004-application-scoped-identity#TEST-219]],
+[[SPEC-004-application-scoped-identity#TEST-244]]
 
 ### REQ-214: Any developer can adopt the profile
 
@@ -954,19 +988,58 @@ immutably to the account record. It SHALL return the same value after normal
 authentication and account recovery. A deleted-and-recreated account SHALL
 receive a new value; a value SHALL never be reassigned to another account.
 
-The application SHALL supply the scope to the SDK from authenticated account
-state without displaying it as a user setting. The SDK SHALL store it in
-platform-protected local storage and include it in any encrypted Selfsame
-recovery backup that supports application metadata. The scope is sensitive
-correlation metadata but is not a password or source of cryptographic entropy.
-It SHALL NOT be derived from or replaced by email, user name, display name,
-phone number, a sequential database identifier, or other PII.
+The application SHALL supply the scope to the SDK from account state without
+displaying it as a user setting. The SDK SHALL store it in platform-protected
+local storage and include it in any encrypted Selfsame recovery backup that
+supports application metadata. The scope is sensitive correlation metadata but
+is not a password or source of cryptographic entropy. It SHALL NOT be derived
+from or replaced by email, user name, display name, phone number, a sequential
+database identifier, or other PII.
+
+**Two lookup modes, declared in the profile.** An application SHALL declare
+`accountScopeLookup` in its [[SPEC-004-application-scoped-identity#CON-201]]
+profile as either `authenticated` or `named`, and SHALL implement the declared
+mode only.
+
+- `authenticated` — the scope is returned only from authenticated account
+  state. The default, and required of any application whose account existence
+  is itself confidential.
+- `named` — the scope and hierarchy version are returned to any caller that
+  names the account, with no authentication. Permitted because **the scope
+  confers no authority**: it selects a child of a hierarchy the caller cannot
+  derive without the recovery secret. A caller given a scope it has no root for
+  derives a home DID that fails the reciprocal binding in
+  [[SPEC-004-application-scoped-identity#CON-204]], and a hostile responder
+  that returns a wrong scope causes a refusal, never an impersonation. The
+  failure direction is denial of service, which this specification accepts, and
+  never takeover, which it does not.
+
+An application declaring `named` SHALL rate-limit the lookup, and accepts that
+account existence and the account-to-scope mapping become publicly enumerable
+by name. That disclosure is the mode's whole cost and SHALL be weighed against
+what the application already publishes: where the account name and its
+[[SPEC-004-application-scoped-identity#CON-204]] binding are already public, it
+adds nothing; where accounts are private, `named` is the wrong mode.
+
+`named` exists because an application whose *only* account credential is the
+Selfsame identity cannot authenticate a caller who has just restored and has no
+key yet. Requiring authentication there would make the scope unrecoverable
+precisely when it is needed. An application with its own independent login has
+no such problem and SHOULD declare `authenticated`.
 
 The mnemonic and `applicationId` alone cannot identify one of several account
-children. If neither the authenticated account record nor a protected backup
-can restore the exact scope, the SDK SHALL fail with
-`AccountScopeUnavailable`. It SHALL NOT guess a scope, ask the person to enter
-one, or silently create a replacement identity.
+children. If neither the account record nor a protected backup can restore the
+exact scope, the SDK SHALL fail with `AccountScopeUnavailable`. It SHALL NOT
+guess a scope, ask the person to enter one, or silently create a replacement
+identity.
+
+**The account record carries the hierarchy version too.** Whichever mode is
+declared, the record returned by this requirement SHALL carry the account's
+hierarchy version beside its scope, and SHALL return both together —
+[[SPEC-004-application-scoped-identity#REQ-232]]. They are the complete set of
+derivation inputs a restored wallet cannot reconstruct for itself, and
+splitting them across two mechanisms would create a state in which one is
+recoverable and the other is not.
 
 The raw or encoded scope SHALL NOT appear in a DID, DID Document, `acct:` URI,
 VC, JWS header, WebFinger response, provider hint, status entry, log, analytics
@@ -1235,6 +1308,78 @@ account across the boundary, and keeps every other path closed. See
 
 Trace: [[SPEC-004-application-scoped-identity#TEST-242]]
 
+### REQ-232: An account's hierarchy version travels with its scope; its persona does not
+
+**The two values are carried differently, because they are different kinds of
+fact.** The hierarchy version is a property of one account, fixed when that
+account was first derived and true of it forever. The persona index is a
+property of the person's wallet — which identity they are signed in as — and is
+the same for every account below it.
+
+**The hierarchy version.** The application SHALL bind the hierarchy version to
+the account record immutably, alongside the `accountScopeId`, and SHALL return
+it by the same mechanism and under the same conditions as that scope
+([[SPEC-004-application-scoped-identity#REQ-217]]). The SDK SHALL store it
+wherever it stores the scope, including in any protected Selfsame recovery
+backup, and SHALL treat local storage as a cache rather than the record.
+
+**The persona index.** The wallet SHALL derive under the persona it is
+currently unlocked as, and SHALL NOT accept a persona index from an
+application, an account record, a backup written by another persona, or any
+other party. A wallet holds exactly one persona at a time and already knows
+which; there is nothing to look up.
+
+An application SHALL NOT store, request, or transmit a persona index, and a
+persona index SHALL NOT appear in an account record. Accepting one would let an
+application select which of a person's identity trees to open, and by walking
+successive indices learn that several home DIDs share one recovery secret —
+defeating the separation
+[[SPEC-004-application-scoped-identity#ADR-223]] exists to preserve. The
+`accountScopeId` selects a *child*; a persona selects a *tree*, and only the
+person's own wallet may do that.
+
+**Fail closed, and do not guess.** A party that cannot obtain an account's
+hierarchy version from its record or a protected backup SHALL fail with
+`DerivationProvenanceUnavailable`
+([[SPEC-004-application-scoped-identity#CON-202]]), derive nothing, and leave
+the account untouched. It SHALL NOT assume the version its own code implements,
+try several versions and select whichever produces a resolvable DID — which
+would make a resolver's availability a derivation input — prompt the person for
+a version, or create a replacement identity.
+
+**Detect substitution, not only absence.** Before using a derived home key for
+an account it has seen before, a wallet SHALL recompute the home DID and
+compare it to the one recorded with that account, and SHALL fail closed on
+mismatch. Absence and malformation are not the only failure: a **well-formed
+but substituted** version — from local tampering, a corrupted restore, or two
+merged profiles — is caught by nothing else, and would otherwise derive a
+different identity under the same account scope and proceed to enrol it. The
+home DID is self-certifying, so this comparison publishes nothing and costs one
+hash.
+
+**Why this is a requirement and not an implementation note.** A hierarchy
+version bump changes every derived key
+([[SPEC-004-application-scoped-identity#CON-202]]). A party that derives without
+knowing which version an account used will silently produce a different home
+DID, orphaning the account rather than failing. The failure is silent, total,
+and unrecoverable — the information needed to repair it is exactly the
+information that was never written down. Recording one small value at
+derivation time costs nothing and cannot be added retroactively, which is why
+it is stated now, while
+[[SPEC-004-application-scoped-identity#REQ-231]] still defines no migration
+between derivation schemes.
+
+**Publication.** The hierarchy version SHALL NOT appear in a DID, DID Document,
+`acct:` URI, VC, JWS header, WebFinger response, provider hint, status entry,
+log, analytics event, or other public protocol artifact — the same list
+[[SPEC-004-application-scoped-identity#REQ-217]] applies to the scope, and for
+the same reason. An account record is not such an artifact; a value the
+application holds and returns to an authorised caller is the carrier this
+requirement depends on, not a publication.
+
+Trace: [[SPEC-004-application-scoped-identity#TEST-244]],
+[[SPEC-004-application-scoped-identity#TEST-245]]
+
 ## Non-functional requirements
 
 ### NFR-201: Pairwise application-account unlinkability
@@ -1359,11 +1504,21 @@ Trace: [[SPEC-004-application-scoped-identity#TEST-208]], [[SPEC-004-application
 
 **Status:** PROPOSED.
 
-The recovery secret feeds a private application node, that node feeds one
-private child per account scope, and each account node feeds its home signing
-seed. The application ID and account scope are length-prefixed and placed in
-separate HKDF invocations, not reduced to the current one-byte application code
-or a 32-bit persona index.
+The recovery secret feeds the hierarchy root
+([[SPEC-004-application-scoped-identity#ADR-223]]), that root feeds a private
+application node, that node feeds one private child per account scope, and each
+account node feeds its home signing seed. The application ID and account scope
+are length-prefixed and placed in separate HKDF invocations, **not reduced to
+the current one-byte application code or to any small integer index**.
+
+That rejection is about how *applications and accounts* are namespaced, and it
+stands. It is not a rejection of the persona index, which
+[[SPEC-004-application-scoped-identity#ADR-223]] admits into the root
+derivation: a persona selects which of the person's own identity trees is in
+use, it is chosen by the wallet and never by an application or a person typing
+a number, and it namespaces nothing below the root. Version 0.14.0 amended this
+paragraph, which previously named the persona index among the rejected
+encodings and would otherwise contradict CON-202.
 
 Reasons:
 
@@ -2009,9 +2164,10 @@ Rejected:
   namespace, collapsing the correlation boundary
   [[SPEC-004-application-scoped-identity#ADR-201]] exists to draw; and
   [[SPEC-004-application-scoped-identity#NFR-202]] requires the home DID to be
-  reproducible from mnemonic, `applicationId`, and `accountScopeId` alone,
-  which a retained predecessor identifier is not. It would buy convenience with
-  the two properties the hierarchy exists for;
+  reproducible from the mnemonic, the hierarchy version and persona, the
+  `applicationId`, and the `accountScopeId` — and from nothing else — which a
+  retained predecessor identifier is not. It would buy convenience with the two
+  properties the hierarchy exists for;
 - **a succession Verifiable Credential** — portable and standards-shaped, and
   it would add terms to the context [[SPEC-004-application-scoped-identity#CON-224]]
   has just frozen. Portability is worthless here: nothing outside the
@@ -2033,6 +2189,130 @@ Rejected:
   Bounding the statement by the incoming profile's existing
   `maxGrantLifetimeSeconds` obtains the same bound for nothing.
 
+### ADR-223: Root the hierarchy at its own sibling of the SPEC-001 persona root
+
+**Status:** PROPOSED.
+
+**Context.** Hierarchy version 1 rooted
+[[SPEC-004-application-scoped-identity#CON-202]] at the 64-byte BIP-39 seed.
+[[SPEC-001-device-key-provisioning]]'s custody seals `root_seed(mnemonic,
+persona)` — an HKDF-SHA-512 output over that seed — and stores the phrase
+nowhere, deliberately. The two specifications therefore rooted at different
+points of one secret, and a wallet that had completed SPEC-001 onboarding held
+only the derivative. It could not derive a SPEC-004 home DID for any
+application, at any time, without the person re-entering their recovery phrase.
+Neither specification was wrong locally; neither stated where they meet. The gap
+was found while planning the person-facing surface and is recorded as
+`FINDING-016` in [[EXP-001-findings]].
+
+**Decision.** Hierarchy version 2 roots at `hierarchy_root`, a 64-octet
+HKDF-SHA-512 output over `bip39_seed` under this project's own label
+`selfsame/v2/hierarchy-root/`. It is a **sibling** of SPEC-001's persona root,
+not its child: both descend from the seed, neither derives the other. A
+custodian seals it alongside whatever else it seals. Everything below
+`application_node` is unchanged — the salt construction, the length-prefixed
+`info` encoding and its injectivity argument, the labels, the node widths, and
+the Ed25519 interpretation of `home_signing_seed`.
+
+**Rationale.** Four alternatives were considered.
+
+*Seal the BIP-39 seed in custody.* `FINDING-016`'s first proposed resolution. It
+works, and it widens a custody compromise from one persona's root key to the
+entire recovery hierarchy — every persona, every application, permanently. The
+persona separation SPEC-001 defines would become decorative.
+
+*Derive at unlock time from a re-entered phrase.* `FINDING-016`'s second
+resolution. It changes no storage but breaks
+[[SPEC-004-application-scoped-identity#REQ-213]]'s user promise and `HP-7`
+(*Restore*) in [[person-happy-paths]], whose precondition is twelve words and a
+new device and nothing else. It also requires the threat boundary to state where
+a recovery secret lives during a session and for how long.
+
+*Root at SPEC-001's persona root itself.* Drafted and rejected. It reaches the
+same usability using material a custodian already holds, and it costs four
+things this decision declines to pay: the persona root would be simultaneously
+an RFC 8032 Ed25519 private seed and HKDF input keying material, requiring a
+joint-security argument in the random-oracle model plus a dual-PRF assumption on
+HMAC-SHA-512 with the secret in the message position; SPEC-001 REQ-024 requires
+user presence for *every* use of that seed, so every application derivation
+would either prompt or hold the root across a session — the very question this
+list rejects alternative 2 for; SPEC-004 would acquire a normative dependency on
+an external Tier-1 draft that is itself unapproved; and the root would have to
+cross into `selfsame-app-identity`, a crate that also compiles to wasm, putting
+the SPEC-001 root signing seed behind any disclosure bug there. A sibling root
+buys the identical capability with none of them.
+
+*A sibling root — chosen.* One extra HKDF call at create or restore, and 64 more
+sealed octets. In exchange the root is HKDF input keying material and nothing
+else, so there is no key-separation question to review, no cross-specification
+dependency to pin, and no SPEC-001 secret in the derivation crate. Sixty-four
+octets is the same width as every interior node of the tree, so
+`application_node`, `account_node` and the recovery type keep their shapes.
+
+**Consequences.**
+
+1. **A custody format change, and it widens what a custody compromise yields.**
+   This is the cost and it is stated first because
+   [[SPEC-004-application-scoped-identity#ADR-223]] is what a reviewer reads to
+   decide. *Before* version 2, compromising the passcode-sealed custody blob
+   yielded one persona's Ed25519 root signing key and **no SPEC-004 material at
+   all** — precisely because the hierarchy rooted at a seed custody did not
+   hold. *After* version 2 the same compromise additionally yields
+   `hierarchy_root`, and with it every `application_node`, `account_node` and
+   `home_signing_seed` under that persona, for every application, past and
+   future, unrevocably. The blast radius did **not** already exist; it is
+   created here. `EXP-001-findings` says the same thing about every resolution
+   of `FINDING-016`: *"the choice widens what a passcode compromise yields, so
+   it wants the security sign-off the Tier-1 gate already requires."* Recorded
+   in the threat model rather than only here.
+2. **What it still does not yield.** Neither the mnemonic nor `bip39_seed` is
+   retained, so a custody compromise does not produce a recovery phrase, and
+   `hierarchy_root` is not derivable from the persona root or vice versa.
+   Compromise of the SPEC-001 root *signing key* yields `SHA-512(seed)` rather
+   than the seed, so it reaches no part of this hierarchy.
+3. **Hierarchy-version-1 vectors are void.** The salt moves to `/v2`, so every
+   derived value changes. [[SPEC-004-application-scoped-identity#CON-226]]'s
+   corpus is regenerated and its new SHA-256 recorded in the changelog.
+4. **No migration path is defined**, and
+   [[SPEC-004-application-scoped-identity#REQ-231]] is deliberately not amended:
+   *"Version 1 defines no other succession, and in particular no migration from
+   an earlier derivation scheme."* Nothing has derived a production identity —
+   the wallet stubs derivation and the reference CLI is a declared prototype —
+   so there is nothing to migrate and no user to protect.
+5. **The persona index becomes a derivation input**, which
+   [[SPEC-004-application-scoped-identity#ADR-201]] previously listed among the
+   things this hierarchy does not reduce identifiers to. That ADR is amended
+   rather than left to contradict this one; its objection was to *namespacing
+   applications* by index, which remains rejected.
+
+**Future hierarchy versions.** This decision does not make version 3 free.
+What it preserves is the one fact a later migration would need and could not
+reconstruct — [[SPEC-004-application-scoped-identity#REQ-232]]'s per-account
+record of the version an account was actually derived under.
+
+When a migration is wanted, the mechanism does not need inventing.
+[[SPEC-004-application-scoped-identity#CON-225]] already succeeds one home DID
+to another by a statement signed by both the outgoing and incoming home keys,
+and its argument is that a person holding the recovery secret can produce both
+signatures and nobody else can produce either, because both DIDs derive from
+that one secret with only the application node differing. A hierarchy bump is
+the same situation with only the root differing. Generalising CON-225's trigger
+from an `applicationId` change to a derivation-input change is a Tier-1
+amendment to succession semantics and is out of scope here; what is in scope is
+not foreclosing it. Note that CON-225 requires a wallet able to derive under
+both the outgoing and incoming versions at once, which
+[[SPEC-004-application-scoped-identity#CON-202]] does not currently provide —
+the salt is a constant. Parameterising it is part of the cost of version 3, not
+a property this decision delivers.
+
+**What no design avoids.** Peers pin key-to-account bindings at first enrolment
+([[SPEC-004-application-scoped-identity#CON-221]]). A hierarchy bump is a
+re-pinning event for every peer whatever else is true, and CON-221 confirms only
+*first* enrolments — so a wrong derivation on any later enrolment is refused at
+[[SPEC-004-application-scoped-identity#CON-204]] without a person ever being
+shown a fingerprint. Fail-closed rejection, not human comparison, is the control
+that operates here.
+
 ## Contracts
 
 ### CON-201: Canonical application profile
@@ -2046,6 +2326,7 @@ shape:
   "applicationId": "https://photos.example/selfsame/application",
   "accountAuthority": "accounts.photos.example",
   "verifierAudience": "https://photos.example/selfsame/application",
+  "accountScopeLookup": "authenticated",
   "allowedPermissions": [
     "https://photos.example/selfsame/application#device"
   ],
@@ -2160,8 +2441,9 @@ The profile is therefore a closed recognized language:
    nesting depth of at most 8;
 3. the top-level value is an object whose member set is exactly the ten names
    below — `profileVersion`, `applicationId`, `accountAuthority`,
-   `verifierAudience`, `allowedPermissions`, `enrollment`, `rendezvous`,
-   `stateResolvers`, `revocation`, and the OPTIONAL `pairingRecordRelays`;
+   `verifierAudience`, `accountScopeLookup`, `allowedPermissions`,
+   `enrollment`, `rendezvous`, `stateResolvers`, `revocation`, and the
+   OPTIONAL `pairingRecordRelays`;
 4. every member value satisfies its grammar in this contract; and
 5. re-serializing the recognized object with RFC 8785 reproduces the input
    byte-for-byte.
@@ -2171,6 +2453,15 @@ is no forward-compatibility affordance inside a profile; a new field is a new
 `profileVersion`. A party SHALL complete all five steps before any semantic
 action, and SHALL NOT extract a field by regular expression or act on a partial
 parse.
+
+`accountScopeLookup` is exactly one of the strings `"authenticated"` or
+`"named"`, compared as exact ASCII, and declares which mode of
+[[SPEC-004-application-scoped-identity#REQ-217]] this application implements.
+There is no default: a profile omitting it is rejected at step 3 like any other
+missing member, because a party that guessed would either send an
+unauthenticated lookup to an application that treats account existence as
+confidential, or withhold one from an application that has no other way to
+answer.
 
 `profileVersion` is exactly the integer `1`. `allowedPermissions` is a non-empty
 array of at most 64 absolute HTTPS URIs, each on the `applicationId` origin with
@@ -2330,7 +2621,7 @@ Definitions:
 UTF8(s)      = UTF-8 encoding of Unicode string s
 U32BE(n)     = four-byte unsigned big-endian encoding of n
 LP(s)        = U32BE(len(UTF8(s))) || UTF8(s)
-SALT         = SHA-512(UTF8("selfsame/application-account-key-hierarchy/v1"))
+SALT         = SHA-512(UTF8("selfsame/application-account-key-hierarchy/v2"))
 
 KDF(ikm, label, context, length) =
   HKDF-SHA-512(
@@ -2341,25 +2632,78 @@ KDF(ikm, label, context, length) =
   )
 ```
 
-The recovery input is the 64-byte BIP-39 seed:
+**Hierarchy version 2.** The salt names the hierarchy version, so a change to
+the version makes every derived key unrelated to every key of the previous
+version. This is deliberate: it removes any possibility of a partial version
+bump, in which some nodes move and others do not. A version is adopted or it is
+not; there is no intermediate state a defect could produce.
+
+*Read "hierarchy version" as a distinct counter from this document's version.*
+Elsewhere "version 1" names the **specification**; here and in
+[[SPEC-004-application-scoped-identity#REQ-232]],
+[[SPEC-004-application-scoped-identity#ADR-223]] and
+[[SPEC-004-application-scoped-identity#TEST-244]] it names the **derivation
+tree**, which moved to 2 in specification version 0.14.0 while the
+specification itself remains version 1. The two counters are independent and a
+future specification version will not move the hierarchy unless it says so in
+this contract.
+
+The recovery input is the **hierarchy root**, a value derived for this
+hierarchy and used for nothing else:
 
 ```text
-recovery_seed = PBKDF2-HMAC-SHA512(
+bip39_seed = PBKDF2-HMAC-SHA512(
   password   = NFKD(mnemonic sentence),
   salt       = UTF8("mnemonic") || UTF8(NFKD(passphrase)),
   iterations = 2048,
   L          = 64
 )
+
+hierarchy_root = HKDF-SHA-512(
+  IKM  = bip39_seed,
+  salt = "",                                          ; zero-length, RFC 5869 §2.2
+  info = UTF8("selfsame/v2/hierarchy-root/") || U32BE(persona),
+  L    = 64
+)
 ```
 
-Version 1 uses the empty BIP-39 passphrase unless a future backup specification
-explicitly records and restores another value.
+The salt is a zero-length string. RFC 5869 §2.2 sets the salt to
+`HashLen` zero octets when it is absent, so "absent" and "zero-length" name one
+value; implementations differ in which spelling their API exposes, and this
+contract fixes the spelling so two of them cannot disagree.
+
+Hierarchy version 2 uses the empty BIP-39 passphrase. Admitting another value
+is a hierarchy version bump, not a parameter, for the reason given above:
+`bip39_seed` would change and every derived key with it. The passphrase is
+therefore **not** a recorded per-account value and is not enumerated by
+[[SPEC-004-application-scoped-identity#REQ-213]]; it is a constant of the
+version.
+
+**`hierarchy_root` is a sibling of the SPEC-001 persona root, not its child.**
+Both descend from `bip39_seed` by HKDF-SHA-512 under different `info` labels,
+and neither is derivable from the other. This hierarchy therefore consumes no
+SPEC-001 construction, defines no shared secret with it, and imposes no
+key-separation obligation: `hierarchy_root` is HKDF input keying material and
+nothing else, in this contract and in every other.
+
+Hierarchy version 1 rooted at `bip39_seed` directly.
+[[SPEC-004-application-scoped-identity#ADR-223]] records why that changed, what
+it costs, and why no migration path from version 1 is defined.
+
+**What a custodian must hold.** A conforming custodian SHALL retain
+`hierarchy_root` — sealed under whatever protection it applies to other
+long-lived secrets — and SHALL NOT be required to retain the mnemonic or
+`bip39_seed` in order to derive. `hierarchy_root` is a one-way function of the
+seed, so a custodian holding it can derive every account below it and cannot
+recover the phrase, the seed, or any sibling root. This is the property the
+version-2 root exists to provide and it is normative: a wallet that can derive
+only while the person is re-entering their recovery phrase does not conform.
 
 After validating `canonical_account_scope_id` with CON-211, the hierarchy is:
 
 ```text
 application_node =
-  KDF(recovery_seed, "application", canonical_application_id, 64)
+  KDF(hierarchy_root, "application", canonical_application_id, 64)
 
 account_node =
   KDF(application_node, "account", canonical_account_scope_id, 64)
@@ -2367,6 +2711,12 @@ account_node =
 home_signing_seed =
   KDF(account_node, "home-signing-key", "", 32)
 ```
+
+**Closed error token.** A deriving party that cannot establish the hierarchy
+version for an account it is restoring SHALL fail with
+`DerivationProvenanceUnavailable` and derive nothing. It is the only token this
+contract defines, it is opaque, and it distinguishes no downstream condition —
+see [[SPEC-004-application-scoped-identity#REQ-232]] for when it is raised.
 
 `home_signing_seed` is interpreted as an RFC 8032 Ed25519 private seed. It SHALL
 be used only for the application-account home DID's assertion and control
@@ -2388,12 +2738,20 @@ The Tier-1 gate requires normative vectors for:
 - the same application ID under two mnemonics;
 - a one-byte application-ID change;
 - a one-byte account-scope change;
-- Unicode mnemonic normalization; and
-- rejection of non-canonical application IDs and account scopes.
+- Unicode mnemonic normalization;
+- rejection of non-canonical application IDs and account scopes;
+- the intermediate `hierarchy_root` for each vector mnemonic, so a second
+  implementation can locate a divergence above or below the root rather than
+  only observing that the home DID differs; and
+- the same mnemonic and application under two persona indices, which SHALL
+  produce unrelated home DIDs. This vector exercises the `info` encoding, not a
+  deployable configuration: `persona = 0` is the only index
+  [[SPEC-001-device-key-provisioning]] defines, and a vector is the one place a
+  second implementation can check the encoding before another index exists.
 
-Implements: [[SPEC-004-application-scoped-identity#REQ-201]], [[SPEC-004-application-scoped-identity#REQ-213]], [[SPEC-004-application-scoped-identity#REQ-216]].
+Implements: [[SPEC-004-application-scoped-identity#REQ-201]], [[SPEC-004-application-scoped-identity#REQ-213]], [[SPEC-004-application-scoped-identity#REQ-216]], [[SPEC-004-application-scoped-identity#REQ-232]].
 
-Verified by: [[SPEC-004-application-scoped-identity#TEST-201]], [[SPEC-004-application-scoped-identity#TEST-202]], [[SPEC-004-application-scoped-identity#TEST-219]], [[SPEC-004-application-scoped-identity#TEST-222]].
+Verified by: [[SPEC-004-application-scoped-identity#TEST-201]], [[SPEC-004-application-scoped-identity#TEST-202]], [[SPEC-004-application-scoped-identity#TEST-219]], [[SPEC-004-application-scoped-identity#TEST-222]], [[SPEC-004-application-scoped-identity#TEST-244]], [[SPEC-004-application-scoped-identity#TEST-245]].
 
 ### CON-203: DID Document and RFC 7565 account alias
 
@@ -4225,6 +4583,14 @@ and following their convention: top-level `spec` and `did_crdt_revision`
 members, then one member per contract named `con_2NN_<slug>` whose value is an
 array of cases.
 
+The filename's `v1` names the **corpus profile**, not the hierarchy version, and
+since 0.14.0 the two differ: this file carries hierarchy-version-2 vectors. The
+corpus SHALL therefore also carry a top-level `hierarchy_version` member, so a
+consuming stack reads the tree it is being checked against rather than inferring
+it from a filename. Values from a superseded hierarchy version SHALL be
+**deleted** rather than retained beside the current ones — a void vector left in
+the file is one an implementation eventually passes against.
+
 Each case is:
 
 ```json
@@ -4250,7 +4616,7 @@ internal conformance artifact and names the step regardless.
 conforming re-serialization reproduces the file byte for byte. Binary is
 base64url without padding. Numbers are integers; no floats appear.
 
-**Completeness rule.** For every closed error token defined by CON-204,
+**Completeness rule.** For every closed error token defined by CON-202, CON-204,
 CON-211, CON-212, CON-214, CON-215, CON-219, CON-220, CON-221, CON-222,
 CON-223, and CON-225, and for each of CON-206's thirteen numbered steps, the
 corpus SHALL contain at least one case whose `expect.reject` names it. A token
@@ -5049,19 +5415,22 @@ outgoing alias to be unassignable to another account or DID.
 
 **Isolation.** Require a third application to be unable to obtain either
 statement, and require its own home DID for the same person to be unchanged by
-the succession. Require the incoming home DID to be reproducible from mnemonic,
-the incoming `applicationId`, and the carried `accountScopeId` alone, so that
+the succession. Require the incoming home DID to be reproducible from the
+mnemonic, the incoming `applicationId`, the carried `accountScopeId`, and the
+account's hierarchy version and persona — and from nothing else — so that
 succession produces an ordinary CON-202 identity and not a retained one.
 
 ### TEST-243: Corpus completeness and independence
 
 **Validates:** [[SPEC-004-application-scoped-identity#REQ-222]], [[SPEC-004-application-scoped-identity#REQ-227]], [[SPEC-004-application-scoped-identity#CON-226]].
 
-Enumerate every closed error token defined by CON-204, CON-211, CON-212,
-CON-214, CON-215, CON-219, CON-220, CON-221, CON-222, CON-223, and CON-225, and
-each of CON-206's thirteen numbered steps, and require at least one corpus case
-whose `expect.reject` names it. A token or step with no case fails this test —
-it is not reported as a warning.
+Enumerate every closed error token defined by CON-202, CON-204, CON-211,
+CON-212, CON-214, CON-215, CON-219, CON-220, CON-221, CON-222, CON-223, and
+CON-225, and each of CON-206's thirteen numbered steps, and require at least one
+corpus case whose `expect.reject` names it. A token or step with no case fails
+this test — it is not reported as a warning. CON-202 joined this list in
+0.14.0 with `DerivationProvenanceUnavailable`; a contract that defines a token
+and is absent from the enumeration has a refusal no corpus case can express.
 
 Require all seven OQ-207 item 5 groups and the KDF, alias, VC, holder-binding,
 revocation, account-scope, and username groups to be present in the one file.
@@ -5075,6 +5444,98 @@ Run two independently implemented stacks over the corpus and require identical
 accept/reject reasons for every case — not merely identical pass/fail. Require
 a case that a stack cannot execute to be reported as a failure rather than
 skipped, and assert that no case is marked skipped, pending, or expected-fail.
+
+### TEST-244: Hierarchy root, version and persona separation
+
+**Validates:** [[SPEC-004-application-scoped-identity#REQ-213]],
+[[SPEC-004-application-scoped-identity#CON-202]],
+[[SPEC-004-application-scoped-identity#ADR-223]].
+
+*Positive.* Compute `hierarchy_root` from each corpus mnemonic using an
+HKDF-SHA-512 implementation **other than the one under test**, driven only by
+CON-202's published definition — IKM, zero-length salt, `info`, and length — and
+require it to equal the corpus value byte for byte. Then require the home DID
+derived from it to equal the corpus value. Comparing home DIDs alone would pass
+while two implementations shared one wrong root; the recorded intermediate is
+what localises a divergence above or below the root.
+
+*Negative — the root is a sibling, not a child.* Require `hierarchy_root` to
+differ from `HKDF-SHA-512(IKM = bip39_seed, salt = "", info =
+UTF8("anuna-ssi/v1/root-key/") || U32BE(persona), L = 32)` — SPEC-001's persona
+root — and require neither to be a prefix, suffix, or truncation of the other.
+Require that no vector in the corpus contains a SPEC-001 persona root at all: a
+corpus that carried one would invite an implementation to derive from it.
+
+*Negative — persona separation.* Derive the same mnemonic, `applicationId` and
+`accountScopeId` under two persona indices and require unrelated
+`hierarchy_root`, `application_node`, home DID and `acct:` alias. Require no
+derived value under one persona to be a prefix, suffix, or truncation of the
+corresponding value under the other.
+
+*Negative — version separation.* Derive under the version-1 salt
+(`selfsame/application-account-key-hierarchy/v1`) and the version-2 salt over
+otherwise identical inputs and require unrelated output at every node,
+confirming that a partial version bump cannot produce a tree that is half of
+each. The v1 salt appears here as a test fixture only; CON-202 no longer defines
+that hierarchy.
+
+*Structural — the seed is not reachable.* Assert on the **public derivation
+signature**, not on runtime behaviour: the entry point that produces
+`application_node` accepts `hierarchy_root` and exposes no parameter, field, or
+constructor through which a mnemonic or a 64-octet BIP-39 seed can be supplied.
+A behavioural check ("run it with the seed absent and require success") cannot
+fail, because a function that never takes the seed succeeds without it by
+construction.
+
+### TEST-245: Restore from the recovery phrase alone
+
+**Validates:** [[SPEC-004-application-scoped-identity#REQ-217]],
+[[SPEC-004-application-scoped-identity#REQ-232]],
+[[SPEC-004-application-scoped-identity#CON-202]].
+
+This is the acceptance test for the flow the hierarchy exists to serve, and no
+earlier test covers it: every other derivation test drives the KDF directly or
+assumes stored state.
+
+*Positive — the whole restore.* Enrol an account and record its home DID. Erase
+**all** wallet-local state. Re-create the wallet from the twelve recovery words
+alone. Authenticate to — or, under `accountScopeLookup: named`, merely name —
+the application, obtain `{accountScopeId, hierarchyVersion}` from its account
+record, derive, and require the **byte-identical home DID**, an accepted
+[[SPEC-004-application-scoped-identity#CON-204]] binding, and **no** new
+enrolment, no fingerprint prompt, and no person-visible question about scopes,
+versions, or personas.
+
+*Positive — persona is not carried.* Assert that the restore above completes
+with the account record supplying no persona index, and that the wallet derives
+under the persona it was unlocked as
+([[SPEC-004-application-scoped-identity#REQ-232]]).
+
+*Negative — a persona in the record is refused.* Present an account record
+carrying a persona index and require the SDK to refuse it rather than derive
+under it, whether or not the supplied index matches the wallet's own.
+
+*Negative — missing provenance fails closed.* Present an account record with the
+scope but no hierarchy version, and require `DerivationProvenanceUnavailable`
+with nothing derived. Require specifically that the wallet does **not** fall
+back to the version its code implements, and does **not** derive under several
+versions and select whichever produces a resolvable DID — assert the second by
+running it with every resolver unreachable and requiring the same refusal, since
+a resolver-dependent implementation would behave differently.
+
+*Negative — substitution is detected.* For an account the wallet has seen
+before, substitute a well-formed but incorrect hierarchy version and require the
+recomputed home DID to mismatch the recorded one and the operation to fail
+closed. This case exists because absence and malformation are separately
+covered and neither catches it.
+
+*Negative — a wrong scope is a refusal, not a takeover.* Under
+`accountScopeLookup: named`, return a scope belonging to a different account and
+require the derived home DID to be refused at
+[[SPEC-004-application-scoped-identity#CON-204]], with no enrolment, no
+overwrite of the caller's own account, and no partial state. This is the
+property that makes the unauthenticated mode admissible, so it is tested rather
+than asserted.
 
 ## Security and threat model
 
@@ -5103,7 +5564,12 @@ boundaries is a specification defect even if its signatures verify.
 This profile relies on:
 
 - platform-protected storage keeping the recovery secret and device private
-  keys confidential;
+  keys confidential — including, since 0.14.0, the **custodian's sealed
+  `hierarchy_root`**, which is a distinct at-rest asset from the mnemonic and
+  is named here because it is now the sole compromise path to every application
+  key below it ([[SPEC-004-application-scoped-identity#ADR-223]]). Where that
+  seal is a passcode-derived key, the passcode's entropy — not the hierarchy's
+  128 bits — is the binding number for an at-rest attacker;
 - BIP-39, ristretto255, SPAKE2, HKDF-SHA-256/HKDF-SHA-512,
   HMAC-SHA-256, SHA-256/SHA-512, BLAKE3, Ed25519, JWS, the RFC 8439
   ChaCha20-Poly1305 AEAD fixed by
@@ -5264,6 +5730,17 @@ mechanism.
 - Compromise of the recovery secret compromises every derived application
   branch. Recovery-secret rotation is outside v1 and must be specified before
   production.
+- **Compromise of a custodian's sealed `hierarchy_root` compromises every
+  application branch under that persona** — every `application_node`,
+  `account_node` and `home_signing_seed`, for every application the holder can
+  name, past and future, unrevocably. Hierarchy version 1 had no such asset:
+  the hierarchy rooted at a seed no custodian retained, so a custody compromise
+  reached no SPEC-004 material at all. Version 2 creates this asset in order to
+  make derivation possible without the recovery phrase, and
+  [[SPEC-004-application-scoped-identity#ADR-223]] records that trade as the
+  cost of the decision. It does **not** yield the mnemonic, the BIP-39 seed, or
+  any sibling root, so it does not compromise other personas or SPEC-001's root
+  signing key.
 - The code provides 128 bits under
   [[PROTO-003-selfsame-pairing-v1#ADR-406]], so guessing is infeasible; SPAKE2
   is retained for transcript binding and forward secrecy. Disclosure of the code
@@ -5416,6 +5893,27 @@ No implementation task may be marked ready until all boxes are checked:
       derived rather than declared.
 - [ ] Two independent implementations reproduce the normative KDF and wire
       vectors required by NFR-202.
+- [ ] **0.14.0 — the widened at-rest asset is accepted on the record.** The
+      human owner, and a human security reviewer, accept that a custodian's
+      sealed `hierarchy_root` now yields every application key under its
+      persona where hierarchy version 1 yielded none, and record the entropy of
+      the seal that protects it — which for a passcode-derived seal is the
+      binding number for an at-rest attacker, not the hierarchy's 128 bits. See
+      [[SPEC-004-application-scoped-identity#ADR-223]] consequence 1. This box
+      does **not** ask whether the root derivation is sound; it asks whether the
+      asset it creates is acceptable, which is a different question and the one
+      version 1 never had to answer.
+- [ ] **0.14.0 — the corpus is regenerated at the version-2 salt**, its new
+      SHA-256 is recorded in the changelog entry, and
+      [[SPEC-004-application-scoped-identity#TEST-244]] and
+      [[SPEC-004-application-scoped-identity#TEST-245]] are green. Version-1
+      vectors are **deleted, not retained**: the salt moved, so every value in
+      them is unrelated to the current hierarchy, and a void corpus left on
+      disk is a corpus something eventually passes against.
+- [ ] **0.14.0 — `TEST-245` passes against a real wallet**, not a harness: erase
+      all local state, restore from twelve words, and reach the byte-identical
+      home DID through an application's account record. The amendment exists to
+      make this flow work, so no other evidence substitutes for observing it.
 - [ ] The `did:crdt` method explicitly defines the `JsonWebKey` projection
       without changing existing DID derivation. As of the pinned revision
       `adb5c7ac`, `resolve()` emits `publicKeyMultibase` and the crate contains
@@ -5729,6 +6227,7 @@ reviewers.
 | User outcome | Requirements | Contracts | Tests |
 |---|---|---|---|
 | Different home identity per application account | [[SPEC-004-application-scoped-identity#REQ-201]], [[SPEC-004-application-scoped-identity#REQ-202]], [[SPEC-004-application-scoped-identity#REQ-213]] | [[SPEC-004-application-scoped-identity#CON-201]], [[SPEC-004-application-scoped-identity#CON-202]], [[SPEC-004-application-scoped-identity#CON-211]] | TEST-201–203, [[SPEC-004-application-scoped-identity#TEST-219]], [[SPEC-004-application-scoped-identity#TEST-222]], [[SPEC-004-application-scoped-identity#TEST-223]] |
+| A wallet restored from the recovery phrase alone re-derives every account | [[SPEC-004-application-scoped-identity#REQ-213]], [[SPEC-004-application-scoped-identity#REQ-217]], [[SPEC-004-application-scoped-identity#REQ-232]] | [[SPEC-004-application-scoped-identity#CON-201]]; [[SPEC-004-application-scoped-identity#CON-202]] | [[SPEC-004-application-scoped-identity#TEST-244]], [[SPEC-004-application-scoped-identity#TEST-245]] |
 | Multiple accounts switch without Selfsame configuration | [[SPEC-004-application-scoped-identity#REQ-216]], [[SPEC-004-application-scoped-identity#REQ-217]] | [[SPEC-004-application-scoped-identity#CON-202]], [[SPEC-004-application-scoped-identity#CON-211]] | [[SPEC-004-application-scoped-identity#TEST-222]], [[SPEC-004-application-scoped-identity#TEST-223]] |
 | RFC 7565 stable alias and optional username | [[SPEC-004-application-scoped-identity#REQ-203]], [[SPEC-004-application-scoped-identity#REQ-204]], [[SPEC-004-application-scoped-identity#REQ-218]] | [[SPEC-004-application-scoped-identity#CON-203]], [[SPEC-004-application-scoped-identity#CON-204]], [[SPEC-004-application-scoped-identity#CON-212]] | TEST-204–206, [[SPEC-004-application-scoped-identity#TEST-225]] |
 | Portable VC device grant | REQ-205–208, [[SPEC-004-application-scoped-identity#REQ-211]] | CON-205–210, [[SPEC-004-application-scoped-identity#CON-219]] | TEST-207–213, [[SPEC-004-application-scoped-identity#TEST-217]], [[SPEC-004-application-scoped-identity#TEST-236]] |
@@ -5886,6 +6385,79 @@ component precedents but no surveyed system with the complete Selfsame
 combination; that is an engineering conclusion, not a legal novelty claim.
 
 ## Changelog
+
+- **0.14.0-draft — 2026-08-10 — PROPOSAL, not an accepted version.**
+  Re-roots [[SPEC-004-application-scoped-identity#CON-202]] at a new
+  `hierarchy_root` — a 64-octet HKDF-SHA-512 output over `bip39_seed` under the
+  label `selfsame/v2/hierarchy-root/`, a **sibling** of
+  [[SPEC-001-device-key-provisioning]]'s persona root rather than the BIP-39
+  seed — and bumps the hierarchy salt to
+  `selfsame/application-account-key-hierarchy/v2`.
+
+  *Status.* This entry is marked `-draft` and the version number does not
+  advance, because the amendment does not yet satisfy this document's own
+  Amendment Channels. That section requires a key-derivation change to arrive
+  with new vectors and renewed security sign-off **for the amendment**; both
+  are instead recorded as Tier-1 gate boxes below, which is not what the
+  channel asks for. It is a proposal for review.
+
+  *Reason.* `FINDING-016` in [[EXP-001-findings]]: SPEC-001 custody seals
+  `root_seed(mnemonic, persona)` and stores the phrase nowhere, while hierarchy
+  version 1 rooted at the BIP-39 seed. The two rooted at different points of one
+  secret, so a wallet that had completed onboarding could not derive a home DID
+  for any application without the person re-entering twelve words — which
+  [[SPEC-004-application-scoped-identity#REQ-213]] and `HP-7` (*Restore*) in
+  [[person-happy-paths]] both promise is unnecessary. Evidence:
+  `app_identity_derive` in the reference wallet returns a fixture and documents
+  why.
+
+  *Why a sibling root and not SPEC-001's persona root.* Rooting at the persona
+  root was drafted and rejected on adversarial review. It would have made one
+  32-octet secret simultaneously an Ed25519 private seed and HKDF input keying
+  material, requiring a random-oracle joint-security argument and a dual-PRF
+  assumption; collided with SPEC-001 REQ-024's per-use presence requirement;
+  added a normative dependency on an unapproved external Tier-1 draft; and
+  carried the SPEC-001 root signing seed into a crate that compiles to wasm. A
+  sibling root buys the same capability with none of those.
+  [[SPEC-004-application-scoped-identity#ADR-223]] records all four.
+
+  *Affected artefacts.* `CON-201` (new required `accountScopeLookup` member);
+  `CON-202` (re-rooted, salt bumped, salt spelling fixed, passphrase demoted to
+  a version constant, `DerivationProvenanceUnavailable` defined, vector list
+  extended, `Verified by` corrected); `REQ-213` (enumeration gains the hierarchy
+  version and persona; prohibition list unchanged); `REQ-217` (two declared
+  lookup modes; the account record now carries the hierarchy version);
+  `REQ-232` (new); `ADR-201` (amended — its rejection of a "32-bit persona
+  index" contradicted CON-202); `ADR-222` and `TEST-242` (their "from mnemonic,
+  `applicationId` and `accountScopeId` alone" claims were falsified); `ADR-223`
+  (new); `TEST-244` (new); `TEST-245` (new); the *User restores* narrative;
+  Protected assets, Trust boundaries and Explicit exclusions in the threat
+  model; three Tier-1 gate boxes; one traceability row. `IMPL-004` `CON-603`
+  becomes non-conforming and is named in `amends`.
+
+  *Not amended, deliberately.* `REQ-231` still defines no migration from an
+  earlier derivation scheme. Nothing has derived a production identity, so
+  there is nothing to migrate; `ADR-223` records the mechanism a future
+  migration would use and names what it would still cost. `CON-206` and every
+  credential, wire and ceremony format are untouched. `OQ-206` remains correct
+  as written — it says version 1 defines no transition from
+  `anuna-ssi/v1/root-key/<persona>` to CON-202, and under a sibling root CON-202
+  is still not rooted there.
+
+  *Cost, stated plainly.* Hierarchy-version-1 vectors are void, not deprecated.
+  A custodian must seal 64 more octets, in a format change with no migration
+  because there is no population. And a custody compromise now yields every
+  application key under that persona where version 1 yielded none — the asset
+  is created here, it is recorded in the threat model's Explicit exclusions, and
+  it is a gate box rather than an assurance.
+
+  *Corpus.* `test-vectors/spec-004-v1.json` requires regeneration at the
+  version-2 salt and deletion of the version-1 values; its new SHA-256 is **not
+  yet recorded** and this entry is incomplete until it is. `CON-226`'s corpus is
+  never edited to match an implementation. Note the filename's `v1` names the
+  corpus profile, not the hierarchy version, and the two now differ.
+
+  Every Tier-1 gate box remains open, and three were added.
 
 - **0.13.1 — 2026-08-07 — draft, normative.** Follows PROTO-003 0.5.1's
   correction to the CON-409 bearer-code model. A record signature and PAKE
