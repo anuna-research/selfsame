@@ -73,7 +73,28 @@ pub fn consume(request_id: &str, expires_at: i64, now: i64) -> Result<(), Replay
     let _guard = LOCK.lock().unwrap_or_else(|p| p.into_inner());
 
     let mut entries = load()?;
+    record(&mut entries, request_id, expires_at, now)?;
+    save(&entries)?;
+    Ok(())
+}
 
+/// The decision, with no I/O in it.
+///
+/// Separated from [`consume`] because it is the whole of what this module
+/// decides, and because a ledger tested through a keyring is a ledger tested
+/// against whatever credential store the machine happens to have. On a CI
+/// runner with no Secret Service the backing store answers every read with
+/// nothing, so a test asserting "the second attempt is a replay" fails for a
+/// reason that has nothing to do with replay.
+///
+/// `entries` is mutated only on success: a refused attempt leaves the ledger
+/// exactly as it was, so a caller cannot half-consume an id.
+fn record(
+    entries: &mut BTreeMap<String, i64>,
+    request_id: &str,
+    expires_at: i64,
+    now: i64,
+) -> Result<(), ReplayError> {
     // Prune first, so a full ledger of expired entries does not refuse a
     // legitimate ceremony.
     entries.retain(|_, &mut expiry| expiry > now);
@@ -86,8 +107,12 @@ pub fn consume(request_id: &str, expires_at: i64, now: i64) -> Result<(), Replay
     }
 
     entries.insert(request_id.to_owned(), expires_at);
-    save(&entries)?;
     Ok(())
+}
+
+/// Whether `entries` already holds a live record for `request_id`.
+fn holds(entries: &BTreeMap<String, i64>, request_id: &str, now: i64) -> bool {
+    entries.get(request_id).is_some_and(|&expiry| expiry > now)
 }
 
 /// Whether an id is already consumed, without consuming it.
@@ -98,7 +123,7 @@ pub fn consume(request_id: &str, expires_at: i64, now: i64) -> Result<(), Replay
 pub fn is_consumed(request_id: &str, now: i64) -> Result<bool, ReplayError> {
     let _guard = LOCK.lock().unwrap_or_else(|p| p.into_inner());
     let entries = load()?;
-    Ok(entries.get(request_id).is_some_and(|&expiry| expiry > now))
+    Ok(holds(&entries, request_id, now))
 }
 
 fn load() -> Result<BTreeMap<String, i64>, ReplayError> {
@@ -124,67 +149,87 @@ mod tests {
 
     const NOW: i64 = 1_785_412_800;
 
-    /// These tests share one store entry, and Rust runs them in parallel. The
-    /// guard is held for the whole of each test rather than just the reset, or
-    /// one test's writes land in another's ledger — which is how the overflow
-    /// case first failed, for a reason that had nothing to do with the ledger.
-    static TEST_LOCK: Mutex<()> = Mutex::new(());
-
-    fn fresh() -> std::sync::MutexGuard<'static, ()> {
-        let guard = TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-        let _ = store::delete(LEDGER_ENTRY);
-        guard
+    /// A ledger with nothing in it. Owned by the test, so nothing here depends
+    /// on the machine having a working credential store — which is what broke
+    /// these tests on a CI runner with no Secret Service, where every read
+    /// answered "nothing" and a replay looked like a first use.
+    fn ledger() -> BTreeMap<String, i64> {
+        BTreeMap::new()
     }
 
     #[test]
     fn a_request_id_is_consumable_once() {
-        let _guard = fresh();
-        assert!(consume("req-a", NOW + 120, NOW).is_ok());
-        assert!(matches!(consume("req-a", NOW + 120, NOW), Err(ReplayError::Replay)));
+        let mut l = ledger();
+        assert!(record(&mut l, "req-a", NOW + 120, NOW).is_ok());
+        assert!(matches!(record(&mut l, "req-a", NOW + 120, NOW), Err(ReplayError::Replay)));
     }
 
     /// The property the whole module exists for: a second issuance from the
     /// same still-valid offer must not produce a second credential.
     #[test]
     fn a_still_valid_offer_cannot_be_replayed() {
-        let _guard = fresh();
-        consume("req-b", NOW + 120, NOW).unwrap();
+        let mut l = ledger();
+        record(&mut l, "req-b", NOW + 120, NOW).unwrap();
         // One second later the offer is still perfectly valid, which is exactly
         // the window a replay would use.
-        assert!(matches!(consume("req-b", NOW + 120, NOW + 1), Err(ReplayError::Replay)));
+        assert!(matches!(record(&mut l, "req-b", NOW + 120, NOW + 1), Err(ReplayError::Replay)));
+    }
+
+    /// A refusal leaves the ledger untouched, so nothing is half-consumed.
+    #[test]
+    fn a_refused_attempt_does_not_change_the_ledger() {
+        let mut l = ledger();
+        record(&mut l, "req-x", NOW + 120, NOW).unwrap();
+        let before = l.clone();
+        let _ = record(&mut l, "req-x", NOW + 120, NOW);
+        assert_eq!(l, before);
     }
 
     /// Once the offer has expired the entry is forgotten, because expiry then
     /// does the refusing and remembering adds nothing.
     #[test]
     fn an_entry_is_forgotten_once_its_offer_expires() {
-        let _guard = fresh();
-        consume("req-c", NOW + 120, NOW).unwrap();
-        assert!(!is_consumed("req-c", NOW + 121).unwrap());
+        let mut l = ledger();
+        record(&mut l, "req-c", NOW + 120, NOW).unwrap();
+        assert!(holds(&l, "req-c", NOW + 119));
+        assert!(!holds(&l, "req-c", NOW + 121));
         // And the id becomes reusable — harmlessly, since any offer bearing it
         // is now refused for expiry before the ledger is ever consulted.
-        assert!(consume("req-c", NOW + 240, NOW + 121).is_ok());
+        assert!(record(&mut l, "req-c", NOW + 240, NOW + 121).is_ok());
     }
 
     #[test]
-    fn review_does_not_burn_the_id() {
-        let _guard = fresh();
-        assert!(!is_consumed("req-d", NOW).unwrap());
-        assert!(!is_consumed("req-d", NOW).unwrap());
-        assert!(consume("req-d", NOW + 120, NOW).is_ok());
+    fn asking_does_not_consume() {
+        let mut l = ledger();
+        assert!(!holds(&l, "req-d", NOW));
+        assert!(!holds(&l, "req-d", NOW));
+        assert!(record(&mut l, "req-d", NOW + 120, NOW).is_ok());
     }
 
     #[test]
     fn expired_entries_do_not_fill_the_ledger() {
-        let _guard = fresh();
+        let mut l = ledger();
         for i in 0..MAX_ENTRIES {
-            consume(&format!("old-{i}"), NOW + 120, NOW).unwrap();
+            record(&mut l, &format!("old-{i}"), NOW + 120, NOW).unwrap();
         }
         // Full at `NOW`, and a fresh ceremony is refused rather than silently
         // evicting somebody else's entry.
-        assert!(matches!(consume("overflow", NOW + 120, NOW), Err(ReplayError::LedgerFull)));
+        assert!(matches!(record(&mut l, "overflow", NOW + 120, NOW), Err(ReplayError::LedgerFull)));
         // Two minutes later every one of them has expired and the ledger is
         // usable again without anyone pruning it by hand.
-        assert!(consume("later", NOW + 240, NOW + 121).is_ok());
+        assert!(record(&mut l, "later", NOW + 240, NOW + 121).is_ok());
+    }
+
+    /// Pruning happens before the cap is checked, so a ledger full of expired
+    /// entries does not refuse a legitimate ceremony.
+    #[test]
+    fn pruning_precedes_the_cap() {
+        let mut l = ledger();
+        for i in 0..MAX_ENTRIES {
+            record(&mut l, &format!("stale-{i}"), NOW + 10, NOW).unwrap();
+        }
+        assert_eq!(l.len(), MAX_ENTRIES);
+        assert!(record(&mut l, "fresh", NOW + 130, NOW + 11).is_ok());
+        assert_eq!(l.len(), 1, "every expired entry is dropped, not just enough of them");
     }
 }
