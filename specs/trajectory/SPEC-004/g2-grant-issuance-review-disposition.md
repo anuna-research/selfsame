@@ -147,13 +147,51 @@ written without asking what the verifier at the other end must be able to do
 with the result. Both are failures to read the contract from the *consumer's*
 side.
 
+## Both groups are now repaired
+
+**Group A** — `69bf01c`. **Group B** — F2 in `c66883d` (PR #20), F3 and F5 in
+`7017b52` and `9987dd0`.
+
+Three things the repairs surfaced that the findings did not name:
+
+- **F3 needed a delta constructor that did not exist.** `selfsame-core` gained
+  `set_also_known_as`, beside `declare_profile`, because that module owns
+  `did:crdt` delta construction and a second place building deltas would be a
+  second answer to what a signed delta is. The closure itself is
+  `did_crdt::core::recon::ClosureBundle` rather than a new type: the method
+  defines the shape, and this crate's reader says it mirrors it, so producing
+  the upstream type is what stops writer and reader drifting.
+- **F5 needed an error the network crate could not express.** Every
+  unsuccessful WebFinger status became `Refused`, so an implementation had to
+  read every outage as first use — the substitution the comparison exists to
+  catch — or refuse every genuine first enrolment. `NetError::NotFound` now
+  distinguishes a 404, which is the authority answering, from the rest, which is
+  the authority failing to answer.
+- **F5 forced issuance into two commands.** The comparison is a person's, and a
+  single command could only have asked them after the fact.
+
+## What is still open, and is reported rather than hidden
+
+`AuthorisedGrant::published` is always `false`. `CON-206` prefers a declared
+`stateResolvers` entry and calls the bundled closure *"a bootstrap for a first
+ceremony on a degraded network, not a standing arrangement"* — a verifier may
+lean on it only at a grant's first acceptance with no resolver reachable, and
+must record that it did.
+
+Publication needs a conforming `did:crdt` resolver and none is deployed: `G6` of
+[[selfsame-path-b-readiness-2026-08-10]]. The field exists so a caller can see it
+is relying on the bootstrap instead of inferring it from silence.
+
 ## Standing
 
-PR #19 is not merged and its description asserts properties F1 shows are false;
-correcting it is part of this disposition. Group A is repaired against this
-record. Group B is tracked as the remaining scope of G2, with F3 expected to
-land as its own change because publishing issuer state reaches `did:crdt`
-construction and the unresolved resolver question.
+The repairs are unreviewed. Round 1 assessed `a793724`; everything since is new
+code written in response to findings, which is the condition under which this
+session has introduced defects before — twice in `authorise` alone, both caught
+by tests written minutes later.
+
+F3 and F5 are where a further error is most likely: both are new capability
+rather than a corrected line, both touch crates outside the one under review,
+and neither has been exercised end to end against a real application.
 
 Nothing shipped: `GATE-01` is shut in cbcl-bus, so this code is dormant by
 construction under `GATE-00`. That is a reason the defects cost nothing yet, not
