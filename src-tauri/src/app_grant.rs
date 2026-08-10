@@ -28,6 +28,14 @@
 //! the decision could only be tested by standing up a keychain, so it had no
 //! tests at all. Next door it has eight, over fixtures this crate cannot build.
 //!
+//! What the shell owes the core is **observations** — things it saw for itself
+//! rather than read from the offer: the `profileDigest` this ceremony is bound
+//! to, the provider and descriptor it selected, and the caller identity the
+//! platform reported. An earlier version passed none of them, which meant the
+//! decision verified that whoever supplied the profile had signed their own
+//! statement with their own key. See
+//! [[g2-grant-issuance-review-disposition]].
+//!
 //! What remains here is what genuinely needs a device:
 //!
 //! 1. **`REQ-002`'s gate** — an identity whose phrase has not been written down
@@ -41,7 +49,7 @@
 
 use selfsame_app_identity::{
     alias::{self, AcctUri},
-    authorise::{self, AuthoriseError},
+    authorise::{self, AuthoriseError, Observation},
     ceremony, grant, hierarchy,
 };
 
@@ -98,15 +106,21 @@ pub struct GrantRequestView {
 pub async fn app_grant_review(
     offer: Vec<u8>,
     profile: Vec<u8>,
+    ceremony_profile_digest: String,
     provider_id: String,
     descriptor_digest: String,
+    platform_binding_id: Option<String>,
 ) -> Result<GrantRequestView> {
     let decided = authorise::authorise(
         &offer,
         &profile,
-        &provider_id,
-        &descriptor_digest,
-        now() as i64,
+        &Observation {
+            ceremony_profile_digest: &ceremony_profile_digest,
+            provider_id: &provider_id,
+            descriptor_digest: &descriptor_digest,
+            platform_binding_id: platform_binding_id.as_deref(),
+            now: now() as i64,
+        },
     )
     .map_err(token)?;
 
@@ -128,6 +142,8 @@ fn token(e: AuthoriseError) -> UiError {
         AuthoriseError::OfferMalformed => "OfferMalformed",
         AuthoriseError::OfferExpired => "OfferExpired",
         AuthoriseError::ScopeNotCanonical => "ScopeNotCanonical",
+        AuthoriseError::ProfileNotBound => "ProfileNotBound",
+        AuthoriseError::HintMismatch => "HintMismatch",
     })
 }
 
@@ -140,8 +156,10 @@ fn token(e: AuthoriseError) -> UiError {
 pub async fn app_grant_issue(
     offer: Vec<u8>,
     profile: Vec<u8>,
+    ceremony_profile_digest: String,
     provider_id: String,
     descriptor_digest: String,
+    platform_binding_id: Option<String>,
     passcode: String,
 ) -> Result<AuthorisedGrant> {
     Custody::require_backup_confirmed()?;
@@ -151,9 +169,13 @@ pub async fn app_grant_issue(
     let decided = authorise::authorise(
         &offer,
         &profile,
-        &provider_id,
-        &descriptor_digest,
-        now() as i64,
+        &Observation {
+            ceremony_profile_digest: &ceremony_profile_digest,
+            provider_id: &provider_id,
+            descriptor_digest: &descriptor_digest,
+            platform_binding_id: platform_binding_id.as_deref(),
+            now: now() as i64,
+        },
     )
     .map_err(token)?;
 
