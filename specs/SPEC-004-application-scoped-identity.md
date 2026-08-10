@@ -6366,10 +6366,12 @@ combination; that is an engineering conclusion, not a legal novelty claim.
   created here, it is recorded in Explicit exclusions, and it is a gate box
   rather than an assurance.
 
-  *Corpus.* `test-vectors/spec-004-v1.json` requires regeneration at the
-  version-2 salt and deletion of the version-1 values; its new SHA-256 is **not
-  yet recorded** and this entry is incomplete until it is. The filename's `v1`
-  names the corpus profile, not the hierarchy version, and the two now differ.
+  *Corpus.* `test-vectors/spec-004-v1.json` regenerated at the version-2 salt;
+  the version-1 values are gone rather than retained beside the new ones. Its
+  SHA-256 is
+  `b0be85945b4b0f9ca0b9f6ff4e01dc0e69cfd4a2753f0b6ab0cf93f6bce30803`. The
+  filename's `v1` names the corpus profile, not the hierarchy version, and the
+  two now differ.
 
   Every Tier-1 gate box remains open, and two were added.
 

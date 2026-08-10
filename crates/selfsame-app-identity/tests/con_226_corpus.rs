@@ -317,7 +317,7 @@ fn con_202() -> Json {
     for (slug, application_id, entropy, _label, scope_byte) in scenarios {
         let app = profile::ApplicationId::parse(application_id).unwrap();
         let scope = AccountScopeId::from_octets([scope_byte; 32]);
-        let key = hierarchy::derive(&mnemonic(entropy), &app, &scope);
+        let key = hierarchy::derive_from_mnemonic(&mnemonic(entropy), &app, &scope);
         cases.push(case(
             &format!("con_202_{slug}"),
             "deterministic application and account derivation",

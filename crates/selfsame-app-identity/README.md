@@ -37,7 +37,10 @@ let mnemonic = hierarchy::Mnemonic::parse_in_normalized(
 let application = ApplicationId::parse("https://photos.example/selfsame/application")?;
 let account_scope = AccountScopeId::parse(scope_from_the_account_record)?;
 
-let home = hierarchy::derive(&mnemonic, &application, &account_scope);
+// The root comes from the custodian's sealed material, not from a phrase —
+// CON-202 hierarchy version 2, see ADR-223. `derive_from_mnemonic` exists for
+// the two moments the phrase is legitimately in hand: creation and restore.
+let home = hierarchy::derive(&hierarchy_root, &application, &account_scope);
 let home_did = home.home_did()?;
 let acct = alias::stable_acct_uri(&home_did, "accounts.photos.example");
 // acct:ss-<52 lower-case base32 characters>@accounts.photos.example

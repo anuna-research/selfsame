@@ -13,8 +13,10 @@
 //!   HKDF-SHA-512(IKM = ikm, salt = SALT,
 //!                info = LP(label) || LP(context), L = length)
 //!
-//! recovery_seed     = BIP-39 seed, 64 octets
-//! application_node  = KDF(recovery_seed,    "application",      applicationId,   64)
+//! bip39_seed        = BIP-39 seed, 64 octets
+//! hierarchy_root    = HKDF-SHA-512(IKM = bip39_seed, salt = "",
+//!                       info = "selfsame/v2/hierarchy-root/" || U32BE(persona), 64)
+//! application_node  = KDF(hierarchy_root,   "application",      applicationId,   64)
 //! account_node      = KDF(application_node, "account",          accountScopeId,  64)
 //! home_signing_seed = KDF(account_node,     "home-signing-key", "",              32)
 //! ```
@@ -59,7 +61,7 @@ use crate::profile::ApplicationId;
 use crate::scope::AccountScopeId;
 
 /// The domain-separation string hashed into the HKDF salt.
-const SALT_LABEL: &[u8] = b"selfsame/application-account-key-hierarchy/v1";
+const SALT_LABEL: &[u8] = b"selfsame/application-account-key-hierarchy/v2";
 
 /// `CON-202` label for the application node.
 const LABEL_APPLICATION: &str = "application";
@@ -75,7 +77,12 @@ const LABEL_HOME_SIGNING_KEY: &str = "home-signing-key";
 /// is the parser-differential shape LangSec Principle 5 rules out.
 pub use bip39::Mnemonic;
 
-/// The 64-octet BIP-39 seed, zeroised on drop.
+/// The 64-octet hierarchy root, zeroised on drop — `CON-202`, `ADR-223`.
+///
+/// A **sibling** of SPEC-001's persona root, not its child: both descend from
+/// the BIP-39 seed by HKDF-SHA-512 under different `info` labels, and neither
+/// derives the other. It is HKDF input keying material here and nothing else,
+/// which is what leaves this hierarchy with no key-separation obligation.
 ///
 /// A newtype rather than an alias for [`Zeroizing<[u8; 64]>`](Zeroizing), and
 /// the reason is the same one [`ApplicationNode`] and [`AccountNode`] are: an
@@ -85,13 +92,30 @@ pub use bip39::Mnemonic;
 /// the one secret in `CON-202` from which every other one below it can be
 /// re-derived, so it is the one that least belongs in a log line.
 ///
-/// It carries no accessor for the same reason the nodes do not: it exists only
-/// to be the IKM of [`application_node`], and nothing else in this profile has
-/// a use for the octets.
-pub struct RecoverySeed(Zeroizing<[u8; 64]>);
+/// The octets are readable through [`HierarchyRoot::expose`] — unlike the nodes
+/// below it, which have no accessor at all. A custodian must be able to seal
+/// this value and reconstruct it later, because `CON-202` requires that *"a
+/// wallet that can derive only while the person is re-entering their recovery
+/// phrase does not conform"*. The accessor is deliberately named so that a
+/// reviewer greps for it and finds every place the root is materialised.
+pub struct HierarchyRoot(Zeroizing<[u8; 64]>);
 
-impl RecoverySeed {
-    /// The raw seed, for the first KDF step only.
+impl HierarchyRoot {
+    /// Rebuild from octets a custodian sealed earlier.
+    ///
+    /// This is the phrase-free path: a wallet that holds the sealed root derives
+    /// every account below it without ever seeing the mnemonic. `FINDING-016`
+    /// existed because hierarchy version 1 had no such path.
+    pub fn from_octets(octets: [u8; 64]) -> Self {
+        Self(Zeroizing::new(octets))
+    }
+
+    /// The octets, for sealing. Zeroised with the returned value.
+    pub fn expose(&self) -> Zeroizing<[u8; 64]> {
+        Zeroizing::new(*self.0)
+    }
+
+    /// The raw root, for the first KDF step only.
     fn as_bytes(&self) -> &[u8; 64] {
         &self.0
     }
@@ -165,9 +189,9 @@ impl core::fmt::Debug for HomeKey {
     }
 }
 
-impl core::fmt::Debug for RecoverySeed {
+impl core::fmt::Debug for HierarchyRoot {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.write_str("RecoverySeed(<redacted>)")
+        f.write_str("HierarchyRoot(<redacted>)")
     }
 }
 
@@ -192,19 +216,56 @@ pub enum HierarchyError {
     DidDerivation,
 }
 
-/// The 64-octet BIP-39 seed (`CON-202`).
+/// The persona index hierarchy version 2 defines and uses.
 ///
-/// Version 1 uses the empty BIP-39 passphrase. That is a versioned property of
-/// the derivation, not a parameter: admitting a passphrase later would re-derive
-/// every existing identity, so it becomes a new hierarchy version rather than an
-/// argument a caller can vary.
-pub fn recovery_seed(mnemonic: &Mnemonic) -> RecoverySeed {
-    RecoverySeed(Zeroizing::new(mnemonic.to_seed_normalized("")))
+/// `CON-202` fixes it as a constant of the hierarchy version rather than a
+/// parameter, for the same reason it fixes the empty BIP-39 passphrase: a
+/// version admitting two personas would be two trees under one name. It appears
+/// in the `info` as `U32BE(0)` so that a later version admitting a second
+/// persona is a change of value in an encoding that already exists, rather than
+/// a change of shape.
+///
+/// It is deliberately **not** carried per account. A wallet restored from a
+/// recovery phrase holds no per-account state from which to learn a persona, and
+/// asking the person for a number is the configuration `REQ-217` and `ADR-210`
+/// refuse.
+pub const PERSONA: u32 = 0;
+
+/// The domain-separation label for the hierarchy root (`CON-202`, `ADR-223`).
+const ROOT_INFO_PREFIX: &[u8] = b"selfsame/v2/hierarchy-root/";
+
+/// Derive the hierarchy root from a recovery phrase (`CON-202`).
+///
+/// ```text
+/// bip39_seed     = PBKDF2-HMAC-SHA512(NFKD(phrase), "mnemonic", 2048, 64)
+/// hierarchy_root = HKDF-SHA-512(IKM  = bip39_seed,
+///                               salt = "",                  ; RFC 5869 §2.2
+///                               info = "selfsame/v2/hierarchy-root/" || U32BE(0),
+///                               L    = 64)
+/// ```
+///
+/// The salt is a zero-length string. RFC 5869 §2.2 sets an absent salt to
+/// `HashLen` zero octets, so "absent" and "zero-length" name one value; the
+/// spelling is fixed here so two implementations cannot disagree.
+///
+/// **This is called once, at identity creation or restore.** Everything
+/// afterwards runs from [`HierarchyRoot::from_octets`] over sealed material —
+/// see `ADR-223` for why that property is the point of hierarchy version 2.
+pub fn hierarchy_root(mnemonic: &Mnemonic) -> HierarchyRoot {
+    let bip39_seed = Zeroizing::new(mnemonic.to_seed_normalized(""));
+    let mut info = ROOT_INFO_PREFIX.to_vec();
+    info.extend_from_slice(&PERSONA.to_be_bytes());
+
+    let hk = hkdf::Hkdf::<sha2::Sha512>::new(None, bip39_seed.as_ref());
+    let mut okm = Zeroizing::new([0u8; 64]);
+    hk.expand(&info, okm.as_mut()).expect("64 octets is a valid HKDF-SHA-512 output length");
+    info.zeroize();
+    HierarchyRoot(okm)
 }
 
 /// The private application node for one canonical `applicationId`.
-pub fn application_node(recovery: &RecoverySeed, application: &ApplicationId) -> ApplicationNode {
-    ApplicationNode(kdf64(recovery.as_bytes(), LABEL_APPLICATION, application.as_str()))
+pub fn application_node(root: &HierarchyRoot, application: &ApplicationId) -> ApplicationNode {
+    ApplicationNode(kdf64(root.as_bytes(), LABEL_APPLICATION, application.as_str()))
 }
 
 /// The private account node for one `(applicationId, accountScopeId)` pair.
@@ -220,21 +281,37 @@ pub fn home_key(account: &AccountNode) -> HomeKey {
     HomeKey { seed, signing }
 }
 
-/// The whole hierarchy in one call, the shape every caller actually wants.
+/// The whole hierarchy from a sealed root — the shape a wallet actually uses.
+///
+/// Takes the root rather than the mnemonic, because that is the property
+/// hierarchy version 2 exists to provide: a custodian that sealed only the root
+/// derives every account below it with the phrase nowhere in the process.
 pub fn derive(
-    mnemonic: &Mnemonic,
+    root: &HierarchyRoot,
     application: &ApplicationId,
     scope: &AccountScopeId,
 ) -> HomeKey {
-    let recovery = recovery_seed(mnemonic);
-    let app = application_node(&recovery, application);
+    let app = application_node(root, application);
     let account = account_node(&app, scope);
     home_key(&account)
 }
 
+/// The whole hierarchy from a recovery phrase, for creation and restore only.
+///
+/// Every other caller wants [`derive`]. This one exists for the two moments at
+/// which the phrase is legitimately in hand, and it is named so that a reviewer
+/// can grep for the places a mnemonic reaches the hierarchy at all.
+pub fn derive_from_mnemonic(
+    mnemonic: &Mnemonic,
+    application: &ApplicationId,
+    scope: &AccountScopeId,
+) -> HomeKey {
+    derive(&hierarchy_root(mnemonic), application, scope)
+}
+
 // ── the KDF ─────────────────────────────────────────────────────────────────
 
-/// `SALT = SHA-512(UTF8("selfsame/application-account-key-hierarchy/v1"))`.
+/// `SALT = SHA-512(UTF8("selfsame/application-account-key-hierarchy/v2"))`.
 fn salt() -> [u8; 64] {
     use sha2::Digest as _;
     sha2::Sha512::digest(SALT_LABEL).into()
@@ -281,7 +358,7 @@ mod tests {
     }
 
     fn home(m: &Mnemonic, id: &str, s: u8) -> [u8; 32] {
-        *derive(m, &app(id), &scope(s)).seed()
+        *derive_from_mnemonic(m, &app(id), &scope(s)).seed()
     }
 
     const A: &str = "https://photos.example/selfsame/application";
@@ -336,8 +413,8 @@ mod tests {
         octets[31] = 1;
         let two = AccountScopeId::from_octets(octets);
         assert_ne!(
-            *derive(&m, &app(A), &one).seed(),
-            *derive(&m, &app(A), &two).seed()
+            *derive_from_mnemonic(&m, &app(A), &one).seed(),
+            *derive_from_mnemonic(&m, &app(A), &two).seed()
         );
     }
 
@@ -345,7 +422,7 @@ mod tests {
     #[test]
     fn ten_thousand_applications_produce_ten_thousand_distinct_home_keys() {
         let m = mnemonic(0);
-        let recovery = recovery_seed(&m);
+        let recovery = hierarchy_root(&m);
         let s = scope(3);
         let mut seen = std::collections::HashSet::with_capacity(10_000);
         for i in 0..10_000u32 {
@@ -359,7 +436,7 @@ mod tests {
     #[test]
     fn ten_thousand_account_scopes_produce_ten_thousand_distinct_home_keys() {
         let m = mnemonic(0);
-        let recovery = recovery_seed(&m);
+        let recovery = hierarchy_root(&m);
         let node = application_node(&recovery, &app(A));
         let mut seen = std::collections::HashSet::with_capacity(10_000);
         for i in 0..10_000u32 {
@@ -374,7 +451,7 @@ mod tests {
     #[test]
     fn the_home_seed_is_domain_separated_from_every_node_above_it() {
         let m = mnemonic(0);
-        let recovery = recovery_seed(&m);
+        let recovery = hierarchy_root(&m);
         let a = application_node(&recovery, &app(A));
         let account = account_node(&a, &scope(1));
         let key = home_key(&account);
@@ -409,7 +486,7 @@ mod tests {
     fn the_salt_is_the_sha512_of_the_declared_domain_string() {
         use sha2::Digest as _;
         let expected: [u8; 64] =
-            sha2::Sha512::digest(b"selfsame/application-account-key-hierarchy/v1").into();
+            sha2::Sha512::digest(b"selfsame/application-account-key-hierarchy/v2").into();
         assert_eq!(salt(), expected);
         // A bare unsalted HKDF must not produce the same material.
         let hk = hkdf::Hkdf::<sha2::Sha512>::new(None, &[0u8; 64]);
@@ -422,7 +499,7 @@ mod tests {
 
     // REQ-213: derivation depends on no provider value.
     #[test]
-    fn derivation_reads_nothing_but_the_recovery_seed_application_id_and_scope() {
+    fn derivation_reads_nothing_but_the_hierarchy_root_application_id_and_scope() {
         // Stated structurally rather than by assertion: the signatures of
         // `application_node`, `account_node`, and `home_key` admit no profile,
         // descriptor, endpoint, region, or device key, so there is no value a
@@ -430,8 +507,8 @@ mod tests {
         // consequence a person notices — the same three inputs give the same
         // home DID no matter what else changed.
         let m = mnemonic(0);
-        let first = derive(&m, &app(A), &scope(1));
-        let second = derive(&m, &app(A), &scope(1));
+        let first = derive_from_mnemonic(&m, &app(A), &scope(1));
+        let second = derive_from_mnemonic(&m, &app(A), &scope(1));
         assert_eq!(first.public_key(), second.public_key());
         assert_eq!(first.home_did().unwrap(), second.home_did().unwrap());
     }
@@ -439,8 +516,8 @@ mod tests {
     #[test]
     fn distinct_home_keys_yield_distinct_dids() {
         let m = mnemonic(0);
-        let one = derive(&m, &app(A), &scope(1)).home_did().unwrap();
-        let two = derive(&m, &app(B), &scope(1)).home_did().unwrap();
+        let one = derive_from_mnemonic(&m, &app(A), &scope(1)).home_did().unwrap();
+        let two = derive_from_mnemonic(&m, &app(B), &scope(1)).home_did().unwrap();
         assert_ne!(one, two);
         assert!(one.starts_with("did:crdt:"), "{one}");
     }
@@ -449,7 +526,7 @@ mod tests {
     #[test]
     fn debug_discloses_no_key_material() {
         let m = mnemonic(0);
-        let recovery = recovery_seed(&m);
+        let recovery = hierarchy_root(&m);
         let a = application_node(&recovery, &app(A));
         let account = account_node(&a, &scope(1));
         let key = home_key(&account);
@@ -465,14 +542,80 @@ mod tests {
     /// array's derived `Debug` — so `{:?}` printed all sixty-four octets of the
     /// root secret, while every type below it in the hierarchy was redacted.
     #[test]
-    fn the_recovery_seed_does_not_print_its_octets() {
-        let recovery = recovery_seed(&mnemonic(0));
+    fn the_hierarchy_root_does_not_print_its_octets() {
+        let recovery = hierarchy_root(&mnemonic(0));
         let rendered = format!("{recovery:?}");
         // The first octet of this seed, in the two spellings a derived `Debug`
         // for `[u8; 64]` would produce.
         let first = recovery.as_bytes()[0];
         assert!(!rendered.contains(&format!("{first}")), "{rendered}");
         assert!(!rendered.contains(&format!("{first:02x}")), "{rendered}");
-        assert_eq!(rendered, "RecoverySeed(<redacted>)");
+        assert_eq!(rendered, "HierarchyRoot(<redacted>)");
     }
+    // ── hierarchy version 2 — ADR-223 ───────────────────────────────────────
+
+    /// The property `FINDING-016` existed because version 1 lacked, and the
+    /// whole reason for `ADR-223`: a custodian that sealed only the root derives
+    /// every account below it with the phrase nowhere in the process.
+    #[test]
+    fn a_sealed_root_derives_without_the_phrase() {
+        let m = mnemonic(7);
+        let sealed: [u8; 64] = *hierarchy_root(&m).expose();
+
+        // The phrase is gone from here on; only the sealed octets remain.
+        let restored = HierarchyRoot::from_octets(sealed);
+        let from_root = *derive(&restored, &app(A), &scope(3)).seed();
+        let from_phrase = *derive_from_mnemonic(&m, &app(A), &scope(3)).seed();
+
+        assert_eq!(from_root, from_phrase);
+    }
+
+    /// `ADR-223`: `hierarchy_root` is a **sibling** of SPEC-001's persona root,
+    /// not its child, and neither derives the other.
+    ///
+    /// The comparison is made at equal width on purpose. SPEC-001's root is 32
+    /// octets, and comparing a 64-octet value against it is a check that cannot
+    /// fail — so the persona-root label is expanded to 64 here, which makes the
+    /// label separation the subject of the test rather than the length.
+    #[test]
+    fn the_root_is_a_sibling_of_the_spec_001_persona_root() {
+        let m = mnemonic(11);
+        let bip39_seed = m.to_seed_normalized("");
+
+        let mut spec001_info = b"anuna-ssi/v1/root-key/".to_vec();
+        spec001_info.extend_from_slice(&PERSONA.to_be_bytes());
+        let hk = hkdf::Hkdf::<sha2::Sha512>::new(None, &bip39_seed);
+        let mut persona_root = [0u8; 64];
+        hk.expand(&spec001_info, &mut persona_root).unwrap();
+
+        let ours: [u8; 64] = *hierarchy_root(&m).expose();
+
+        assert_ne!(ours, persona_root);
+        // Neither is a prefix or truncation of the other at any split.
+        for n in 1..64 {
+            assert_ne!(ours[..n], persona_root[..n]);
+            assert_ne!(ours[64 - n..], persona_root[64 - n..]);
+        }
+    }
+
+    /// The root commits to the persona index, so a later version admitting a
+    /// second persona yields an unrelated tree rather than a colliding one.
+    #[test]
+    fn a_different_persona_gives_an_unrelated_root() {
+        let m = mnemonic(13);
+        let bip39_seed = m.to_seed_normalized("");
+
+        let derive_at = |persona: u32| -> [u8; 64] {
+            let mut info = b"selfsame/v2/hierarchy-root/".to_vec();
+            info.extend_from_slice(&persona.to_be_bytes());
+            let hk = hkdf::Hkdf::<sha2::Sha512>::new(None, &bip39_seed);
+            let mut out = [0u8; 64];
+            hk.expand(&info, &mut out).unwrap();
+            out
+        };
+
+        assert_eq!(derive_at(PERSONA), *hierarchy_root(&m).expose());
+        assert_ne!(derive_at(0), derive_at(1));
+    }
+
 }

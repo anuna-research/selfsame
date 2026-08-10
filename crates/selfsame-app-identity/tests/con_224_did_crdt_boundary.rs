@@ -62,7 +62,7 @@ struct Home {
 fn home(application_id: &str, scope_byte: u8) -> Home {
     let app = ApplicationId::parse(application_id).expect("canonical");
     let scope = AccountScopeId::from_octets([scope_byte; 32]);
-    let derived = hierarchy::derive(&mnemonic(0), &app, &scope);
+    let derived = hierarchy::derive_from_mnemonic(&mnemonic(0), &app, &scope);
     let key = derived.signing_key().clone();
 
     // "two ordinary independent did:crdt genesis documents" — ordinary meaning
