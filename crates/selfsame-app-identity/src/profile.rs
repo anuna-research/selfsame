@@ -73,7 +73,9 @@ pub const MAX_PROPAGATION_SLA_CEILING: i64 = 300;
 /// `CON-201`: ceiling on `revocation.projection.maxAgeSeconds` — one hour.
 pub const MAX_PROJECTION_AGE_CEILING: i64 = 3_600;
 
-const MAX_PERMISSIONS: usize = 64;
+/// The shared `CON-201` ceiling for permission sets carried by profiles and
+/// enrollment statements.
+pub(crate) const MAX_PERMISSIONS: usize = 64;
 const MAX_PROVIDERS: usize = 64;
 const MAX_RELAYS: usize = 16;
 
@@ -136,7 +138,7 @@ fn bad(path: impl Into<String>, reason: &'static str) -> ProfileError {
 #[derive(Clone, PartialEq, Eq, Debug, Hash)]
 pub struct ApplicationId {
     text: String,
-    origin_len: usize,
+    origin: String,
 }
 
 impl ApplicationId {
@@ -144,8 +146,7 @@ impl ApplicationId {
     /// repaired.
     pub fn parse(text: &str) -> Result<Self, UriError> {
         let parts = uri::recognise(text, UriPolicy::APPLICATION_ID)?;
-        let origin_len = parts.origin.len();
-        Ok(Self { text: text.to_string(), origin_len })
+        Ok(Self { text: text.to_string(), origin: parts.origin.to_string() })
     }
 
     /// The exact ASCII serialisation. Compared as exact ASCII by every verifier.
@@ -156,7 +157,7 @@ impl ApplicationId {
     /// `https://host[:port]` — the origin permissions and enrollment keys must
     /// share.
     pub fn origin(&self) -> &str {
-        &self.text[..self.origin_len]
+        &self.origin
     }
 }
 
@@ -684,12 +685,18 @@ fn mobile_binding(
     }
 }
 
-fn provider_id(text: &str, path: &'static str) -> Result<(), ProfileError> {
+/// Whether `text` belongs to `CON-201`'s provider-ID language.
+pub(crate) fn is_provider_id(text: &str) -> bool {
     let bytes = text.as_bytes();
-    let valid = (1..=63).contains(&bytes.len())
-        && (bytes[0].is_ascii_lowercase() || bytes[0].is_ascii_digit())
-        && bytes.iter().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || *b == b'-');
-    if valid {
+    (1..=63).contains(&bytes.len())
+        && bytes
+            .first()
+            .is_some_and(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
+        && bytes.iter().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || *b == b'-')
+}
+
+fn provider_id(text: &str, path: &'static str) -> Result<(), ProfileError> {
+    if is_provider_id(text) {
         Ok(())
     } else {
         Err(bad(path, "does not match [a-z0-9][a-z0-9-]{0,62}"))
