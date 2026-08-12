@@ -107,6 +107,17 @@ jobs:
             "$webkit" libssl-dev libxdo-dev \
             libayatana-appindicator3-dev librsvg2-dev
 
+          # erlc and erl, for selfsame-beam's NIF boundary test. That test
+          # compiles a small Erlang harness, loads the built cdylib into a real
+          # BEAM and asserts the enrolment NIF's refusals are opaque — which is
+          # the only place the Rustler boundary is exercised as the BEAM
+          # actually sees it. Without Erlang it panics on a missing `erlc`.
+          #
+          # `erlang-nox` rather than `erlang`: erlc, erl and crypto, without the
+          # X11 and wxWidgets dependencies the full package drags in.
+          $SUDO apt-get install -y --no-install-recommends erlang-nox
+          erlc -v || true
+
       - name: Ensure the Rust toolchain
         run: |
           set -euo pipefail
