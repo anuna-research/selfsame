@@ -13,6 +13,7 @@
     rehydrate_path_b/2,
     run/0,
     sign_enrollment/4,
+    sign_enrollment_profile_bound/4,
     verified_path_b_revocations/2,
     verify_path_b/2,
     verify_path_b_sealed/2,
@@ -26,6 +27,12 @@ operation_permission(_, _) -> nif_not_loaded().
 path_b_standing_cache_expiry(_) -> nif_not_loaded().
 rehydrate_path_b(_, _) -> nif_not_loaded().
 sign_enrollment(_, _, _, _) -> nif_not_loaded().
+
+%% Declared because `rustler::init!` registers every NIF in the crate and
+%% `load_nif` answers `bad_lib` when the library exports one this module does
+%% not — taking every OTHER entry point down with it. This harness exercises
+%% `sign_enrollment/4`; the stub still has to exist.
+sign_enrollment_profile_bound(_, _, _, _) -> nif_not_loaded().
 verified_path_b_revocations(_, _) -> nif_not_loaded().
 verify_path_b(_, _) -> nif_not_loaded().
 verify_path_b_sealed(_, _) -> nif_not_loaded().

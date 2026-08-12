@@ -333,6 +333,30 @@ pub fn recognise_unsigned(
     Ok(statement)
 }
 
+/// Recognise canonical unsigned statement OCTETS, with no protected header.
+///
+/// `recognise_unsigned` needs a `kid` because it also recognises the header a
+/// signature will carry. A CONSTRUCTOR has no `kid` yet and still must not emit
+/// a statement its own grammar rejects — `build` is an infallible serialiser, so
+/// without this a browser facade could return canonical-looking bytes for
+/// `"bad"` identifiers, an empty permission list, or `expiresAt` before
+/// `issuedAt`, and the disagreement between builder and recogniser would surface
+/// only as a wallet refusing every request.
+pub fn recognise_unsigned_payload(
+    statement_octets: &[u8],
+) -> Result<EnrollmentStatement, EnrollmentError> {
+    let payload = crate::json::recognise(statement_octets, STATEMENT_LIMITS)
+        .map_err(|_| EnrollmentError::EnrollmentMalformed)?;
+    if crate::json::canonicalise(&payload) != statement_octets {
+        return Err(EnrollmentError::EnrollmentMalformed);
+    }
+    let statement = recognise_payload(&payload)?;
+    if crate::json::canonicalise(&build(&statement)) != statement_octets {
+        return Err(EnrollmentError::EnrollmentMalformed);
+    }
+    Ok(statement)
+}
+
 fn recognise_payload(payload: &Json) -> Result<EnrollmentStatement, EnrollmentError> {
     let members =
         payload.as_object().ok_or(EnrollmentError::EnrollmentMalformed)?;

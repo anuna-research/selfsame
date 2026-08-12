@@ -171,11 +171,12 @@ pub fn build_offer_json(
     offer_core_json: &str,
     enrollment_evidence: &str,
     provider_hint_json: &str,
+    profile: &[u8],
 ) -> Result<Vec<u8>, JsError> {
     let result = (|| -> Result<Vec<u8>, IdentityError> {
         let core = parse_offer_core(offer_core_json)?;
         let hint = parse_provider_hint(provider_hint_json)?;
-        build_offer(&core, enrollment_evidence, &hint)
+        build_offer(&core, enrollment_evidence, &hint, profile)
     })();
     result.map_err(|_| JsError::new("SPEC-004 offer refused"))
 }
@@ -185,11 +186,34 @@ pub fn build_offer_json(
 /// [`OfferCore::to_json`] is the ceremony module's actual construction entry
 /// point. There is no `ceremony::build_offer`; this function only adds the two
 /// excluded members and asks the module's own recogniser to accept the result.
+/// PROFILE-BOUND, because the two nested members are not this function's to take
+/// on trust.
+///
+/// `recognise_offer` returns the evidence as text and the hint as an
+/// unrecognised JSON value, so this used to emit a "complete" offer for
+/// `not.a.valid.enrollment-jws` and a hint naming another application, an
+/// undeclared provider and an unrelated offer digest — reproduced against the
+/// built artefact. `ProviderHint::verify` is `CON-209`'s five checks and already
+/// existed; nothing called it. A constructor that emits what its own protocol
+/// rejects is a producer/recogniser disagreement that surfaces as a wallet
+/// refusing every request rather than as a diff.
 pub fn build_offer(
     core: &OfferCore,
     enrollment_evidence: &str,
     provider_hint: &ProviderHint,
+    profile_bytes: &[u8],
 ) -> Result<Vec<u8>, IdentityError> {
+    // Every check below compares against the JOINER'S OWN profile, never a
+    // value the hint supplied — a hint may only select among things already
+    // trusted.
+    let profile =
+        ApplicationProfile::recognise(profile_bytes).map_err(|_| IdentityError::Refused)?;
+    provider_hint
+        .verify(&profile, &core.digest())
+        .map_err(|_| IdentityError::Refused)?;
+    // The evidence is a CON-214 compact JWS, not arbitrary text to append.
+    identity_enrollment::recognise(enrollment_evidence).map_err(|_| IdentityError::Refused)?;
+
     let Json::Object(mut members) = core.to_json() else {
         return Err(IdentityError::Refused);
     };
@@ -296,21 +320,30 @@ pub fn proof_input(
 /// developer backend, not browser code, signs the returned payload.
 #[wasm_bindgen]
 pub fn build_enrollment_json(statement_json: &str) -> Result<Vec<u8>, JsError> {
-    let result =
-        parse_enrollment_statement(statement_json).map(|statement| build_enrollment(&statement));
+    let result = parse_enrollment_statement(statement_json)
+        .and_then(|statement| build_enrollment(&statement));
     result.map_err(|_| JsError::new("Enrollment statement refused"))
 }
 
 /// Native twin of [`build_enrollment_json`].
-pub fn build_enrollment(statement: &EnrollmentStatement) -> Vec<u8> {
-    identity_json::canonicalise(&identity_enrollment::build(statement))
+///
+/// `enrollment::build` is an infallible serialiser, so this returned
+/// canonical-looking bytes for `"bad"` identifiers and digests, an empty
+/// permission list, and `expiresAt` earlier than `issuedAt` — the actual
+/// language begins in the recogniser, which the facade never invoked. Round-trip
+/// through it so the builder and the recogniser cannot disagree about what a
+/// statement is.
+pub fn build_enrollment(statement: &EnrollmentStatement) -> Result<Vec<u8>, IdentityError> {
+    let octets = identity_json::canonicalise(&identity_enrollment::build(statement));
+    identity_enrollment::recognise_unsigned_payload(&octets).map_err(|_| IdentityError::Refused)?;
+    Ok(octets)
 }
 
 /// Recognise a compact `CON-214` enrollment JWS as a closed statement.
 #[wasm_bindgen]
 pub fn recognise_enrollment_json(compact: &str) -> Result<String, JsError> {
     let result = recognise_enrollment(compact).and_then(|statement| {
-        String::from_utf8(build_enrollment(&statement)).map_err(|_| IdentityError::Refused)
+        String::from_utf8(build_enrollment(&statement)?).map_err(|_| IdentityError::Refused)
     });
     result.map_err(|_| JsError::new("Enrollment statement refused"))
 }
@@ -1066,6 +1099,7 @@ mod tests {
             &offer_core_json(&core),
             &evidence,
             &provider_hint_json(&hint),
+            &fixture.profile_octets,
         )
         .expect("the native rlib can exercise a successful wasm facade");
         let recognised = identity_ceremony::recognise_offer(&payload).expect("recognised offer");
@@ -1111,6 +1145,7 @@ mod tests {
             &offer_core_json(&core),
             &evidence,
             &provider_hint_json(&hint),
+            &fixture.profile_octets,
         )
         .unwrap();
         let bundle = identity_ceremony::build_bundle(
@@ -1189,7 +1224,7 @@ mod tests {
         let (_, _, statement, _) = offer_fixture(&fixture);
         let output = build_enrollment_json(&enrollment_statement_json(&statement))
             .expect("the native rlib can exercise a successful wasm facade");
-        assert_eq!(output, build_enrollment(&statement));
+        assert_eq!(output, build_enrollment(&statement).unwrap());
         let value: serde_json::Value = serde_json::from_slice(&output).unwrap();
         assert_eq!(value["evidenceVersion"], 1);
         assert_eq!(value["offerDigest"], statement.offer_digest);
@@ -1201,7 +1236,7 @@ mod tests {
         let (_, _, statement, compact) = offer_fixture(&fixture);
         let output = recognise_enrollment_json(&compact)
             .expect("the native rlib can exercise a successful wasm facade");
-        assert_eq!(output.as_bytes(), build_enrollment(&statement));
+        assert_eq!(output.as_bytes(), build_enrollment(&statement).unwrap());
     }
 
     #[test]
@@ -1457,4 +1492,88 @@ mod tests {
         }
         assert!(out.starts_with('{') && out.ends_with('}'));
     }
+
+    // ── the constructors refuse what their own protocol rejects ──────────
+
+    // REPRODUCED AGAINST THE BUILT ARTEFACT BEFORE THIS FIX: `build_offer_json`
+    // returned 923 bytes for invalid enrolment evidence together with a hint
+    // naming another application, an undeclared provider, a wrong descriptor
+    // digest and an unrelated offer digest. `recognise_offer` returns the
+    // evidence as text and the hint as an unrecognised JSON value, so neither
+    // was ever looked at. `ProviderHint::verify` is CON-209's five checks and
+    // already existed; nothing called it.
+    #[test]
+    fn build_offer_refuses_a_hint_that_selects_something_the_profile_does_not_declare() {
+        let fixture = grant_fixture();
+        let (core, hint, _, evidence) = offer_fixture(&fixture);
+        let core_json = offer_core_json(&core);
+
+        // The NATIVE twin: `JsError` cannot be constructed outside wasm, so the
+        // `_json` facades panic on their error path here and only their success
+        // path is exercisable natively. Same code, one wrapper down.
+        let _ = &core_json;
+        let mutate = |f: &dyn Fn(&mut ProviderHint)| {
+            let mut h = hint.clone();
+            f(&mut h);
+            build_offer(&core, &evidence, &h, &fixture.profile_octets)
+        };
+
+        // One clause each, so a passing suite cannot rest on a single check.
+        assert!(mutate(&|h| h.application_id = "https://elsewhere.example/app".into()).is_err());
+        assert!(mutate(&|h| h.profile_version = 99).is_err());
+        assert!(mutate(&|h| h.provider_id = "urn:provider:undeclared".into()).is_err());
+        assert!(mutate(&|h| h.descriptor_digest = codec::b64url(&[0xEE; 32])).is_err());
+        assert!(mutate(&|h| h.offer_digest = codec::b64url(&[0xEE; 32])).is_err());
+
+        // A hint that selects only what the profile declares still builds, so
+        // the refusals above are the checks and not a constructor that refuses
+        // everything.
+        assert!(build_offer(&core, &evidence, &hint, &fixture.profile_octets).is_ok());
+    }
+
+    #[test]
+    fn build_offer_refuses_evidence_that_is_not_a_con_214_jws_and_an_unrecognised_profile() {
+        let fixture = grant_fixture();
+        let (core, hint, _, evidence) = offer_fixture(&fixture);
+        for bad in ["", "not.a.valid.enrollment-jws", "a.b.c", "eyJhbGciOiJub25lIn0.."] {
+            assert!(
+                build_offer(&core, bad, &hint, &fixture.profile_octets).is_err(),
+                "evidence {bad:?} is not a CON-214 compact JWS"
+            );
+        }
+
+        // And an offer cannot be bound to a profile that is not recognised —
+        // there is nothing to check the hint against.
+        for bytes in [&b""[..], &b"{}"[..], &b"not json"[..]] {
+            assert!(build_offer(&core, &evidence, &hint, bytes).is_err());
+        }
+
+        assert!(build_offer(&core, &evidence, &hint, &fixture.profile_octets).is_ok());
+    }
+
+    // `enrollment::build` is an infallible serialiser, so this returned
+    // canonical-looking bytes for `"bad"` identifiers, an empty permission list
+    // and `expiresAt` earlier than `issuedAt`. The language begins in the
+    // recogniser, which the facade never invoked.
+    #[test]
+    fn build_enrollment_refuses_a_statement_its_own_recogniser_rejects() {
+        let fixture = grant_fixture();
+        let (_, _, statement, _) = offer_fixture(&fixture);
+
+        let mutate = |f: &dyn Fn(&mut EnrollmentStatement)| {
+            let mut st = statement.clone();
+            f(&mut st);
+            build_enrollment(&st)
+        };
+
+        assert!(mutate(&|st| st.request_id = "bad".into()).is_err());
+        assert!(mutate(&|st| st.ceremony_id = "bad".into()).is_err());
+        assert!(mutate(&|st| st.profile_digest = "bad".into()).is_err());
+        assert!(mutate(&|st| st.requested_permissions = vec![]).is_err());
+        assert!(mutate(&|st| st.expires_at = st.issued_at - 1).is_err());
+
+        // The control.
+        assert!(build_enrollment(&statement).is_ok());
+    }
+
 }
