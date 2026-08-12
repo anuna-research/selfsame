@@ -45,6 +45,8 @@ use crate::json::{self, Json, JsonError, Limits};
 /// The one algorithm version 1 admits (`NFR-208`).
 pub const ALG: &str = "EdDSA";
 
+pub(crate) const HEADER_LIMITS: Limits = Limits { max_bytes: 4_096, max_depth: 4 };
+
 /// Header members no contract may include, at any value.
 ///
 /// Each nominates a key or a location from which to fetch one, so accepting any
@@ -241,9 +243,8 @@ pub fn recognise(
     let mut signature = [0u8; 64];
     signature.copy_from_slice(&signature_octets);
 
-    let header_limits = Limits { max_bytes: 4_096, max_depth: 4 };
     let protected =
-        json::recognise(&header_octets, header_limits).map_err(JwsError::BadHeader)?;
+        json::recognise(&header_octets, HEADER_LIMITS).map_err(JwsError::BadHeader)?;
     let payload_limits =
         Limits { max_bytes: policy.max_octets, max_depth: policy.max_payload_depth };
     let payload = json::recognise(&payload_octets, payload_limits).map_err(JwsError::BadPayload)?;
@@ -272,7 +273,7 @@ pub fn recognise(
     Ok(CompactJws { protected, payload, kid, signing_input, signature, payload_octets })
 }
 
-fn recognise_header(
+pub(crate) fn recognise_header(
     protected: &Json,
     policy: JwsPolicy,
     extra: &[&str],

@@ -60,22 +60,28 @@ pub fn parse_date_time_stamp(text: &str) -> Result<UnixSeconds, TimeError> {
     }
     let punctuation = [(4, b'-'), (7, b'-'), (10, b'T'), (13, b':'), (16, b':'), (19, b'Z')];
     for (index, expected) in punctuation {
-        if b[index] != expected {
+        if b.get(index).copied() != Some(expected) {
             return Err(TimeError::Malformed);
         }
     }
     let digits = [(0, 4), (5, 2), (8, 2), (11, 2), (14, 2), (17, 2)];
     for (start, len) in digits {
-        if !b[start..start + len].iter().all(u8::is_ascii_digit) {
+        let Some(part) = b.get(start..start + len) else {
+            return Err(TimeError::Malformed);
+        };
+        if !part.iter().all(u8::is_ascii_digit) {
             return Err(TimeError::Malformed);
         }
     }
 
-    let num = |start: usize, len: usize| -> i64 {
-        text[start..start + len].parse::<i64>().expect("digits were checked above")
+    let num = |start: usize, len: usize| -> Result<i64, TimeError> {
+        text.get(start..start + len)
+            .ok_or(TimeError::Malformed)?
+            .parse::<i64>()
+            .map_err(|_| TimeError::Malformed)
     };
-    let (year, month, day) = (num(0, 4), num(5, 2), num(8, 2));
-    let (hour, minute, second) = (num(11, 2), num(14, 2), num(17, 2));
+    let (year, month, day) = (num(0, 4)?, num(5, 2)?, num(8, 2)?);
+    let (hour, minute, second) = (num(11, 2)?, num(14, 2)?, num(17, 2)?);
 
     if !(1..=12).contains(&month) || day < 1 || day > days_in_month(year, month) {
         return Err(TimeError::OutOfRange);

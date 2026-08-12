@@ -5,9 +5,14 @@
 //! established CBCL parser NIF; keeping the dependency graphs separate avoids
 //! turning an identity-verifier addition into a parser availability risk.
 
+pub mod enrollment;
 pub mod path_b;
 
-pub use path_b::{standing_cache_expiry, verified_revocation_union, verify_path_b_pure, PathBPresentation, ResolverClosure};
+pub use enrollment::sign_enrollment_statement;
+pub use path_b::{
+    standing_cache_expiry, verified_revocation_union, verify_path_b_pure, PathBPresentation,
+    ResolverClosure,
+};
 
 fn load(env: rustler::Env<'_>, _info: rustler::Term<'_>) -> bool {
     env.register::<path_b::StandingGrantResource>().is_ok()

@@ -268,7 +268,53 @@ pub fn device_key_digest(offer: &OfferCore) -> String {
 pub fn recognise(compact: &str) -> Result<(EnrollmentStatement, CompactJws), EnrollmentError> {
     let signed = jws::recognise(compact, ENROLLMENT_JWS, &[])
         .map_err(|_| EnrollmentError::EnrollmentMalformed)?;
-    let payload = &signed.payload;
+    let statement = recognise_payload(&signed.payload)?;
+    Ok((statement, signed))
+}
+
+/// Recognise a canonical unsigned enrollment statement and its proposed `kid`.
+///
+/// This is the producer-side counterpart to [`recognise`]. It applies the same
+/// closed payload grammar and the same protected-header policy before a backend
+/// lets its private key touch the statement. The returned value is suitable for
+/// [`sign`]; malformed or non-canonical input yields no partial statement.
+pub fn recognise_unsigned(
+    statement_octets: &[u8],
+    kid: &str,
+) -> Result<EnrollmentStatement, EnrollmentError> {
+    let payload = crate::json::recognise(statement_octets, STATEMENT_LIMITS)
+        .map_err(|_| EnrollmentError::EnrollmentMalformed)?;
+    if crate::json::canonicalise(&payload) != statement_octets {
+        return Err(EnrollmentError::EnrollmentMalformed);
+    }
+    let protected = header(kid);
+    let protected_octets = crate::json::canonicalise(&protected);
+    if protected_octets.len() > jws::HEADER_LIMITS.max_bytes {
+        return Err(EnrollmentError::EnrollmentMalformed);
+    }
+    jws::recognise_header(&protected, ENROLLMENT_JWS, &[])
+        .map_err(|_| EnrollmentError::EnrollmentMalformed)?;
+    let statement = recognise_payload(&payload)?;
+    if crate::json::canonicalise(&build(&statement)) != statement_octets {
+        return Err(EnrollmentError::EnrollmentMalformed);
+    }
+
+    // The policy bounds the complete compact JWS, not merely its decoded
+    // payload. Account for the exact protected header and fixed-size Ed25519
+    // signature before a private key is constructed.
+    let compact_octets = codec::b64url(&protected_octets)
+        .len()
+        .saturating_add(codec::b64url(statement_octets).len())
+        .saturating_add(codec::b64url(&[0u8; 64]).len())
+        .saturating_add(2);
+    if compact_octets > ENROLLMENT_JWS.max_octets {
+        return Err(EnrollmentError::EnrollmentMalformed);
+    }
+
+    Ok(statement)
+}
+
+fn recognise_payload(payload: &Json) -> Result<EnrollmentStatement, EnrollmentError> {
     let members =
         payload.as_object().ok_or(EnrollmentError::EnrollmentMalformed)?;
     for (name, _) in members {
@@ -346,7 +392,7 @@ pub fn recognise(compact: &str) -> Result<(EnrollmentStatement, CompactJws), Enr
         issued_at,
         expires_at,
     };
-    Ok((statement, signed))
+    Ok(statement)
 }
 
 /// `CON-214` steps 1 to 4 and 6: verify the evidence and every binding.
