@@ -10,6 +10,7 @@
 use rustler::types::atom;
 use rustler::{Binary, Encoder, Env, OwnedBinary, Term};
 use selfsame_app_identity::enrollment;
+use selfsame_app_identity::profile::ApplicationProfile;
 
 rustler::atoms! {
     rejected,
@@ -101,6 +102,83 @@ pub fn sign_enrollment<'a>(
             statement.as_slice(),
             kid,
             declared_public_key.as_slice(),
+            private_key.as_slice(),
+        )
+        .and_then(|compact| binary(env, compact.as_bytes()))
+    }));
+
+    match result {
+        Ok(Ok(compact)) => (atom::ok(), compact).encode(env),
+        Ok(Err(_)) | Err(_) => (atom::error(), rejected()).encode(env),
+    }
+}
+
+/// Recognise and sign one `CON-214` statement, taking the declared key from the
+/// PROFILE rather than from the caller.
+///
+/// `sign_enrollment_statement` proves only that the seed derives the public key
+/// it was handed. When both come from one deployment's configuration that is a
+/// comparison of configuration with itself: advance configuration to key B while
+/// the published profile still declares only A, and signing succeeds while every
+/// wallet refuses the result — which is precisely the rollout failure the check
+/// is supposed to prevent.
+///
+/// Here the declared key is read out of recognised profile bytes, so the
+/// comparison is against the document a wallet will actually fetch. That makes
+/// the rotation overlap mean something: a `kid` the profile does not declare
+/// cannot sign, whatever configuration says.
+pub fn sign_enrollment_profile_bound(
+    statement: &[u8],
+    kid: &str,
+    profile_bytes: &[u8],
+    private_key: &[u8],
+) -> Result<String, String> {
+    if kid.len() > enrollment::MAX_ENROLLMENT_KID_OCTETS {
+        return Err(String::from(REFUSED));
+    }
+    // Recognition of the profile precedes everything, including any use of the
+    // `kid` as a lookup key: an unrecognised profile has no declared set.
+    let profile = ApplicationProfile::recognise(profile_bytes).map_err(|_| String::from(REFUSED))?;
+    let declared = profile
+        .enrollment_keys
+        .iter()
+        .find(|key| key.kid == kid)
+        .ok_or_else(|| String::from(REFUSED))?;
+
+    // Delegate to the existing path with the PROFILE's key as the declared one.
+    // Sharing that function keeps one statement recogniser, one header policy
+    // and one producer/recogniser round-trip check; only the provenance of the
+    // declared key differs, which is the entire point of this entry point.
+    sign_enrollment_statement(statement, kid, &declared.jwk.public_key, private_key)
+}
+
+
+/// `cbcl_selfsame_erl:sign_enrollment_profile_bound/4`.
+///
+/// Arguments are `(canonical_statement_binary, kid_binary,
+/// canonical_profile_binary, private_seed_binary)`. The result is
+/// `{ok, CompactJwsBinary}` or the sole refusal `{error, rejected}`.
+#[rustler::nif(name = "sign_enrollment_profile_bound")]
+pub fn sign_enrollment_profile_bound_nif<'a>(
+    env: Env<'a>,
+    statement: Term<'a>,
+    kid: Term<'a>,
+    profile: Term<'a>,
+    private_key: Term<'a>,
+) -> Term<'a> {
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let kid: Binary<'a> = kid.decode().map_err(|_| String::from(REFUSED))?;
+        if kid.len() > enrollment::MAX_ENROLLMENT_KID_OCTETS {
+            return Err(String::from(REFUSED));
+        }
+        let kid = std::str::from_utf8(kid.as_slice()).map_err(|_| String::from(REFUSED))?;
+        let statement: Binary<'a> = statement.decode().map_err(|_| String::from(REFUSED))?;
+        let profile: Binary<'a> = profile.decode().map_err(|_| String::from(REFUSED))?;
+        let private_key: Binary<'a> = private_key.decode().map_err(|_| String::from(REFUSED))?;
+        sign_enrollment_profile_bound(
+            statement.as_slice(),
+            kid,
+            profile.as_slice(),
             private_key.as_slice(),
         )
         .and_then(|compact| binary(env, compact.as_bytes()))
@@ -341,4 +419,84 @@ mod tests {
             Err(String::from(REFUSED))
         );
     }
+
+    // ── profile-bound signing ────────────────────────────────────────────
+
+    // THE FAILURE THE CALLER-SUPPLIED PATH CANNOT SEE.
+    //
+    // `sign_enrollment_statement` proves the seed derives the key it was
+    // handed. A hub that advanced its configuration to key B while its
+    // published profile still declares only A supplies a MUTUALLY CONSISTENT
+    // {kid, key B, seed B} — so that check passes and every wallet then refuses
+    // the request, which is exactly the rollout failure it is credited with
+    // preventing. Both halves came from one configuration, so it compared
+    // configuration with itself.
+    #[test]
+    fn profile_bound_signing_refuses_a_key_the_profile_does_not_declare() {
+        let f = fixture();
+        let rotated = ed25519_dalek::SigningKey::from_bytes(&[0x5b; 32]);
+
+        // The caller-supplied path ACCEPTS the rotated key, because the seed
+        // and the declared key it was given agree with each other.
+        assert!(sign_enrollment_statement(
+            &f.statement_octets,
+            KID,
+            &rotated.verifying_key().to_bytes(),
+            &[0x5b; 32],
+        )
+        .is_ok());
+
+        // The profile-bound path refuses it: the profile declares the backend
+        // key, and this seed does not derive that.
+        assert!(sign_enrollment_profile_bound(
+            &f.statement_octets,
+            KID,
+            f.profile.canonical_bytes(),
+            &[0x5b; 32],
+        )
+        .is_err());
+
+        // The control — the key the profile DOES declare still signs, so the
+        // refusal above is the declaration check and not a path that refuses
+        // everything.
+        let compact = sign_enrollment_profile_bound(
+            &f.statement_octets,
+            KID,
+            f.profile.canonical_bytes(),
+            &[0x41; 32],
+        )
+        .expect("the declared key signs");
+        assert!(enrollment::recognise(&compact).is_ok());
+    }
+
+    // A `kid` absent from the declared set has no key to compare against, and
+    // the profile is the only thing that can say so.
+    #[test]
+    fn profile_bound_signing_refuses_an_undeclared_kid() {
+        let f = fixture();
+        assert!(sign_enrollment_profile_bound(
+            &f.statement_octets,
+            "https://photos.example/selfsame/application#enrollment-2026-07",
+            f.profile.canonical_bytes(),
+            &[0x41; 32],
+        )
+        .is_err());
+    }
+
+    // Unrecognised profile bytes have no declared set at all, so nothing is
+    // signed — recognition precedes the `kid` lookup rather than following it.
+    #[test]
+    fn profile_bound_signing_refuses_unrecognised_profile_bytes() {
+        let f = fixture();
+        for bytes in [&b""[..], &b"{}"[..], &b"not json at all"[..]] {
+            assert!(sign_enrollment_profile_bound(
+                &f.statement_octets,
+                KID,
+                bytes,
+                &[0x41; 32],
+            )
+            .is_err());
+        }
+    }
+
 }

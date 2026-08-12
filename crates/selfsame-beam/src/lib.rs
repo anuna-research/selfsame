@@ -8,7 +8,7 @@
 pub mod enrollment;
 pub mod path_b;
 
-pub use enrollment::sign_enrollment_statement;
+pub use enrollment::{sign_enrollment_profile_bound, sign_enrollment_statement};
 pub use path_b::{
     standing_cache_expiry, verified_revocation_union, verify_path_b_pure, PathBPresentation,
     ResolverClosure,
