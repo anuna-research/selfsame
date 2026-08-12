@@ -23,6 +23,13 @@ phone can change the lock.*
 > requires at a 100 % kill rate — **has not been run**. Do not put an identity
 > you rely on into this.
 
+## What it looks like
+
+| The home key, and every client cut from it | Nothing is granted without you |
+|---|---|
+| ![Selfsame home screen: the home key rendered as a LifeHash picture above the fingerprint 2E 41 D0 88 6B 15, the petname garnet-plover-31, and the did:crdt identifier; below it a device list showing Chrome on macOS, hark on workstation-01 still publishing, and a revoked Firefox on the old laptop struck through](https://imagedelivery.net/O-SJhBv1S1zUZFvTxrBOhQ/a95f6456-6790-486b-8930-3d378776be00/public) | ![Selfsame consent screen asking "Let this application act for your account?", showing the origin that asked, the name it calls itself marked "its own words, unchecked", the account it is for, and the two capabilities it gains — one of them "not recognised by this wallet" — above Allow and No](https://imagedelivery.net/O-SJhBv1S1zUZFvTxrBOhQ/fd33d347-6639-47b9-2ee2-86b1e6e52c00/public) |
+| Every key carries the same 48 bits three ways — hex, picture, petname — and each linked client shows its own. Revocation is a line through a row, done from the phone. | The origin that asked is the fact; the name beside it is that application's own claim, labelled as unchecked. A capability the wallet doesn't recognise says so rather than being quietly summarised. |
+
 ## Before you build
 
 Selfsame depends on two sibling repositories by path. Clone them next to this
