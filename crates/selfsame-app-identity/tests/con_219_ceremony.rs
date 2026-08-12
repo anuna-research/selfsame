@@ -363,18 +363,17 @@ fn each_binding_mismatch_returns_its_own_closed_token() {
             EnrollmentError::ProfileMismatch,
         ),
         // The profile block has three clauses and only its third was ever the
-        // sole one true, so a mutant collapsing either of the other two
-        // survived. Each is now the only thing wrong with an otherwise
-        // conforming statement.
+        // sole one true, so a mutant collapsing the application-ID comparison
+        // survived. `profileVersion != 1` is now outside the closed CON-214
+        // language and is exercised separately as `EnrollmentMalformed`.
         (
             EnrollmentStatement {
-                application_id: OTHER_APPLICATION_ID.into(),
+                // Keep the origin fixed so the `kid` and permission remain in
+                // the closed language; only the application identifier differs
+                // from the authenticated profile.
+                application_id: "https://photos.example/selfsame/other".into(),
                 ..statement(&p, &core)
             },
-            EnrollmentError::ProfileMismatch,
-        ),
-        (
-            EnrollmentStatement { profile_version: 2, ..statement(&p, &core) },
             EnrollmentError::ProfileMismatch,
         ),
         // `expiresAt` alone, so the second clause of the timestamp comparison
@@ -423,7 +422,10 @@ fn each_binding_mismatch_returns_its_own_closed_token() {
         ),
         (
             EnrollmentStatement {
-                platform_binding_id: "android:com.attacker.app:x".into(),
+                platform_binding_id: format!(
+                    "android:com.attacker.app:{}",
+                    codec::b64url(&[8u8; 32])
+                ),
                 ..statement(&p, &core)
             },
             EnrollmentError::PlatformBindingMismatch,
@@ -438,6 +440,61 @@ fn each_binding_mismatch_returns_its_own_closed_token() {
             "{expected:?}"
         );
     }
+}
+
+#[test]
+fn inherited_con_214_grammars_are_part_of_recognition_for_both_paths() {
+    let p = profile_with_real_key();
+    let core = offer_core(&p);
+    let base = statement(&p, &core);
+
+    let mut too_many_permissions = Vec::new();
+    for index in 0..65 {
+        too_many_permissions.push(format!("{APPLICATION_ID}#{index:02}"));
+    }
+
+    let cases = [
+        EnrollmentStatement { profile_version: 2, ..base.clone() },
+        EnrollmentStatement { application_id: "not-an-https-uri".into(), ..base.clone() },
+        EnrollmentStatement { account_scope_id: "not-base64url".into(), ..base.clone() },
+        EnrollmentStatement {
+            requested_permissions: vec!["https://elsewhere.example/app#device".into()],
+            ..base.clone()
+        },
+        EnrollmentStatement { requested_permissions: too_many_permissions, ..base.clone() },
+        EnrollmentStatement { provider_id: "Not-A-Provider".into(), ..base.clone() },
+        EnrollmentStatement { platform_binding_id: "not-a-binding".into(), ..base.clone() },
+        EnrollmentStatement {
+            return_uri: "https://elsewhere.example/return".into(),
+            ..base.clone()
+        },
+    ];
+
+    for malformed in cases {
+        let octets = json::canonicalise(&enrollment::build(&malformed));
+        assert_eq!(
+            enrollment::recognise_unsigned(&octets, KID),
+            Err(EnrollmentError::EnrollmentMalformed)
+        );
+
+        let compact = enrollment::sign(&malformed, KID, &backend_key());
+        assert_eq!(
+            enrollment::recognise(&compact),
+            Err(EnrollmentError::EnrollmentMalformed)
+        );
+    }
+
+    let octets = json::canonicalise(&enrollment::build(&base));
+    let other_origin_kid = "https://elsewhere.example/app#enrollment";
+    assert_eq!(
+        enrollment::recognise_unsigned(&octets, other_origin_kid),
+        Err(EnrollmentError::EnrollmentMalformed)
+    );
+    let compact = enrollment::sign(&base, other_origin_kid, &backend_key());
+    assert_eq!(
+        enrollment::recognise(&compact),
+        Err(EnrollmentError::EnrollmentMalformed)
+    );
 }
 
 #[test]

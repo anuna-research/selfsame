@@ -169,7 +169,8 @@ pub fn recognise(text: &str, policy: UriPolicy) -> Result<HttpsUri<'_>, UriError
     // keeps a `@` or `:` inside a path from being mistaken for user information
     // or a port.
     let authority_end = rest.find(['/', '#']).unwrap_or(rest.len());
-    let (authority, tail) = rest.split_at(authority_end);
+    let authority = rest.get(..authority_end).ok_or(UriError::BadCharacter)?;
+    let tail = rest.get(authority_end..).ok_or(UriError::BadCharacter)?;
     if authority.contains('@') {
         return Err(UriError::HasUserInfo);
     }
@@ -194,7 +195,7 @@ pub fn recognise(text: &str, policy: UriPolicy) -> Result<HttpsUri<'_>, UriError
         (FragmentRule::Forbidden, None) => {}
     }
 
-    let origin = &text[..text.len() - tail.len()];
+    let origin = text.strip_suffix(tail).ok_or(UriError::BadCharacter)?;
     Ok(HttpsUri { origin, host, port, path, fragment })
 }
 
@@ -218,7 +219,7 @@ fn recognise_host(host: &str) -> Result<(), UriError> {
         if bytes.is_empty() || bytes.len() > 63 {
             return Err(UriError::BadHost);
         }
-        if bytes[0] == b'-' || bytes[bytes.len() - 1] == b'-' {
+        if bytes.first() == Some(&b'-') || bytes.last() == Some(&b'-') {
             return Err(UriError::BadHost);
         }
         if !bytes.iter().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || *b == b'-') {
@@ -238,7 +239,7 @@ fn recognise_port(port: &str) -> Result<u16, UriError> {
     if bytes.is_empty() || bytes.len() > 5 || !bytes.iter().all(u8::is_ascii_digit) {
         return Err(UriError::BadPort);
     }
-    if bytes[0] == b'0' {
+    if bytes.first() == Some(&b'0') {
         return Err(UriError::BadPort);
     }
     let value: u16 = port.parse().map_err(|_| UriError::BadPort)?;
@@ -263,7 +264,8 @@ fn recognise_path(path: &str, rule: PathRule) -> Result<(), UriError> {
     if !path.starts_with('/') {
         return Err(UriError::BadPath);
     }
-    let segments: Vec<&str> = path[1..].split('/').collect();
+    let path_without_slash = path.strip_prefix('/').ok_or(UriError::BadPath)?;
+    let segments: Vec<&str> = path_without_slash.split('/').collect();
     if rule == PathRule::NonEmptyNoDotSegments
         && (segments.iter().any(|s| s.is_empty() || *s == "." || *s == ".."))
     {
@@ -283,7 +285,7 @@ fn recognise_pchars(text: &str) -> Result<(), UriError> {
     let bytes = text.as_bytes();
     let mut i = 0;
     while i < bytes.len() {
-        let b = bytes[i];
+        let b = bytes.get(i).copied().ok_or(UriError::BadCharacter)?;
         if b == b'%' {
             let pair = bytes.get(i + 1..i + 3).ok_or(UriError::BadPercentEncoding)?;
             if !pair.iter().all(|c| c.is_ascii_digit() || (b'A'..=b'F').contains(c)) {

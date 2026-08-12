@@ -45,8 +45,9 @@ use crate::ceremony::OfferCore;
 use crate::codec;
 use crate::json::{Json, Limits};
 use crate::jws::{self, CompactJws, JwsPolicy};
-use crate::profile::ApplicationProfile;
+use crate::profile::{ApplicationId, ApplicationProfile};
 use crate::time::{self, TimeError};
+use crate::uri::{self, UriPolicy};
 use crate::UnixSeconds;
 
 /// The JWS policy `CON-214` fixes for an enrollment statement.
@@ -64,6 +65,14 @@ pub const ENROLLMENT_JWS: JwsPolicy = JwsPolicy {
 
 /// `CON-214`: `expiresAt` is later than `issuedAt` by at most 120 seconds.
 pub const MAX_EVIDENCE_WINDOW_SECONDS: i64 = 120;
+
+/// A pre-allocation bound for an enrollment `kid`.
+///
+/// The protected-header limit is stricter after JSON escaping and fixed-member
+/// overhead are included. This raw-octet ceiling exists so an oversized `kid`
+/// is refused before it is cloned into a JSON value or expanded by the RFC 8785
+/// writer.
+pub const MAX_ENROLLMENT_KID_OCTETS: usize = jws::HEADER_LIMITS.max_bytes;
 
 /// The closed member set of an enrollment statement.
 pub const STATEMENT_MEMBERS: &[&str] = &[
@@ -269,6 +278,7 @@ pub fn recognise(compact: &str) -> Result<(EnrollmentStatement, CompactJws), Enr
     let signed = jws::recognise(compact, ENROLLMENT_JWS, &[])
         .map_err(|_| EnrollmentError::EnrollmentMalformed)?;
     let statement = recognise_payload(&signed.payload)?;
+    recognise_kid_for_application(&signed.kid, &statement.application_id)?;
     Ok((statement, signed))
 }
 
@@ -282,6 +292,14 @@ pub fn recognise_unsigned(
     statement_octets: &[u8],
     kid: &str,
 ) -> Result<EnrollmentStatement, EnrollmentError> {
+    // This check must precede every parse, clone, JSON construction, and
+    // canonicalisation. C0 bytes can expand sixfold when the protected header
+    // is written, and callers of this pure helper are not necessarily behind
+    // the BEAM boundary's matching guard.
+    if kid.len() > MAX_ENROLLMENT_KID_OCTETS {
+        return Err(EnrollmentError::EnrollmentMalformed);
+    }
+
     let payload = crate::json::recognise(statement_octets, STATEMENT_LIMITS)
         .map_err(|_| EnrollmentError::EnrollmentMalformed)?;
     if crate::json::canonicalise(&payload) != statement_octets {
@@ -295,6 +313,7 @@ pub fn recognise_unsigned(
     jws::recognise_header(&protected, ENROLLMENT_JWS, &[])
         .map_err(|_| EnrollmentError::EnrollmentMalformed)?;
     let statement = recognise_payload(&payload)?;
+    recognise_kid_for_application(kid, &statement.application_id)?;
     if crate::json::canonicalise(&build(&statement)) != statement_octets {
         return Err(EnrollmentError::EnrollmentMalformed);
     }
@@ -344,20 +363,35 @@ fn recognise_payload(payload: &Json) -> Result<EnrollmentStatement, EnrollmentEr
         Ok(value)
     };
 
+    let application_id = text("applicationId")?;
+    let application_id_parts = ApplicationId::parse(&application_id)
+        .map_err(|_| EnrollmentError::EnrollmentMalformed)?;
+
+    if payload.get("profileVersion").and_then(Json::as_i64) != Some(crate::PROFILE_VERSION) {
+        return Err(EnrollmentError::EnrollmentMalformed);
+    }
+
     let permission_items = payload
         .get("requestedPermissions")
         .and_then(Json::as_array)
         .ok_or(EnrollmentError::EnrollmentMalformed)?;
-    if permission_items.is_empty() {
+    if permission_items.is_empty() || permission_items.len() > crate::profile::MAX_PERMISSIONS {
         return Err(EnrollmentError::EnrollmentMalformed);
     }
     let mut requested_permissions = Vec::with_capacity(permission_items.len());
     for item in permission_items {
-        requested_permissions.push(
-            item.as_str().ok_or(EnrollmentError::EnrollmentMalformed)?.to_string(),
-        );
+        let permission = item.as_str().ok_or(EnrollmentError::EnrollmentMalformed)?;
+        let parts = uri::recognise(permission, UriPolicy::FRAGMENT_ID)
+            .map_err(|_| EnrollmentError::EnrollmentMalformed)?;
+        if parts.origin != application_id_parts.origin() {
+            return Err(EnrollmentError::EnrollmentMalformed);
+        }
+        requested_permissions.push(permission.to_string());
     }
-    if requested_permissions.windows(2).any(|w| w[0] >= w[1]) {
+    if requested_permissions
+        .windows(2)
+        .any(|window| matches!(window, [left, right] if left >= right))
+    {
         return Err(EnrollmentError::EnrollmentMalformed);
     }
 
@@ -372,27 +406,81 @@ fn recognise_payload(payload: &Json) -> Result<EnrollmentStatement, EnrollmentEr
         return Err(EnrollmentError::EnrollmentMalformed);
     }
 
+    let provider_id = text("providerId")?;
+    if !crate::profile::is_provider_id(&provider_id) {
+        return Err(EnrollmentError::EnrollmentMalformed);
+    }
+
+    let return_uri = text("returnUri")?;
+    let return_uri_parts = uri::recognise(&return_uri, UriPolicy::PROVIDER_URL)
+        .map_err(|_| EnrollmentError::EnrollmentMalformed)?;
+    if return_uri_parts.origin != application_id_parts.origin() {
+        return Err(EnrollmentError::EnrollmentMalformed);
+    }
+
+    let platform_binding_id = text("platformBindingId")?;
+    recognise_platform_binding(&platform_binding_id, return_uri_parts.origin)?;
+
     let statement = EnrollmentStatement {
         request_id: b64_32("requestId")?,
         ceremony_id: b64_32("ceremonyId")?,
-        application_id: text("applicationId")?,
-        profile_version: payload
-            .get("profileVersion")
-            .and_then(Json::as_i64)
-            .ok_or(EnrollmentError::EnrollmentMalformed)?,
+        application_id,
+        profile_version: crate::PROFILE_VERSION,
         profile_digest: b64_32("profileDigest")?,
-        account_scope_id: text("accountScopeId")?,
+        account_scope_id: b64_32("accountScopeId")?,
         device_key_digest: b64_32("deviceKeyDigest")?,
         requested_permissions,
-        provider_id: text("providerId")?,
+        provider_id,
         descriptor_digest: b64_32("descriptorDigest")?,
         offer_digest: b64_32("offerDigest")?,
-        platform_binding_id: text("platformBindingId")?,
-        return_uri: text("returnUri")?,
+        platform_binding_id,
+        return_uri,
         issued_at,
         expires_at,
     };
     Ok(statement)
+}
+
+fn recognise_kid_for_application(kid: &str, application_id: &str) -> Result<(), EnrollmentError> {
+    let application = ApplicationId::parse(application_id)
+        .map_err(|_| EnrollmentError::EnrollmentMalformed)?;
+    let kid = uri::recognise(kid, UriPolicy::FRAGMENT_ID)
+        .map_err(|_| EnrollmentError::EnrollmentMalformed)?;
+    if kid.origin != application.origin() {
+        return Err(EnrollmentError::EnrollmentMalformed);
+    }
+    Ok(())
+}
+
+fn recognise_platform_binding(id: &str, return_origin: &str) -> Result<(), EnrollmentError> {
+    if let Some(android) = id.strip_prefix("android:") {
+        let (package_name, certificate) = android
+            .rsplit_once(':')
+            .ok_or(EnrollmentError::EnrollmentMalformed)?;
+        if package_name.is_empty() {
+            return Err(EnrollmentError::EnrollmentMalformed);
+        }
+        codec::decode_b64url_32(certificate)
+            .map_err(|_| EnrollmentError::EnrollmentMalformed)?;
+        return Ok(());
+    }
+
+    if let Some(apple) = id.strip_prefix("apple:") {
+        let (team_id, rest) = apple
+            .split_once(':')
+            .ok_or(EnrollmentError::EnrollmentMalformed)?;
+        let (bundle_id, origin) = rest
+            .split_once(':')
+            .ok_or(EnrollmentError::EnrollmentMalformed)?;
+        if team_id.is_empty() || bundle_id.is_empty() || origin != return_origin {
+            return Err(EnrollmentError::EnrollmentMalformed);
+        }
+        uri::recognise(origin, UriPolicy::ORIGIN)
+            .map_err(|_| EnrollmentError::EnrollmentMalformed)?;
+        return Ok(());
+    }
+
+    Err(EnrollmentError::EnrollmentMalformed)
 }
 
 /// `CON-214` steps 1 to 4 and 6: verify the evidence and every binding.

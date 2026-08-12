@@ -229,13 +229,18 @@ pub fn recognise(
     if text.len() > policy.max_octets {
         return Err(JwsError::TooLarge);
     }
-    let segments: Vec<&str> = text.split('.').collect();
-    if segments.len() != 3 {
+    let mut segments = text.split('.');
+    let (Some(header_segment), Some(payload_segment), Some(signature_segment)) =
+        (segments.next(), segments.next(), segments.next())
+    else {
+        return Err(JwsError::BadSegmentCount);
+    };
+    if segments.next().is_some() {
         return Err(JwsError::BadSegmentCount);
     }
-    let header_octets = decode_segment(segments[0])?;
-    let payload_octets = decode_segment(segments[1])?;
-    let signature_octets = decode_segment(segments[2])?;
+    let header_octets = decode_segment(header_segment)?;
+    let payload_octets = decode_segment(payload_segment)?;
+    let signature_octets = decode_segment(signature_segment)?;
 
     if signature_octets.len() != 64 {
         return Err(JwsError::BadSignatureLength);
@@ -265,10 +270,10 @@ pub fn recognise(
 
     let kid = protected.get("kid").and_then(Json::as_str).ok_or(JwsError::BadKid)?.to_string();
 
-    let mut signing_input = Vec::with_capacity(segments[0].len() + 1 + segments[1].len());
-    signing_input.extend_from_slice(segments[0].as_bytes());
+    let mut signing_input = Vec::with_capacity(header_segment.len() + 1 + payload_segment.len());
+    signing_input.extend_from_slice(header_segment.as_bytes());
     signing_input.push(b'.');
-    signing_input.extend_from_slice(segments[1].as_bytes());
+    signing_input.extend_from_slice(payload_segment.as_bytes());
 
     Ok(CompactJws { protected, payload, kid, signing_input, signature, payload_octets })
 }

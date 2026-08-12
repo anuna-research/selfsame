@@ -301,7 +301,7 @@ impl<'a> Parser<'a> {
     }
 
     fn literal(&mut self, word: &[u8], out: Json) -> Result<Json, JsonError> {
-        if self.s[self.i..].starts_with(word) {
+        if self.s.get(self.i..).is_some_and(|rest| rest.starts_with(word)) {
             self.i += word.len();
             Ok(out)
         } else {
@@ -495,7 +495,11 @@ impl<'a> Parser<'a> {
         if matches!(self.peek(), Some(b'.' | b'e' | b'E')) {
             return Err(JsonError::NonIntegerNumber);
         }
-        let text = core::str::from_utf8(&self.s[start..self.i])
+        let number = self
+            .s
+            .get(start..self.i)
+            .ok_or(JsonError::Malformed("number bounds are invalid"))?;
+        let text = core::str::from_utf8(number)
             .map_err(|_| JsonError::Malformed("number is not ASCII"))?;
         let n: i64 = text.parse().map_err(|_| JsonError::NumberOutOfRange)?;
         if n.unsigned_abs() > MAX_SAFE_INTEGER as u64 {

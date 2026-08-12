@@ -1,10 +1,11 @@
 //! `CON-214` enrollment signing at the CBCL/BEAM boundary.
 //!
-//! The hub supplies canonical unsigned statement bytes, the declared `kid`,
-//! and a 32-octet Ed25519 private seed for each call. This module retains no
-//! signing state. Before constructing a signing key it delegates recognition of
-//! both the statement and protected header to `selfsame-app-identity`, then
-//! delegates compact-JWS production to that same module.
+//! The hub supplies canonical unsigned statement bytes, the declared `kid` and
+//! public key, and a 32-octet Ed25519 private seed for each call. This module
+//! retains no signing state. Before constructing a signing key it delegates
+//! recognition of both the statement and protected header to
+//! `selfsame-app-identity`, then requires the seed to derive the independently
+//! supplied declared public key before delegating compact-JWS production.
 
 use rustler::types::atom;
 use rustler::{Binary, Encoder, Env, OwnedBinary, Term};
@@ -25,20 +26,34 @@ const REFUSED: &str = "rejected";
 pub fn sign_enrollment_statement(
     statement: &[u8],
     kid: &str,
+    declared_public_key: &[u8],
     private_key: &[u8],
 ) -> Result<String, String> {
+    // Keep this guard here as well as at the NIF boundary: this helper is a
+    // public Rust API, and no caller may reach header construction with an
+    // unbounded identifier.
+    if kid.len() > enrollment::MAX_ENROLLMENT_KID_OCTETS {
+        return Err(String::from(REFUSED));
+    }
+
     // Recognition deliberately precedes even construction of the secret key.
     // This is the enrollment module's own grammar and protected-header policy,
     // not a BEAM-side restatement of CON-214.
     let recognised =
         enrollment::recognise_unsigned(statement, kid).map_err(|_| String::from(REFUSED))?;
 
+    let declared: &[u8; 32] =
+        declared_public_key.try_into().map_err(|_| String::from(REFUSED))?;
     let seed: &[u8; 32] = private_key.try_into().map_err(|_| String::from(REFUSED))?;
-    let (compact, public_key) = {
+    let compact = {
         let signing_key = ed25519_dalek::SigningKey::from_bytes(seed);
-        let public_key = signing_key.verifying_key().to_bytes();
-        let compact = enrollment::sign(&recognised, kid, &signing_key);
-        (compact, public_key)
+        // This is the declaration check: `declared` came from the caller's
+        // authenticated profile/configuration, independently of the seed. It
+        // happens before the private key touches the statement.
+        if signing_key.verifying_key().to_bytes() != *declared {
+            return Err(String::from(REFUSED));
+        }
+        enrollment::sign(&recognised, kid, &signing_key)
     };
 
     // Refuse producer/recogniser drift at the boundary where it would otherwise
@@ -48,32 +63,47 @@ pub fn sign_enrollment_statement(
     if round_trip != recognised || signed.kid != kid {
         return Err(String::from(REFUSED));
     }
-    signed
-        .verify(&public_key)
-        .map_err(|_| String::from(REFUSED))?;
 
     Ok(compact)
 }
 
-/// `cbcl_selfsame_erl:sign_enrollment/3`.
+/// `cbcl_selfsame_erl:sign_enrollment/4`.
 ///
 /// Arguments are `(canonical_statement_binary, kid_binary,
-/// private_seed_binary)`. The result is `{ok, CompactJwsBinary}` or the sole
-/// refusal `{error, rejected}`.
+/// declared_public_key_binary, private_seed_binary)`. The result is
+/// `{ok, CompactJwsBinary}` or the sole refusal `{error, rejected}`.
 #[rustler::nif]
 pub fn sign_enrollment<'a>(
     env: Env<'a>,
-    statement: Binary<'a>,
-    kid: Binary<'a>,
-    private_key: Binary<'a>,
+    statement: Term<'a>,
+    kid: Term<'a>,
+    declared_public_key: Term<'a>,
+    private_key: Term<'a>,
 ) -> Term<'a> {
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        std::str::from_utf8(kid.as_slice())
-            .map_err(|_| String::from(REFUSED))
-            .and_then(|kid| {
-                sign_enrollment_statement(statement.as_slice(), kid, private_key.as_slice())
-            })
-            .and_then(|compact| binary(env, compact.as_bytes()))
+        // Decode the `kid` first and reject its raw binary length before UTF-8
+        // scanning, JSON construction, or canonicalisation. Decoding a BEAM
+        // binary borrows its storage and does not copy it.
+        let kid: Binary<'a> = kid.decode().map_err(|_| String::from(REFUSED))?;
+        if kid.len() > enrollment::MAX_ENROLLMENT_KID_OCTETS {
+            return Err(String::from(REFUSED));
+        }
+        let kid = std::str::from_utf8(kid.as_slice()).map_err(|_| String::from(REFUSED))?;
+
+        let statement: Binary<'a> =
+            statement.decode().map_err(|_| String::from(REFUSED))?;
+        let declared_public_key: Binary<'a> =
+            declared_public_key.decode().map_err(|_| String::from(REFUSED))?;
+        let private_key: Binary<'a> =
+            private_key.decode().map_err(|_| String::from(REFUSED))?;
+
+        sign_enrollment_statement(
+            statement.as_slice(),
+            kid,
+            declared_public_key.as_slice(),
+            private_key.as_slice(),
+        )
+        .and_then(|compact| binary(env, compact.as_bytes()))
     }));
 
     match result {
@@ -237,8 +267,14 @@ mod tests {
     fn accepting_control_round_trips_and_verifies_only_under_the_declared_key() {
         let fixture = fixture();
         let key = backend_key();
-        let compact = sign_enrollment_statement(&fixture.statement_octets, KID, key.as_bytes())
-            .expect("the accepting fixture must sign");
+        let public_key = key.verifying_key().to_bytes();
+        let compact = sign_enrollment_statement(
+            &fixture.statement_octets,
+            KID,
+            &public_key,
+            key.as_bytes(),
+        )
+        .expect("the accepting fixture must sign");
 
         let (recognised, signed) =
             enrollment::recognise(&compact).expect("the producer output must recognise");
@@ -247,6 +283,16 @@ mod tests {
         assert!(signed.verify(&key.verifying_key().to_bytes()).is_ok());
         let other = ed25519_dalek::SigningKey::from_bytes(&[0x42; 32]);
         assert!(signed.verify(&other.verifying_key().to_bytes()).is_err());
+        assert_eq!(
+            sign_enrollment_statement(
+                &fixture.statement_octets,
+                KID,
+                &public_key,
+                other.as_bytes(),
+            ),
+            Err(String::from(REFUSED)),
+            "holding the declaration and kid fixed while varying only the seed must refuse"
+        );
 
         let descriptor_digest = codec::b64url(&fixture.profile.rendezvous[0].digest);
         let observed = Observed {
@@ -269,8 +315,15 @@ mod tests {
         let mut fixture = fixture();
         // The statement is the sole changed input from the accepting control.
         fixture.statement_octets.pop();
+        let key = backend_key();
+        let public_key = key.verifying_key().to_bytes();
         assert_eq!(
-            sign_enrollment_statement(&fixture.statement_octets, KID, backend_key().as_bytes()),
+            sign_enrollment_statement(
+                &fixture.statement_octets,
+                KID,
+                &public_key,
+                key.as_bytes(),
+            ),
             Err(String::from(REFUSED))
         );
     }
@@ -278,11 +331,13 @@ mod tests {
     #[test]
     fn a_wrong_length_private_key_is_refused() {
         let fixture = fixture();
-        let mut short_key = backend_key().as_bytes().to_vec();
+        let key = backend_key();
+        let public_key = key.verifying_key().to_bytes();
+        let mut short_key = key.as_bytes().to_vec();
         // The private-key bytes are the sole changed input from the control.
         short_key.pop();
         assert_eq!(
-            sign_enrollment_statement(&fixture.statement_octets, KID, &short_key),
+            sign_enrollment_statement(&fixture.statement_octets, KID, &public_key, &short_key),
             Err(String::from(REFUSED))
         );
     }
