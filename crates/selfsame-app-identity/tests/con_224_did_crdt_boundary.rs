@@ -90,12 +90,16 @@ fn signed_op(h: &Home, op: DeltaOp, now_ms: u64) -> SignedDelta {
     .expect("delta signs")
 }
 
-/// The `CON-203` step 2 update: a root-signed `SetDocumentData` setting
-/// `alsoKnownAs` to the deterministically named alias.
+/// The `CON-203` step 2 update: a root-signed `SetAlsoKnownAs` setting the
+/// deterministically named alias.
+///
+/// Was a `SetDocumentData` update keyed `alsoKnownAs`. Upstream now refuses
+/// that: such a key projects into the same JSON object as the typed fields and
+/// shadows it for any last-wins parser (did-crdt BUG-001). The typed op is the
+/// replacement, so the capability is unchanged and the spelling unambiguous.
 fn publish_alias(h: &mut Home, aliases: &[&str]) {
-    let op = DeltaOp::SetDocumentData {
-        key: "alsoKnownAs".into(),
-        value: serde_json::json!(aliases),
+    let op = DeltaOp::SetAlsoKnownAs {
+        uris: aliases.iter().map(|a| (*a).to_string()).collect(),
     };
     let delta = signed_op(h, op, 1_000);
     h.document.merge_verified_delta(delta).expect("the update is admitted");
@@ -131,12 +135,11 @@ fn a_root_signed_update_exposes_the_exact_rfc_7565_uri_at_the_document_top_level
         // `SetDocumentData` lands in the flattened `extra` map, which serialises
         // at the top level of the DID Document — which is what CON-203's shape
         // requires and what a verifier reads.
-        let also_known_as = document
-            .extra
-            .get("alsoKnownAs")
-            .unwrap_or_else(|| panic!("alsoKnownAs is absent for {application_id}"));
-        let entries: Vec<&str> =
-            also_known_as.as_array().unwrap().iter().map(|v| v.as_str().unwrap()).collect();
+        // A typed top-level property now, not a flattened `extra` entry — the
+        // same shape CON-203 requires, minus the duplicate-member ambiguity the
+        // untyped route carried.
+        let entries: Vec<&str> = document.also_known_as.iter().map(String::as_str).collect();
+        assert!(!entries.is_empty(), "alsoKnownAs is absent for {application_id}");
         assert_eq!(entries, vec![expected.as_str()], "the exact URI, not a normalisation of it");
         assert_eq!(document.id, h.did);
     }
@@ -149,6 +152,10 @@ fn the_alias_is_absent_until_the_update_is_applied() {
     // is nameable by the controller and asserted by nobody.
     let h = home(APPLICATION_ID, 1);
     let document = h.document.resolve().unwrap().did_document.unwrap();
+    // Asserted on the typed field. Checking `extra` alone would now pass
+    // VACUOUSLY — aliases never land there — and a test that cannot fail is
+    // worse than one that does.
+    assert!(document.also_known_as.is_empty());
     assert!(!document.extra.contains_key("alsoKnownAs"));
 }
 
@@ -161,13 +168,16 @@ fn both_the_stable_and_the_optional_alias_survive_one_update() {
     publish_alias(&mut h, &[&stable, &human]);
 
     let document = h.document.resolve().unwrap().did_document.unwrap();
-    let entries: Vec<&str> = document.extra["alsoKnownAs"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|v| v.as_str().unwrap())
-        .collect();
-    assert_eq!(entries, vec![stable.as_str(), human.as_str()]);
+    // Compared as a SET. The register canonicalises its value — sorted and
+    // deduplicated — so replicas writing the same aliases in different orders
+    // hold identical state and agree on `versionId`. Order is therefore not the
+    // writer's, and `alsoKnownAs` is a set of URIs where order carries no
+    // meaning.
+    let mut entries: Vec<&str> = document.also_known_as.iter().map(String::as_str).collect();
+    entries.sort_unstable();
+    let mut expected = vec![stable.as_str(), human.as_str()];
+    expected.sort_unstable();
+    assert_eq!(entries, expected);
 }
 
 // ── the resolver representation must not disturb the identifier ────────────

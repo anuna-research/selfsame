@@ -473,10 +473,20 @@ mod tests {
         let (sealed, ctx) = scenario(
             &device(),
             &root(),
-            Some(("capabilityInvocation", serde_json::json!({"admin": true, "rooms": ["*"]}))),
+            // A capability-shaped key that is still LEGAL to write. The DID Core
+            // spelling `capabilityInvocation` can no longer reach this layer:
+            // upstream refuses a documentData key naming a DID Core property at
+            // admission (did-crdt BUG-001), so a delta carrying it never enters
+            // the log. That is a stronger guarantee, tested there.
+            //
+            // This layer's rule is an ALLOW-LIST — only the profile key and known
+            // method ids are interpreted — so it still has work to do for every
+            // legal key, and remains the only defence for state that arrived by
+            // state-merge rather than by delta.
+            Some(("adminCapabilities", serde_json::json!({"admin": true, "rooms": ["*"]}))),
         );
         let accepted = accept(&sealed, &ctx, MINTED).unwrap();
-        assert_eq!(accepted.dropped_document_data, vec!["capabilityInvocation".to_owned()]);
+        assert_eq!(accepted.dropped_document_data, vec!["adminCapabilities".to_owned()]);
         assert!(accepted.device_labels.is_empty());
     }
 

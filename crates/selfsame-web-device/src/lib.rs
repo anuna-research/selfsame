@@ -80,11 +80,13 @@ struct BrowserClosure {
     did: String,
     did_recomputed_ok: bool,
     deltas_verified: bool,
-    causally_complete: bool,
+    locally_closed: bool,
     deactivated: bool,
     assertion_methods: Vec<BrowserMethod>,
     revoked_credential_ids: Vec<String>,
-    closure_age_seconds: i64,
+    /// Unix seconds at which this browser fetched the closure — its own
+    /// observation, never the resolver's account of its freshness.
+    fetched_at_seconds: i64,
     also_known_as: Vec<String>,
 }
 #[derive(Deserialize)]
@@ -440,14 +442,22 @@ pub fn verify_path_b_peer_json(
             serde_json::from_str(permissions_json).map_err(|_| DeviceError::Refused)?;
         let permission_refs: Vec<&str> = permissions.iter().map(String::as_str).collect();
         let now = browser_unix_seconds(now)?;
+        // The browser's clock as a signed second count, for comparison against
+        // fetch stamps. Refusing an unrepresentable value rather than saturating
+        // keeps a nonsensical clock from reading as a valid one.
+        let now_seconds = i64::try_from(now).map_err(|_| DeviceError::Refused)?;
         let jrd =
             selfsame_app_identity::alias::recognise_jrd(jrd).map_err(|_| DeviceError::Refused)?;
         let closures: Vec<BrowserClosure> =
             serde_json::from_str(closures_json).map_err(|_| DeviceError::Refused)?;
         let first = closures.first().ok_or(DeviceError::Refused)?;
+        // A fetch stamped before the epoch, or in the future relative to `now`,
+        // is a broken clock or a caller inventing freshness. Refuse rather than
+        // clamp: clamping a future stamp to zero age would present the most
+        // suspect input as the freshest.
         if closures
             .iter()
-            .any(|closure| closure.closure_age_seconds < 0)
+            .any(|closure| closure.fetched_at_seconds < 0 || closure.fetched_at_seconds > now_seconds)
         {
             return Err(DeviceError::Refused);
         }
@@ -464,7 +474,7 @@ pub fn verify_path_b_peer_json(
             c.did != first.did
                 || c.did_recomputed_ok != first.did_recomputed_ok
                 || c.deltas_verified != first.deltas_verified
-                || c.causally_complete != first.causally_complete
+                || c.locally_closed != first.locally_closed
                 || c.deactivated != first.deactivated
                 || c.assertion_methods.len() != first.assertion_methods.len()
                 || c.also_known_as != first.also_known_as
@@ -491,16 +501,20 @@ pub fn verify_path_b_peer_json(
                 })
             })
             .collect::<Result<Vec<_>, DeviceError>>()?;
+        // Age from the OLDEST fetch in the quorum: a union is only as fresh as
+        // its stalest member, and taking the newest would let one fresh resolver
+        // vouch for the staleness of the rest.
         let closure_age_seconds = closures
             .iter()
-            .map(|c| c.closure_age_seconds)
-            .max()
+            .map(|c| c.fetched_at_seconds)
+            .min()
+            .and_then(|oldest| now_seconds.checked_sub(oldest))
             .ok_or(DeviceError::Refused)?;
         let issuer = IssuerState {
             did: first.did.clone(),
             did_recomputed_ok: first.did_recomputed_ok,
             deltas_verified: first.deltas_verified,
-            causally_complete: first.causally_complete,
+            locally_closed: first.locally_closed,
             deactivated: first.deactivated,
             assertion_methods: methods,
             revoked_credential_ids: revoked,
@@ -914,7 +928,7 @@ mod tests {
             did: home_did.clone(),
             did_recomputed_ok: true,
             deltas_verified: true,
-            causally_complete: true,
+            locally_closed: true,
             deactivated: false,
             assertion_methods: vec![VerificationMethod {
                 id: format!("{home_did}#jwk-0"),
@@ -1080,11 +1094,13 @@ mod tests {
                 "did": issuer.did,
                 "did_recomputed_ok": issuer.did_recomputed_ok,
                 "deltas_verified": issuer.deltas_verified,
-                "causally_complete": issuer.causally_complete,
+                "locally_closed": issuer.locally_closed,
                 "deactivated": issuer.deactivated,
                 "assertion_methods": methods,
                 "revoked_credential_ids": issuer.revoked_credential_ids,
-                "closure_age_seconds": issuer.closure_age_seconds,
+                // A fetch stamp, not an age. The fixture's issuer carries an age,
+                // so the equivalent stamp is that far before `now`.
+                "fetched_at_seconds": NOW as i64 - issuer.closure_age_seconds,
                 "also_known_as": issuer.also_known_as,
             })
         };

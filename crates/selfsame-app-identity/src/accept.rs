@@ -214,8 +214,21 @@ pub struct IssuerState {
     pub did_recomputed_ok: bool,
     /// Whether every required delta and authorization rule verified.
     pub deltas_verified: bool,
-    /// `did:crdt` SPEC-035 causal validity and completeness.
-    pub causally_complete: bool,
+    /// The closure had no dangling parent — every delta's parents resolved
+    /// within it.
+    ///
+    /// Renamed from `causally_complete`. The logic below is unchanged; the NAME
+    /// was claiming more than any replica can supply, and a check whose name
+    /// overstates its input is how a weaker guarantee gets relied on as a
+    /// stronger one.
+    ///
+    /// The profile asks for causal COMPLETENESS. What a replica can establish is
+    /// local closure: this bundle was not truncated mid-chain. It cannot
+    /// establish that the bundle is the whole history — a replica holding only
+    /// genesis is locally closed and arbitrarily far behind. The gap is real and
+    /// is NOT closed by this rename; it is `did:crdt` SPEC-035, a Tier-1 gate
+    /// item.
+    pub locally_closed: bool,
     /// Whether the DID has been deactivated.
     pub deactivated: bool,
     /// Verification methods in `assertionMethod`.
@@ -223,6 +236,11 @@ pub struct IssuerState {
     /// The grow-only credential-revocation set.
     pub revoked_credential_ids: Vec<String>,
     /// Age of the closure in seconds at `now`.
+    ///
+    /// Computed by the verifier from when IT fetched, not reported by the
+    /// resolver. Previously the resolver supplied this and nothing ever computed
+    /// it, so the bound below compared against a constant zero and could not
+    /// fail.
     pub closure_age_seconds: i64,
     /// Where it came from.
     pub source: ClosureSource,
@@ -519,12 +537,18 @@ fn check_status(
             "closure is older than the applicable bound",
         ));
     }
-    // "causally valid and causally complete" — the most security-critical check
-    // in the profile, and the one whose upstream definition is still deferred
-    // (`did:crdt` SPEC-035, a Tier-1 gate item). It is a parameter here so the
-    // shell that has the method library decides it.
-    if !issuer.causally_complete {
-        return Err(AcceptError::at(AcceptStep::Status, "closure is not causally complete"));
+    // The most security-critical check in the profile, and the one whose
+    // upstream definition is still deferred (`did:crdt` SPEC-035, a Tier-1 gate
+    // item). It is a parameter here so the shell that has the method library
+    // decides it.
+    //
+    // The profile asks for causal completeness; the input provides local
+    // closure, which is strictly weaker and is all a replica can establish
+    // without a total order the method deliberately lacks. The name now says so.
+    // Refusing on `!locally_closed` still rejects a truncated closure, which is
+    // the part that IS decidable.
+    if !issuer.locally_closed {
+        return Err(AcceptError::at(AcceptStep::Status, "closure is not locally closed"));
     }
     // At session establishment a closure from a declared resolver is preferred
     // over the issuer's own account of its own revocations — and the preference

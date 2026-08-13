@@ -45,11 +45,11 @@ rustler::atoms! {
     did,
     did_recomputed_ok,
     deltas_verified,
-    causally_complete,
+    locally_closed,
+    fetched_at_seconds,
     deactivated,
     assertion_methods,
     revoked_credential_ids,
-    closure_age_seconds,
     also_known_as,
     id,
     kind,
@@ -83,18 +83,28 @@ pub struct ResolverClosure {
     pub did_recomputed_ok: bool,
     /// All required DID deltas verified.
     pub deltas_verified: bool,
-    /// The resolved closure is causally complete.
-    pub causally_complete: bool,
+    /// The closure had no dangling parent — every delta's parents resolved
+    /// within it.
+    ///
+    /// Renamed from `locally_closed`, which claimed more than any replica can
+    /// establish. Local closure says the bundle was not truncated mid-chain; it
+    /// cannot say the bundle is the whole history.
+    pub locally_closed: bool,
     /// The DID's deactivation state.
     pub deactivated: bool,
     /// Assertion methods exposed by the resolved DID document.
     pub assertion_methods: Vec<ResolverAssertionMethod>,
     /// The resolver's current credential-revocation G-Set.
     pub revoked_credential_ids: Vec<String>,
-    /// Age of this closure at the supplied `now` value.
-    pub closure_age_seconds: i64,
     /// Resolved DID `alsoKnownAs` entries.
     pub also_known_as: Vec<String>,
+    /// Unix seconds at which THIS VERIFIER fetched the closure.
+    ///
+    /// Replaces `closure_age_seconds`, which the resolver reported. A resolver's
+    /// own account of its freshness is unforgeable by nobody, and what it could
+    /// honestly time is when it last spoke to a peer — contact recency, which
+    /// diverges from staleness exactly when a partition makes it matter.
+    pub fetched_at_seconds: i64,
 }
 
 /// One assertion method from a verified resolver closure.
@@ -249,10 +259,8 @@ pub fn verified_revocation_union(
     if closure.did != account_did
         || !closure.did_recomputed_ok
         || !closure.deltas_verified
-        || !closure.causally_complete
+        || !closure.locally_closed
         || closure.deactivated
-        || closure.closure_age_seconds < 0
-        || closure.closure_age_seconds > profile.revocation.max_closure_age_seconds
     {
         return Err(String::from("resolver_closure"));
     }
@@ -282,7 +290,7 @@ fn verify_sealed(
     let closure = resolver_quorum(&profile, closures)?;
     let account = AcctUri::parse(&presentation.account).map_err(|_| String::from("account"))?;
     let jrd = recognise_jrd(&presentation.jrd).map_err(|_| String::from("jrd"))?;
-    let issuer = issuer_state(&closure);
+    let issuer = issuer_state(&closure, presentation.now);
     let challenge = Challenge { nonce: presentation.nonce, application_id: profile.application_id.as_str().to_owned(), account: account.as_str().to_owned(), grant_hash: presentation.grant_hash, session: presentation.challenge_session.clone(), issued_at: presentation.issued_at };
     let permissions: Vec<&str> = presentation.operation_permissions.iter().map(String::as_str).collect();
     verify_session_establishment(
@@ -305,7 +313,7 @@ fn resolver_quorum(
         closure.did != first.did
             || closure.did_recomputed_ok != first.did_recomputed_ok
             || closure.deltas_verified != first.deltas_verified
-            || closure.causally_complete != first.causally_complete
+            || closure.locally_closed != first.locally_closed
             || closure.deactivated != first.deactivated
             || closure.assertion_methods != first.assertion_methods
             || closure.also_known_as != first.also_known_as
@@ -321,31 +329,29 @@ fn resolver_quorum(
         .collect();
     let revoked_credential_ids = union_resolver_revocations(profile, &observations)
         .map_err(|_| String::from("resolver_quorum"))?;
-    let closure_age_seconds = closures
-        .iter()
-        .map(|closure| closure.closure_age_seconds)
-        .max()
-        .ok_or_else(|| String::from("resolver_quorum"))?;
     Ok(ResolverClosure {
         resolver_id: String::new(),
         did: first.did.clone(),
         did_recomputed_ok: first.did_recomputed_ok,
         deltas_verified: first.deltas_verified,
-        causally_complete: first.causally_complete,
+        locally_closed: first.locally_closed,
         deactivated: first.deactivated,
         assertion_methods: first.assertion_methods.clone(),
         revoked_credential_ids,
-        closure_age_seconds,
         also_known_as: first.also_known_as.clone(),
+        // The OLDEST fetch across the quorum: a union is only as fresh as its
+        // stalest member, and taking the newest would let one fresh resolver
+        // vouch for the staleness of the rest.
+        fetched_at_seconds: closures.iter().map(|c| c.fetched_at_seconds).min().unwrap_or(0),
     })
 }
 
-fn issuer_state(closure: &ResolverClosure) -> IssuerState {
+fn issuer_state(closure: &ResolverClosure, now: i64) -> IssuerState {
     IssuerState {
         did: closure.did.clone(),
         did_recomputed_ok: closure.did_recomputed_ok,
         deltas_verified: closure.deltas_verified,
-        causally_complete: closure.causally_complete,
+        locally_closed: closure.locally_closed,
         deactivated: closure.deactivated,
         assertion_methods: closure
             .assertion_methods
@@ -364,7 +370,11 @@ fn issuer_state(closure: &ResolverClosure) -> IssuerState {
             })
             .collect(),
         revoked_credential_ids: closure.revoked_credential_ids.clone(),
-        closure_age_seconds: closure.closure_age_seconds,
+        // Computed from the verifier's own clock and its own record of when it
+        // fetched. A stamp in the future is a broken clock or a lying caller;
+        // clamping to 0 would make that look maximally fresh, so it saturates
+        // and fails the bound instead.
+        closure_age_seconds: now.checked_sub(closure.fetched_at_seconds).filter(|age| *age >= 0).unwrap_or(i64::MAX),
         source: selfsame_app_identity::accept::ClosureSource::StateResolver,
         also_known_as: closure.also_known_as.clone(),
     }
@@ -545,7 +555,7 @@ fn decode_rehydration<'a>(env: Env<'a>, term: Term<'a>) -> Result<RehydrationInp
 fn verify_standing_pure(grant: &VerifiedGrant, request: &StandingInput, closures: &[ResolverClosure]) -> Result<(), String> {
     let profile = ApplicationProfile::recognise(&request.profile).map_err(|_| String::from("profile"))?;
     let closure = resolver_quorum(&profile, closures)?;
-    let issuer = issuer_state(&closure);
+    let issuer = issuer_state(&closure, request.now);
     let permissions: Vec<&str> = request.operation_permissions.iter().map(String::as_str).collect();
     verify_standing(grant, &StandingRequest::new(&profile, &permissions, request.now, request.clock_skew_seconds), &StandingEvidence::new(&issuer, request.projection)).map_err(|_| String::from("rejected"))
 }
@@ -553,7 +563,7 @@ fn verify_standing_pure(grant: &VerifiedGrant, request: &StandingInput, closures
 fn rehydrate_pure(recovery: &RehydrationInput, closures: &[ResolverClosure]) -> Result<VerifiedGrant, String> {
     let profile = ApplicationProfile::recognise(&recovery.profile).map_err(|_| String::from("profile"))?;
     let closure = resolver_quorum(&profile, closures)?;
-    let issuer = issuer_state(&closure);
+    let issuer = issuer_state(&closure, recovery.now);
     let account = AcctUri::parse(&recovery.account).map_err(|_| String::from("account"))?;
     let jrd = recognise_jrd(&recovery.jrd).map_err(|_| String::from("jrd"))?;
     let permissions: Vec<&str> = recovery.operation_permissions.iter().map(String::as_str).collect();
@@ -599,8 +609,8 @@ fn decode_closures<'a>(env: Env<'a>, term: Term<'a>) -> Result<Vec<ResolverClosu
 
 fn decode_closure<'a>(env: Env<'a>, term: Term<'a>) -> Result<ResolverClosure, String> {
     reject_unknown(term, &[
-        "resolver_id", "did", "did_recomputed_ok", "deltas_verified", "causally_complete", "deactivated",
-        "assertion_methods", "revoked_credential_ids", "closure_age_seconds", "also_known_as",
+        "resolver_id", "did", "did_recomputed_ok", "deltas_verified", "locally_closed", "deactivated",
+        "assertion_methods", "revoked_credential_ids", "fetched_at_seconds", "also_known_as",
     ])?;
     let methods: Vec<Term<'_>> = value(env, term, "assertion_methods")?;
     Ok(ResolverClosure {
@@ -608,15 +618,15 @@ fn decode_closure<'a>(env: Env<'a>, term: Term<'a>) -> Result<ResolverClosure, S
         did: utf8(env, term, "did")?,
         did_recomputed_ok: value(env, term, "did_recomputed_ok")?,
         deltas_verified: value(env, term, "deltas_verified")?,
-        causally_complete: value(env, term, "causally_complete")?,
+        locally_closed: value(env, term, "locally_closed")?,
         deactivated: value(env, term, "deactivated")?,
         assertion_methods: methods
             .into_iter()
             .map(|method| decode_method(env, method))
             .collect::<Result<Vec<_>, _>>()?,
         revoked_credential_ids: strings(env, term, "revoked_credential_ids")?,
-        closure_age_seconds: value(env, term, "closure_age_seconds")?,
         also_known_as: strings(env, term, "also_known_as")?,
+        fetched_at_seconds: value(env, term, "fetched_at_seconds")?,
     })
 }
 
@@ -668,9 +678,9 @@ fn key_atom(key: &str) -> Atom {
         "issued_at" => issued_at(), "proof_signature" => proof_signature(), "session" => session(),
         "projection" => projection(), "did" => did(), "did_recomputed_ok" => did_recomputed_ok(),
         "resolver_closures" => resolver_closures(), "resolver_id" => resolver_id(),
-        "deltas_verified" => deltas_verified(), "causally_complete" => causally_complete(),
+        "deltas_verified" => deltas_verified(), "locally_closed" => locally_closed(),
         "deactivated" => deactivated(), "assertion_methods" => assertion_methods(),
-        "revoked_credential_ids" => revoked_credential_ids(), "closure_age_seconds" => closure_age_seconds(),
+        "revoked_credential_ids" => revoked_credential_ids(), "fetched_at_seconds" => fetched_at_seconds(),
         "also_known_as" => also_known_as(), "id" => id(), "kind" => kind(),
         "public_key" => public_key(), "has_private_component" => has_private_component(),
         "account_did" => account_did(), "grant_id" => grant_id(), "permissions" => permissions(), "valid_until" => valid_until(), "expires_at" => expires_at(),
@@ -749,9 +759,9 @@ mod tests {
         };
         let closure = ResolverClosure {
             resolver_id: "state-1".to_owned(), did: "did:crdt:bad".to_owned(), did_recomputed_ok: false,
-            deltas_verified: false, causally_complete: false, deactivated: false,
+            deltas_verified: false, locally_closed: false, deactivated: false,
             assertion_methods: vec![], revoked_credential_ids: vec![],
-            closure_age_seconds: 0, also_known_as: vec![],
+            fetched_at_seconds: 0, also_known_as: vec![],
         };
         assert_eq!(verify_path_b_pure(&presentation, &[closure]), Err(String::from("profile")));
     }
@@ -760,11 +770,11 @@ mod tests {
     fn issuer_state_hard_codes_resolver_provenance() {
         let closure = ResolverClosure {
             resolver_id: "state-1".to_owned(), did: "did:crdt:x".to_owned(), did_recomputed_ok: true,
-            deltas_verified: true, causally_complete: true, deactivated: false,
+            deltas_verified: true, locally_closed: true, deactivated: false,
             assertion_methods: vec![], revoked_credential_ids: vec![],
-            closure_age_seconds: 0, also_known_as: vec![],
+            fetched_at_seconds: 0, also_known_as: vec![],
         };
-        assert_eq!(issuer_state(&closure).source, selfsame_app_identity::accept::ClosureSource::StateResolver);
+        assert_eq!(issuer_state(&closure, 0).source, selfsame_app_identity::accept::ClosureSource::StateResolver);
     }
 
     #[test]

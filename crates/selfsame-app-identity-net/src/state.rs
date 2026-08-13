@@ -133,12 +133,18 @@ pub struct PathBClosureFacts {
     pub did: String,
     pub did_recomputed_ok: bool,
     pub deltas_verified: bool,
-    pub causally_complete: bool,
+    /// The closure had no dangling parent — every delta's parents resolved
+    /// within it. Renamed from `causally_complete`, which claimed more than any
+    /// replica can establish: a replica holding only genesis is locally closed
+    /// and arbitrarily far behind.
+    pub locally_closed: bool,
     pub deactivated: bool,
     pub assertion_methods: Vec<PathBAssertionMethod>,
     pub revoked_credential_ids: Vec<String>,
-    pub closure_age_seconds: i64,
     pub also_known_as: Vec<String>,
+    /// Unix seconds at which THIS VERIFIER fetched the closure — never the
+    /// resolver's own account of its freshness.
+    pub fetched_at_seconds: i64,
 }
 #[allow(missing_docs)]
 #[derive(Clone, Debug, serde::Serialize)]
@@ -147,7 +153,10 @@ pub struct PathBAssertionMethod { pub id: String, pub kind: String, pub public_k
 impl PathBResolverQuorum {
     /// Convert verified documents to the exact closed resolver facts expected by
     /// the isolated NIF. No input closure map can enter this conversion.
-    pub fn nif_closures(&self) -> Result<Vec<PathBClosureFacts>, NetError> {
+    /// `fetched_at_seconds` is the caller's OWN observation of when it fetched.
+    /// A parameter rather than a clock read, so this stays a pure projection and
+    /// a caller cannot be handed a freshness claim it did not make itself.
+    pub fn nif_closures(&self, fetched_at_seconds: i64) -> Result<Vec<PathBClosureFacts>, NetError> {
         self.closures.iter().map(|(resolver_id, document)| {
             // The projection is built HERE, from did-crdt's neutral accessors,
             // rather than asked of the document. Path B is this application's
@@ -167,7 +176,17 @@ impl PathBResolverQuorum {
                     if raw.len() != 32 { return Err(NetError::Refused("Path-B assertion key is not Ed25519 length")); }
                     Ok(PathBAssertionMethod { id: entry.id, kind: "JsonWebKey".into(), public_key: raw, has_private_component: false })
                 }).collect::<Result<Vec<_>, NetError>>()?;
-            Ok(PathBClosureFacts { resolver_id: resolver_id.clone(), did: document.did.to_string(), did_recomputed_ok: true, deltas_verified: true, causally_complete: true, deactivated: document.is_deactivated(), assertion_methods, revoked_credential_ids: document.revoked_credential_ids(), closure_age_seconds: 0, also_known_as: vec![] })
+            // These three are true BY CONSTRUCTION, not by assertion: a document
+            // reaches this vector only via `replay_closure`, which refuses unless
+            // it found exactly one genesis delta whose root key derives the DID
+            // asked about, every signature verified, and no parent dangled.
+            //
+            // `closure_age_seconds` is REPLACED by the verifier's own fetch time,
+            // not deleted. The resolver used to report the age while nothing
+            // computed it, so `maxClosureAgeSeconds` compared against a constant
+            // zero and could not fail. The bound is a real control; it was
+            // starved, not wrong.
+            Ok(PathBClosureFacts { resolver_id: resolver_id.clone(), did: document.did.to_string(), did_recomputed_ok: true, deltas_verified: true, locally_closed: true, deactivated: document.is_deactivated(), assertion_methods, revoked_credential_ids: document.revoked_credential_ids(), also_known_as: document.also_known_as(), fetched_at_seconds })
         }).collect()
     }
 }
@@ -235,6 +254,14 @@ pub const MAX_CLOSURE_OCTETS: usize = 1_048_576;
 
 /// The `did:crdt` `CON-003` resolution path: `GET /{did}`.
 const RESOLUTION_PATH: &str = "/";
+
+/// The `includeClosure` resolution option (DID Resolution 1.0 §12.1 carries
+/// resolution options as query parameters).
+///
+/// Always sent. A resolver that ignores it answers without a `signedClosure`,
+/// and `closure_from_resolution` refuses — which is correct, since such a
+/// resolver cannot supply what `CON-206` step 5 requires.
+const CLOSURE_OPTION: &str = "?includeClosure=true";
 
 /// The `did:crdt` `CON-003` delta submission path: `POST /dids/{did}/deltas`.
 fn submission_path(did: &str) -> String {
@@ -401,11 +428,18 @@ fn outcome_of(error: &NetError) -> ResolverOutcome {
 }
 
 async fn fetch_closure(resolver: &StateResolver, did: &str) -> Result<Document, NetError> {
-    // CON-003: `GET /{did}`. `resolve_closure` has recognised the DID, so it is
-    // a canonical `did:crdt:` string with no reserved characters and stands as a
-    // path segment; `join` supplies exactly one separator whether or not the
-    // profile spelled the resolver URL with a trailing `/`.
-    let url = join(&resolver.url, &format!("{RESOLUTION_PATH}{did}"));
+    // CON-003: `GET /{did}?includeClosure=true`. `resolve_closure` has
+    // recognised the DID, so it is a canonical `did:crdt:` string with no
+    // reserved characters and stands as a path segment; `join` supplies exactly
+    // one separator whether or not the profile spelled the resolver URL with a
+    // trailing `/`.
+    //
+    // The option is what makes an independently-operated resolver usable at
+    // all. Without it the response is a PROJECTED document, which carries no
+    // signatures — deserialising one would make the resolver authoritative on
+    // the DID's own revocations. With it the response also carries the signed
+    // deltas, and replaying those makes the signatures authoritative instead.
+    let url = join(&resolver.url, &format!("{RESOLUTION_PATH}{did}{CLOSURE_OPTION}"));
     let response = client(RESOLVER_DEADLINE)?
         .get(&url)
         .header(reqwest::header::ACCEPT, "application/json")
@@ -422,7 +456,28 @@ async fn fetch_closure(resolver: &StateResolver, did: &str) -> Result<Document, 
         return Err(NetError::Refused("the resolver returned no closure"));
     }
     let body = bounded_body(response, MAX_CLOSURE_OCTETS).await?;
-    replay_closure(&body, did)
+    replay_closure(&closure_from_resolution(&body)?, did)
+}
+
+/// Take the signed closure out of a DID resolution result.
+///
+/// The resolver answers with the W3C three-part envelope; the deltas ride in
+/// `didDocumentMetadata.signedClosure` as a method-specific property. Only that
+/// member is read. `didDocument` is deliberately ignored — it is the resolver's
+/// unsigned account of the state, and reading it is the exact mistake this path
+/// exists to avoid.
+///
+/// A missing property is a refusal, not an empty closure. A resolver that
+/// answered 200 without honouring the option has told us it cannot supply
+/// evidence, and proceeding on the projection would silently downgrade
+/// signature-checked state to hearsay.
+fn closure_from_resolution(body: &[u8]) -> Result<Vec<u8>, NetError> {
+    let envelope: serde_json::Value = serde_json::from_slice(body)
+        .map_err(|e| NetError::Recognition(format!("resolver response is not a resolution result: {e}")))?;
+    let closure = envelope.get("didDocumentMetadata").and_then(|m| m.get("signedClosure"))
+        .ok_or(NetError::Refused("the resolver returned no signedClosure; it cannot supply evidence for this DID"))?;
+    serde_json::to_vec(closure)
+        .map_err(|e| NetError::Recognition(format!("signedClosure is not re-serialisable: {e}")))
 }
 
 /// Replay a signed closure into a document, verifying every delta.

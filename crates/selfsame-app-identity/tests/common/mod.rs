@@ -313,7 +313,7 @@ impl Ceremony {
             did: home_did.clone(),
             did_recomputed_ok: true,
             deltas_verified: true,
-            causally_complete: true,
+            locally_closed: true,
             deactivated: false,
             assertion_methods: vec![VerificationMethod {
                 id: format!("{home_did}#jwk-0"),
