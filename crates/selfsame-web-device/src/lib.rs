@@ -1082,7 +1082,7 @@ mod tests {
                 "revoked_credential_ids": issuer.revoked_credential_ids,
                 // A fetch stamp, not an age. The fixture's issuer carries an age,
                 // so the equivalent stamp is that far before `now`.
-                "fetched_at_seconds": NOW as i64 - issuer.closure_age_seconds,
+                "fetched_at_seconds": NOW - issuer.closure_age_seconds,
                 "also_known_as": issuer.also_known_as,
             })
         };
@@ -1329,7 +1329,7 @@ mod tests {
             assertion_methods: vec![method(byte)],
             revoked_credential_ids: vec![],
             also_known_as: fixture.issuer.also_known_as.clone(),
-            fetched_at_seconds: NOW as i64,
+            fetched_at_seconds: NOW,
         };
 
         let agreed = agree_closures(&fixture.profile, &[observation("app-own", 1), observation("state-1", 1)]);
