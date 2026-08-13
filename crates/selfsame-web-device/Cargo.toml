@@ -38,6 +38,8 @@ serde_json = { workspace = true }
 # dev-dependency on `tokio` in a crate that compiles to wasm would otherwise be
 # alarming enough to warrant this note.
 [dev-dependencies]
+# For the vendored-vector digest pin only.
+sha2 = { version = "0.10", default-features = false }
 selfsame-rendezvous = { path = "../selfsame-rendezvous" }
 did-crdt = { workspace = true }
 tokio = { workspace = true }

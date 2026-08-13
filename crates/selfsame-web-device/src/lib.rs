@@ -1237,6 +1237,68 @@ mod tests {
         assert_eq!(output.as_bytes(), build_enrollment(&statement).unwrap());
     }
 
+    /// The shared closure vectors, vendored from cbcl-bus.
+    ///
+    /// The schema has three recognisers in three runtimes — this crate, the LFE
+    /// hub shell, and the browser module — and they cannot share code: full
+    /// recognition has to happen at each trust boundary. Sharing the CASES is
+    /// what turns a disagreement between them into a failing test rather than a
+    /// frame one stack accepts and another refuses.
+    ///
+    /// The digest is pinned so that a vendored copy which drifts from the
+    /// authority fails here rather than quietly testing something else. When it
+    /// fails, re-vendor the file and move the digest — never edit the digest to
+    /// match a copy nobody compared.
+    #[test]
+    fn vendored_closure_vectors_match_their_pin() {
+        use sha2::{Digest, Sha256};
+        let raw = include_str!("../../../test-vectors/path-b-closure-vectors.json");
+        let pinned = include_str!("../../../test-vectors/path-b-closure-vectors.sha256").trim();
+        let actual = format!("{:x}", Sha256::digest(raw.as_bytes()));
+        assert_eq!(actual, pinned, "the vendored vectors have drifted from their pin");
+    }
+
+    /// This crate reads the STAMPED wire: ten members.
+    ///
+    /// Not the nine-member resolver wire. The browser module stamps
+    /// `fetched_at_seconds` after it fetches, so by the time this facade
+    /// deserialises, the closure carries it — the same shape the sidecar hands
+    /// the LFE hub shell. Nine members is what the browser module reads; ten is
+    /// what everything downstream of a stamp reads.
+    #[test]
+    fn the_shared_vectors_are_answered_identically_here() {
+        let vectors: serde_json::Value =
+            serde_json::from_str(include_str!("../../../test-vectors/path-b-closure-vectors.json"))
+                .expect("vendored vectors parse");
+
+        // Exactly the production path: deserialise the closed shape, then
+        // recognise every assertion key as Ed25519-length. Nothing here decides
+        // anything about the DID — that is the verifier's job, and a recogniser
+        // that judged it would be a second implementation of the verdict.
+        let recognise = |value: &serde_json::Value| -> Result<(), ()> {
+            let closure: BrowserClosure = serde_json::from_value(value.clone()).map_err(|_| ())?;
+            for method in &closure.assertion_methods {
+                let _: [u8; 32] = method.public_key.as_slice().try_into().map_err(|_| ())?;
+            }
+            Ok(())
+        };
+
+        for case in vectors["sidecar"]["accept"].as_array().expect("accept cases") {
+            assert!(
+                recognise(&case["closure"]).is_ok(),
+                "must accept: {}",
+                case["why"].as_str().unwrap_or_default()
+            );
+        }
+        for case in vectors["sidecar"]["reject"].as_array().expect("reject cases") {
+            assert!(
+                recognise(&case["closure"]).is_err(),
+                "must reject: {}",
+                case["why"].as_str().unwrap_or_default()
+            );
+        }
+    }
+
     /// Regression: two resolvers reporting DIFFERENT assertion keys in EQUAL
     /// numbers must not read as agreeing.
     ///

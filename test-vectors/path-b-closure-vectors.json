@@ -1,0 +1,2103 @@
+{
+  "spec": "SPEC-053 / SPEC-004 CON-003 \u2014 the Path-B resolver closure",
+  "what": "The closed schema for one resolver closure, as EVERY stack that recognises one must read it.",
+  "why": "This schema had four recognisers \u2014 the LFE hub shell, the browser module, the Rustler NIF and the WASM facade \u2014 and two had already drifted on a security check: assertion methods were compared by value natively and by COUNT in the browser. The DECISION is now shared. The RECOGNISERS cannot be: they sit at trust boundaries in three runtimes, and full recognition must happen at the boundary. Shared vectors are what makes their disagreement fail a test instead of a frame.",
+  "authority": "selfsame's `PathBClosureFacts` is the producer and its serde field names are the wire. A change here is a change to that type, and every consumer's pinned copy must move with it.",
+  "two_wires": "TWO wires, and THREE readers. The RESOLVER wire has nine members and is seen only by the browser module, which fetches for itself and so refuses a resolver that supplies `fetched_at_seconds`. Once that module stamps the member, the closure is on the STAMPED wire of ten members -- which is the same shape the sidecar hands the LFE hub shell, and the same shape the WASM facade deserialises. So the browser module reads nine and everything downstream of it reads ten. Neither wire is a superset by accident.",
+  "resolver_id_sentinel": "Every case carries `resolver_id`: \"state-1\". A harness MUST substitute the declared resolver identity it is exercising wherever that exact string appears, and MUST leave any other value alone \u2014 one reject case sets resolver_id to a NUMBER on purpose, and a harness that overwrote it unconditionally would silently pass that case.",
+  "sidecar": {
+    "note": "Ten members, the fetch stamp already applied. Read by the LFE hub shell, by the WASM facade, and by the Rustler NIF. Named for its producer, but it is the shape every reader downstream of a stamp sees.",
+    "accept": [
+      {
+        "closure": {
+          "resolver_id": "state-1",
+          "did": "did:crdt:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "did_recomputed_ok": true,
+          "deltas_verified": true,
+          "locally_closed": true,
+          "deactivated": false,
+          "assertion_methods": [
+            {
+              "id": "did:crdt:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa#assertion-1",
+              "kind": "JsonWebKey",
+              "public_key": [
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7
+              ],
+              "has_private_component": false
+            }
+          ],
+          "revoked_credential_ids": [],
+          "also_known_as": [],
+          "fetched_at_seconds": 1000
+        },
+        "why": "the canonical form"
+      },
+      {
+        "closure": {
+          "resolver_id": "state-1",
+          "did": "did:crdt:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "did_recomputed_ok": true,
+          "deltas_verified": true,
+          "locally_closed": true,
+          "deactivated": false,
+          "assertion_methods": [],
+          "revoked_credential_ids": [],
+          "also_known_as": [],
+          "fetched_at_seconds": 1000
+        },
+        "why": "empty lists are legal: a DID with no assertion methods is a fact, not a malformed answer"
+      },
+      {
+        "closure": {
+          "resolver_id": "state-1",
+          "did": "did:crdt:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "did_recomputed_ok": false,
+          "deltas_verified": false,
+          "locally_closed": false,
+          "deactivated": true,
+          "assertion_methods": [
+            {
+              "id": "did:crdt:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa#assertion-1",
+              "kind": "JsonWebKey",
+              "public_key": [
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7
+              ],
+              "has_private_component": false
+            }
+          ],
+          "revoked_credential_ids": [
+            "credential-1"
+          ],
+          "also_known_as": [
+            "acct:alice@accounts.example"
+          ],
+          "fetched_at_seconds": 1000
+        },
+        "why": "every boolean at its other value, with populated lists \u2014 a recogniser judges shape, never the verdict"
+      },
+      {
+        "closure": {
+          "resolver_id": "state-1",
+          "did": "did:crdt:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "did_recomputed_ok": true,
+          "deltas_verified": true,
+          "locally_closed": true,
+          "deactivated": false,
+          "assertion_methods": [
+            {
+              "id": "did:crdt:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa#assertion-1",
+              "kind": "JsonWebKey",
+              "public_key": [
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7
+              ],
+              "has_private_component": false
+            }
+          ],
+          "revoked_credential_ids": [],
+          "also_known_as": [],
+          "fetched_at_seconds": 0
+        },
+        "why": "a fetch at the epoch is a shape that must pass; whether it is too old is the verifier's decision, not the recogniser's"
+      }
+    ],
+    "reject": [
+      {
+        "closure": {
+          "resolver_id": "state-1",
+          "did_recomputed_ok": true,
+          "deltas_verified": true,
+          "locally_closed": true,
+          "deactivated": false,
+          "assertion_methods": [
+            {
+              "id": "did:crdt:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa#assertion-1",
+              "kind": "JsonWebKey",
+              "public_key": [
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7
+              ],
+              "has_private_component": false
+            }
+          ],
+          "revoked_credential_ids": [],
+          "also_known_as": [],
+          "fetched_at_seconds": 1000
+        },
+        "why": "a missing member \u2014 the schema is closed, so an absent field is not a defaulted one"
+      },
+      {
+        "closure": {
+          "resolver_id": "state-1",
+          "did": "did:crdt:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "did_recomputed_ok": true,
+          "deltas_verified": true,
+          "locally_closed": true,
+          "deactivated": false,
+          "assertion_methods": [
+            {
+              "id": "did:crdt:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa#assertion-1",
+              "kind": "JsonWebKey",
+              "public_key": [
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7
+              ],
+              "has_private_component": false
+            }
+          ],
+          "revoked_credential_ids": [],
+          "also_known_as": [],
+          "fetched_at_seconds": 1000,
+          "unexpected": true
+        },
+        "why": "an unexpected member; a recogniser that ignores extras lets a producer smuggle state past the others"
+      },
+      {
+        "closure": {
+          "resolver_id": "state-1",
+          "did": "did:crdt:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "did_recomputed_ok": "true",
+          "deltas_verified": true,
+          "locally_closed": true,
+          "deactivated": false,
+          "assertion_methods": [
+            {
+              "id": "did:crdt:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa#assertion-1",
+              "kind": "JsonWebKey",
+              "public_key": [
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7
+              ],
+              "has_private_component": false
+            }
+          ],
+          "revoked_credential_ids": [],
+          "also_known_as": [],
+          "fetched_at_seconds": 1000
+        },
+        "why": "a boolean spelled as a string \u2014 one stack coerces, another refuses, and the check silently passes on one of them"
+      },
+      {
+        "closure": {
+          "resolver_id": 1,
+          "did": "did:crdt:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "did_recomputed_ok": true,
+          "deltas_verified": true,
+          "locally_closed": true,
+          "deactivated": false,
+          "assertion_methods": [
+            {
+              "id": "did:crdt:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa#assertion-1",
+              "kind": "JsonWebKey",
+              "public_key": [
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7
+              ],
+              "has_private_component": false
+            }
+          ],
+          "revoked_credential_ids": [],
+          "also_known_as": [],
+          "fetched_at_seconds": 1000
+        },
+        "why": "resolver_id as a number: identity is compared as a string, and a coerced one may compare equal by accident"
+      },
+      {
+        "closure": {
+          "resolver_id": "state-1",
+          "did": "did:crdt:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "did_recomputed_ok": true,
+          "deltas_verified": true,
+          "locally_closed": true,
+          "deactivated": null,
+          "assertion_methods": [
+            {
+              "id": "did:crdt:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa#assertion-1",
+              "kind": "JsonWebKey",
+              "public_key": [
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7
+              ],
+              "has_private_component": false
+            }
+          ],
+          "revoked_credential_ids": [],
+          "also_known_as": [],
+          "fetched_at_seconds": 1000
+        },
+        "why": "null for a boolean \u2014 absent and false are different claims"
+      },
+      {
+        "closure": {
+          "resolver_id": "state-1",
+          "did": "did:crdt:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "did_recomputed_ok": true,
+          "deltas_verified": true,
+          "locally_closed": true,
+          "deactivated": false,
+          "assertion_methods": [
+            {
+              "id": "did:crdt:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa#assertion-1",
+              "kind": "JsonWebKey",
+              "public_key": [
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7
+              ],
+              "has_private_component": false
+            }
+          ],
+          "revoked_credential_ids": [],
+          "also_known_as": [],
+          "fetched_at_seconds": 1000
+        },
+        "why": "a 31-byte key: Ed25519 length is a boundary every stack must reject identically"
+      },
+      {
+        "closure": {
+          "resolver_id": "state-1",
+          "did": "did:crdt:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "did_recomputed_ok": true,
+          "deltas_verified": true,
+          "locally_closed": true,
+          "deactivated": false,
+          "assertion_methods": [
+            {
+              "id": "did:crdt:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa#assertion-1",
+              "kind": "JsonWebKey",
+              "public_key": [
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7
+              ],
+              "has_private_component": false
+            }
+          ],
+          "revoked_credential_ids": [],
+          "also_known_as": [],
+          "fetched_at_seconds": 1000
+        },
+        "why": "a 33-byte key \u2014 secp256k1 SEC1 length, which must not pass as Ed25519"
+      },
+      {
+        "closure": {
+          "resolver_id": "state-1",
+          "did": "did:crdt:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "did_recomputed_ok": true,
+          "deltas_verified": true,
+          "locally_closed": true,
+          "deactivated": false,
+          "assertion_methods": [
+            {
+              "id": "did:crdt:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa#assertion-1",
+              "kind": "JsonWebKey",
+              "public_key": "BwBwBwBwBwBwBwBwBwBwBwBwBwBwBwBwBwBwBwBwBwBwBwBwBwBwBwBwBwBwBwBw",
+              "has_private_component": false
+            }
+          ],
+          "revoked_credential_ids": [],
+          "also_known_as": [],
+          "fetched_at_seconds": 1000
+        },
+        "why": "a key as a base64 string: the sole accepted spelling is the number array serde emits for Vec<u8>"
+      },
+      {
+        "closure": {
+          "resolver_id": "state-1",
+          "did": "did:crdt:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "did_recomputed_ok": true,
+          "deltas_verified": true,
+          "locally_closed": true,
+          "deactivated": false,
+          "assertion_methods": [
+            {
+              "id": "did:crdt:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa#assertion-1",
+              "kind": "JsonWebKey",
+              "public_key": [
+                256,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7
+              ],
+              "has_private_component": false
+            }
+          ],
+          "revoked_credential_ids": [],
+          "also_known_as": [],
+          "fetched_at_seconds": 1000
+        },
+        "why": "a byte of 256 \u2014 out of range, and a stack that masks it would accept a different key than the others"
+      },
+      {
+        "closure": {
+          "resolver_id": "state-1",
+          "did": "did:crdt:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "did_recomputed_ok": true,
+          "deltas_verified": true,
+          "locally_closed": true,
+          "deactivated": false,
+          "assertion_methods": [
+            {
+              "id": "did:crdt:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa#assertion-1",
+              "kind": "JsonWebKey",
+              "public_key": [
+                -1,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7
+              ],
+              "has_private_component": false
+            }
+          ],
+          "revoked_credential_ids": [],
+          "also_known_as": [],
+          "fetched_at_seconds": 1000
+        },
+        "why": "a negative byte, for the same reason"
+      },
+      {
+        "closure": {
+          "resolver_id": "state-1",
+          "did": "did:crdt:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "did_recomputed_ok": true,
+          "deltas_verified": true,
+          "locally_closed": true,
+          "deactivated": false,
+          "assertion_methods": [
+            {
+              "id": "did:crdt:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa#assertion-1",
+              "kind": "JsonWebKey",
+              "public_key": [
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7
+              ],
+              "has_private_component": false,
+              "surprise": true
+            }
+          ],
+          "revoked_credential_ids": [],
+          "also_known_as": [],
+          "fetched_at_seconds": 1000
+        },
+        "why": "an unexpected member inside a nested method \u2014 a nested map is a trust boundary too"
+      },
+      {
+        "closure": {
+          "resolver_id": "state-1",
+          "did": "did:crdt:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "did_recomputed_ok": true,
+          "deltas_verified": true,
+          "locally_closed": true,
+          "deactivated": false,
+          "assertion_methods": [
+            {
+              "id": "did:crdt:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa#assertion-1",
+              "public_key": [
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7
+              ],
+              "has_private_component": false
+            }
+          ],
+          "revoked_credential_ids": [],
+          "also_known_as": [],
+          "fetched_at_seconds": 1000
+        },
+        "why": "a missing member inside a nested method"
+      },
+      {
+        "closure": {
+          "resolver_id": "state-1",
+          "did": "did:crdt:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "did_recomputed_ok": true,
+          "deltas_verified": true,
+          "locally_closed": true,
+          "deactivated": false,
+          "assertion_methods": [
+            {
+              "id": "did:crdt:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa#assertion-1",
+              "kind": "JsonWebKey",
+              "public_key": [
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7
+              ],
+              "has_private_component": false
+            }
+          ],
+          "revoked_credential_ids": [
+            "ok",
+            7
+          ],
+          "also_known_as": [],
+          "fetched_at_seconds": 1000
+        },
+        "why": "a non-string in the revocation set: ids are compared as strings, so a number would never match and would silently withhold a revocation"
+      },
+      {
+        "closure": {
+          "resolver_id": "state-1",
+          "did": "did:crdt:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "did_recomputed_ok": true,
+          "deltas_verified": true,
+          "locally_closed": true,
+          "deactivated": false,
+          "assertion_methods": [
+            {
+              "id": "did:crdt:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa#assertion-1",
+              "kind": "JsonWebKey",
+              "public_key": [
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7
+              ],
+              "has_private_component": false
+            }
+          ],
+          "revoked_credential_ids": [],
+          "also_known_as": [
+            "acct:a@b.example",
+            7
+          ],
+          "fetched_at_seconds": 1000
+        },
+        "why": "a non-string alias, for the same reason"
+      },
+      {
+        "closure": {
+          "resolver_id": "state-1",
+          "did": "did:crdt:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "did_recomputed_ok": true,
+          "deltas_verified": true,
+          "locally_closed": true,
+          "deactivated": false,
+          "assertion_methods": "none",
+          "revoked_credential_ids": [],
+          "also_known_as": [],
+          "fetched_at_seconds": 1000
+        },
+        "why": "a list member given as a string"
+      },
+      {
+        "closure": {
+          "resolver_id": "state-1",
+          "did": "did:crdt:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "did_recomputed_ok": true,
+          "deltas_verified": true,
+          "locally_closed": true,
+          "deactivated": false,
+          "assertion_methods": [
+            {
+              "id": "did:crdt:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa#assertion-1",
+              "kind": "JsonWebKey",
+              "public_key": [
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7
+              ],
+              "has_private_component": false
+            }
+          ],
+          "revoked_credential_ids": null,
+          "also_known_as": [],
+          "fetched_at_seconds": 1000
+        },
+        "why": "null for a list \u2014 an empty revocation set and an absent one are different claims"
+      },
+      {
+        "closure": {
+          "resolver_id": "state-1",
+          "did": "did:crdt:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "did_recomputed_ok": true,
+          "deltas_verified": true,
+          "locally_closed": true,
+          "deactivated": false,
+          "assertion_methods": [
+            {
+              "id": "did:crdt:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa#assertion-1",
+              "kind": "JsonWebKey",
+              "public_key": [
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7
+              ],
+              "has_private_component": false
+            }
+          ],
+          "revoked_credential_ids": [],
+          "also_known_as": []
+        },
+        "why": "the sidecar wire carries the fetch stamp; without it no freshness bound can be applied at all"
+      },
+      {
+        "closure": {
+          "resolver_id": "state-1",
+          "did": "did:crdt:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "did_recomputed_ok": true,
+          "deltas_verified": true,
+          "locally_closed": true,
+          "deactivated": false,
+          "assertion_methods": [
+            {
+              "id": "did:crdt:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa#assertion-1",
+              "kind": "JsonWebKey",
+              "public_key": [
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7
+              ],
+              "has_private_component": false
+            }
+          ],
+          "revoked_credential_ids": [],
+          "also_known_as": [],
+          "fetched_at_seconds": "1000"
+        },
+        "why": "the stamp as a string"
+      },
+      {
+        "closure": {
+          "resolver_id": "state-1",
+          "did": "did:crdt:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "did_recomputed_ok": true,
+          "deltas_verified": true,
+          "locally_closed": true,
+          "deactivated": false,
+          "assertion_methods": [
+            {
+              "id": "did:crdt:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa#assertion-1",
+              "kind": "JsonWebKey",
+              "public_key": [
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7
+              ],
+              "has_private_component": false
+            }
+          ],
+          "revoked_credential_ids": [],
+          "also_known_as": [],
+          "fetched_at_seconds": 1000.5
+        },
+        "why": "a fractional stamp \u2014 seconds are integers, and a stack that truncates disagrees with one that refuses"
+      }
+    ]
+  },
+  "resolver": {
+    "note": "Nine members, as a resolver presents one. Read ONLY by the browser module, which stamps the tenth itself.",
+    "accept": [
+      {
+        "closure": {
+          "resolver_id": "state-1",
+          "did": "did:crdt:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "did_recomputed_ok": true,
+          "deltas_verified": true,
+          "locally_closed": true,
+          "deactivated": false,
+          "assertion_methods": [
+            {
+              "id": "did:crdt:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa#assertion-1",
+              "kind": "JsonWebKey",
+              "public_key": [
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7
+              ],
+              "has_private_component": false
+            }
+          ],
+          "revoked_credential_ids": [],
+          "also_known_as": []
+        },
+        "why": "the canonical form as a resolver may present it"
+      },
+      {
+        "closure": {
+          "resolver_id": "state-1",
+          "did": "did:crdt:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "did_recomputed_ok": true,
+          "deltas_verified": true,
+          "locally_closed": true,
+          "deactivated": false,
+          "assertion_methods": [],
+          "revoked_credential_ids": [],
+          "also_known_as": []
+        },
+        "why": "empty lists are legal here too"
+      }
+    ],
+    "reject": [
+      {
+        "closure": {
+          "resolver_id": "state-1",
+          "did_recomputed_ok": true,
+          "deltas_verified": true,
+          "locally_closed": true,
+          "deactivated": false,
+          "assertion_methods": [
+            {
+              "id": "did:crdt:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa#assertion-1",
+              "kind": "JsonWebKey",
+              "public_key": [
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7
+              ],
+              "has_private_component": false
+            }
+          ],
+          "revoked_credential_ids": [],
+          "also_known_as": []
+        },
+        "why": "a missing member \u2014 the schema is closed, so an absent field is not a defaulted one"
+      },
+      {
+        "closure": {
+          "resolver_id": "state-1",
+          "did": "did:crdt:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "did_recomputed_ok": true,
+          "deltas_verified": true,
+          "locally_closed": true,
+          "deactivated": false,
+          "assertion_methods": [
+            {
+              "id": "did:crdt:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa#assertion-1",
+              "kind": "JsonWebKey",
+              "public_key": [
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7
+              ],
+              "has_private_component": false
+            }
+          ],
+          "revoked_credential_ids": [],
+          "also_known_as": [],
+          "unexpected": true
+        },
+        "why": "an unexpected member; a recogniser that ignores extras lets a producer smuggle state past the others"
+      },
+      {
+        "closure": {
+          "resolver_id": "state-1",
+          "did": "did:crdt:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "did_recomputed_ok": "true",
+          "deltas_verified": true,
+          "locally_closed": true,
+          "deactivated": false,
+          "assertion_methods": [
+            {
+              "id": "did:crdt:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa#assertion-1",
+              "kind": "JsonWebKey",
+              "public_key": [
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7
+              ],
+              "has_private_component": false
+            }
+          ],
+          "revoked_credential_ids": [],
+          "also_known_as": []
+        },
+        "why": "a boolean spelled as a string \u2014 one stack coerces, another refuses, and the check silently passes on one of them"
+      },
+      {
+        "closure": {
+          "resolver_id": 1,
+          "did": "did:crdt:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "did_recomputed_ok": true,
+          "deltas_verified": true,
+          "locally_closed": true,
+          "deactivated": false,
+          "assertion_methods": [
+            {
+              "id": "did:crdt:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa#assertion-1",
+              "kind": "JsonWebKey",
+              "public_key": [
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7
+              ],
+              "has_private_component": false
+            }
+          ],
+          "revoked_credential_ids": [],
+          "also_known_as": []
+        },
+        "why": "resolver_id as a number: identity is compared as a string, and a coerced one may compare equal by accident"
+      },
+      {
+        "closure": {
+          "resolver_id": "state-1",
+          "did": "did:crdt:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "did_recomputed_ok": true,
+          "deltas_verified": true,
+          "locally_closed": true,
+          "deactivated": null,
+          "assertion_methods": [
+            {
+              "id": "did:crdt:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa#assertion-1",
+              "kind": "JsonWebKey",
+              "public_key": [
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7
+              ],
+              "has_private_component": false
+            }
+          ],
+          "revoked_credential_ids": [],
+          "also_known_as": []
+        },
+        "why": "null for a boolean \u2014 absent and false are different claims"
+      },
+      {
+        "closure": {
+          "resolver_id": "state-1",
+          "did": "did:crdt:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "did_recomputed_ok": true,
+          "deltas_verified": true,
+          "locally_closed": true,
+          "deactivated": false,
+          "assertion_methods": [
+            {
+              "id": "did:crdt:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa#assertion-1",
+              "kind": "JsonWebKey",
+              "public_key": [
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7
+              ],
+              "has_private_component": false
+            }
+          ],
+          "revoked_credential_ids": [],
+          "also_known_as": []
+        },
+        "why": "a 31-byte key: Ed25519 length is a boundary every stack must reject identically"
+      },
+      {
+        "closure": {
+          "resolver_id": "state-1",
+          "did": "did:crdt:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "did_recomputed_ok": true,
+          "deltas_verified": true,
+          "locally_closed": true,
+          "deactivated": false,
+          "assertion_methods": [
+            {
+              "id": "did:crdt:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa#assertion-1",
+              "kind": "JsonWebKey",
+              "public_key": [
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7
+              ],
+              "has_private_component": false
+            }
+          ],
+          "revoked_credential_ids": [],
+          "also_known_as": []
+        },
+        "why": "a 33-byte key \u2014 secp256k1 SEC1 length, which must not pass as Ed25519"
+      },
+      {
+        "closure": {
+          "resolver_id": "state-1",
+          "did": "did:crdt:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "did_recomputed_ok": true,
+          "deltas_verified": true,
+          "locally_closed": true,
+          "deactivated": false,
+          "assertion_methods": [
+            {
+              "id": "did:crdt:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa#assertion-1",
+              "kind": "JsonWebKey",
+              "public_key": "BwBwBwBwBwBwBwBwBwBwBwBwBwBwBwBwBwBwBwBwBwBwBwBwBwBwBwBwBwBwBwBw",
+              "has_private_component": false
+            }
+          ],
+          "revoked_credential_ids": [],
+          "also_known_as": []
+        },
+        "why": "a key as a base64 string: the sole accepted spelling is the number array serde emits for Vec<u8>"
+      },
+      {
+        "closure": {
+          "resolver_id": "state-1",
+          "did": "did:crdt:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "did_recomputed_ok": true,
+          "deltas_verified": true,
+          "locally_closed": true,
+          "deactivated": false,
+          "assertion_methods": [
+            {
+              "id": "did:crdt:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa#assertion-1",
+              "kind": "JsonWebKey",
+              "public_key": [
+                256,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7
+              ],
+              "has_private_component": false
+            }
+          ],
+          "revoked_credential_ids": [],
+          "also_known_as": []
+        },
+        "why": "a byte of 256 \u2014 out of range, and a stack that masks it would accept a different key than the others"
+      },
+      {
+        "closure": {
+          "resolver_id": "state-1",
+          "did": "did:crdt:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "did_recomputed_ok": true,
+          "deltas_verified": true,
+          "locally_closed": true,
+          "deactivated": false,
+          "assertion_methods": [
+            {
+              "id": "did:crdt:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa#assertion-1",
+              "kind": "JsonWebKey",
+              "public_key": [
+                -1,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7
+              ],
+              "has_private_component": false
+            }
+          ],
+          "revoked_credential_ids": [],
+          "also_known_as": []
+        },
+        "why": "a negative byte, for the same reason"
+      },
+      {
+        "closure": {
+          "resolver_id": "state-1",
+          "did": "did:crdt:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "did_recomputed_ok": true,
+          "deltas_verified": true,
+          "locally_closed": true,
+          "deactivated": false,
+          "assertion_methods": [
+            {
+              "id": "did:crdt:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa#assertion-1",
+              "kind": "JsonWebKey",
+              "public_key": [
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7
+              ],
+              "has_private_component": false,
+              "surprise": true
+            }
+          ],
+          "revoked_credential_ids": [],
+          "also_known_as": []
+        },
+        "why": "an unexpected member inside a nested method \u2014 a nested map is a trust boundary too"
+      },
+      {
+        "closure": {
+          "resolver_id": "state-1",
+          "did": "did:crdt:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "did_recomputed_ok": true,
+          "deltas_verified": true,
+          "locally_closed": true,
+          "deactivated": false,
+          "assertion_methods": [
+            {
+              "id": "did:crdt:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa#assertion-1",
+              "public_key": [
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7
+              ],
+              "has_private_component": false
+            }
+          ],
+          "revoked_credential_ids": [],
+          "also_known_as": []
+        },
+        "why": "a missing member inside a nested method"
+      },
+      {
+        "closure": {
+          "resolver_id": "state-1",
+          "did": "did:crdt:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "did_recomputed_ok": true,
+          "deltas_verified": true,
+          "locally_closed": true,
+          "deactivated": false,
+          "assertion_methods": [
+            {
+              "id": "did:crdt:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa#assertion-1",
+              "kind": "JsonWebKey",
+              "public_key": [
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7
+              ],
+              "has_private_component": false
+            }
+          ],
+          "revoked_credential_ids": [
+            "ok",
+            7
+          ],
+          "also_known_as": []
+        },
+        "why": "a non-string in the revocation set: ids are compared as strings, so a number would never match and would silently withhold a revocation"
+      },
+      {
+        "closure": {
+          "resolver_id": "state-1",
+          "did": "did:crdt:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "did_recomputed_ok": true,
+          "deltas_verified": true,
+          "locally_closed": true,
+          "deactivated": false,
+          "assertion_methods": [
+            {
+              "id": "did:crdt:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa#assertion-1",
+              "kind": "JsonWebKey",
+              "public_key": [
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7
+              ],
+              "has_private_component": false
+            }
+          ],
+          "revoked_credential_ids": [],
+          "also_known_as": [
+            "acct:a@b.example",
+            7
+          ]
+        },
+        "why": "a non-string alias, for the same reason"
+      },
+      {
+        "closure": {
+          "resolver_id": "state-1",
+          "did": "did:crdt:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "did_recomputed_ok": true,
+          "deltas_verified": true,
+          "locally_closed": true,
+          "deactivated": false,
+          "assertion_methods": "none",
+          "revoked_credential_ids": [],
+          "also_known_as": []
+        },
+        "why": "a list member given as a string"
+      },
+      {
+        "closure": {
+          "resolver_id": "state-1",
+          "did": "did:crdt:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "did_recomputed_ok": true,
+          "deltas_verified": true,
+          "locally_closed": true,
+          "deactivated": false,
+          "assertion_methods": [
+            {
+              "id": "did:crdt:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa#assertion-1",
+              "kind": "JsonWebKey",
+              "public_key": [
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7
+              ],
+              "has_private_component": false
+            }
+          ],
+          "revoked_credential_ids": null,
+          "also_known_as": []
+        },
+        "why": "null for a list \u2014 an empty revocation set and an absent one are different claims"
+      },
+      {
+        "closure": {
+          "resolver_id": "state-1",
+          "did": "did:crdt:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "did_recomputed_ok": true,
+          "deltas_verified": true,
+          "locally_closed": true,
+          "deactivated": false,
+          "assertion_methods": [
+            {
+              "id": "did:crdt:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa#assertion-1",
+              "kind": "JsonWebKey",
+              "public_key": [
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7
+              ],
+              "has_private_component": false
+            }
+          ],
+          "revoked_credential_ids": [],
+          "also_known_as": [],
+          "fetched_at_seconds": 1000
+        },
+        "why": "a resolver claiming its own fetch time: the browser observes that itself, so there is no honest way for a resolver to supply one"
+      }
+    ]
+  }
+}
