@@ -6172,6 +6172,53 @@ arbitrary application requests.
 Owner: Selfsame wallet + application-profile working group + mobile platform
 reviewers.
 
+### OQ-209: is a first-approval distinct at consent, or does a lookalike origin look identical to a familiar one?
+
+`CON-214` step 6 requires consent rendered *"from the authenticated origin and
+bound operation rather than caller-supplied presentation metadata"*, and the
+wallet honours it — `toConsent` renders `application_id` from the authenticated
+profile and falls back to `"(no name given)"` rather than to anything the
+caller supplied. That defeats an application claiming to be another one.
+
+**It does not defeat an application that truthfully claims to be itself, when
+the person cannot tell that self apart from a familiar one.** A homograph or
+near-miss origin — `chat-anuna.io` beside `chat.anuna.io` — authenticates
+perfectly, as itself. Every check passes. The prompt is truthful. And it is
+rendered identically to the one the person has approved a dozen times, because
+nothing on the surface marks it as an origin this wallet has **never seen
+before**.
+
+That contrast is the signal a person would actually act on, and first approval
+is the only moment it exists. `T6`'s residue is not authentication — `REQ-018`
+covers possession and `REQ-019` covers the display — it is that truth without
+contrast is what a homograph attack is for.
+
+**The state to answer it is already persisted.** `CON-214` step 2 records the
+profile's complete `enrollment.requestSigningKeys` set *against this application
+account*, and `CON-225` depends on that history existing. The wallet therefore
+already knows whether it has enrolled with an origin before; it simply does not
+say so at consent time.
+
+**Not the same control as `REQ-230`.** That confirms an account's first issuer
+by fingerprint comparison, with no skip. It establishes *this is my home key*,
+and says nothing about *this is a counterparty I have dealt with before*.
+
+Open, because the answer is a design decision rather than a mechanism:
+
+- Does a first approval get a distinct treatment, or a distinct step?
+- Is "seen before" keyed on `applicationId`, on the recorded key set, or on
+  both — and what does a legitimate `CON-225` succession look like under it, so
+  that a rotation does not read as a stranger?
+- Does a *near-miss* against a known origin deserve more than mere novelty —
+  and if so, is that comparison the wallet's to make, given that a false
+  "similar to" is its own hazard?
+
+Raised by the adopting application (`cbcl-bus`, [[SPEC-053-key-root-identity]])
+while dispositioning `T6` of [[SPEC-001-device-key-provisioning]]'s attack
+table. The adopter's whole defence against impersonation is that an attacker
+must use their **own** authenticated origin; this is the signal that makes a
+person notice they have.
+
 ### OQ-208: how does an application with no independent login return an account scope?
 
 [[SPEC-004-application-scoped-identity#REQ-217]] makes the authenticated account
