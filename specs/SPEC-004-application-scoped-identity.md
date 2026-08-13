@@ -6,10 +6,10 @@ tier: 1
 version: 0.14.0-draft
 audience: agent, human, application developer, infrastructure provider
 author: Anuna Research (drafted with Codex, 2026-07-30; amended with Claude, 2026-07-31; hierarchy re-rooted with Claude, 2026-08-10)
-last-updated: 2026-08-10
+last-updated: 2026-08-13
 owner-repo: selfsame
 affects-repos: selfsame, anuna-ssi, did-crdt, adopting applications
-prototype-authorised: 2026-08-10 by the repository owner, for hierarchy version 2 only — see Tier-1 Gate
+prototype-authorised: 2026-08-10 by the repository owner for hierarchy version 2; widened 2026-08-13 to cover the contracts SPEC-053 adopts — see Tier-1 Gate
 review-gate: not-approved — Tier-1; all ADRs are PROPOSED; cross-model adversarial review, independent KDF/SPAKE2/AEAD vectors, privacy review, and human cryptography/security sign-off are outstanding. **0.14.0 is `-draft` because it does not yet satisfy this document's own Amendment Channels**: a key-derivation change requires new vectors plus renewed security sign-off *for the amendment*, and neither exists. It is a proposal for review, not an accepted version, and the version number does not advance until both land
 depends-on: did:crdt Method Specification; PROTO-002 Selfsame Rendezvous Protocol v1; PROTO-003 Selfsame Pairing Protocol v1; PROTO-004 Selfsame Ceremony Envelope v1; W3C VC Data Model 2.0; W3C VC JOSE/COSE; W3C DID Core 1.0; optional W3C Bitstring Status List 1.0 projection; RFC 7565; RFC 7033; RFC 3986; RFC 4648; RFC 5234; RFC 5869; RFC 7515; RFC 8032; RFC 8439; RFC 8785; RFC 9382; RFC 9496
 ---
@@ -5762,6 +5762,60 @@ excludes is read as covering everything:
 - **[[SPEC-004-application-scoped-identity#OQ-208]]'s successor design.** The
   derived account index is a design note under review and is not part of this
   authorisation.
+
+### Prototype authorisation — widened to the adoption SPEC-053 builds against
+
+**Recorded 2026-08-13 on the instruction of the repository owner (HOC).** The
+2026-08-10 entry above is scoped to hierarchy version 2 and says in as many
+words that *"the grant, acceptance, ceremony, pairing, revocation and platform
+contracts are untouched by this authorisation"*. Those are precisely the
+contracts [[SPEC-053-key-root-identity]] adopts, so that entry named
+`GATE-01`'s second branch without satisfying it. This one does.
+
+**Authorised:** implementing, in the adopting application's repositories, the
+contracts [[SPEC-053-key-root-identity]] declares it adopts —
+[[SPEC-004-application-scoped-identity#CON-201]],
+[[SPEC-004-application-scoped-identity#CON-203]],
+[[SPEC-004-application-scoped-identity#CON-204]],
+[[SPEC-004-application-scoped-identity#CON-205]],
+[[SPEC-004-application-scoped-identity#CON-206]],
+[[SPEC-004-application-scoped-identity#CON-207]],
+[[SPEC-004-application-scoped-identity#CON-208]],
+[[SPEC-004-application-scoped-identity#CON-214]],
+[[SPEC-004-application-scoped-identity#CON-220]] and
+[[SPEC-004-application-scoped-identity#CON-225]] — together with the
+`selfsame-app-identity`, `selfsame-beam` and `selfsame-web-device` surfaces that
+expose them.
+
+**Not authorised**, on the same principle as above:
+
+- **Deployment or shipment.** Unchanged, and it is not this authorisation's to
+  give: the Tier-1 Gate forbids every Path-B requirement from shipping while any
+  box below is open, and [[SPEC-053-key-root-identity#GATE-00]] independently
+  holds the adopting code unreachable — no route, no allocation, no durable
+  write. An authorisation that permitted shipping would contradict two gates.
+- **Contracts outside that list.** `CON-202`'s hierarchy is covered by the
+  2026-08-10 entry and by nothing here; the platform-binding and mobile
+  contracts are covered by neither.
+- **The withdrawn 0.14.0 cluster** and
+  [[SPEC-004-application-scoped-identity#OQ-208]]'s successor design, excluded
+  by the entry above and excluded again here.
+
+**Why this is smaller than it sounds, and worth recording anyway.** It
+authorises *building against a draft*, which is what the adopting repository has
+been doing since before either entry existed. Its value is that the practice
+becomes a stated one: a reader can now tell which upstream contracts an
+adoption was permitted to implement, and a future divergence has a dated
+baseline to be measured against. It changes nothing about what may be relied on.
+
+**What this does not discharge.** Every box below stands, unchanged and
+unweakened — the cross-model adversarial review, the independent KDF, SPAKE2 and
+AEAD vectors, the privacy review, and the human cryptography and security
+sign-off. This document remains `not-approved`, and `0.14.0` remains `-draft`
+for the reason its `review-gate` gives: a key-derivation change requires new
+vectors and renewed sign-off *for the amendment*, and neither exists. An
+authorisation permits building; it asserts nothing about correctness, and the
+implementation it covers has been reviewed by nobody.
 
 **What this does not discharge.** A prototype authorisation permits building; it
 asserts nothing about correctness. The implementation it covers has been
