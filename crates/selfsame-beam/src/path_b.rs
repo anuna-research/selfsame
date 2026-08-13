@@ -13,14 +13,14 @@
 
 use rustler::types::atom;
 use rustler::{Atom, Binary, Encoder, Env, MapIterator, OwnedBinary, Resource, ResourceArc, Term};
-use selfsame_app_identity::accept::{IssuerState, Projection, VerificationMethod};
+use selfsame_app_identity::accept::Projection;
 use selfsame_app_identity::alias::{recognise_jrd, AcctUri};
-use selfsame_app_identity::path_b::{
-    rehydrate_verified_grant, union_resolver_revocations, verify_session_establishment,
+use selfsame_app_identity::path_b::{agree_closures, issuer_state_of, ClosureAssertionMethod, ResolverObservation, 
+    rehydrate_verified_grant, verify_session_establishment,
     verify_standing, GrantEvidence, GrantRequest, ResolverRevocations, StandingEvidence,
     StandingRequest, VerifiedGrant,
 };
-use selfsame_app_identity::profile::{ApplicationProfile, Ed25519Jwk};
+use selfsame_app_identity::profile::ApplicationProfile;
 use selfsame_app_identity::proof::Challenge;
 
 rustler::atoms! {
@@ -255,16 +255,16 @@ pub fn verified_revocation_union(
     closures: &[ResolverClosure],
 ) -> Result<Vec<String>, String> {
     let profile = ApplicationProfile::recognise(profile_bytes).map_err(|_| String::from("profile"))?;
-    let closure = resolver_quorum(&profile, closures)?;
-    if closure.did != account_did
-        || !closure.did_recomputed_ok
-        || !closure.deltas_verified
-        || !closure.locally_closed
-        || closure.deactivated
+    let agreed = agree_closures(&profile, &observations(closures)).map_err(|_| String::from("resolver_quorum"))?;
+    if agreed.did != account_did
+        || !agreed.did_recomputed_ok
+        || !agreed.deltas_verified
+        || !agreed.locally_closed
+        || agreed.deactivated
     {
         return Err(String::from("resolver_closure"));
     }
-    Ok(closure.revoked_credential_ids)
+    Ok(agreed.revoked_credential_ids)
 }
 
 /// Compute the only permitted expiry for a cached Path-B standing fact.
@@ -287,10 +287,10 @@ fn verify_sealed(
     closures: &[ResolverClosure],
 ) -> Result<VerifiedGrant, String> {
     let profile = ApplicationProfile::recognise(&presentation.profile).map_err(|_| String::from("profile"))?;
-    let closure = resolver_quorum(&profile, closures)?;
+    let agreed = agree_closures(&profile, &observations(closures)).map_err(|_| String::from("resolver_quorum"))?;
     let account = AcctUri::parse(&presentation.account).map_err(|_| String::from("account"))?;
     let jrd = recognise_jrd(&presentation.jrd).map_err(|_| String::from("jrd"))?;
-    let issuer = issuer_state(&closure, presentation.now);
+    let issuer = issuer_state_of(&agreed, presentation.now);
     let challenge = Challenge { nonce: presentation.nonce, application_id: profile.application_id.as_str().to_owned(), account: account.as_str().to_owned(), grant_hash: presentation.grant_hash, session: presentation.challenge_session.clone(), issued_at: presentation.issued_at };
     let permissions: Vec<&str> = presentation.operation_permissions.iter().map(String::as_str).collect();
     verify_session_establishment(
@@ -300,84 +300,37 @@ fn verify_sealed(
     ).map_err(|_| String::from("rejected"))
 }
 
-/// Enforce the Path-B two-resolver rule and make the union the only revocation
-/// set the CON-206 predicate can observe.  All non-revocation resolver facts
-/// must agree exactly; choosing one resolver's key set or `alsoKnownAs` while
-/// borrowing another's revocations would be a new, unreviewed merge rule.
-fn resolver_quorum(
-    profile: &ApplicationProfile,
-    closures: &[ResolverClosure],
-) -> Result<ResolverClosure, String> {
-    let first = closures.first().ok_or_else(|| String::from("resolver_quorum"))?;
-    if closures.iter().skip(1).any(|closure| {
-        closure.did != first.did
-            || closure.did_recomputed_ok != first.did_recomputed_ok
-            || closure.deltas_verified != first.deltas_verified
-            || closure.locally_closed != first.locally_closed
-            || closure.deactivated != first.deactivated
-            || closure.assertion_methods != first.assertion_methods
-            || closure.also_known_as != first.also_known_as
-    }) {
-        return Err(String::from("resolver_disagreement"));
-    }
-    let observations: Vec<ResolverRevocations<'_>> = closures
+/// Convert decoded BEAM closures into the shared quorum's input.
+///
+/// The ONLY thing this adapter does. Agreement, the revocation union and the
+/// freshness aggregate live in `selfsame_app_identity::path_b`, because a
+/// second copy of that decision is what let the native and browser paths drift
+/// apart on whether assertion methods must match by value or merely by count.
+fn observations(closures: &[ResolverClosure]) -> Vec<ResolverObservation> {
+    closures
         .iter()
-        .map(|closure| ResolverRevocations {
-            resolver_id: &closure.resolver_id,
-            revoked_credential_ids: &closure.revoked_credential_ids,
+        .map(|c| ResolverObservation {
+            resolver_id: c.resolver_id.clone(),
+            did: c.did.clone(),
+            did_recomputed_ok: c.did_recomputed_ok,
+            deltas_verified: c.deltas_verified,
+            locally_closed: c.locally_closed,
+            deactivated: c.deactivated,
+            assertion_methods: c
+                .assertion_methods
+                .iter()
+                .map(|m| ClosureAssertionMethod {
+                    id: m.id.clone(),
+                    kind: m.kind.clone(),
+                    public_key: m.public_key,
+                    has_private_component: m.has_private_component,
+                })
+                .collect(),
+            revoked_credential_ids: c.revoked_credential_ids.clone(),
+            also_known_as: c.also_known_as.clone(),
+            fetched_at_seconds: c.fetched_at_seconds,
         })
-        .collect();
-    let revoked_credential_ids = union_resolver_revocations(profile, &observations)
-        .map_err(|_| String::from("resolver_quorum"))?;
-    Ok(ResolverClosure {
-        resolver_id: String::new(),
-        did: first.did.clone(),
-        did_recomputed_ok: first.did_recomputed_ok,
-        deltas_verified: first.deltas_verified,
-        locally_closed: first.locally_closed,
-        deactivated: first.deactivated,
-        assertion_methods: first.assertion_methods.clone(),
-        revoked_credential_ids,
-        also_known_as: first.also_known_as.clone(),
-        // The OLDEST fetch across the quorum: a union is only as fresh as its
-        // stalest member, and taking the newest would let one fresh resolver
-        // vouch for the staleness of the rest.
-        fetched_at_seconds: closures.iter().map(|c| c.fetched_at_seconds).min().unwrap_or(0),
-    })
-}
-
-fn issuer_state(closure: &ResolverClosure, now: i64) -> IssuerState {
-    IssuerState {
-        did: closure.did.clone(),
-        did_recomputed_ok: closure.did_recomputed_ok,
-        deltas_verified: closure.deltas_verified,
-        locally_closed: closure.locally_closed,
-        deactivated: closure.deactivated,
-        assertion_methods: closure
-            .assertion_methods
-            .iter()
-            .map(|method| VerificationMethod {
-                id: method.id.clone(),
-                kind: method.kind.clone(),
-                jwk: Ed25519Jwk {
-                    public_key: method.public_key,
-                    // `x` is never read by CON-206 once the typed key has
-                    // crossed the resolver boundary; retain a fixed marker so
-                    // this boundary cannot create another base64 parser.
-                    x: String::new(),
-                },
-                has_private_component: method.has_private_component,
-            })
-            .collect(),
-        revoked_credential_ids: closure.revoked_credential_ids.clone(),
-        // Computed from the verifier's own clock and its own record of when it
-        // fetched. A stamp in the future is a broken clock or a lying caller;
-        // clamping to 0 would make that look maximally fresh, so it saturates
-        // and fails the bound instead.
-        closure_age_seconds: now.checked_sub(closure.fetched_at_seconds).filter(|age| *age >= 0).unwrap_or(i64::MAX),
-        source: selfsame_app_identity::accept::ClosureSource::StateResolver,
-        also_known_as: closure.also_known_as.clone(),
-    }
+        .collect()
 }
 
 /// `cbcl_selfsame_erl:verify_path_b/2`.
@@ -554,16 +507,16 @@ fn decode_rehydration<'a>(env: Env<'a>, term: Term<'a>) -> Result<RehydrationInp
 
 fn verify_standing_pure(grant: &VerifiedGrant, request: &StandingInput, closures: &[ResolverClosure]) -> Result<(), String> {
     let profile = ApplicationProfile::recognise(&request.profile).map_err(|_| String::from("profile"))?;
-    let closure = resolver_quorum(&profile, closures)?;
-    let issuer = issuer_state(&closure, request.now);
+    let agreed = agree_closures(&profile, &observations(closures)).map_err(|_| String::from("resolver_quorum"))?;
+    let issuer = issuer_state_of(&agreed, request.now);
     let permissions: Vec<&str> = request.operation_permissions.iter().map(String::as_str).collect();
     verify_standing(grant, &StandingRequest::new(&profile, &permissions, request.now, request.clock_skew_seconds), &StandingEvidence::new(&issuer, request.projection)).map_err(|_| String::from("rejected"))
 }
 
 fn rehydrate_pure(recovery: &RehydrationInput, closures: &[ResolverClosure]) -> Result<VerifiedGrant, String> {
     let profile = ApplicationProfile::recognise(&recovery.profile).map_err(|_| String::from("profile"))?;
-    let closure = resolver_quorum(&profile, closures)?;
-    let issuer = issuer_state(&closure, recovery.now);
+    let agreed = agree_closures(&profile, &observations(closures)).map_err(|_| String::from("resolver_quorum"))?;
+    let issuer = issuer_state_of(&agreed, recovery.now);
     let account = AcctUri::parse(&recovery.account).map_err(|_| String::from("account"))?;
     let jrd = recognise_jrd(&recovery.jrd).map_err(|_| String::from("jrd"))?;
     let permissions: Vec<&str> = recovery.operation_permissions.iter().map(String::as_str).collect();
@@ -774,7 +727,13 @@ mod tests {
             assertion_methods: vec![], revoked_credential_ids: vec![],
             fetched_at_seconds: 0, also_known_as: vec![],
         };
-        assert_eq!(issuer_state(&closure, 0).source, selfsame_app_identity::accept::ClosureSource::StateResolver);
+        // Through the shared core, which is now the only place provenance is
+        // decided. The adapter's job is the conversion above, so that is what
+        // this exercises.
+        let obs = observations(std::slice::from_ref(&closure));
+        assert_eq!(obs.len(), 1);
+        assert_eq!(obs[0].resolver_id, "state-1");
+        assert_eq!(obs[0].fetched_at_seconds, 0);
     }
 
     #[test]

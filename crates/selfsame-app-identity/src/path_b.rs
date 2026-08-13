@@ -18,10 +18,10 @@
 
 use crate::accept::{
     accept_grant, check_standing, rehydrate_accepted_grant, AcceptError, ClosureSource, Evidence, Expectation, Freshness, IssuerState,
-    Projection,
+    Projection, VerificationMethod,
 };
 use crate::alias::{AcctUri, Jrd};
-use crate::profile::ApplicationProfile;
+use crate::profile::{ApplicationProfile, Ed25519Jwk};
 use crate::proof::Challenge;
 use crate::UnixSeconds;
 
@@ -226,6 +226,183 @@ pub enum VerifyError {
     /// One of `CON-206`'s thirteen ordered checks rejected the grant.
     #[error(transparent)]
     Grant(#[from] AcceptError),
+}
+
+// ── the resolver quorum, in one place ────────────────────────────────────────
+
+/// One resolver's locally verified account of a DID, as the quorum sees it.
+///
+/// Both adapters decode into this: the Rustler NIF from BEAM terms, the WASM
+/// facade from JSON. Neither decides anything about it. That split exists
+/// because the two used to carry SEPARATE copies of the agreement rule, and
+/// they had already drifted -- the native side compared assertion methods by
+/// equality while the browser side compared only their COUNT, so two resolvers
+/// reporting different keys in equal numbers read as agreeing in the browser
+/// and disagreeing on the hub. A JavaScript layer above had been given a
+/// compensating check, which protected one caller and no other.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ResolverObservation {
+    /// The exact profile-declared resolver identifier.
+    pub resolver_id: String,
+    /// The DID this resolver answered about.
+    pub did: String,
+    /// The DID was recomputed from its own genesis and matched.
+    pub did_recomputed_ok: bool,
+    /// Every delta in the replayed closure verified.
+    pub deltas_verified: bool,
+    /// No delta in the closure dangled a parent.
+    pub locally_closed: bool,
+    /// The DID's deactivation latch.
+    pub deactivated: bool,
+    /// Assertion methods the replayed document exposes.
+    pub assertion_methods: Vec<ClosureAssertionMethod>,
+    /// This resolver's credential-revocation G-Set.
+    pub revoked_credential_ids: Vec<String>,
+    /// The DID's `alsoKnownAs` entries.
+    pub also_known_as: Vec<String>,
+    /// Unix seconds at which THIS VERIFIER fetched, never a resolver's claim.
+    pub fetched_at_seconds: UnixSeconds,
+}
+
+/// One assertion method, with its key already recognised as Ed25519-length.
+///
+/// `[u8; 32]` rather than a byte vector on purpose: an unvalidated length
+/// cannot reach the quorum, so no caller can compare, or fail to compare, keys
+/// of differing lengths.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ClosureAssertionMethod {
+    /// Method identifier.
+    pub id: String,
+    /// The exact resolved verification-method kind.
+    pub kind: String,
+    /// Ed25519 verification key bytes.
+    pub public_key: [u8; 32],
+    /// Whether the source JWK illegally included private key material.
+    pub has_private_component: bool,
+}
+
+/// The facts a quorum of resolvers agrees on, plus their unioned revocations.
+///
+/// Separate from [`IssuerState`] because agreement is clock-free: a caller
+/// asking only "what revocations does this quorum establish" has no `now` to
+/// offer, and should not have to invent one to obtain an answer that does not
+/// depend on it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AgreedClosure {
+    /// The DID every observation answered about.
+    pub did: String,
+    /// The DID was recomputed from genesis and matched.
+    pub did_recomputed_ok: bool,
+    /// Every delta in the replayed closure verified.
+    pub deltas_verified: bool,
+    /// No delta dangled a parent.
+    pub locally_closed: bool,
+    /// The deactivation latch.
+    pub deactivated: bool,
+    /// Agreed assertion methods.
+    pub assertion_methods: Vec<ClosureAssertionMethod>,
+    /// The UNION of every observation's revocation set.
+    pub revoked_credential_ids: Vec<String>,
+    /// Agreed `alsoKnownAs` entries.
+    pub also_known_as: Vec<String>,
+    /// The OLDEST fetch in the set.
+    pub oldest_fetched_at: UnixSeconds,
+}
+
+/// Agree a set of independently fetched resolver observations, and union their
+/// revocations.
+///
+/// Two decisions, neither of which an adapter may repeat:
+///
+/// 1. **Agreement.** Every observation must match the first on every fact
+///    except its own identity and revocation set. Assertion methods are
+///    compared by VALUE: comparing counts would let a resolver substitute a key
+///    while keeping the list the same length, and the agreed methods are then
+///    taken from the first observation, which would adopt the substitution.
+/// 2. **Revocation union**, the one place disagreement is expected. A resolver
+///    that has not yet seen a revocation is behind, not hostile, so the sets
+///    are unioned rather than required to match.
+///
+/// # Errors
+///
+/// [`VerifyError::ResolverQuorum`] if the set is empty, the observations
+/// disagree, or the union cannot be formed.
+pub fn agree_closures(
+    profile: &ApplicationProfile,
+    observations: &[ResolverObservation],
+) -> Result<AgreedClosure, VerifyError> {
+    let first = observations.first().ok_or(VerifyError::ResolverQuorum)?;
+    if observations.iter().skip(1).any(|o| {
+        o.did != first.did
+            || o.did_recomputed_ok != first.did_recomputed_ok
+            || o.deltas_verified != first.deltas_verified
+            || o.locally_closed != first.locally_closed
+            || o.deactivated != first.deactivated
+            || o.assertion_methods != first.assertion_methods
+            || o.also_known_as != first.also_known_as
+    }) {
+        return Err(VerifyError::ResolverQuorum);
+    }
+
+    let revocations: Vec<ResolverRevocations<'_>> = observations
+        .iter()
+        .map(|o| ResolverRevocations { resolver_id: &o.resolver_id, revoked_credential_ids: &o.revoked_credential_ids })
+        .collect();
+    let revoked_credential_ids = union_resolver_revocations(profile, &revocations)?;
+
+    // The OLDEST fetch: a union is only as fresh as its stalest member, and
+    // taking the newest would let one freshly fetched resolver vouch for the
+    // staleness of the rest.
+    let oldest_fetched_at = observations.iter().map(|o| o.fetched_at_seconds).min().ok_or(VerifyError::ResolverQuorum)?;
+
+    Ok(AgreedClosure {
+        did: first.did.clone(),
+        did_recomputed_ok: first.did_recomputed_ok,
+        deltas_verified: first.deltas_verified,
+        locally_closed: first.locally_closed,
+        deactivated: first.deactivated,
+        assertion_methods: first.assertion_methods.clone(),
+        revoked_credential_ids,
+        also_known_as: first.also_known_as.clone(),
+        oldest_fetched_at,
+    })
+}
+
+/// Project an agreed closure into the issuer state `CON-206` reasons over.
+///
+/// The age is computed here, from the verifier's own clock against its own
+/// record of when it fetched. Saturating rather than clamping when the stamp is
+/// in the future: a broken clock or an inventing caller must FAIL the age
+/// bound, and clamping to zero would present the most suspect input as the
+/// freshest.
+pub fn issuer_state_of(agreed: &AgreedClosure, now: UnixSeconds) -> IssuerState {
+    IssuerState {
+        did: agreed.did.clone(),
+        did_recomputed_ok: agreed.did_recomputed_ok,
+        deltas_verified: agreed.deltas_verified,
+        locally_closed: agreed.locally_closed,
+        deactivated: agreed.deactivated,
+        assertion_methods: agreed
+            .assertion_methods
+            .iter()
+            .map(|m| VerificationMethod {
+                id: m.id.clone(),
+                kind: m.kind.clone(),
+                // `x` is never read by CON-206 once the typed key has crossed
+                // the resolver boundary; a fixed marker keeps this boundary from
+                // creating another base64 parser.
+                jwk: Ed25519Jwk { public_key: m.public_key, x: String::new() },
+                has_private_component: m.has_private_component,
+            })
+            .collect(),
+        revoked_credential_ids: agreed.revoked_credential_ids.clone(),
+        closure_age_seconds: now
+            .checked_sub(agreed.oldest_fetched_at)
+            .filter(|age| *age >= 0)
+            .unwrap_or(UnixSeconds::MAX),
+        source: ClosureSource::StateResolver,
+        also_known_as: agreed.also_known_as.clone(),
+    }
 }
 
 /// Verify one Path-B device-grant presentation.

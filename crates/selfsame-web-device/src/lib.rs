@@ -57,16 +57,14 @@ use ed25519_dalek::SigningKey;
 use serde::Deserialize;
 use wasm_bindgen::prelude::*;
 
-use selfsame_app_identity::accept::VerificationMethod;
 use selfsame_app_identity::accept::{ClosureSource, IssuerState};
 use selfsame_app_identity::alias::{AcctUri, Jrd};
 use selfsame_app_identity::ceremony::{self as identity_ceremony, BundlePayload, OfferCore};
 use selfsame_app_identity::enrollment::{self as identity_enrollment, EnrollmentStatement};
 use selfsame_app_identity::json::{self as identity_json, Json};
 use selfsame_app_identity::path_b::{rehydrate_verified_grant, GrantRequest, VerifiedGrant};
-use selfsame_app_identity::path_b::{union_resolver_revocations, ResolverRevocations};
+use selfsame_app_identity::path_b::{agree_closures, issuer_state_of, ClosureAssertionMethod, ResolverObservation};
 use selfsame_app_identity::profile::ApplicationProfile;
-use selfsame_app_identity::profile::Ed25519Jwk;
 use selfsame_app_identity::proof::{self as identity_proof, Challenge};
 use selfsame_app_identity::selection::ProviderHint;
 use selfsame_core::code::{LinkCode, LinkSecret};
@@ -450,7 +448,7 @@ pub fn verify_path_b_peer_json(
             selfsame_app_identity::alias::recognise_jrd(jrd).map_err(|_| DeviceError::Refused)?;
         let closures: Vec<BrowserClosure> =
             serde_json::from_str(closures_json).map_err(|_| DeviceError::Refused)?;
-        let first = closures.first().ok_or(DeviceError::Refused)?;
+        // Emptiness is the shared quorum's to reject, along with agreement.
         // A fetch stamped before the epoch, or in the future relative to `now`,
         // is a broken clock or a caller inventing freshness. Refuse rather than
         // clamp: clamping a future stamp to zero age would present the most
@@ -461,67 +459,47 @@ pub fn verify_path_b_peer_json(
         {
             return Err(DeviceError::Refused);
         }
-        let observations: Vec<ResolverRevocations<'_>> = closures
+        // Recognise the keys, then hand every decision to the shared quorum.
+        //
+        // This block used to agree the observations itself, and it did so more
+        // weakly than the native path: it compared assertion methods by COUNT,
+        // so two resolvers reporting different keys in equal numbers read as
+        // agreeing here and disagreeing on the hub. A JavaScript layer above had
+        // been given a compensating check, which protected one caller and no
+        // other. There is now one agreement rule and it compares by value.
+        let observations = closures
             .iter()
-            .map(|c| ResolverRevocations {
-                resolver_id: &c.resolver_id,
-                revoked_credential_ids: &c.revoked_credential_ids,
-            })
-            .collect();
-        let revoked = union_resolver_revocations(&profile, &observations)
-            .map_err(|_| DeviceError::Refused)?;
-        if closures.iter().any(|c| {
-            c.did != first.did
-                || c.did_recomputed_ok != first.did_recomputed_ok
-                || c.deltas_verified != first.deltas_verified
-                || c.locally_closed != first.locally_closed
-                || c.deactivated != first.deactivated
-                || c.assertion_methods.len() != first.assertion_methods.len()
-                || c.also_known_as != first.also_known_as
-        }) {
-            return Err(DeviceError::Refused);
-        }
-        let methods = first
-            .assertion_methods
-            .iter()
-            .map(|m| {
-                let key: [u8; 32] = m
-                    .public_key
-                    .as_slice()
-                    .try_into()
-                    .map_err(|_| DeviceError::Refused)?;
-                Ok(VerificationMethod {
-                    id: m.id.clone(),
-                    kind: m.kind.clone(),
-                    jwk: Ed25519Jwk {
-                        public_key: key,
-                        x: String::new(),
-                    },
-                    has_private_component: m.has_private_component,
+            .map(|c| {
+                Ok(ResolverObservation {
+                    resolver_id: c.resolver_id.clone(),
+                    did: c.did.clone(),
+                    did_recomputed_ok: c.did_recomputed_ok,
+                    deltas_verified: c.deltas_verified,
+                    locally_closed: c.locally_closed,
+                    deactivated: c.deactivated,
+                    assertion_methods: c
+                        .assertion_methods
+                        .iter()
+                        .map(|m| {
+                            let public_key: [u8; 32] =
+                                m.public_key.as_slice().try_into().map_err(|_| DeviceError::Refused)?;
+                            Ok(ClosureAssertionMethod {
+                                id: m.id.clone(),
+                                kind: m.kind.clone(),
+                                public_key,
+                                has_private_component: m.has_private_component,
+                            })
+                        })
+                        .collect::<Result<Vec<_>, DeviceError>>()?,
+                    revoked_credential_ids: c.revoked_credential_ids.clone(),
+                    also_known_as: c.also_known_as.clone(),
+                    fetched_at_seconds: c.fetched_at_seconds,
                 })
             })
             .collect::<Result<Vec<_>, DeviceError>>()?;
-        // Age from the OLDEST fetch in the quorum: a union is only as fresh as
-        // its stalest member, and taking the newest would let one fresh resolver
-        // vouch for the staleness of the rest.
-        let closure_age_seconds = closures
-            .iter()
-            .map(|c| c.fetched_at_seconds)
-            .min()
-            .and_then(|oldest| now_seconds.checked_sub(oldest))
-            .ok_or(DeviceError::Refused)?;
-        let issuer = IssuerState {
-            did: first.did.clone(),
-            did_recomputed_ok: first.did_recomputed_ok,
-            deltas_verified: first.deltas_verified,
-            locally_closed: first.locally_closed,
-            deactivated: first.deactivated,
-            assertion_methods: methods,
-            revoked_credential_ids: revoked,
-            closure_age_seconds,
-            source: ClosureSource::StateResolver,
-            also_known_as: first.also_known_as.clone(),
-        };
+        let agreed = agree_closures(&profile, &observations).map_err(|_| DeviceError::Refused)?;
+        let issuer = issuer_state_of(&agreed, now_seconds);
+
         verify_path_b_peer(
             &profile,
             &account,
@@ -847,6 +825,10 @@ fn json_string(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // Still built here by fixtures, though the production path now reaches
+    // them only through the shared quorum.
+    use selfsame_app_identity::accept::VerificationMethod;
+    use selfsame_app_identity::profile::Ed25519Jwk;
 
     use selfsame_app_identity::profile::ApplicationId;
     use selfsame_app_identity::scope::AccountScopeId;
@@ -1253,6 +1235,54 @@ mod tests {
         let output = recognise_enrollment_json(&compact)
             .expect("the native rlib can exercise a successful wasm facade");
         assert_eq!(output.as_bytes(), build_enrollment(&statement).unwrap());
+    }
+
+    /// Regression: two resolvers reporting DIFFERENT assertion keys in EQUAL
+    /// numbers must not read as agreeing.
+    ///
+    /// This browser path used to compare assertion methods by COUNT while the
+    /// native path compared them by value, so a resolver could substitute a key
+    /// and still pass here — and the agreed methods are taken from the first
+    /// observation, so the substitution would have been adopted. A JavaScript
+    /// layer above carried a compensating check, which protected one caller and
+    /// no other. Both paths now share one agreement rule, and this exercises it
+    /// directly: the wasm-bindgen facade cannot report failure natively, which
+    /// is why the JSON entry point is only testable here on its success path.
+    #[test]
+    fn a_substituted_key_of_equal_count_is_refused() {
+        let fixture = grant_fixture();
+        let method = |byte: u8| ClosureAssertionMethod {
+            id: format!("{}#jwk-0", fixture.issuer.did),
+            kind: "JsonWebKey".to_owned(),
+            public_key: [byte; 32],
+            has_private_component: false,
+        };
+        let observation = |resolver_id: &str, byte: u8| ResolverObservation {
+            resolver_id: resolver_id.to_owned(),
+            did: fixture.issuer.did.clone(),
+            did_recomputed_ok: true,
+            deltas_verified: true,
+            locally_closed: true,
+            deactivated: false,
+            assertion_methods: vec![method(byte)],
+            revoked_credential_ids: vec![],
+            also_known_as: fixture.issuer.also_known_as.clone(),
+            fetched_at_seconds: NOW as i64,
+        };
+
+        let agreed = agree_closures(&fixture.profile, &[observation("app-own", 1), observation("state-1", 1)]);
+        assert!(agreed.is_ok(), "control: identical observations agree");
+
+        let substituted = [observation("app-own", 1), observation("state-1", 2)];
+        assert_eq!(
+            substituted[0].assertion_methods.len(),
+            substituted[1].assertion_methods.len(),
+            "premise: the counts match, which is all the old browser rule compared"
+        );
+        assert!(
+            agree_closures(&fixture.profile, &substituted).is_err(),
+            "a substituted assertion key must be a disagreement, not a match"
+        );
     }
 
     #[test]
