@@ -17,7 +17,7 @@ use selfsame_app_identity::accept::Projection;
 use selfsame_app_identity::alias::{recognise_jrd, AcctUri};
 use selfsame_app_identity::path_b::{agree_closures, issuer_state_of, ClosureAssertionMethod, ResolverObservation, 
     rehydrate_verified_grant, verify_session_establishment,
-    verify_standing, GrantEvidence, GrantRequest, ResolverRevocations, StandingEvidence,
+    verify_standing, GrantEvidence, GrantRequest, StandingEvidence,
     StandingRequest, VerifiedGrant,
 };
 use selfsame_app_identity::profile::ApplicationProfile;

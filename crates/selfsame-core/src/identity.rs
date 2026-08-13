@@ -58,11 +58,6 @@ pub const PROFILE_KEY: &str = "profile";
 /// The profile this build enforces.
 pub const PROFILE_VALUE: &str = "anuna-ssi/v1/single-controller";
 
-/// The document-data key `CON-203` sets to the account's `acct:` alias.
-///
-/// An array, because the DID Document member is one, and `CON-203`'s example
-/// carries exactly one entry: a verifier accepts `alsoKnownAs` only when the
-/// document-data update setting it is present in the verified signed closure.
 // `ALSO_KNOWN_AS_KEY` is deliberately gone. It named a documentData key that
 // upstream now REFUSES, so keeping it would advertise a route that no longer
 // exists — and a constant naming an illegal key is an invitation to use it.
