@@ -211,4 +211,5 @@ The original device-provisioning design lives in the
 
 ## Licence
 
-Copyright 2026 Anuna Research Pty Ltd. Apache-2.0.
+Copyright 2026 Anuna Research Pty Ltd. Licensed under the Apache License,
+Version 2.0 ([LICENSE](LICENSE) or <https://www.apache.org/licenses/LICENSE-2.0>).
