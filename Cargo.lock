@@ -3975,6 +3975,7 @@ dependencies = [
  "selfsame-rendezvous",
  "serde",
  "serde_json",
+ "sha2",
  "tokio",
  "wasm-bindgen",
 ]

@@ -227,6 +227,10 @@ mod tests {
             // revoking the root.
             DeltaOp::RevokeVerificationMethod { key_id: identity::root_method_id(&did) },
             DeltaOp::Deactivate,
+            // A device rewriting the account's alias set: the alsoKnownAs
+            // register is whole-set replacement, so one unauthorised write
+            // withdraws the binding rather than merely adding to it.
+            DeltaOp::SetAlsoKnownAs { uris: vec!["acct:attacker@evil.example".into()] },
         ];
 
         // Exhaustiveness guard: if upstream gains a variant, this match stops
@@ -240,10 +244,11 @@ mod tests {
                 | DeltaOp::RotateKey { .. }
                 | DeltaOp::RevokeCredential { .. }
                 | DeltaOp::RevokeVerificationMethod { .. }
-                | DeltaOp::Deactivate => {}
+                | DeltaOp::Deactivate
+                | DeltaOp::SetAlsoKnownAs { .. } => {}
             }
         }
-        assert_eq!(ops.len(), 8, "every upstream DeltaOp variant must appear");
+        assert_eq!(ops.len(), 9, "every upstream DeltaOp variant must appear");
 
         for op in ops {
             let delta = SignedDelta::new_with_parents(

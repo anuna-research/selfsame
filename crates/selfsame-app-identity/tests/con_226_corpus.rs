@@ -46,7 +46,7 @@ use selfsame_app_identity::{
 const CORPUS_PATH: &str = "../../test-vectors/spec-004-v1.json";
 
 /// The `did:crdt` revision SPEC-001 ADR-010 pins.
-const DID_CRDT_REVISION: &str = "9a53bff1ed3eb88680fe19db0366ffd13d6b240a";
+const DID_CRDT_REVISION: &str = "fbccfd5885cd0c0136218f809ea0e183bc7e49f3";
 
 // ── the completeness rule ──────────────────────────────────────────────────
 

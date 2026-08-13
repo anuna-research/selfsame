@@ -431,11 +431,21 @@ mod tests {
                 DeltaOp::RevokeCredential { credential_id: grant_id(&doc, "BBBB") },
             ),
             (
+                // NOT `alsoKnownAs`: upstream now refuses a documentData key that
+                // names a DID Core property (did-crdt BUG-001). The key is
+                // incidental to what this test asserts, so it uses a legal one.
                 "a document-data update",
                 DeltaOp::SetDocumentData {
-                    key: "alsoKnownAs".into(),
-                    value: serde_json::json!(["acct:x@y.example"]),
+                    key: "profile".into(),
+                    value: serde_json::json!({ "display": "x" }),
                 },
+            ),
+            (
+                // The typed replacement, and a real "later operation the
+                // controller can author": whole-set replacement of the alias set
+                // must not disturb revocation state either.
+                "an alsoKnownAs replacement",
+                DeltaOp::SetAlsoKnownAs { uris: vec!["acct:x@y.example".into()] },
             ),
         ] {
             let public = k.verifying_key().to_bytes();

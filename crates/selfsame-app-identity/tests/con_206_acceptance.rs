@@ -483,7 +483,7 @@ fn step_10_rejects_a_stale_or_causally_incomplete_closure() {
     refused_at(&c, c.expectation(), evidence, AcceptStep::Status);
 
     let mut issuer = c.issuer.clone();
-    issuer.causally_complete = false;
+    issuer.locally_closed = false;
     let evidence = Evidence { issuer: Some(&issuer), ..c.evidence() };
     refused_at(&c, c.expectation(), evidence, AcceptStep::Status);
 }

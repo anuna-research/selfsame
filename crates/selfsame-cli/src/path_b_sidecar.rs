@@ -21,12 +21,23 @@ pub fn run() -> Result<()> {
     let request: Request = serde_json::from_str(&input).context("closed Path-B request JSON")?;
     let profile = ApplicationProfile::recognise(&request.profile).context("recognise profile")?;
     let runtime = tokio::runtime::Runtime::new()?;
+    // Stamped BEFORE the fetch, deliberately. This is the verifier's own record
+    // of when it obtained the state; taking it afterwards would understate the
+    // age by however long the fetch took — exactly the interval a slow or
+    // stalling resolver controls. Erring old cannot make stale state look fresh.
+    let fetched_at_seconds = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .context("system clock is before the Unix epoch")?
+        .as_secs() as i64;
     let quorum = runtime.block_on(resolve_path_b_quorum(&profile, &request.did))?;
     let account = stable_acct_uri(&request.did, &profile.account_authority);
     let acct = AcctUri::parse(&account)?;
-    let aka = quorum.nif_closures()?.first().map(|c| c.also_known_as.clone()).unwrap_or_default();
+    // Projected ONCE. It was built twice before, which with a clock reading
+    // inside would have stamped two different times into one answer.
+    let resolver_closures = quorum.nif_closures(fetched_at_seconds)?;
+    let aka = resolver_closures.first().map(|c| c.also_known_as.clone()).unwrap_or_default();
     let jrd = runtime.block_on(fetch_and_verify_bytes(&acct, &request.did, &aka))?;
-    serde_json::to_writer(std::io::stdout(), &Response { resolver_closures: quorum.nif_closures()?, account, jrd })?;
+    serde_json::to_writer(std::io::stdout(), &Response { resolver_closures, account, jrd })?;
     std::io::stdout().write_all(b"\n")?;
     Ok(())
 }

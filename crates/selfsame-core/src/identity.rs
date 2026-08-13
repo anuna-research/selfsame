@@ -58,12 +58,10 @@ pub const PROFILE_KEY: &str = "profile";
 /// The profile this build enforces.
 pub const PROFILE_VALUE: &str = "anuna-ssi/v1/single-controller";
 
-/// The document-data key `CON-203` sets to the account's `acct:` alias.
-///
-/// An array, because the DID Document member is one, and `CON-203`'s example
-/// carries exactly one entry: a verifier accepts `alsoKnownAs` only when the
-/// document-data update setting it is present in the verified signed closure.
-pub const ALSO_KNOWN_AS_KEY: &str = "alsoKnownAs";
+// `ALSO_KNOWN_AS_KEY` is deliberately gone. It named a documentData key that
+// upstream now REFUSES, so keeping it would advertise a route that no longer
+// exists — and a constant naming an illegal key is an invitation to use it.
+// Aliases are written with `DeltaOp::SetAlsoKnownAs`.
 
 /// Maximum user-visible device label, in characters (REQ-021).
 pub const MAX_DEVICE_LABEL_CHARS: usize = 64;
@@ -242,12 +240,14 @@ pub fn set_also_known_as(
     sign_on_frontier(
         doc,
         controller,
-        DeltaOp::SetDocumentData {
-            key: ALSO_KNOWN_AS_KEY.to_owned(),
-            value: serde_json::Value::Array(vec![serde_json::Value::String(
-                acct_uri.to_owned(),
-            )]),
-        },
+        // The typed op, not a documentData key. `alsoKnownAs` is a DID Core
+        // property, and an untyped entry of that name projected into the same
+        // JSON object as the typed fields — shadowing it for any last-wins
+        // parser (did-crdt BUG-001). Upstream now refuses such a key outright.
+        //
+        // One URI, exactly as before: this wrapped a single acct_uri in an array
+        // and the register replaces the whole set, so emitted state is unchanged.
+        DeltaOp::SetAlsoKnownAs { uris: vec![acct_uri.to_owned()] },
         now_ms,
     )
 }
