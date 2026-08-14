@@ -148,18 +148,27 @@ impl Relay {
     /// a `409` here is not a race this client can resolve — someone else holds
     /// the nameplate — and the caller burns.
     ///
-    /// # The reference provider does not answer in those codes
+    /// # One other implementation answers differently, and it is not deployed
     ///
-    /// `cbcl-bus`'s `cbcl-chat-selfsame-pair-http` deliberately projects the
-    /// claim outcomes differently, to avoid an enumeration oracle: an identical
-    /// retry is `409` and *every* conflict — a second responder, and the whole
-    /// pre-`pA` window — is `404`. Its own comment gives the reason: "a fresh
-    /// responder credential is the sole authority that may learn a plate is
-    /// live", so a stranger's claim must not be distinguishable from an absent
-    /// session.
+    /// `cbcl-bus` carries a `CON-405` relay — `cbcl-chat-selfsame-pair-http`,
+    /// served at `/selfsame/pair/v1` — which deliberately projects the claim
+    /// outcomes differently, to avoid an enumeration oracle: an identical retry
+    /// is `409` and *every* conflict, including the whole pre-`pA` window, is
+    /// `404`. Its own comment gives the reason: "a fresh responder credential is
+    /// the sole authority that may learn a plate is live", so a stranger's claim
+    /// must not be distinguishable from an absent session.
     ///
-    /// This client is written to the contract and is safe under both readings,
-    /// because it holds exactly one token and never re-claims after a success:
+    /// It is **not a provider this client will meet**, at least not yet:
+    /// `cbcl-chat-selfsame-pair-gate:routed?/0` is a hard-coded `'false` under
+    /// SPEC-053 GATE-00 clause 4, so the routes are not compiled into a release
+    /// dispatch at all, and only that repository's own EXP-004 harness shims the
+    /// gate open. The conforming provider is `selfsame-rendezvous`, which
+    /// `tests/a_live_pairing.rs` runs this client against.
+    ///
+    /// It is recorded because the divergence is real and will have to be settled
+    /// before that gate opens, and because this client is safe under both
+    /// readings anyway — it holds exactly one token and never re-claims after a
+    /// success:
     ///
     /// * `409` can only ever be a first response here, and the provider's
     ///   `identical` is unreachable for a token that has not yet succeeded — so
@@ -425,11 +434,28 @@ mod tests {
     /// `https://cbcl.chat/selfsame` yields `https://cbcl.chat/pair/v1` and sends
     /// the whole ceremony to the wrong place on a provider that is doing nothing
     /// unusual.
+    ///
+    /// # The path prefix is not decoration
+    ///
+    /// `CON-401` says why it exists, and names the exact collision: "one operated
+    /// service may expose the blind mailbox at its origin and the pairing relay
+    /// below `/selfsame` **without colliding with another protocol at
+    /// `/pair/v1`**". That other protocol is real — `cbcl-bus` serves SPEC-016's
+    /// agent pairing, a WebSocket, at an ungated `/pair/v1`, and serves
+    /// `PROTO-003`'s relay at `/selfsame/pair/v1`. A client that resolved instead
+    /// of appending would take a descriptor pointing at the second and arrive at
+    /// the first: a different protocol, on a different transport, answering.
     #[test]
     fn the_base_url_appends_rather_than_resolving() {
         assert_eq!(
             Relay::at("https://cbcl.chat/selfsame").unwrap().base,
             "https://cbcl.chat/selfsame/pair/v1",
+        );
+        // The shape a `cbcl-bus` descriptor has to declare, spelled out because
+        // it is the deployment this is aimed at.
+        assert_eq!(
+            Relay::at("https://chat.anuna.io/selfsame").unwrap().base,
+            "https://chat.anuna.io/selfsame/pair/v1",
         );
         assert_eq!(
             Relay::at("https://provider.example").unwrap().base,
