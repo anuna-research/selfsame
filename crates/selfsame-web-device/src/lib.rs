@@ -73,6 +73,11 @@ use selfsame_core::code::{LinkCode, LinkSecret};
 use selfsame_core::record::{Application, Offer};
 use selfsame_core::{accept, seal, LinkContext, UnixSeconds};
 
+/// `PROTO-003` `CON-402`/`CON-409` — minting a code, showing it, publishing its
+/// record.
+mod carrier;
+pub use carrier::PairingCarrier;
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct BrowserClosure {
@@ -353,6 +358,25 @@ impl PairingSession {
 /// all, and a state machine whose refusals cannot be tested is a state machine
 /// with untested refusals.
 impl PairingSession {
+    /// Begin, from a code the caller already holds as octets.
+    ///
+    /// The route [`crate::carrier::PairingCarrier`] uses, so that a role-A
+    /// session can be started without `C` passing through JavaScript on the way.
+    pub fn begin_for(
+        party: identity_spake2::Party,
+        wib: &[u8; identity_spake2::WIB_OCTETS],
+        binding_hash: &[u8],
+        ephemeral: &[u8],
+    ) -> Result<PairingSession, IdentityError> {
+        let binding_hash: [u8; 32] =
+            binding_hash.try_into().map_err(|_| IdentityError::Refused)?;
+        let ephemeral: [u8; 64] = ephemeral.try_into().map_err(|_| IdentityError::Refused)?;
+        let pairing = identity_spake2::Pairing::begin(party, wib, &binding_hash, &ephemeral)
+            .map_err(|_| IdentityError::Refused)?;
+        let message = pairing.message();
+        Ok(PairingSession { stage: PairingStage::Offered(Box::new(pairing)), message })
+    }
+
     /// Native twin of [`PairingSession::confirm`].
     pub fn confirm_for(&mut self, peer_message: &[u8]) -> Result<[u8; 32], IdentityError> {
         let peer: [u8; 32] = peer_message.try_into().map_err(|_| IdentityError::Refused)?;
@@ -583,6 +607,90 @@ pub fn open_bundle_for(
 /// ceremony that times out rather than one that refuses.
 fn mailbox_secret(secret: &[u8]) -> Result<[u8; 16], IdentityError> {
     secret.try_into().map_err(|_| IdentityError::Refused)
+}
+
+// ── PROTO-004: the envelope a PAIRING uses ─────────────────────────────────
+//
+// THESE ARE NOT THE THREE ABOVE, AND THE DIFFERENCE IS NOT COSMETIC. The
+// functions above are SPEC-001's envelope, keyed by HKDF over the secret alone
+// and bound to the offer through a BLAKE3 transcript. A `PROTO-003` pairing uses
+// `PROTO-004`'s instead: two role-separated keys salted by `CON-403`'s
+// `binding_hash`, a constant nonce, and a record padded to one fixed length so
+// the mailbox operator cannot read a closure's size off a bundle.
+//
+// Both exist because both are live. `Device`/`LinkSession` below are SPEC-001's
+// browser device and keep SPEC-001's envelope; a pairing must use these. Sealing
+// with the wrong pair is not a subtle divergence — the record lengths differ by
+// two orders of magnitude and nothing opens — but it is an easy mistake to make
+// from JavaScript, where both are just functions taking a secret, so the names
+// carry the specification and the arity differs: PROTO-004's take the binding
+// hash, because there is no way to derive its keys without one.
+
+/// `CON-501`/`CON-502` — seal an offer payload for the offer slot.
+///
+/// Role `0x01`, which the wallet opens and never seals. The result is exactly
+/// 69,632 octets whatever the payload was.
+#[wasm_bindgen]
+pub fn seal_offer_envelope(
+    mailbox_secret_16: &[u8],
+    binding_hash: &[u8],
+    offer_payload: &[u8],
+) -> Result<Vec<u8>, JsError> {
+    seal_offer_envelope_for(mailbox_secret_16, binding_hash, offer_payload)
+        .map_err(|_| JsError::new("the offer could not be sealed"))
+}
+
+/// Native twin of [`seal_offer_envelope`].
+pub fn seal_offer_envelope_for(
+    mailbox_secret_16: &[u8],
+    binding_hash: &[u8],
+    offer_payload: &[u8],
+) -> Result<Vec<u8>, IdentityError> {
+    envelope_keys(mailbox_secret_16, binding_hash)?
+        .offer
+        .seal(offer_payload)
+        .map_err(|_| IdentityError::Refused)
+}
+
+/// `CON-502` — open the bundle the wallet sealed.
+///
+/// Role `0x02`. Unlike SPEC-001's [`open_bundle_bytes`] this takes no offer
+/// plaintext: `PROTO-004` binds a record to its ceremony through the
+/// `binding_hash` in the associated data rather than through a transcript of the
+/// offer, so a bundle from another ceremony fails the tag. The reply-to-this-offer
+/// property `REQ-006` gets from the transcript is `CON-219`'s job here — the
+/// `ceremonyId` and `requestId` in the opened payload must be the ones this
+/// application sealed, which [`bundle_matches_offer_json`] checks.
+#[wasm_bindgen]
+pub fn open_bundle_envelope(
+    mailbox_secret_16: &[u8],
+    binding_hash: &[u8],
+    sealed_record: &[u8],
+) -> Result<Vec<u8>, JsError> {
+    open_bundle_envelope_for(mailbox_secret_16, binding_hash, sealed_record)
+        .map_err(|_| JsError::new("sealed record did not authenticate"))
+}
+
+/// Native twin of [`open_bundle_envelope`].
+pub fn open_bundle_envelope_for(
+    mailbox_secret_16: &[u8],
+    binding_hash: &[u8],
+    sealed_record: &[u8],
+) -> Result<Vec<u8>, IdentityError> {
+    envelope_keys(mailbox_secret_16, binding_hash)?
+        .bundle
+        .open(sealed_record)
+        .map_err(|_| IdentityError::Refused)
+}
+
+fn envelope_keys(
+    mailbox_secret_16: &[u8],
+    binding_hash: &[u8],
+) -> Result<selfsame_core::envelope::EnvelopeKeys, IdentityError> {
+    let secret = mailbox_secret(mailbox_secret_16)?;
+    let binding: [u8; 32] = binding_hash.try_into().map_err(|_| IdentityError::Refused)?;
+    selfsame_core::envelope::EnvelopeKeys::derive(&secret, &binding)
+        .map_err(|_| IdentityError::Refused)
 }
 
 /// Native twin of [`bundle_matches_offer_json`].

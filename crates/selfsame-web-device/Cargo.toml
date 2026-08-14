@@ -31,6 +31,12 @@ ed25519-dalek = { workspace = true, features = ["std"] }
 wasm-bindgen = "0.2"
 serde = { workspace = true }
 serde_json = { workspace = true }
+# CON-402's QR, encoded here rather than in JavaScript so the symbol a browser
+# paints and the one `selfsame-cli` prints come from one encoder. Two encoders
+# for one payload is the parser-differential shape this repository refuses, and
+# it is worse than usual here: a subtly wrong symbol does not fail to render, it
+# scans as something else. Already in the workspace for the CLI.
+qrcode = { version = "0.14", default-features = false }
 
 # The integration test stands up the real rendezvous service on loopback and
 # plays the phone against it, so it needs what the phone needs. None of this
@@ -40,6 +46,10 @@ serde_json = { workspace = true }
 [dev-dependencies]
 # For the vendored-vector digest pin only.
 sha2 = { version = "0.10", default-features = false }
+# So the CON-409 round-trip test decodes the published envelope exactly the way
+# the wallet's `resolve_record` does, rather than through a helper that happens
+# to agree.
+base64ct = { workspace = true }
 selfsame-rendezvous = { path = "../selfsame-rendezvous" }
 did-crdt = { workspace = true }
 tokio = { workspace = true }
