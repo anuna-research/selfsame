@@ -57,6 +57,11 @@ const invoke = bridge;
 // primitives it needs, and imports nothing back. A cycle would work and would
 // make the boundary a convention rather than a fact.
 import { initAppIdentity } from "./app-identity.js";
+// PROTO-003's surface, on the same terms: one-way, and holding no security
+// logic. It is separate from `app-identity.js` because it implements a different
+// specification — the pairing that produces an offer, rather than the SPEC-004
+// screens that live with one afterwards.
+import { initPairing } from "./pairing.js";
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
@@ -803,6 +808,14 @@ const actions = {
 // listener below dispatches both surfaces without knowing there are two.
 const appIdentity = initAppIdentity({
   $, $$, show, invoke, fail, clearErrors, message, renderLifehash, since, actions,
+});
+
+// PROTO-003 registers into the same map. It additionally needs `busy`/`idle`,
+// because a pairing has three network waits a person watches — resolving the
+// record, meeting the application, and sending the bundle back — and `refresh`,
+// because the applications list is derived from what the wallet holds after one.
+initPairing({
+  $, show, invoke, fail, message, renderLifehash, actions, busy, idle, refresh,
 });
 
 document.addEventListener("click", (e) => {
