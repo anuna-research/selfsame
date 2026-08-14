@@ -35,8 +35,10 @@
 //! [OQ-007]: ../../../../anuna-ssi/specs/SPEC-001-device-key-provisioning.md
 
 pub mod app_grant;
-/// `PROTO-003` `CON-409` — resolving a scanned pairing code.
-mod pairing;
+/// `PROTO-003` — resolving a code, answering the pairing, delivering the bundle.
+pub mod pairing;
+/// `PROTO-003` `CON-405` and `PROTO-002` `CON-303` — the two wires.
+mod pairing_net;
 pub mod replay;
 mod app_identity;
 mod commands;
@@ -87,6 +89,9 @@ pub fn run() {
             app_identity::home_fingerprint,
             app_identity::app_identity_derive,
             pairing::read_pairing_code,
+            pairing::pairing_answer,
+            pairing::pairing_deliver,
+            pairing::pairing_decline,
             app_grant::app_grant_review,
             app_grant::app_grant_prepare,
             app_grant::app_grant_confirm,

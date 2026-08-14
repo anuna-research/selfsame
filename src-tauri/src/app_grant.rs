@@ -123,7 +123,7 @@ pub struct PendingIssuance {
 /// clippy's argument bound — which is a real signal here rather than a lint to
 /// silence, since a command taking eight loose values is one whose caller can
 /// transpose two of them.
-#[derive(serde::Deserialize)]
+#[derive(serde::Deserialize, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CeremonyObservation {
     /// The `profileDigest` this ceremony is bound to, from `PROTO-003`'s record.
@@ -205,7 +205,7 @@ pub async fn app_grant_review(
 ///
 /// One arm per variant and no catch-all, so a variant added upstream fails to
 /// compile here rather than silently becoming whatever the wildcard said.
-fn token(e: AuthoriseError) -> UiError {
+pub(crate) fn token(e: AuthoriseError) -> UiError {
     UiError::from(match e {
         AuthoriseError::UnverifiedApplication => "UnverifiedApplication",
         AuthoriseError::OfferMalformed => "OfferMalformed",
