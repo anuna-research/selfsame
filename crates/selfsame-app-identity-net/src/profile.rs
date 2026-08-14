@@ -48,6 +48,15 @@ pub const FETCH_DEADLINE: Duration = Duration::from_millis(5_000);
 pub struct FetchedProfile {
     /// The recognised profile.
     pub profile: ApplicationProfile,
+    /// The exact octets that were served and recognised.
+    ///
+    /// Retained because `ApplicationProfile` does not keep them and a caller
+    /// cannot re-derive them: the digest `CON-220` step 6 compares is over the
+    /// bytes the origin sent, and every downstream consumer — `build_offer`, a
+    /// wallet handing a profile to `app_grant_review`, `CON-409`'s digest match —
+    /// takes octets rather than the parsed value. Without this the only way to
+    /// obtain them is a second fetch, which may return a different document.
+    pub octets: Vec<u8>,
     /// When it was fetched, for [`discovery::cache_is_fresh`].
     pub fetched_at: UnixSeconds,
 }
@@ -101,7 +110,7 @@ pub async fn fetch(
     let profile = discovery::recognise_profile_response(&observed, application_id)
         .map_err(|e: DiscoveryError| NetError::Recognition(e.to_string()))?;
 
-    Ok(FetchedProfile { profile, fetched_at: now })
+    Ok(FetchedProfile { profile, octets: body.to_vec(), fetched_at: now })
 }
 
 /// Fetch, or reuse a cached profile that is still inside `CON-220`'s bound.
@@ -265,7 +274,7 @@ mod tests {
         let profile = ApplicationProfile::recognise(&octets).unwrap();
         // The fixture names photos.example, so build a cache entry whose
         // identifier matches what we ask for.
-        let held = FetchedProfile { profile, fetched_at: 1_000 };
+        let held = FetchedProfile { profile, octets: octets.clone(), fetched_at: 1_000 };
         let outcome = fetch_or_cached(&held.profile.application_id.clone(), Some(&held), 1_500)
             .await
             .expect("a fresh cache entry is reused");
@@ -278,7 +287,7 @@ mod tests {
         let octets = fixture_profile_octets();
         let profile = ApplicationProfile::recognise(&octets).unwrap();
         let id = profile.application_id.clone();
-        let held = FetchedProfile { profile, fetched_at: 1_000 };
+        let held = FetchedProfile { profile, octets: octets.clone(), fetched_at: 1_000 };
         // Past 3,600 seconds the cache is dead and the fetch is attempted —
         // against `photos.example`, which does not resolve, so this is an
         // error rather than a stale hit. That is the point: no grace period.
@@ -300,7 +309,7 @@ mod tests {
         let last_expiry =
             profile.rendezvous.iter().map(|d| d.valid_until).max().expect("a descriptor");
         let id = profile.application_id.clone();
-        let held = FetchedProfile { profile, fetched_at: last_expiry - 60 };
+        let held = FetchedProfile { profile, octets: octets.clone(), fetched_at: last_expiry - 60 };
 
         // Sixty seconds old — well inside the bound — and one second past the
         // last descriptor's expiry.
