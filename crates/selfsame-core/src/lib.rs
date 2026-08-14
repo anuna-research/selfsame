@@ -40,6 +40,8 @@
 pub mod accept;
 pub mod code;
 pub mod derive;
+/// `PROTO-004` `CON-501`/`CON-502` — the ceremony envelope.
+pub mod envelope;
 pub mod fingerprint;
 pub mod identity;
 pub mod mb;

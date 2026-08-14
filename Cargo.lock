@@ -3832,6 +3832,7 @@ name = "selfsame"
 version = "0.1.0"
 dependencies = [
  "argon2",
+ "base64ct",
  "blake3",
  "did-crdt",
  "ed25519-dalek",
@@ -3954,9 +3955,11 @@ name = "selfsame-rendezvous"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "base64ct",
  "did-crdt",
  "ed25519-dalek",
  "reqwest 0.12.28",
+ "selfsame-app-identity",
  "selfsame-core",
  "serde",
  "serde_json",
