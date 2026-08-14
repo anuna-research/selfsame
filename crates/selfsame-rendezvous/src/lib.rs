@@ -44,6 +44,9 @@ use did_crdt::core::document::Document;
 use did_crdt::Did;
 use serde::{Deserialize, Serialize};
 
+/// `PROTO-003` `CON-405`'s relay and `PROTO-002`'s mailbox.
+pub mod pairing;
+
 /// Maximum accepted rendezvous body (CON-002).
 pub const MAX_SLOT_BYTES: usize = 4096;
 
@@ -80,6 +83,12 @@ struct Inner {
     closures: HashMap<Did, Vec<serde_json::Value>>,
     /// `CON-409` records, keyed by the base64url meeting address.
     records: HashMap<String, Record>,
+    /// `PROTO-003` `CON-405` sessions, keyed by nameplate.
+    sessions: HashMap<String, pairing::Session>,
+    /// `PROTO-002` `CON-304` slots. Separate from `slots` because the two
+    /// contracts disagree about size, retry, and whether a read is repeatable —
+    /// see the table in [`pairing`].
+    mailbox: HashMap<String, pairing::MailboxSlot>,
 }
 
 /// A published `CON-409` record, exactly as its publisher signed it.
@@ -104,7 +113,15 @@ impl Service {
         Self::default()
     }
 
-    /// The axum router carrying the three routes.
+    /// The axum router.
+    ///
+    /// Two mailbox routes, and the second is not a duplicate. `/rendezvous/:slot`
+    /// is SPEC-001's `CON-002` — 4 KiB, read-once, `409` on any second write.
+    /// `/proto002/rendezvous/:slot` is `PROTO-002`'s `CON-304`/`CON-305` —
+    /// 69,632 octets, repeatable reads, `204` on an identical retry. `CON-408`
+    /// requires a pairing to follow the second "without alteration", and
+    /// `CON-303` addresses a mailbox from a base URL precisely so one origin can
+    /// serve both without either having to bend.
     pub fn router(self) -> Router {
         Router::new()
             .route("/rendezvous/:slot", get(get_slot).put(put_slot))
@@ -112,6 +129,18 @@ impl Service {
             .route("/dids/:did/deltas", post(publish_delta))
             .route("/dids/:did/closure", get(get_closure))
             .route("/healthz", get(|| async { "ok" }))
+            // PROTO-003 CON-405: allocate, claim, and the four frames.
+            .route("/pair/v1/healthz", get(pairing::health))
+            .route("/pair/v1/sessions", post(pairing::allocate))
+            .route(
+                "/pair/v1/sessions/:nameplate/:resource",
+                post(pairing::claim).put(pairing::put_frame).get(pairing::get_frame),
+            )
+            // PROTO-002 CON-304/CON-305.
+            .route(
+                "/proto002/rendezvous/:slot",
+                get(pairing::get_mailbox).put(pairing::put_mailbox),
+            )
             .with_state(self)
     }
 

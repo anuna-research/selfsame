@@ -55,6 +55,14 @@ tauri-plugin-biometric = "2"
 tauri-plugin-selfsame-store = { path = "../crates/tauri-plugin-selfsame-store" }
 
 [dev-dependencies]
+# `tests/a_live_pairing.rs` runs the ceremony against the reference provider it
+# starts itself, and drives role A through the browser's own wasm surface —
+# using `pairing_net` for both ends would make the test agree with itself about
+# anything the client gets wrong.
+selfsame-rendezvous = { path = "../crates/selfsame-rendezvous" }
+selfsame-web-device = { path = "../crates/selfsame-web-device" }
+axum = "0.7"
+base64ct = { workspace = true }
 tempfile = "3"
 tokio = { workspace = true }
 serde_json = { workspace = true }

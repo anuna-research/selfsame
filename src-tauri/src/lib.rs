@@ -38,7 +38,12 @@ pub mod app_grant;
 /// `PROTO-003` — resolving a code, answering the pairing, delivering the bundle.
 pub mod pairing;
 /// `PROTO-003` `CON-405` and `PROTO-002` `CON-303` — the two wires.
-mod pairing_net;
+///
+/// Public so `tests/a_live_pairing.rs` can drive it against a real provider.
+/// Nothing else outside this crate should reach for it: the ordering, the burn
+/// rules and the ceremony state all live in [`pairing`], and a caller holding a
+/// `Relay` directly has none of them.
+pub mod pairing_net;
 pub mod replay;
 mod app_identity;
 mod commands;

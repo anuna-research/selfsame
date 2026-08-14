@@ -17,6 +17,10 @@ serde = { workspace = true }
 # CON-409 records travel as base64url in a JSON envelope.
 base64ct = { workspace = true }
 serde_json = { workspace = true }
+sha2 = { version = "0.10", default-features = false }
+# CON-405 draws a role token and a nameplate and wants no distribution for
+# either, so the OS CSPRNG directly rather than a second RNG stack.
+getrandom = "0.2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
