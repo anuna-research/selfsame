@@ -42,10 +42,17 @@ use axum::{Json, Router};
 use did_crdt::core::delta::{DeltaOp, SignedDelta};
 use did_crdt::core::document::Document;
 use did_crdt::Did;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// Maximum accepted rendezvous body (CON-002).
 pub const MAX_SLOT_BYTES: usize = 4096;
+
+/// The largest `CON-409` record this store accepts.
+///
+/// Six short members and a timestamp; the contract's own recogniser bounds it at
+/// 4 KiB, and a store that accepted more would be holding bytes no conforming
+/// resolver will read.
+pub const MAX_RECORD_BYTES: usize = 4096;
 
 /// Slot lifetime in seconds (CON-002).
 pub const SLOT_TTL_SECONDS: u64 = 600;
@@ -71,6 +78,18 @@ struct Inner {
     /// the signer produced rather than a re-serialisation of them. REQ-003
     /// hashes those exact bytes, so a re-serialisation is not the same artefact.
     closures: HashMap<Did, Vec<serde_json::Value>>,
+    /// `CON-409` records, keyed by the base64url meeting address.
+    records: HashMap<String, Record>,
+}
+
+/// A published `CON-409` record, exactly as its publisher signed it.
+struct Record {
+    /// The RFC 8785 octets. Held verbatim, because a verifier checks a signature
+    /// over the bytes it received and a re-serialisation is a different artefact
+    /// — the same reason `closures` keeps published deltas as they arrived.
+    payload: Vec<u8>,
+    signature: [u8; 64],
+    stored_at: Now,
 }
 
 /// A monotonic second counter injected by the caller.
@@ -89,6 +108,7 @@ impl Service {
     pub fn router(self) -> Router {
         Router::new()
             .route("/rendezvous/:slot", get(get_slot).put(put_slot))
+            .route("/pairing/records/:address", get(get_record).put(put_record))
             .route("/dids/:did/deltas", post(publish_delta))
             .route("/dids/:did/closure", get(get_closure))
             .route("/healthz", get(|| async { "ok" }))
@@ -99,6 +119,11 @@ impl Service {
     /// need a background task to honour the 600 s lifetime.
     fn sweep(inner: &mut Inner, now: Now) {
         inner.slots.retain(|_, s| now.saturating_sub(s.stored_at) < SLOT_TTL_SECONDS);
+        // A record's own `expiresAt` is the verifier's bound; this is the
+        // STORE's, so an abandoned ceremony does not sit at a public address
+        // indefinitely. Both are 600 s and neither is a substitute for the other:
+        // this one cannot read the record, and that one cannot free memory.
+        inner.records.retain(|_, r| now.saturating_sub(r.stored_at) < SLOT_TTL_SECONDS);
     }
 }
 
@@ -263,6 +288,102 @@ fn closure_contains(closure: &[serde_json::Value], hash: &str) -> bool {
     })
 }
 
+
+// ── CON-409: the code-derived meeting point ─────────────────────────────────
+//
+// A DIFFERENT STORE FROM THE MAILBOX ABOVE, and the difference is the phase.
+//
+// The mailbox is keyed by a slot derived from `mailbox_secret_16`, which exists
+// only after the PAKE, and it carries ciphertext. A record is keyed by
+// `meet_addr` — derived from `C` before anything has been agreed — and carries a
+// signed, PLAINTEXT routing hint that tells a scanning wallet which application
+// and nameplate to meet at. A QR carries only `C`, so without this a scanned code
+// resolves to nothing.
+//
+// The store still holds no key material and makes no trust decision. It does not
+// verify the signature: the address is a public key and the resolving party
+// checks the signature against it, which is the only check that means anything
+// and is not one an operator can be trusted to have made.
+//
+// SINGLE-WRITE, like the mailbox, and for a sharper reason here: `CON-409`
+// requires a resolver to "reject a second record at the same address", and an
+// address that accepted two would let whoever holds `C` show one application to
+// the wallet and another to an observer.
+
+/// The publication envelope. Exactly two members.
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct RecordEnvelope {
+    /// The RFC 8785 record, base64url.
+    pub payload: String,
+    /// Ed25519 over exactly those octets, base64url.
+    pub signature: String,
+}
+
+/// A meeting address is 32 octets as unpadded base64url — 43 characters.
+fn is_well_formed_address(address: &str) -> bool {
+    address.len() == 43
+        && address.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+}
+
+/// `PUT /pairing/records/{address}` — single-write, 201 | 409 | 400.
+async fn put_record(
+    State(service): State<Service>,
+    Path(address): Path<String>,
+    Json(envelope): Json<RecordEnvelope>,
+) -> StatusCode {
+    use base64ct::Encoding as _;
+    if !is_well_formed_address(&address) {
+        return StatusCode::BAD_REQUEST;
+    }
+    let (Ok(payload), Ok(signature)) = (
+        base64ct::Base64UrlUnpadded::decode_vec(&envelope.payload),
+        base64ct::Base64UrlUnpadded::decode_vec(&envelope.signature),
+    ) else {
+        return StatusCode::BAD_REQUEST;
+    };
+    let Ok(signature): Result<[u8; 64], _> = signature.try_into() else {
+        return StatusCode::BAD_REQUEST;
+    };
+    if payload.is_empty() || payload.len() > MAX_RECORD_BYTES {
+        return StatusCode::BAD_REQUEST;
+    }
+
+    let now = now_seconds();
+    let mut inner = service.inner.lock().unwrap_or_else(|p| p.into_inner());
+    Service::sweep(&mut inner, now);
+    if inner.records.contains_key(&address) {
+        return StatusCode::CONFLICT;
+    }
+    inner.records.insert(address, Record { payload, signature, stored_at: now });
+    StatusCode::CREATED
+}
+
+/// `GET /pairing/records/{address}` — 200 | 404.
+///
+/// Readable more than once, unlike a mailbox slot. A record is a routing hint
+/// that a wallet may legitimately re-read — after a dropped connection, or while
+/// a person re-reads the code — and read-once here would turn a retry into a
+/// dead ceremony. Nothing is spent by reading it: the disclosure is bounded by
+/// `OQ-402` and is the same on the first read as the tenth.
+async fn get_record(
+    State(service): State<Service>,
+    Path(address): Path<String>,
+) -> Result<Json<RecordEnvelope>, StatusCode> {
+    use base64ct::Encoding as _;
+    if !is_well_formed_address(&address) {
+        return Err(StatusCode::NOT_FOUND);
+    }
+    let now = now_seconds();
+    let mut inner = service.inner.lock().unwrap_or_else(|p| p.into_inner());
+    Service::sweep(&mut inner, now);
+    let record = inner.records.get(&address).ok_or(StatusCode::NOT_FOUND)?;
+    Ok(Json(RecordEnvelope {
+        payload: base64ct::Base64UrlUnpadded::encode_string(&record.payload),
+        signature: base64ct::Base64UrlUnpadded::encode_string(&record.signature),
+    }))
+}
+
 // ── CON-005: signed-closure resolution ──────────────────────────────────────
 
 /// The closure response. **Signed deltas, not a resolved document.**
@@ -314,4 +435,23 @@ mod tests {
         assert!(!is_well_formed_slot(&"1".repeat(26)), "1 and 8 are not in RFC 4648 base32");
         assert!(!is_well_formed_slot(&"8".repeat(26)));
     }
+
+    /// Every address the contract's own derivation produces is accepted.
+    ///
+    /// The same shape as the slot test above, and for the same reason: a store
+    /// whose grammar is narrower than the deriver's refuses live ceremonies, and
+    /// one that is wider accepts addresses no code can reach.
+    #[test]
+    fn meeting_addresses_outside_the_grammar_are_refused() {
+        for seed in 0u8..32 {
+            let code = selfsame_app_identity::pairing_code::Code::from_octets([seed; 16]);
+            assert!(is_well_formed_address(&code.meeting_point().address_text()));
+        }
+        assert!(!is_well_formed_address(""));
+        assert!(!is_well_formed_address(&"a".repeat(42)), "32 octets is 43 characters");
+        assert!(!is_well_formed_address(&"a".repeat(44)));
+        assert!(!is_well_formed_address(&format!("{}=", "a".repeat(42))), "unpadded only");
+        assert!(!is_well_formed_address(&format!("{}+", "a".repeat(42))), "url-safe alphabet only");
+    }
+
 }
