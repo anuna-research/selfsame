@@ -168,13 +168,41 @@ impl PathBResolverQuorum {
             // exists and is revoked from one that never existed, which is why
             // `Document::resolve` — which drops revoked methods and yields
             // nothing at all for a deactivated DID — is not the right source.
-            let assertion_methods = document.verification_methods().into_iter()
+            //
+            // THE ID IS THE `JsonWebKey` TWIN'S, NOT THE RAW METHOD'S, and that
+            // is the whole reason this loop is more than a map.
+            //
+            // `CON-206` step 6 requires the grant's `kid` to name a `JsonWebKey`
+            // in `assertionMethod`, and `grant::header` signs under
+            // `{did}#jwk-0`. That fragment does not exist among the raw
+            // verification methods — `issuer::create` writes `#key-1` and says
+            // so: *"the resolver then projects that method into the JsonWebKey
+            // twin the VC JOSE/COSE profile requires, at `#jwk-0`"*. This
+            // function IS that resolver-side projection for the NIF path, and it
+            // used to emit `entry.id`, so every grant `issuer::create` minted was
+            // refused `IssuerKey: "kid is not in assertionMethod"` — through the
+            // sidecar, through `cbcl_selfsame_erl:verify_path_b/2`, by every
+            // route that did not go through `Document::resolve`. The `kind` was
+            // already hard-coded to `JsonWebKey` here, which is the tell: this
+            // was always meant to be the twin, and only the id was left raw.
+            //
+            // The numbering rule is `did-crdt`'s and is reproduced exactly —
+            // asserting methods ordered BY ID, then twinned positionally as
+            // `#jwk-{index}`. Ordering by id rather than by arrival is what makes
+            // the fragment a function of state; sorting differently here would
+            // hand `#jwk-0` to a different key than the one a resolver serves,
+            // which is worse than not projecting at all.
+            let mut asserting: Vec<_> = document.verification_methods().into_iter()
                 .filter(|entry| entry.relationships.contains(&VerificationRelationship::AssertionMethod))
-                .map(|entry| {
+                .collect();
+            asserting.sort_by(|a, b| a.id.cmp(&b.id));
+            let assertion_methods = asserting.into_iter()
+                .enumerate()
+                .map(|(index, entry)| {
                     let raw = entry.public_key_multibase.strip_prefix('u').ok_or(NetError::Refused("Path-B assertion key is not base64url multibase"))
                         .and_then(|text| Base64UrlUnpadded::decode_vec(text).map_err(|_| NetError::Refused("Path-B assertion key is malformed")))?;
                     if raw.len() != 32 { return Err(NetError::Refused("Path-B assertion key is not Ed25519 length")); }
-                    Ok(PathBAssertionMethod { id: entry.id, kind: "JsonWebKey".into(), public_key: raw, has_private_component: false })
+                    Ok(PathBAssertionMethod { id: format!("{}#jwk-{index}", document.did), kind: "JsonWebKey".into(), public_key: raw, has_private_component: false })
                 }).collect::<Result<Vec<_>, NetError>>()?;
             // These three are true BY CONSTRUCTION, not by assertion: a document
             // reaches this vector only via `replay_closure`, which refuses unless
@@ -971,4 +999,69 @@ mod tests {
         assert!(bundle_is_admissible(&[], Acceptance::Repeat).is_err());
     }
 
+    /// The projected assertion-method id is the one a grant's `kid` names.
+    ///
+    /// This is the regression for a defect that made Path-B unverifiable by
+    /// every route that does not go through `Document::resolve`. `nif_closures`
+    /// emitted `entry.id` — the raw `did:crdt` method, `#key-1` — while
+    /// `grant::header` signs under `{did}#jwk-0` and `CON-206` step 6 looks for
+    /// a `JsonWebKey` in `assertionMethod`. The two never met, so every grant
+    /// `issuer::create` minted was refused
+    /// `IssuerKey: "kid is not in assertionMethod"` through the sidecar and
+    /// through `cbcl_selfsame_erl:verify_path_b/2`.
+    ///
+    /// It asserts the two sides against **each other** rather than both against
+    /// the literal `#jwk-0`. Pinning the constant twice would let a future
+    /// change to the fragment pass here while breaking the pairing; comparing
+    /// the projection with the kid the signer actually uses cannot.
+    #[test]
+    fn the_projected_assertion_id_is_the_kid_a_grant_is_signed_under() {
+        use did_crdt::core::delta::DeltaOp;
+        use ed25519_dalek::SigningKey;
+        use selfsame_app_identity::grant::HOME_METHOD_FRAGMENT;
+        use selfsame_app_identity::issuer;
+
+        let home = SigningKey::from_bytes(&[9u8; 32]);
+        let identity = issuer::create(&home, "chat.anuna.io", 1_700_000_000_000)
+            .expect("the pinned method creates an issuing identity");
+
+        // Replay exactly as `replay_closure` does, so the document under test is
+        // the one a resolver would hand back.
+        let genesis = identity
+            .deltas
+            .iter()
+            .find(|d| d.parents.is_empty())
+            .expect("one genesis delta");
+        let DeltaOp::AddVerificationMethod { public_key_multibase, .. } = &genesis.op else {
+            panic!("genesis adds a verification method");
+        };
+        let (mut document, _) = Document::new(public_key_multibase).expect("admissible genesis");
+        document
+            .merge_verified_bundle(identity.closure.clone())
+            .expect("the issuer's own closure verifies");
+
+        let quorum = PathBResolverQuorum {
+            closures: vec![("state-1".to_owned(), document)],
+            outcomes: vec![],
+        };
+        let facts = quorum.nif_closures(1_700_000_000).expect("closure facts");
+        let ids: Vec<&str> = facts[0]
+            .assertion_methods
+            .iter()
+            .map(|m| m.id.as_str())
+            .collect();
+
+        let kid = format!("{}{HOME_METHOD_FRAGMENT}", identity.did);
+        assert!(
+            ids.contains(&kid.as_str()),
+            "the projection must carry the id a grant is signed under; \
+             kid={kid} projected={ids:?}",
+        );
+        // And it must be a `JsonWebKey`, because that is the other half of what
+        // step 6 asks: the right id under the wrong type is still a refusal.
+        assert!(facts[0]
+            .assertion_methods
+            .iter()
+            .any(|m| m.id == kid && m.kind == "JsonWebKey"));
+    }
 }
