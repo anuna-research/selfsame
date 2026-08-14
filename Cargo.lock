@@ -3832,6 +3832,8 @@ name = "selfsame"
 version = "0.1.0"
 dependencies = [
  "argon2",
+ "axum",
+ "base64ct",
  "blake3",
  "did-crdt",
  "ed25519-dalek",
@@ -3841,6 +3843,8 @@ dependencies = [
  "selfsame-app-identity",
  "selfsame-app-identity-net",
  "selfsame-core",
+ "selfsame-rendezvous",
+ "selfsame-web-device",
  "serde",
  "serde_json",
  "tauri",
@@ -3954,12 +3958,16 @@ name = "selfsame-rendezvous"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "base64ct",
  "did-crdt",
  "ed25519-dalek",
+ "getrandom 0.2.17",
  "reqwest 0.12.28",
+ "selfsame-app-identity",
  "selfsame-core",
  "serde",
  "serde_json",
+ "sha2",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -3970,8 +3978,10 @@ name = "selfsame-web-device"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "base64ct",
  "did-crdt",
  "ed25519-dalek",
+ "qrcode",
  "reqwest 0.12.28",
  "selfsame-app-identity",
  "selfsame-core",

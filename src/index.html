@@ -490,6 +490,257 @@
           No applications yet. Sign into one that supports Selfsame and it will
           appear here.
         </p>
+        <div class="spacer"></div>
+        <button class="btn btn--primary" data-action="to-pairing">Connect an application</button>
+      </section>
+
+      <!--
+        ══ PROTO-003 · enter a pairing code (CON-402) ═════════════════════
+
+        Twelve words, and nothing else on the screen. CON-402 makes the word
+        rendering a first-class carrier rather than a fallback, and ADR-406
+        withdraws every shorter form — so there is no "just the first four
+        letters" affordance to offer, and abbreviated entry is deliberately
+        unspecified because it would be a second accepted input form and
+        therefore a second way for two recognisers to disagree.
+
+        A QR payload pasted here is accepted too; `read_pairing_code` tries both
+        renderings of the same sixteen octets. What it will not do is open one:
+        CON-402 is explicit that the QR "MUST NOT be opened by a browser,
+        emitted as an HTTP query, placed in a referrer, or registered as an
+        authoritative private-use URL scheme."
+      -->
+      <section class="screen" data-screen="pairing-enter" hidden>
+        <button class="back" data-action="to-applications">Back</button>
+        <h1>Type the pairing words.</h1>
+        <p class="lede">
+          Twelve words, in order, from the application asking to connect.
+          Hyphens or spaces, upper or lower case — all fine.
+        </p>
+        <label class="field">
+          <span class="field__label">Pairing words</span>
+          <textarea id="pairing-input" rows="3" autocomplete="off" spellcheck="false"
+                    autocapitalize="none" inputmode="text"></textarea>
+        </label>
+        <p class="code-state" data-pairing-state></p>
+        <p class="error" data-error="pairing" hidden></p>
+        <div class="spacer"></div>
+        <button class="btn btn--primary" data-action="read-pairing-code" disabled>Continue</button>
+      </section>
+
+      <!--
+        ══ PROTO-003 CON-409 · the claimed target ═════════════════════════
+
+        The one screen in this application that must not be believed.
+
+        A resolved CON-409 record is an "unauthenticated, bearer-routable hint".
+        Its signature "proves only that whoever holds C wrote it; it establishes
+        neither application authority nor an intended recipient" — so a party who
+        knows the code can publish a coherent record for a DIFFERENT application
+        and complete the PAKE for it, and the binding is internally consistent
+        either way. Confirmation cannot detect the substitution.
+
+        So the application identifier here sits under the untrusted treatment,
+        exactly as an application's self-declared display name does on
+        `consent-application`, and for the same reason: it is a claim. The command
+        that produced it calls the field `claimedApplicationId`, which is what
+        stopped this screen being built the other way round.
+
+        What it is FOR is the human check the protocol relies on: the person knows
+        which application they just asked to connect, and the origin is where they
+        would notice that it is not that one. So the origin leads and the full
+        identifier follows it — a person comparing a long URL reads the path and
+        misses the host, and the host is the part that decides who they are about
+        to be granted by.
+
+        Two options, ever. "This isn't mine" burns the ceremony without touching
+        the relay, because a decline that announced itself would tell an
+        unauthenticated party that a real wallet resolved its record.
+      -->
+      <section class="screen screen--scroll" data-screen="pairing-target" hidden>
+        <div class="consent-head">
+          <span class="screen-title">Connect an application</span>
+          <span class="countdown" data-pairing-countdown></span>
+        </div>
+        <h1>Is this what you're connecting to?</h1>
+
+        <div class="evidence">
+          <div class="evidence__row evidence__row--untrusted">
+            <p class="evidence__key">Says it is</p>
+            <p class="evidence__val evidence__val--mono" data-pairing-origin></p>
+            <p class="evidence__note">the code's own words, unchecked</p>
+          </div>
+
+          <div class="evidence__row evidence__row--untrusted">
+            <p class="evidence__key">Full identifier</p>
+            <p class="evidence__val evidence__val--mono" data-pairing-application></p>
+            <p class="evidence__note">nothing has verified this yet</p>
+          </div>
+
+          <div class="evidence__row">
+            <p class="evidence__key">Meeting at</p>
+            <p class="evidence__val evidence__val--mono" data-pairing-provider></p>
+            <p class="evidence__note">relays the exchange; learns nothing from it</p>
+          </div>
+        </div>
+
+        <p class="caution">
+          Only continue if you just asked this application to connect. Nothing has
+          been shared yet, and nothing will be until it proves it is who it says.
+        </p>
+
+        <div class="spacer"></div>
+        <button class="btn btn--primary" data-action="pairing-approve">Yes, this is me</button>
+        <button class="btn btn--quiet" data-action="pairing-decline">This isn't mine</button>
+      </section>
+
+      <!--
+        ══ PROTO-003 · what the application actually asked for ════════════
+
+        Reached only after `pairing_answer` returned, which means the PAKE
+        confirmed AND the wallet verified CON-214 enrollment evidence against the
+        profile the record pinned. CON-217 is blunt that the first is not the
+        second — "a valid confirmation is never sufficient application
+        authentication or authorization" — and the gate on this screen is the
+        second.
+
+        So the origin here is stated plainly, with no untrusted treatment. It is
+        the same string `pairing-target` showed as a claim, and the difference
+        between the two screens is the whole of what happened in between.
+      -->
+      <section class="screen screen--scroll" data-screen="pairing-grant" hidden>
+        <div class="consent-head">
+          <span class="screen-title">Authorise an application</span>
+          <span class="countdown" data-grant-countdown></span>
+        </div>
+        <h1>Let this application act for your account?</h1>
+
+        <div class="evidence">
+          <div class="evidence__row">
+            <p class="evidence__key">Verified as</p>
+            <p class="evidence__val evidence__val--mono" data-grant-application></p>
+            <p class="evidence__note">it signed for this, with a key its own site publishes</p>
+          </div>
+
+          <div class="evidence__row">
+            <p class="evidence__key">Gains</p>
+            <ul class="permissions" data-grant-permissions></ul>
+          </div>
+
+          <div class="evidence__row">
+            <p class="evidence__key">For the device</p>
+            <p class="evidence__val evidence__val--mono" data-grant-device></p>
+          </div>
+        </div>
+
+        <div class="spacer"></div>
+        <button class="btn btn--primary" data-action="pairing-grant-allow">Allow</button>
+        <button class="btn btn--quiet" data-action="pairing-decline">No</button>
+      </section>
+
+      <!-- ══ PROTO-003 · presence (REQ-024) ═════════════════════════════ -->
+      <section class="screen" data-screen="pairing-presence" hidden>
+        <button class="back" data-action="pairing-decline">Cancel</button>
+        <div class="mark mark--lg" aria-hidden="true"></div>
+        <h1>Confirm it's you</h1>
+        <p class="lede">
+          This account's home key is used once, here, to sign the grant.
+        </p>
+        <label class="field">
+          <span class="field__label">Passcode</span>
+          <input type="password" id="pairing-passcode" autocomplete="current-password" />
+        </label>
+        <p class="error" data-error="pairing-presence" hidden></p>
+        <div class="spacer"></div>
+        <button class="btn btn--primary" data-action="pairing-prepare">Authorise</button>
+      </section>
+
+      <!--
+        ══ CON-221 · the once-per-account comparison ══════════════════════
+
+        Shown only when `app_grant_prepare` reports `required`, which it decides
+        from AUTHORITY STATE and never from local cache. An unreachable authority
+        is `failClosed` and never reaches this screen — collapsing "no binding"
+        with "could not ask" is precisely the substitution this comparison exists
+        to catch, so the refusal happens in Rust and arrives here as a token.
+
+        No skip, and no back. REQ-230 gives the comparison no third control, and
+        retrying is what an attacker would ask for.
+      -->
+      <section class="screen screen--scroll" data-screen="pairing-compare" hidden>
+        <div class="consent-head">
+          <span class="screen-title">First time on this account</span>
+        </div>
+        <h1>Does the other screen show this?</h1>
+
+        <div class="fp">
+          <canvas class="fp__lifehash fp__lifehash--lg" data-pairing-fp-lifehash aria-hidden="true"></canvas>
+          <p class="fp__hex" data-pairing-fp-hex></p>
+          <p class="fp__label" data-pairing-fp-label></p>
+        </div>
+
+        <p class="lede">
+          This is <strong data-pairing-fp-account>this account</strong>'s identity
+          — <em>not</em> your home key fingerprint. Every account gets its own, so
+          it differs from the one on your home screen and differs again for every
+          other account.
+        </p>
+        <p class="caution">
+          You are asked this once for this account. It is what stands between you
+          and someone else's identity being bound to it.
+        </p>
+
+        <div class="spacer"></div>
+        <button class="btn btn--primary" data-action="pairing-confirm">Yes, they match</button>
+        <button class="btn btn--danger" data-action="pairing-decline">They're different</button>
+      </section>
+
+      <!-- ══ PROTO-003 · done ═══════════════════════════════════════════ -->
+      <section class="screen screen--scroll" data-screen="pairing-done" hidden>
+        <div class="mark mark--lg mark--ok" aria-hidden="true"></div>
+        <h1>Connected.</h1>
+        <p class="lede">
+          <strong data-done-application></strong> can now act for
+          <strong data-done-account></strong>, and nothing else.
+        </p>
+        <p class="label">Until</p>
+        <p class="value" data-done-until></p>
+        <!--
+          Reported rather than hidden. CON-206 step 4 prefers a resolver and
+          treats the bundled closure as "a bootstrap for a first ceremony on a
+          degraded network, not a standing arrangement" — and no conforming
+          did:crdt resolver is deployed, which is G6 of the Path-B review. A
+          person can see from this that the grant is leaning on the bootstrap,
+          which is better than a silence they would have to infer.
+        -->
+        <p class="caution" data-done-publishing></p>
+        <div class="spacer"></div>
+        <button class="btn btn--primary" data-action="to-applications">Done</button>
+      </section>
+
+      <!--
+        ══ PROTO-003 · the pairing ended ══════════════════════════════════
+
+        One line, from a closed set, and never a parse detail. CON-407: a UI
+        "reports that the code expired or pairing failed; it does not distinguish
+        a wrong word from an active attack." Those two are the same event to
+        anybody who can tell them apart, and telling them apart is what an
+        attacker is doing.
+
+        Every arrival here is terminal. CON-218 has one retry transition —
+        `burned -> new ceremony` — so the only control is to start again with a
+        fresh code, which is a new ceremony by construction.
+      -->
+      <section class="screen screen--scroll" data-screen="pairing-refused" hidden>
+        <div class="mark mark--lg mark--broken" aria-hidden="true"></div>
+        <h1 data-refused-pairing-title></h1>
+        <p class="lede" data-refused-pairing-body></p>
+        <p class="caution">
+          Nothing was shared and nothing was authorised. This code is finished —
+          if you were expecting this, ask the application for a new one.
+        </p>
+        <div class="spacer"></div>
+        <button class="btn btn--primary" data-action="to-applications">Close</button>
       </section>
 
       <!-- ══ HP-3 · one application ═════════════════════════════════════ -->

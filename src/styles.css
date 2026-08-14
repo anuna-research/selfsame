@@ -779,9 +779,47 @@ textarea:focus {
   aspect-ratio: 1;
   border-radius: 20px;
   border: 1px solid var(--hairline-strong);
-  background: var(--surface);
+  /* No fill. `windowed: true` puts the camera BEHIND the webview, so anything
+     painted here is painted over the preview. This used to be `var(--surface)`,
+     which is why the permission was granted, the scan worked, and the frame
+     showed a flat panel. */
+  background: transparent;
   position: relative;
   overflow: hidden;
+}
+
+/* ── the camera is behind the page, so the page has to get out of the way ────
+ *
+ * `tauri-plugin-barcode-scanner` with `windowed: true` renders the preview in a
+ * native surface UNDERNEATH the webview. Nothing shows through an opaque page,
+ * and the failure is silent in the worst way: permissions are granted, the
+ * scanner is running, and the screen looks like a UI bug.
+ *
+ * So while a scan is live the shell goes transparent and everything that is not
+ * the scanner is hidden — not merely dimmed, because a translucent element over
+ * a camera preview is unreadable on both counts. `body` keeps its text colour so
+ * the note under the frame stays legible against whatever the camera sees.
+ */
+html:has(body.scanning),
+body.scanning {
+  /* Both, because the WebView paints the root element's background and a
+     transparent body over an opaque html shows nothing. */
+  background: transparent;
+}
+
+/* The prose goes; the CONTROLS stay. A person looking at a live camera still
+ * needs the way out and the typed fallback — REQ-011 makes typing a route rather
+ * than a consolation, and hiding it here would make the camera the only way
+ * through at exactly the moment the camera is not working for them. */
+body.scanning h1,
+body.scanning .lede,
+body.scanning .spacer {
+  visibility: hidden;
+}
+
+body.scanning .scanner__note {
+  /* Readable over an arbitrary scene rather than over the shell colour. */
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
 }
 
 .scanner__line {

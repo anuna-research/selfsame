@@ -65,6 +65,16 @@ pub struct Session {
     /// rather than two, and dropped on rejection — it was never transmitted, so
     /// having signed it conferred nothing.
     pub pending_issuance: Option<crate::app_grant::PendingIssuance>,
+    /// The live `PROTO-003` ceremony, if there is one.
+    ///
+    /// `CON-407` requires the binding, the code, the role token and the terminal
+    /// state to be held "in process-private memory". This field is that memory,
+    /// and it is why the pairing commands take a `binding_hash` rather than the
+    /// code: the page names the ceremony, and holds none of it.
+    ///
+    /// Never persisted. [`Session::save`] writes `state` alone, and `NFR-403`
+    /// requires pairing metadata to be ephemeral.
+    pub pending_pairing: Option<crate::pairing::PendingPairing>,
 }
 
 /// An offer that has been fetched, recognised, and signature-verified, and is
@@ -84,7 +94,13 @@ impl Session {
             .ok()
             .and_then(|t| serde_json::from_str(&t).ok())
             .unwrap_or_default();
-        Self { path: Some(path), state, pending_offer: None, pending_issuance: None }
+        Self {
+            path: Some(path),
+            state,
+            pending_offer: None,
+            pending_issuance: None,
+            pending_pairing: None,
+        }
     }
 
     fn save(&self) {

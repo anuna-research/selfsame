@@ -57,6 +57,11 @@ const invoke = bridge;
 // primitives it needs, and imports nothing back. A cycle would work and would
 // make the boundary a convention rather than a fact.
 import { initAppIdentity } from "./app-identity.js";
+// PROTO-003's surface, on the same terms: one-way, and holding no security
+// logic. It is separate from `app-identity.js` because it implements a different
+// specification — the pairing that produces an offer, rather than the SPEC-004
+// screens that live with one afterwards.
+import { initPairing } from "./pairing.js";
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
@@ -441,7 +446,19 @@ async function startLink() {
       return;
     }
 
-    const scanned = await camera.scan({ formats: ["QRCode"], windowed: true });
+    // `windowed: true` renders the preview in a native surface BENEATH the
+    // webview, so the page must get out of its way or the person sees a flat
+    // panel with the permission granted and the scanner running — which reads as
+    // a broken camera rather than an opaque page.
+    document.body.classList.add("scanning");
+    let scanned;
+    try {
+      scanned = await camera.scan({ formats: ["QRCode"], windowed: true });
+    } finally {
+      // Removed on every path. A cancelled or failed scan that left the class on
+      // would leave the shell transparent over a camera that is no longer there.
+      document.body.classList.remove("scanning");
+    }
     await readCode(scanned.content);
   } catch (e) {
     // Falling back to typing is not an error state — REQ-011 makes the typed
@@ -791,6 +808,14 @@ const actions = {
 // listener below dispatches both surfaces without knowing there are two.
 const appIdentity = initAppIdentity({
   $, $$, show, invoke, fail, clearErrors, message, renderLifehash, since, actions,
+});
+
+// PROTO-003 registers into the same map. It additionally needs `busy`/`idle`,
+// because a pairing has three network waits a person watches — resolving the
+// record, meeting the application, and sending the bundle back — and `refresh`,
+// because the applications list is derived from what the wallet holds after one.
+initPairing({
+  $, show, invoke, fail, message, renderLifehash, actions, busy, idle, refresh,
 });
 
 document.addEventListener("click", (e) => {

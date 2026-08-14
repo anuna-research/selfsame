@@ -87,6 +87,9 @@ pub mod issuer;
 pub mod json;
 pub mod jws;
 pub mod pairing;
+/// `PROTO-003` `CON-402`/`CON-409` — the pairing code's carriers and the
+/// meeting point they route to.
+pub mod pairing_code;
 pub mod path_b;
 pub mod platform;
 pub mod profile;
