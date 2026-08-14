@@ -261,6 +261,168 @@ pub fn bundle_matches_offer_json(bundle: &[u8], offer: &[u8]) -> Result<(), JsEr
     result.map_err(|_| JsError::new("SPEC-004 bundle refused"))
 }
 
+// ── The facts a joiner must compute BEFORE it can build an offer ────────────
+//
+// `build_offer` insists that every check compares against "the JOINER'S OWN
+// profile, never a value the hint supplied — a hint may only select among things
+// already trusted". But a browser could not compute those values at all: the
+// profile digest the offer core carries, and the per-descriptor digest the
+// provider hint must match, were both native-only.
+//
+// So a browser building an offer had to be HANDED them by something else, which
+// is precisely the trust the sentence above refuses. This exposes them from the
+// joiner's own recognised profile, so the values it binds to are ones it derived.
+
+/// The profile facts a joiner needs to construct an offer and a provider hint.
+#[wasm_bindgen]
+pub fn profile_facts_json(profile: &[u8]) -> Result<String, JsError> {
+    profile_facts(profile).map_err(|_| JsError::new("SPEC-004 profile refused"))
+}
+
+/// Native twin of [`profile_facts_json`].
+pub fn profile_facts(profile: &[u8]) -> Result<String, IdentityError> {
+    let profile = ApplicationProfile::recognise(profile).map_err(|_| IdentityError::Refused)?;
+    let descriptors: Vec<String> = profile
+        .rendezvous
+        .iter()
+        .map(|d| {
+            format!(
+                r#"{{"id":{},"descriptorDigest":{}}}"#,
+                json_string(&d.id),
+                json_string(&selfsame_app_identity::codec::b64url(&d.digest)),
+            )
+        })
+        .collect();
+    Ok(format!(
+        r#"{{"applicationId":{},"accountAuthority":{},"profileVersion":{},"profileDigest":{},"allowedPermissions":[{}],"rendezvous":[{}]}}"#,
+        json_string(profile.application_id.as_str()),
+        json_string(profile.account_authority.as_str()),
+        selfsame_app_identity::PROFILE_VERSION,
+        json_string(&selfsame_app_identity::codec::b64url(profile.digest())),
+        profile
+            .allowed_permissions
+            .iter()
+            .map(|p| json_string(p))
+            .collect::<Vec<_>>()
+            .join(","),
+        descriptors.join(","),
+    ))
+}
+
+/// The `CON-219` offer digest, which the provider hint must carry.
+///
+/// Exposed because the hint commits to the offer and the offer excludes the
+/// hint, so the digest has to exist before either is complete — and a joiner that
+/// could not compute it could not construct a hint its own `build_offer` accepts.
+#[wasm_bindgen]
+pub fn offer_core_digest_json(offer_core_json: &str) -> Result<String, JsError> {
+    offer_core_digest(offer_core_json).map_err(|_| JsError::new("SPEC-004 offer core refused"))
+}
+
+/// Native twin of [`offer_core_digest_json`].
+pub fn offer_core_digest(offer_core_json: &str) -> Result<String, IdentityError> {
+    Ok(parse_offer_core(offer_core_json)?.digest())
+}
+
+// ── The transport, which a browser could not reach until now ────────────────
+//
+// The ceremony facades above decide what an offer and a bundle MEAN. None of
+// them could put one in a mailbox or take one out, so a browser holding this
+// package could build a `CON-219` offer and then had nowhere to send it — and
+// the adapter written against these facades in `cbcl-bus` refuses to start for
+// exactly that reason.
+//
+// The three below are the missing half, and they are deliberately the SMALLEST
+// surface that closes it: where a slot is, how an offer is sealed, and how a
+// bundle is opened. Everything they do is `selfsame_core::seal`'s, unchanged.
+//
+// WHY NOT LET THE BROWSER DO ITS OWN AEAD. A JavaScript reimplementation would
+// have to reproduce the HKDF label, the direction-separated nonces, both
+// associated-data strings and the BLAKE3 transcript exactly, and the first thing
+// it would get wrong is the one thing nothing else checks — `CON-205`'s parser
+// differential, in the one place where being wrong means a bundle that opens for
+// the wrong offer. There is one implementation and this exposes it.
+//
+// WHAT THIS IS NOT. It is `PROTO-002`'s transport, keyed by a 16-octet secret
+// the caller supplies. `PROTO-003` derives that secret from a SPAKE2 exchange,
+// which is unimplemented, so a caller passing a secret carried some other way is
+// running an unauthenticated channel. That is the caller's to declare, and the
+// naming says so: nothing here mentions pairing.
+
+/// The two mailbox addresses a secret designates — `CON-002`'s slot derivation.
+///
+/// Returned together because they are one fact about one secret, and a caller
+/// that derived them separately could pass different secrets to each and write
+/// its offer where nothing would read it.
+#[wasm_bindgen]
+pub fn mailbox_slots_json(secret: &[u8]) -> Result<String, JsError> {
+    mailbox_slots(secret).map_err(|_| JsError::new("a mailbox secret is exactly 16 octets"))
+}
+
+/// Native twin of [`mailbox_slots_json`].
+pub fn mailbox_slots(secret: &[u8]) -> Result<String, IdentityError> {
+    let secret = mailbox_secret(secret)?;
+    Ok(format!(
+        "{{\"offer\":\"{}\",\"bundle\":\"{}\"}}",
+        seal::slot(seal::Role::Offer, &secret),
+        seal::slot(seal::Role::Bundle, &secret),
+    ))
+}
+
+/// Seal an offer payload for the offer slot.
+#[wasm_bindgen]
+pub fn seal_offer_bytes(secret: &[u8], offer_plaintext: &[u8]) -> Result<Vec<u8>, JsError> {
+    seal_offer_for(secret, offer_plaintext)
+        .map_err(|_| JsError::new("a mailbox secret is exactly 16 octets"))
+}
+
+/// Native twin of [`seal_offer_bytes`].
+pub fn seal_offer_for(secret: &[u8], offer_plaintext: &[u8]) -> Result<Vec<u8>, IdentityError> {
+    let secret = mailbox_secret(secret)?;
+    Ok(seal::seal_offer(&seal::derive_key(&secret), offer_plaintext))
+}
+
+/// Open a bundle **under the caller's own offer**.
+///
+/// The transcript is computed here from `offer_plaintext` rather than accepted
+/// as a parameter, which makes `REQ-006`'s binding impossible to skip: a caller
+/// cannot pass a transcript it did not derive from the exact offer it wrote. A
+/// bundle that opens is therefore provably a reply to *this* offer and not
+/// something the rendezvous operator substituted.
+#[wasm_bindgen]
+pub fn open_bundle_bytes(
+    secret: &[u8],
+    sealed: &[u8],
+    offer_plaintext: &[u8],
+) -> Result<Vec<u8>, JsError> {
+    open_bundle_for(secret, sealed, offer_plaintext)
+        .map_err(|_| JsError::new("sealed record did not authenticate"))
+}
+
+/// Native twin of [`open_bundle_bytes`].
+pub fn open_bundle_for(
+    secret: &[u8],
+    sealed: &[u8],
+    offer_plaintext: &[u8],
+) -> Result<Vec<u8>, IdentityError> {
+    let secret = mailbox_secret(secret)?;
+    seal::open_bundle(
+        &seal::derive_key(&secret),
+        sealed,
+        &seal::transcript(offer_plaintext),
+    )
+    .map_err(|_| IdentityError::Refused)
+}
+
+/// A 16-octet mailbox secret, recognised before it is used.
+///
+/// A shorter secret silently padded, or a longer one truncated, would derive a
+/// slot and a key that no counterparty agrees with — which surfaces as a
+/// ceremony that times out rather than one that refuses.
+fn mailbox_secret(secret: &[u8]) -> Result<[u8; 16], IdentityError> {
+    secret.try_into().map_err(|_| IdentityError::Refused)
+}
+
 /// Native twin of [`bundle_matches_offer_json`].
 pub fn bundle_matches_offer(
     bundle: &BundlePayload,
@@ -1682,6 +1844,130 @@ mod tests {
 
         // The control.
         assert!(build_enrollment(&statement).is_ok());
+    }
+
+
+    // ── the transport surface ───────────────────────────────────────────────
+
+    /// The offer a device sealed is the offer the phone opens, and the bundle it
+    /// gets back opens only under its own offer.
+    ///
+    /// This is the round trip the browser could not perform at all before these
+    /// three functions existed, so it is worth having end to end rather than as
+    /// three separate unit assertions: the failure that matters is the one where
+    /// each half is individually right and they do not meet.
+    #[test]
+    fn an_offer_and_its_bundle_make_a_round_trip() {
+        let secret = [7u8; 16];
+        let offer = b"the exact offer octets a device wrote".to_vec();
+        let grant = b"the credential the phone sealed back".to_vec();
+
+        let sealed_offer = seal_offer_for(&secret, &offer).expect("seal");
+        // The phone's side is `selfsame_core::seal` directly — the same functions
+        // these facades call, reached the way a native wallet reaches them.
+        let key = seal::derive_key(&secret);
+        let opened = seal::open_offer(&key, &sealed_offer).expect("the phone opens the offer");
+        assert_eq!(opened, offer);
+
+        let sealed_bundle = seal::seal_bundle(&key, &grant, &seal::transcript(&offer));
+        assert_eq!(open_bundle_for(&secret, &sealed_bundle, &offer).expect("open"), grant);
+    }
+
+    /// A bundle minted against a DIFFERENT offer does not authenticate.
+    ///
+    /// `REQ-006` is the whole reason the transcript is computed inside
+    /// `open_bundle_bytes` instead of being a parameter. If this ever passes,
+    /// the rendezvous operator can substitute a reply.
+    #[test]
+    fn a_bundle_for_another_offer_is_refused() {
+        let secret = [7u8; 16];
+        let ours = b"our offer".to_vec();
+        let theirs = b"somebody else's offer".to_vec();
+        let key = seal::derive_key(&secret);
+
+        let sealed = seal::seal_bundle(&key, b"a grant", &seal::transcript(&theirs));
+        assert!(open_bundle_for(&secret, &sealed, &ours).is_err());
+    }
+
+    /// Both slots come from one secret, and they are not the same address.
+    #[test]
+    fn the_two_slots_are_distinct_and_derived_from_the_secret() {
+        let a: serde_json::Value =
+            serde_json::from_str(&mailbox_slots(&[1u8; 16]).expect("slots")).unwrap();
+        let b: serde_json::Value =
+            serde_json::from_str(&mailbox_slots(&[2u8; 16]).expect("slots")).unwrap();
+
+        assert_ne!(a["offer"], a["bundle"], "one secret, two directions, two mailboxes");
+        assert_ne!(a["offer"], b["offer"], "a different secret is a different mailbox");
+        // The derivation is upstream's and this is the check that they agree.
+        assert_eq!(a["offer"], seal::slot(seal::Role::Offer, &[1u8; 16]));
+    }
+
+    /// A secret of the wrong length is refused rather than padded.
+    #[test]
+    fn a_mailbox_secret_must_be_exactly_sixteen_octets() {
+        assert!(mailbox_slots(&[0u8; 15]).is_err());
+        assert!(mailbox_slots(&[0u8; 17]).is_err());
+        assert!(seal_offer_for(&[0u8; 8], b"x").is_err());
+    }
+
+
+    /// The facts a joiner is given are the ones its own `build_offer` checks.
+    ///
+    /// Asserted against `ProviderHint::verify`'s sources rather than against
+    /// literals: the point of exposing them is that a browser can construct a
+    /// hint its own offer builder accepts, so the test that matters is that a
+    /// hint built ONLY from these facts passes. Pinning the digests as constants
+    /// would still let the two drift and would say nothing about that.
+    #[test]
+    fn a_hint_built_only_from_the_exposed_facts_is_accepted() {
+        let fixture = grant_fixture();
+        let facts: serde_json::Value =
+            serde_json::from_str(&profile_facts(&fixture.profile_octets).expect("facts")).unwrap();
+
+        let descriptor = &facts["rendezvous"][0];
+        let (core, _, _, _) = offer_fixture(&fixture);
+        // Built in the BROWSER'S wire shape, so the digest under test is the one a
+        // browser would actually compute rather than one taken off the native
+        // value beside it.
+        let core_json = serde_json::json!({
+            "ceremony_id": core.ceremony_id,
+            "request_id": core.request_id,
+            "application_id": core.application_id,
+            "profile_version": core.profile_version,
+            "profile_digest": core.profile_digest,
+            "account_scope_id": core.account_scope_id,
+            "device_did": core.device_did,
+            "device_public_key": core.device_public_key.to_vec(),
+            "requested_permissions": core.requested_permissions,
+            "issued_at": core.issued_at,
+            "expires_at": core.expires_at,
+        })
+        .to_string();
+        let digest = offer_core_digest(&core_json).expect("digest");
+        assert_eq!(digest, core.digest(), "the browser's digest is the native one");
+
+        let hint = ProviderHint {
+            application_id: facts["applicationId"].as_str().unwrap().to_owned(),
+            profile_version: facts["profileVersion"].as_i64().unwrap(),
+            provider_id: descriptor["id"].as_str().unwrap().to_owned(),
+            descriptor_digest: descriptor["descriptorDigest"].as_str().unwrap().to_owned(),
+            offer_digest: digest.clone(),
+        };
+        let profile = ApplicationProfile::recognise(&fixture.profile_octets).unwrap();
+        assert!(hint.verify(&profile, &digest).is_ok(),
+                "a hint built from the exposed facts must satisfy CON-209");
+
+        // And the profile digest the offer core carries is the same one.
+        assert_eq!(facts["profileDigest"].as_str().unwrap(),
+                   selfsame_app_identity::codec::b64url(profile.digest()));
+    }
+
+    /// An unrecognised profile yields no facts at all.
+    #[test]
+    fn facts_are_refused_for_a_profile_the_recogniser_rejects() {
+        assert!(profile_facts(b"{}").is_err());
+        assert!(profile_facts(b"not json").is_err());
     }
 
 }
