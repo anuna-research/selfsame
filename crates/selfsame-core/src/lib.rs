@@ -46,6 +46,8 @@ pub mod mb;
 pub mod profile;
 pub mod record;
 pub mod seal;
+/// `PROTO-003` `CON-404`/`CON-408` — the pairing ciphersuite.
+pub mod spake2;
 
 /// Seconds since the Unix epoch, injected by the shell.
 ///

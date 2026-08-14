@@ -56,6 +56,7 @@
 //!
 //! [[PROTO-003]]: ../../../../specs/PROTO-003-selfsame-pairing-v1.md
 
+use crate::json::{self, Json};
 use crate::profile::{ApplicationProfile, RendezvousDescriptor};
 
 /// The thirteen values `REQ-229` requires a retry to regenerate.
@@ -1394,5 +1395,143 @@ mod tests {
         for role in ["did-crdt-state", "account-authority", "status-projection"] {
             assert!(ROLES_A_DESCRIPTOR_DOES_NOT_SUPPLY.contains(&role));
         }
+    }
+}
+
+// ── CON-403: the binding object, and the hash both endpoints must agree on ───
+
+/// The nine members `CON-403` fixes, and nothing else.
+///
+/// # Why this is a type and not a JSON blob
+///
+/// Both endpoints must construct *the same* object before either processes a
+/// peer frame — `CON-403` is emphatic: *"Both parties MUST hold every member
+/// below before either processes a peer frame."* They build it from different
+/// sources (the application from its own profile and selection, the wallet from
+/// the resolved `CON-409` record plus the profile it fetched and pinned), so the
+/// one thing that must not vary is the shape. A struct with nine fields and one
+/// serialiser is how two implementations reach the same octets.
+///
+/// # What is deliberately absent
+///
+/// The code, `C`, and `wib` never appear here. `CON-403` says so, and the reason
+/// is the whole point of the ceremony: the binding object is hashed into a
+/// transcript that a relay can see the consequences of, and the password must not
+/// be recoverable from it.
+///
+/// Two applications may share a route, provider, number and code. Their different
+/// application IDs or profile digests still produce different identities,
+/// transcripts, keys and confirmation MACs — which is the property the last test
+/// below pins.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BindingObject {
+    /// The canonical application identifier.
+    pub application_id: String,
+    /// The selected complete descriptor's digest, unpadded base64url SHA-256.
+    pub descriptor_digest: String,
+    /// The six-digit nameplate.
+    pub nameplate: String,
+    /// `route || nameplate`.
+    pub number: String,
+    /// The authenticated application profile's digest.
+    pub profile_digest: String,
+    /// The protocol name.
+    pub protocol: String,
+    /// The selected provider.
+    pub provider_id: String,
+    /// The two-digit route.
+    pub route: String,
+    /// The binding object version.
+    pub version: i64,
+}
+
+impl BindingObject {
+    /// `SHA256(RFC8785(binding_object))` — `CON-403`'s `binding_hash`.
+    ///
+    /// The members are listed in the contract's printed order. RFC 8785 sorts, so
+    /// the order here changes nothing about the digest; it is kept so a reader
+    /// comparing this to `CON-403` sees the same sequence.
+    pub fn binding_hash(&self) -> [u8; 32] {
+        let value = Json::obj([
+            ("applicationId", Json::text(self.application_id.clone())),
+            ("descriptorDigest", Json::text(self.descriptor_digest.clone())),
+            ("nameplate", Json::text(self.nameplate.clone())),
+            ("number", Json::text(self.number.clone())),
+            ("profileDigest", Json::text(self.profile_digest.clone())),
+            ("protocol", Json::text(self.protocol.clone())),
+            ("providerId", Json::text(self.provider_id.clone())),
+            ("route", Json::text(self.route.clone())),
+            ("version", Json::int(self.version)),
+        ]);
+        <sha2::Sha256 as sha2::Digest>::digest(json::canonicalise(&value)).into()
+    }
+}
+
+#[cfg(test)]
+mod binding_tests {
+    use super::*;
+
+    fn object() -> BindingObject {
+        BindingObject {
+            application_id: "https://photos.example/selfsame/application".into(),
+            descriptor_digest: "ZGVzY3JpcHRvci1kaWdlc3QtMzItb2N0ZXRzLWhlcmUtb2s".into(),
+            nameplate: "482715".into(),
+            number: "03482715".into(),
+            profile_digest: "cHJvZmlsZS1kaWdlc3QtMzItb2N0ZXRzLWhlcmUtb2sten8".into(),
+            protocol: "selfsame-pairing-v1".into(),
+            provider_id: "au-primary".into(),
+            route: "03".into(),
+            version: 1,
+        }
+    }
+
+    /// The same object always hashes the same way, whoever built it.
+    #[test]
+    fn the_binding_hash_is_a_function_of_the_nine_members() {
+        assert_eq!(object().binding_hash(), object().binding_hash());
+    }
+
+    /// Every member is load-bearing.
+    ///
+    /// Written as a sweep rather than nine tests because the property is about
+    /// the SET: a member that could change without moving the hash would be one an
+    /// attacker could vary while both endpoints still agreed.
+    #[test]
+    fn changing_any_member_changes_the_hash() {
+        let base = object().binding_hash();
+        // Plain fn pointers, and each mutation names the member it moves — so a
+        // failure says which of the nine stopped being load-bearing rather than
+        // giving an index to count out.
+        // Named, because clippy asks for it and because the name says what the
+        // array is: one way to change one member.
+        type Mutation = (&'static str, fn(&mut BindingObject));
+        let mutations: [Mutation; 9] = [
+            ("applicationId", |o| o.application_id = "https://pictura.example/selfsame/application".into()),
+            ("descriptorDigest", |o| o.descriptor_digest = "b3RoZXItZGVzY3JpcHRvci1kaWdlc3QtdmFsdWUtaGVy".into()),
+            ("nameplate", |o| o.nameplate = "482716".into()),
+            ("number", |o| o.number = "03482716".into()),
+            ("profileDigest", |o| o.profile_digest = "b3RoZXItcHJvZmlsZS1kaWdlc3QtdmFsdWUtaGVyZS1v".into()),
+            ("protocol", |o| o.protocol = "selfsame-pairing-v2".into()),
+            ("providerId", |o| o.provider_id = "global-secondary".into()),
+            ("route", |o| o.route = "17".into()),
+            ("version", |o| o.version = 2),
+        ];
+        for (member, mutate) in mutations {
+            let mut mutated = object();
+            mutate(&mut mutated);
+            assert_ne!(mutated.binding_hash(), base, "{member} did not move the hash");
+        }
+    }
+
+    /// `CON-403`'s stated consequence: one code, two applications, two ceremonies.
+    #[test]
+    fn two_applications_sharing_a_code_do_not_share_a_binding() {
+        let mut other = object();
+        other.application_id = "https://pictura.example/selfsame/application".into();
+        // Same route, provider, number — and the code never enters either object.
+        assert_eq!(other.route, object().route);
+        assert_eq!(other.number, object().number);
+        assert_eq!(other.provider_id, object().provider_id);
+        assert_ne!(other.binding_hash(), object().binding_hash());
     }
 }

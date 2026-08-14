@@ -64,7 +64,9 @@ use selfsame_app_identity::enrollment::{self as identity_enrollment, EnrollmentS
 use selfsame_app_identity::json::{self as identity_json, Json};
 use selfsame_app_identity::path_b::{rehydrate_verified_grant, GrantRequest, VerifiedGrant};
 use selfsame_app_identity::path_b::{agree_closures, issuer_state_of, ClosureAssertionMethod, ResolverObservation};
+use selfsame_app_identity::pairing as identity_pairing;
 use selfsame_app_identity::profile::ApplicationProfile;
+use selfsame_core::spake2 as identity_spake2;
 use selfsame_app_identity::proof::{self as identity_proof, Challenge};
 use selfsame_app_identity::selection::ProviderHint;
 use selfsame_core::code::{LinkCode, LinkSecret};
@@ -259,6 +261,166 @@ pub fn bundle_matches_offer_json(bundle: &[u8], offer: &[u8]) -> Result<(), JsEr
         bundle_matches_offer(&bundle, &offer.core)
     })();
     result.map_err(|_| JsError::new("SPEC-004 bundle refused"))
+}
+
+// ── PROTO-003's pairing, so the browser can be role A ───────────────────────
+//
+// The mailbox secret is DOWNSTREAM of the PAKE (`SPEC-004` step 4), so a browser
+// that could not run SPAKE2 could not derive one — it could only be handed a
+// secret, which is a mailbox with the binding removed. This is the ceremony's
+// application side.
+//
+// STATE IS HELD, because SPAKE2 is two round trips and the type-state in
+// `selfsame_core::spake2` cannot cross the wasm boundary. The ordering it
+// enforces is preserved here by consuming the stage on each step: `message` is
+// available before `confirm`, `confirm` before `finish`, and calling one out of
+// turn is an error rather than a different answer. `K` is never exposed at any
+// point — `finish` returns the mailbox secret and nothing else.
+
+enum PairingStage {
+    Offered(Box<identity_spake2::Pairing>),
+    Confirmed(Box<identity_spake2::Confirmed>),
+    Spent,
+}
+
+/// One endpoint of a `PROTO-003` pairing.
+#[wasm_bindgen]
+pub struct PairingSession {
+    stage: PairingStage,
+    message: [u8; 32],
+}
+
+#[wasm_bindgen]
+impl PairingSession {
+    /// Begin as the named party, from the 16-octet code and 64 CSPRNG octets.
+    ///
+    /// `binding_hash` is `CON-403`'s and must be computed by this endpoint from
+    /// its own profile and selection — see [`binding_hash_json`]. Accepting a
+    /// peer's is the trust the binding exists to remove.
+    #[wasm_bindgen(constructor)]
+    pub fn new(
+        party: &str,
+        wib: &[u8],
+        binding_hash: &[u8],
+        ephemeral: &[u8],
+    ) -> Result<PairingSession, JsError> {
+        let party = match party {
+            "application" => identity_spake2::Party::Application,
+            "wallet" => identity_spake2::Party::Wallet,
+            _ => return Err(JsError::new("a party is \"application\" or \"wallet\"")),
+        };
+        let wib: [u8; identity_spake2::WIB_OCTETS] = wib
+            .try_into()
+            .map_err(|_| JsError::new("a pairing code is exactly 16 octets"))?;
+        let binding_hash: [u8; 32] = binding_hash
+            .try_into()
+            .map_err(|_| JsError::new("a binding hash is exactly 32 octets"))?;
+        let ephemeral: [u8; 64] = ephemeral
+            .try_into()
+            .map_err(|_| JsError::new("an ephemeral is exactly 64 octets"))?;
+        let pairing = identity_spake2::Pairing::begin(party, &wib, &binding_hash, &ephemeral)
+            .map_err(|e| JsError::new(&e.to_string()))?;
+        let message = pairing.message();
+        Ok(PairingSession { stage: PairingStage::Offered(Box::new(pairing)), message })
+    }
+
+    /// This endpoint's wire value — `pA` or `pB`, 32 octets.
+    pub fn message(&self) -> Vec<u8> {
+        self.message.to_vec()
+    }
+
+    /// Consume the peer's value; return this endpoint's confirmation MAC.
+    pub fn confirm(&mut self, peer_message: &[u8]) -> Result<Vec<u8>, JsError> {
+        self.confirm_for(peer_message)
+            .map(|mac| mac.to_vec())
+            .map_err(|_| JsError::new("the peer pairing value was refused"))
+    }
+
+    /// Verify the peer's confirmation and return the `CON-408` mailbox secret.
+    ///
+    /// The only way to reach a mailbox secret, and it is unreachable until the
+    /// peer has been confirmed — which is `CON-404`'s rule that `K` is released
+    /// to `CON-408` only after mutual confirmation.
+    pub fn finish(&mut self, peer_confirmation: &[u8]) -> Result<Vec<u8>, JsError> {
+        self.finish_for(peer_confirmation)
+            .map(|secret| secret.to_vec())
+            .map_err(|_| JsError::new("the peer confirmation was refused"))
+    }
+}
+
+/// The native twins. See the note on [`bundle_matches_offer`] — `JsError` only
+/// works inside a wasm host, so every error path is reachable natively or not at
+/// all, and a state machine whose refusals cannot be tested is a state machine
+/// with untested refusals.
+impl PairingSession {
+    /// Native twin of [`PairingSession::confirm`].
+    pub fn confirm_for(&mut self, peer_message: &[u8]) -> Result<[u8; 32], IdentityError> {
+        let peer: [u8; 32] = peer_message.try_into().map_err(|_| IdentityError::Refused)?;
+        let stage = std::mem::replace(&mut self.stage, PairingStage::Spent);
+        let PairingStage::Offered(pairing) = stage else {
+            return Err(IdentityError::Refused);
+        };
+        let confirmed = pairing.confirm(&peer).map_err(|_| IdentityError::Refused)?;
+        let ours = confirmed.confirmation();
+        self.stage = PairingStage::Confirmed(Box::new(confirmed));
+        Ok(ours)
+    }
+
+    /// Native twin of [`PairingSession::finish`].
+    pub fn finish_for(&mut self, peer_confirmation: &[u8]) -> Result<[u8; 16], IdentityError> {
+        let peer: [u8; 32] = peer_confirmation.try_into().map_err(|_| IdentityError::Refused)?;
+        let stage = std::mem::replace(&mut self.stage, PairingStage::Spent);
+        let PairingStage::Confirmed(confirmed) = stage else {
+            return Err(IdentityError::Refused);
+        };
+        Ok(confirmed
+            .verify_peer(&peer)
+            .map_err(|_| IdentityError::Refused)?
+            .mailbox_secret())
+    }
+}
+
+/// `CON-403`'s `binding_hash`, from the nine members.
+///
+/// The object is passed as JSON with the contract's own member names, so what a
+/// caller writes can be compared against `CON-403` by eye. It is recognised as a
+/// closed set: an unknown member is an error rather than something silently
+/// dropped, because a member that did not reach the hash is one the two
+/// endpoints could disagree about while still agreeing on the digest.
+#[wasm_bindgen]
+pub fn binding_hash_json(binding_object_json: &str) -> Result<Vec<u8>, JsError> {
+    binding_hash_of(binding_object_json).map_err(|_| JsError::new("SPEC-004 binding object refused"))
+}
+
+/// Native twin of [`binding_hash_json`].
+pub fn binding_hash_of(binding_object_json: &str) -> Result<Vec<u8>, IdentityError> {
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Wire {
+        #[serde(rename = "applicationId")] application_id: String,
+        #[serde(rename = "descriptorDigest")] descriptor_digest: String,
+        nameplate: String,
+        number: String,
+        #[serde(rename = "profileDigest")] profile_digest: String,
+        protocol: String,
+        #[serde(rename = "providerId")] provider_id: String,
+        route: String,
+        version: i64,
+    }
+    let w: Wire = serde_json::from_str(binding_object_json).map_err(|_| IdentityError::Refused)?;
+    Ok(identity_pairing::BindingObject {
+        application_id: w.application_id,
+        descriptor_digest: w.descriptor_digest,
+        nameplate: w.nameplate,
+        number: w.number,
+        profile_digest: w.profile_digest,
+        protocol: w.protocol,
+        provider_id: w.provider_id,
+        route: w.route,
+        version: w.version,
+    }
+    .binding_hash()
+    .to_vec())
 }
 
 // ── The facts a joiner must compute BEFORE it can build an offer ────────────
@@ -1968,6 +2130,82 @@ mod tests {
     fn facts_are_refused_for_a_profile_the_recogniser_rejects() {
         assert!(profile_facts(b"{}").is_err());
         assert!(profile_facts(b"not json").is_err());
+    }
+
+
+    /// The two wasm endpoints reach the same mailbox secret.
+    ///
+    /// The browser is role A and a wallet is role B, so this is the exchange
+    /// EXP-004 runs with a relay between the two halves. Driving both here means
+    /// a relay failure and a ceremony failure cannot be confused for each other.
+    #[test]
+    fn two_pairing_sessions_reach_one_mailbox_secret() {
+        let binding = serde_json::json!({
+            "applicationId": "https://chat.anuna.io/selfsame/application",
+            "descriptorDigest": "ZGVzY3JpcHRvci1kaWdlc3QtMzItb2N0ZXRzLWhlcmUtb2s",
+            "nameplate": "482715",
+            "number": "03482715",
+            "profileDigest": "cHJvZmlsZS1kaWdlc3QtMzItb2N0ZXRzLWhlcmUtb2sten8",
+            "protocol": "selfsame-pairing-v1",
+            "providerId": "exp-004-loopback",
+            "route": "03",
+            "version": 1,
+        })
+        .to_string();
+        let hash = binding_hash_of(&binding).expect("a closed binding object");
+
+        let code = [5u8; 16];
+        let mut a = PairingSession::new("application", &code, &hash, &[1u8; 64]).unwrap();
+        let mut b = PairingSession::new("wallet", &code, &hash, &[2u8; 64]).unwrap();
+
+        let (pa, pb) = (a.message(), b.message());
+        let ca = a.confirm_for(&pb).unwrap();
+        let cb = b.confirm_for(&pa).unwrap();
+        assert_eq!(a.finish_for(&cb).unwrap(), b.finish_for(&ca).unwrap());
+    }
+
+    /// A different code reaches confirmation and fails there, not at the mailbox.
+    #[test]
+    fn a_wrong_code_fails_at_confirmation_across_the_boundary() {
+        let binding = serde_json::json!({
+            "applicationId": "https://chat.anuna.io/selfsame/application",
+            "descriptorDigest": "ZGVzY3JpcHRvci1kaWdlc3QtMzItb2N0ZXRzLWhlcmUtb2s",
+            "nameplate": "482715", "number": "03482715",
+            "profileDigest": "cHJvZmlsZS1kaWdlc3QtMzItb2N0ZXRzLWhlcmUtb2sten8",
+            "protocol": "selfsame-pairing-v1", "providerId": "exp-004-loopback",
+            "route": "03", "version": 1,
+        }).to_string();
+        let hash = binding_hash_of(&binding).unwrap();
+        let mut a = PairingSession::new("application", &[5u8; 16], &hash, &[1u8; 64]).unwrap();
+        let mut b = PairingSession::new("wallet", &[6u8; 16], &hash, &[2u8; 64]).unwrap();
+        let (pa, pb) = (a.message(), b.message());
+        let ca = a.confirm_for(&pb).unwrap();
+        let cb = b.confirm_for(&pa).unwrap();
+        assert!(a.finish_for(&cb).is_err());
+        assert!(b.finish_for(&ca).is_err());
+    }
+
+    /// The stages cannot be taken out of order.
+    #[test]
+    fn a_pairing_refuses_to_finish_before_it_has_confirmed() {
+        let hash = [3u8; 32];
+        let mut a = PairingSession::new("application", &[5u8; 16], &hash, &[1u8; 64]).unwrap();
+        assert!(a.finish_for(&[0u8; 32]).is_err(), "no mailbox secret without a peer value");
+    }
+
+    /// An unknown member in the binding object is refused, not dropped.
+    #[test]
+    fn the_binding_object_is_a_closed_set() {
+        let extra = serde_json::json!({
+            "applicationId": "https://chat.anuna.io/selfsame/application",
+            "descriptorDigest": "ZGVzY3JpcHRvci1kaWdlc3QtMzItb2N0ZXRzLWhlcmUtb2s",
+            "nameplate": "482715", "number": "03482715",
+            "profileDigest": "cHJvZmlsZS1kaWdlc3QtMzItb2N0ZXRzLWhlcmUtb2sten8",
+            "protocol": "selfsame-pairing-v1", "providerId": "exp-004-loopback",
+            "route": "03", "version": 1,
+            "code": "the one member CON-403 must never carry",
+        }).to_string();
+        assert!(binding_hash_of(&extra).is_err());
     }
 
 }
