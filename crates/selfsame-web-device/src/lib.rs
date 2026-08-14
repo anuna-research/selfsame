@@ -261,6 +261,69 @@ pub fn bundle_matches_offer_json(bundle: &[u8], offer: &[u8]) -> Result<(), JsEr
     result.map_err(|_| JsError::new("SPEC-004 bundle refused"))
 }
 
+// ── The facts a joiner must compute BEFORE it can build an offer ────────────
+//
+// `build_offer` insists that every check compares against "the JOINER'S OWN
+// profile, never a value the hint supplied — a hint may only select among things
+// already trusted". But a browser could not compute those values at all: the
+// profile digest the offer core carries, and the per-descriptor digest the
+// provider hint must match, were both native-only.
+//
+// So a browser building an offer had to be HANDED them by something else, which
+// is precisely the trust the sentence above refuses. This exposes them from the
+// joiner's own recognised profile, so the values it binds to are ones it derived.
+
+/// The profile facts a joiner needs to construct an offer and a provider hint.
+#[wasm_bindgen]
+pub fn profile_facts_json(profile: &[u8]) -> Result<String, JsError> {
+    profile_facts(profile).map_err(|_| JsError::new("SPEC-004 profile refused"))
+}
+
+/// Native twin of [`profile_facts_json`].
+pub fn profile_facts(profile: &[u8]) -> Result<String, IdentityError> {
+    let profile = ApplicationProfile::recognise(profile).map_err(|_| IdentityError::Refused)?;
+    let descriptors: Vec<String> = profile
+        .rendezvous
+        .iter()
+        .map(|d| {
+            format!(
+                r#"{{"id":{},"descriptorDigest":{}}}"#,
+                json_string(&d.id),
+                json_string(&selfsame_app_identity::codec::b64url(&d.digest)),
+            )
+        })
+        .collect();
+    Ok(format!(
+        r#"{{"applicationId":{},"accountAuthority":{},"profileVersion":{},"profileDigest":{},"allowedPermissions":[{}],"rendezvous":[{}]}}"#,
+        json_string(profile.application_id.as_str()),
+        json_string(profile.account_authority.as_str()),
+        selfsame_app_identity::PROFILE_VERSION,
+        json_string(&selfsame_app_identity::codec::b64url(profile.digest())),
+        profile
+            .allowed_permissions
+            .iter()
+            .map(|p| json_string(p))
+            .collect::<Vec<_>>()
+            .join(","),
+        descriptors.join(","),
+    ))
+}
+
+/// The `CON-219` offer digest, which the provider hint must carry.
+///
+/// Exposed because the hint commits to the offer and the offer excludes the
+/// hint, so the digest has to exist before either is complete — and a joiner that
+/// could not compute it could not construct a hint its own `build_offer` accepts.
+#[wasm_bindgen]
+pub fn offer_core_digest_json(offer_core_json: &str) -> Result<String, JsError> {
+    offer_core_digest(offer_core_json).map_err(|_| JsError::new("SPEC-004 offer core refused"))
+}
+
+/// Native twin of [`offer_core_digest_json`].
+pub fn offer_core_digest(offer_core_json: &str) -> Result<String, IdentityError> {
+    Ok(parse_offer_core(offer_core_json)?.digest())
+}
+
 // ── The transport, which a browser could not reach until now ────────────────
 //
 // The ceremony facades above decide what an offer and a bundle MEAN. None of
@@ -1846,6 +1909,65 @@ mod tests {
         assert!(mailbox_slots(&[0u8; 15]).is_err());
         assert!(mailbox_slots(&[0u8; 17]).is_err());
         assert!(seal_offer_for(&[0u8; 8], b"x").is_err());
+    }
+
+
+    /// The facts a joiner is given are the ones its own `build_offer` checks.
+    ///
+    /// Asserted against `ProviderHint::verify`'s sources rather than against
+    /// literals: the point of exposing them is that a browser can construct a
+    /// hint its own offer builder accepts, so the test that matters is that a
+    /// hint built ONLY from these facts passes. Pinning the digests as constants
+    /// would still let the two drift and would say nothing about that.
+    #[test]
+    fn a_hint_built_only_from_the_exposed_facts_is_accepted() {
+        let fixture = grant_fixture();
+        let facts: serde_json::Value =
+            serde_json::from_str(&profile_facts(&fixture.profile_octets).expect("facts")).unwrap();
+
+        let descriptor = &facts["rendezvous"][0];
+        let (core, _, _, _) = offer_fixture(&fixture);
+        // Built in the BROWSER'S wire shape, so the digest under test is the one a
+        // browser would actually compute rather than one taken off the native
+        // value beside it.
+        let core_json = serde_json::json!({
+            "ceremony_id": core.ceremony_id,
+            "request_id": core.request_id,
+            "application_id": core.application_id,
+            "profile_version": core.profile_version,
+            "profile_digest": core.profile_digest,
+            "account_scope_id": core.account_scope_id,
+            "device_did": core.device_did,
+            "device_public_key": core.device_public_key.to_vec(),
+            "requested_permissions": core.requested_permissions,
+            "issued_at": core.issued_at,
+            "expires_at": core.expires_at,
+        })
+        .to_string();
+        let digest = offer_core_digest(&core_json).expect("digest");
+        assert_eq!(digest, core.digest(), "the browser's digest is the native one");
+
+        let hint = ProviderHint {
+            application_id: facts["applicationId"].as_str().unwrap().to_owned(),
+            profile_version: facts["profileVersion"].as_i64().unwrap(),
+            provider_id: descriptor["id"].as_str().unwrap().to_owned(),
+            descriptor_digest: descriptor["descriptorDigest"].as_str().unwrap().to_owned(),
+            offer_digest: digest.clone(),
+        };
+        let profile = ApplicationProfile::recognise(&fixture.profile_octets).unwrap();
+        assert!(hint.verify(&profile, &digest).is_ok(),
+                "a hint built from the exposed facts must satisfy CON-209");
+
+        // And the profile digest the offer core carries is the same one.
+        assert_eq!(facts["profileDigest"].as_str().unwrap(),
+                   selfsame_app_identity::codec::b64url(profile.digest()));
+    }
+
+    /// An unrecognised profile yields no facts at all.
+    #[test]
+    fn facts_are_refused_for_a_profile_the_recogniser_rejects() {
+        assert!(profile_facts(b"{}").is_err());
+        assert!(profile_facts(b"not json").is_err());
     }
 
 }
