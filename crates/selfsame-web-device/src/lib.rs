@@ -458,6 +458,15 @@ pub fn binding_hash_of(binding_object_json: &str) -> Result<Vec<u8>, IdentityErr
 // So a browser building an offer had to be HANDED them by something else, which
 // is precisely the trust the sentence above refuses. This exposes them from the
 // joiner's own recognised profile, so the values it binds to are ones it derived.
+//
+// THE ENDPOINTS ARE HERE FOR THE SAME REASON, and their absence had the same
+// consequence one step further out. A descriptor's `url` and `pairingUrl` are
+// what `CON-213` calls the ceremony's only mailbox origin and only PAKE relay
+// origin, and a browser that could not read them from its own recognised profile
+// had to be told where to go — so `cbcl-bus`'s page hard-coded both, and its
+// profile drifted to declaring a `pairingUrl` with no relay behind it without
+// anything failing. A descriptor nobody dereferences is a descriptor nobody
+// checks.
 
 /// The profile facts a joiner needs to construct an offer and a provider hint.
 #[wasm_bindgen]
@@ -473,9 +482,12 @@ pub fn profile_facts(profile: &[u8]) -> Result<String, IdentityError> {
         .iter()
         .map(|d| {
             format!(
-                r#"{{"id":{},"descriptorDigest":{}}}"#,
+                r#"{{"id":{},"descriptorDigest":{},"url":{},"pairingUrl":{},"pairingRoute":{}}}"#,
                 json_string(&d.id),
                 json_string(&selfsame_app_identity::codec::b64url(&d.digest)),
+                json_string(&d.url),
+                json_string(&d.pairing_url),
+                json_string(&d.pairing_route),
             )
         })
         .collect();
@@ -2231,6 +2243,39 @@ mod tests {
         // And the profile digest the offer core carries is the same one.
         assert_eq!(facts["profileDigest"].as_str().unwrap(),
                    selfsame_app_identity::codec::b64url(profile.digest()));
+    }
+
+    /// A joiner can reach the two origins its own profile names.
+    ///
+    /// `CON-213`: the selected descriptor's exact `pairingUrl` is the only PAKE
+    /// relay origin for a ceremony and its exact `url` is the only mailbox
+    /// origin. Exposed for the same reason the digests are — a browser that
+    /// could not read them had to be told where to go, and `cbcl-bus`'s page
+    /// hard-coded both while its profile drifted to declaring a `pairingUrl`
+    /// with no relay behind it. Nothing failed, because nothing dereferenced it.
+    ///
+    /// Asserted through `BoundOrigins`, which is what a conforming client checks
+    /// a request's origin against, rather than against literals: the two must be
+    /// the same strings or the check passes for a descriptor the ceremony is not
+    /// actually bound to.
+    #[test]
+    fn the_facts_name_the_two_origins_a_ceremony_is_bound_to() {
+        let fixture = grant_fixture();
+        let facts: serde_json::Value =
+            serde_json::from_str(&profile_facts(&fixture.profile_octets).expect("facts")).unwrap();
+        let exposed = &facts["rendezvous"][0];
+
+        let profile = ApplicationProfile::recognise(&fixture.profile_octets).unwrap();
+        let descriptor = &profile.rendezvous[0];
+        let bound = identity_pairing::BoundOrigins::of(descriptor);
+
+        assert!(bound.permits_pairing(exposed["pairingUrl"].as_str().unwrap()).is_ok());
+        assert!(bound.permits_mailbox(exposed["url"].as_str().unwrap()).is_ok());
+        // And the route, which `CON-403`'s `number` is `route || nameplate`.
+        assert_eq!(exposed["pairingRoute"].as_str().unwrap(), descriptor.pairing_route);
+        // The two origins are not assumed to be one operator: `NFR-206` requires
+        // that no wire identifier assume they are, so they travel separately.
+        assert!(exposed["url"].is_string() && exposed["pairingUrl"].is_string());
     }
 
     /// An unrecognised profile yields no facts at all.
