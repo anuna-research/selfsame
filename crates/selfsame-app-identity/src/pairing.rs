@@ -1499,21 +1499,27 @@ mod binding_tests {
     #[test]
     fn changing_any_member_changes_the_hash() {
         let base = object().binding_hash();
-        let mutations: Vec<Box<dyn Fn(&mut BindingObject)>> = vec![
-            Box::new(|o| o.application_id = "https://pictura.example/selfsame/application".into()),
-            Box::new(|o| o.descriptor_digest = "b3RoZXItZGVzY3JpcHRvci1kaWdlc3QtdmFsdWUtaGVy".into()),
-            Box::new(|o| o.nameplate = "482716".into()),
-            Box::new(|o| o.number = "03482716".into()),
-            Box::new(|o| o.profile_digest = "b3RoZXItcHJvZmlsZS1kaWdlc3QtdmFsdWUtaGVyZS1v".into()),
-            Box::new(|o| o.protocol = "selfsame-pairing-v2".into()),
-            Box::new(|o| o.provider_id = "global-secondary".into()),
-            Box::new(|o| o.route = "17".into()),
-            Box::new(|o| o.version = 2),
+        // Plain fn pointers, and each mutation names the member it moves — so a
+        // failure says which of the nine stopped being load-bearing rather than
+        // giving an index to count out.
+        // Named, because clippy asks for it and because the name says what the
+        // array is: one way to change one member.
+        type Mutation = (&'static str, fn(&mut BindingObject));
+        let mutations: [Mutation; 9] = [
+            ("applicationId", |o| o.application_id = "https://pictura.example/selfsame/application".into()),
+            ("descriptorDigest", |o| o.descriptor_digest = "b3RoZXItZGVzY3JpcHRvci1kaWdlc3QtdmFsdWUtaGVy".into()),
+            ("nameplate", |o| o.nameplate = "482716".into()),
+            ("number", |o| o.number = "03482716".into()),
+            ("profileDigest", |o| o.profile_digest = "b3RoZXItcHJvZmlsZS1kaWdlc3QtdmFsdWUtaGVyZS1v".into()),
+            ("protocol", |o| o.protocol = "selfsame-pairing-v2".into()),
+            ("providerId", |o| o.provider_id = "global-secondary".into()),
+            ("route", |o| o.route = "17".into()),
+            ("version", |o| o.version = 2),
         ];
-        for (index, mutate) in mutations.iter().enumerate() {
+        for (member, mutate) in mutations {
             let mut mutated = object();
             mutate(&mut mutated);
-            assert_ne!(mutated.binding_hash(), base, "member {index} did not move the hash");
+            assert_ne!(mutated.binding_hash(), base, "{member} did not move the hash");
         }
     }
 
