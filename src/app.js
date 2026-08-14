@@ -441,7 +441,19 @@ async function startLink() {
       return;
     }
 
-    const scanned = await camera.scan({ formats: ["QRCode"], windowed: true });
+    // `windowed: true` renders the preview in a native surface BENEATH the
+    // webview, so the page must get out of its way or the person sees a flat
+    // panel with the permission granted and the scanner running — which reads as
+    // a broken camera rather than an opaque page.
+    document.body.classList.add("scanning");
+    let scanned;
+    try {
+      scanned = await camera.scan({ formats: ["QRCode"], windowed: true });
+    } finally {
+      // Removed on every path. A cancelled or failed scan that left the class on
+      // would leave the shell transparent over a camera that is no longer there.
+      document.body.classList.remove("scanning");
+    }
     await readCode(scanned.content);
   } catch (e) {
     // Falling back to typing is not an error state — REQ-011 makes the typed
