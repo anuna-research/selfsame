@@ -261,6 +261,105 @@ pub fn bundle_matches_offer_json(bundle: &[u8], offer: &[u8]) -> Result<(), JsEr
     result.map_err(|_| JsError::new("SPEC-004 bundle refused"))
 }
 
+// ── The transport, which a browser could not reach until now ────────────────
+//
+// The ceremony facades above decide what an offer and a bundle MEAN. None of
+// them could put one in a mailbox or take one out, so a browser holding this
+// package could build a `CON-219` offer and then had nowhere to send it — and
+// the adapter written against these facades in `cbcl-bus` refuses to start for
+// exactly that reason.
+//
+// The three below are the missing half, and they are deliberately the SMALLEST
+// surface that closes it: where a slot is, how an offer is sealed, and how a
+// bundle is opened. Everything they do is `selfsame_core::seal`'s, unchanged.
+//
+// WHY NOT LET THE BROWSER DO ITS OWN AEAD. A JavaScript reimplementation would
+// have to reproduce the HKDF label, the direction-separated nonces, both
+// associated-data strings and the BLAKE3 transcript exactly, and the first thing
+// it would get wrong is the one thing nothing else checks — `CON-205`'s parser
+// differential, in the one place where being wrong means a bundle that opens for
+// the wrong offer. There is one implementation and this exposes it.
+//
+// WHAT THIS IS NOT. It is `PROTO-002`'s transport, keyed by a 16-octet secret
+// the caller supplies. `PROTO-003` derives that secret from a SPAKE2 exchange,
+// which is unimplemented, so a caller passing a secret carried some other way is
+// running an unauthenticated channel. That is the caller's to declare, and the
+// naming says so: nothing here mentions pairing.
+
+/// The two mailbox addresses a secret designates — `CON-002`'s slot derivation.
+///
+/// Returned together because they are one fact about one secret, and a caller
+/// that derived them separately could pass different secrets to each and write
+/// its offer where nothing would read it.
+#[wasm_bindgen]
+pub fn mailbox_slots_json(secret: &[u8]) -> Result<String, JsError> {
+    mailbox_slots(secret).map_err(|_| JsError::new("a mailbox secret is exactly 16 octets"))
+}
+
+/// Native twin of [`mailbox_slots_json`].
+pub fn mailbox_slots(secret: &[u8]) -> Result<String, IdentityError> {
+    let secret = mailbox_secret(secret)?;
+    Ok(format!(
+        "{{\"offer\":\"{}\",\"bundle\":\"{}\"}}",
+        seal::slot(seal::Role::Offer, &secret),
+        seal::slot(seal::Role::Bundle, &secret),
+    ))
+}
+
+/// Seal an offer payload for the offer slot.
+#[wasm_bindgen]
+pub fn seal_offer_bytes(secret: &[u8], offer_plaintext: &[u8]) -> Result<Vec<u8>, JsError> {
+    seal_offer_for(secret, offer_plaintext)
+        .map_err(|_| JsError::new("a mailbox secret is exactly 16 octets"))
+}
+
+/// Native twin of [`seal_offer_bytes`].
+pub fn seal_offer_for(secret: &[u8], offer_plaintext: &[u8]) -> Result<Vec<u8>, IdentityError> {
+    let secret = mailbox_secret(secret)?;
+    Ok(seal::seal_offer(&seal::derive_key(&secret), offer_plaintext))
+}
+
+/// Open a bundle **under the caller's own offer**.
+///
+/// The transcript is computed here from `offer_plaintext` rather than accepted
+/// as a parameter, which makes `REQ-006`'s binding impossible to skip: a caller
+/// cannot pass a transcript it did not derive from the exact offer it wrote. A
+/// bundle that opens is therefore provably a reply to *this* offer and not
+/// something the rendezvous operator substituted.
+#[wasm_bindgen]
+pub fn open_bundle_bytes(
+    secret: &[u8],
+    sealed: &[u8],
+    offer_plaintext: &[u8],
+) -> Result<Vec<u8>, JsError> {
+    open_bundle_for(secret, sealed, offer_plaintext)
+        .map_err(|_| JsError::new("sealed record did not authenticate"))
+}
+
+/// Native twin of [`open_bundle_bytes`].
+pub fn open_bundle_for(
+    secret: &[u8],
+    sealed: &[u8],
+    offer_plaintext: &[u8],
+) -> Result<Vec<u8>, IdentityError> {
+    let secret = mailbox_secret(secret)?;
+    seal::open_bundle(
+        &seal::derive_key(&secret),
+        sealed,
+        &seal::transcript(offer_plaintext),
+    )
+    .map_err(|_| IdentityError::Refused)
+}
+
+/// A 16-octet mailbox secret, recognised before it is used.
+///
+/// A shorter secret silently padded, or a longer one truncated, would derive a
+/// slot and a key that no counterparty agrees with — which surfaces as a
+/// ceremony that times out rather than one that refuses.
+fn mailbox_secret(secret: &[u8]) -> Result<[u8; 16], IdentityError> {
+    secret.try_into().map_err(|_| IdentityError::Refused)
+}
+
 /// Native twin of [`bundle_matches_offer_json`].
 pub fn bundle_matches_offer(
     bundle: &BundlePayload,
@@ -1682,6 +1781,71 @@ mod tests {
 
         // The control.
         assert!(build_enrollment(&statement).is_ok());
+    }
+
+
+    // ── the transport surface ───────────────────────────────────────────────
+
+    /// The offer a device sealed is the offer the phone opens, and the bundle it
+    /// gets back opens only under its own offer.
+    ///
+    /// This is the round trip the browser could not perform at all before these
+    /// three functions existed, so it is worth having end to end rather than as
+    /// three separate unit assertions: the failure that matters is the one where
+    /// each half is individually right and they do not meet.
+    #[test]
+    fn an_offer_and_its_bundle_make_a_round_trip() {
+        let secret = [7u8; 16];
+        let offer = b"the exact offer octets a device wrote".to_vec();
+        let grant = b"the credential the phone sealed back".to_vec();
+
+        let sealed_offer = seal_offer_for(&secret, &offer).expect("seal");
+        // The phone's side is `selfsame_core::seal` directly — the same functions
+        // these facades call, reached the way a native wallet reaches them.
+        let key = seal::derive_key(&secret);
+        let opened = seal::open_offer(&key, &sealed_offer).expect("the phone opens the offer");
+        assert_eq!(opened, offer);
+
+        let sealed_bundle = seal::seal_bundle(&key, &grant, &seal::transcript(&offer));
+        assert_eq!(open_bundle_for(&secret, &sealed_bundle, &offer).expect("open"), grant);
+    }
+
+    /// A bundle minted against a DIFFERENT offer does not authenticate.
+    ///
+    /// `REQ-006` is the whole reason the transcript is computed inside
+    /// `open_bundle_bytes` instead of being a parameter. If this ever passes,
+    /// the rendezvous operator can substitute a reply.
+    #[test]
+    fn a_bundle_for_another_offer_is_refused() {
+        let secret = [7u8; 16];
+        let ours = b"our offer".to_vec();
+        let theirs = b"somebody else's offer".to_vec();
+        let key = seal::derive_key(&secret);
+
+        let sealed = seal::seal_bundle(&key, b"a grant", &seal::transcript(&theirs));
+        assert!(open_bundle_for(&secret, &sealed, &ours).is_err());
+    }
+
+    /// Both slots come from one secret, and they are not the same address.
+    #[test]
+    fn the_two_slots_are_distinct_and_derived_from_the_secret() {
+        let a: serde_json::Value =
+            serde_json::from_str(&mailbox_slots(&[1u8; 16]).expect("slots")).unwrap();
+        let b: serde_json::Value =
+            serde_json::from_str(&mailbox_slots(&[2u8; 16]).expect("slots")).unwrap();
+
+        assert_ne!(a["offer"], a["bundle"], "one secret, two directions, two mailboxes");
+        assert_ne!(a["offer"], b["offer"], "a different secret is a different mailbox");
+        // The derivation is upstream's and this is the check that they agree.
+        assert_eq!(a["offer"], seal::slot(seal::Role::Offer, &[1u8; 16]));
+    }
+
+    /// A secret of the wrong length is refused rather than padded.
+    #[test]
+    fn a_mailbox_secret_must_be_exactly_sixteen_octets() {
+        assert!(mailbox_slots(&[0u8; 15]).is_err());
+        assert!(mailbox_slots(&[0u8; 17]).is_err());
+        assert!(seal_offer_for(&[0u8; 8], b"x").is_err());
     }
 
 }
