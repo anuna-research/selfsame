@@ -96,9 +96,21 @@ pub enum UriError {
 pub enum PathRule {
     /// A canonical origin: no path at all, not even a trailing `/`.
     ///
-    /// The shape `CON-201` gives rendezvous `url`, `pairingUrl`, and
-    /// `pairingRecordRelays`.
+    /// The shape `CON-201` gives a rendezvous `url` and `pairingRecordRelays`.
+    /// **Not `pairingUrl`** — `PROTO-003` `CON-401` gives that one a path
+    /// grammar, deliberately, and [`PathRule::PairingBase`] is it.
     Forbidden,
+    /// `CON-401`'s `pairing-base-url`: an optional prefix of one or more
+    /// segments, each `ALPHA / DIGIT / "-" / "_" / "."`, with no trailing slash.
+    ///
+    /// Narrower than [`PathRule::Any`] on purpose. `CON-401` states the grammar
+    /// as its own ABNF and adds that the value has "no query, fragment,
+    /// userinfo, percent-encoding or trailing slash", so a percent-encoded
+    /// segment or a trailing `/` is refused here rather than left to whichever
+    /// endpoint concatenates it — two implementations joining
+    /// `https://host/selfsame/` to `/pair/v1` disagree about the double slash,
+    /// and the ceremony fails at a 404 nobody can attribute.
+    PairingBase,
     /// Any RFC 3986 path, including empty segments and a trailing `/`.
     ///
     /// The shape provider URLs use, whose `credentialBaseUrl` example ends in
@@ -141,6 +153,9 @@ impl UriPolicy {
     /// A provider URL that may carry a path.
     pub const PROVIDER_URL: Self =
         Self { path: PathRule::Any, fragment: FragmentRule::Forbidden };
+    /// `PROTO-003` `CON-401`'s `pairing-base-url` — a descriptor's `pairingUrl`.
+    pub const PAIRING_BASE_URL: Self =
+        Self { path: PathRule::PairingBase, fragment: FragmentRule::Forbidden };
 }
 
 /// The recognised components of an HTTPS URI, borrowed from the input.
@@ -258,6 +273,10 @@ fn recognise_path(path: &str, rule: PathRule) -> Result<(), UriError> {
     if path.is_empty() {
         return match rule {
             PathRule::NonEmptyNoDotSegments => Err(UriError::BadPath),
+            // `pairing-base-url = base-url [ pairing-path ]` — the prefix is
+            // optional, so an origin-only `pairingUrl` stays valid and every
+            // descriptor written before `CON-401` grew the grammar still
+            // recognises.
             _ => Ok(()),
         };
     }
@@ -266,6 +285,18 @@ fn recognise_path(path: &str, rule: PathRule) -> Result<(), UriError> {
     }
     let path_without_slash = path.strip_prefix('/').ok_or(UriError::BadPath)?;
     let segments: Vec<&str> = path_without_slash.split('/').collect();
+    if rule == PathRule::PairingBase {
+        // `pairing-path = "/" path-segment *( "/" path-segment )` and
+        // `path-segment = 1*( ALPHA / DIGIT / "-" / "_" / "." )`. An empty
+        // segment is both a doubled slash and a trailing one, so this covers
+        // `CON-401`'s "no trailing slash" without a separate check.
+        if segments.iter().any(|s| {
+            s.is_empty()
+                || !s.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'))
+        }) {
+            return Err(UriError::BadPath);
+        }
+    }
     if rule == PathRule::NonEmptyNoDotSegments
         && (segments.iter().any(|s| s.is_empty() || *s == "." || *s == ".."))
     {
@@ -475,6 +506,55 @@ mod tests {
             Err(UriError::BadPercentEncoding)
         );
         assert!(recognise("https://photos.example/%2Fapp", UriPolicy::APPLICATION_ID).is_ok());
+    }
+
+    /// `CON-401`'s `pairing-base-url`, both halves.
+    ///
+    /// The prefix is OPTIONAL, so an origin-only `pairingUrl` — every descriptor
+    /// written before the grammar existed — still recognises. And it is narrower
+    /// than a provider URL, because `CON-401` says the value has "no query,
+    /// fragment, userinfo, percent-encoding or trailing slash".
+    #[test]
+    fn a_pairing_base_url_may_carry_one_path_prefix_and_nothing_stranger() {
+        for ok in [
+            // The shape the collision exists for: a hub serving the mailbox at
+            // its origin and PROTO-003's relay below `/selfsame`, so that
+            // appending `/pair/v1` does not land on SPEC-016's WebSocket.
+            "https://chat.anuna.io/selfsame",
+            "https://localhost:8080/selfsame",
+            "https://provider.example",
+            "https://provider.example/a/b/c",
+            "https://provider.example/v1.2/pair_relay-2",
+        ] {
+            assert!(recognise(ok, UriPolicy::PAIRING_BASE_URL).is_ok(), "{ok}");
+        }
+        for bad in [
+            // A trailing slash: two endpoints joining this to `/pair/v1`
+            // disagree about the double slash, and the ceremony fails at a 404
+            // nobody can attribute.
+            "https://provider.example/selfsame/",
+            "https://provider.example/",
+            "https://provider.example/a//b",
+            // Percent-encoding, a query, and a fragment are all excluded by
+            // `path-segment`'s own character set.
+            "https://provider.example/self%2Fsame",
+            "https://provider.example/selfsame?x=1",
+        ] {
+            assert!(recognise(bad, UriPolicy::PAIRING_BASE_URL).is_err(), "{bad}");
+        }
+    }
+
+    /// A `pairingUrl` is not a mailbox `url`, and the difference is the point.
+    ///
+    /// `CON-301` keeps `url` origin-only and `CON-401` is explicit that its own
+    /// value is "deliberately distinct" from it. A build that recognised both
+    /// the same way could not express the one deployment shape the path grammar
+    /// was added for.
+    #[test]
+    fn a_mailbox_url_still_refuses_the_path_a_pairing_url_admits() {
+        let with_path = "https://provider.example/selfsame";
+        assert!(recognise(with_path, UriPolicy::PAIRING_BASE_URL).is_ok());
+        assert_eq!(recognise(with_path, UriPolicy::ORIGIN), Err(UriError::BadPath));
     }
 
     #[test]
