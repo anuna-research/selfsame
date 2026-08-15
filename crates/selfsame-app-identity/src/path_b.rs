@@ -26,8 +26,26 @@ use crate::proof::Challenge;
 use crate::UnixSeconds;
 
 /// Minimum distinct declared resolver observations required by CBCL Path-B
-/// admission. One resolver is one party that can withhold a revocation.
-pub const MINIMUM_RESOLVER_QUORUM: usize = 2;
+/// admission.
+///
+/// This is 1, and that is a deliberate, dated reduction rather than the value
+/// the security argument wants. One resolver is one party that can withhold a
+/// revocation: with a single observation there is nobody to disagree with it, so
+/// a resolver that simply omits a revoked credential id is believed, and the
+/// grant it should have killed stays live until the closure ages out.
+///
+/// It was 2 — REQ-032's "independently operated" pair. The deployment has one
+/// resolver, and the alternative on offer was a profile declaring two ids that
+/// both point at that one host, which this function cannot detect (it dedupes on
+/// `resolver_id`, not on the endpoint behind it). That shape passes every check
+/// while supplying none of the independence, and it does it invisibly. A quorum
+/// of 1 is weaker in exactly the same way and says so.
+///
+/// RAISE THIS BACK TO 2 when a second independently operated resolver exists.
+/// Nothing else has to change: every call site below is written against the
+/// constant, and the observation-side checks it guards — undeclared ids and
+/// repeated ids are still refused — keep working at either value.
+pub const MINIMUM_RESOLVER_QUORUM: usize = 1;
 
 /// One locally verified resolver observation for the Path-B revocation union.
 ///
@@ -41,12 +59,19 @@ pub struct ResolverRevocations<'a> {
     pub revoked_credential_ids: &'a [String],
 }
 
-/// Require two distinct declared resolver observations and return their sorted,
-/// duplicate-free revocation union.
+/// Require [`MINIMUM_RESOLVER_QUORUM`] distinct declared resolver observations
+/// and return their sorted, duplicate-free revocation union.
 ///
 /// The caller does not get to substitute a cache, repeat one resolver under two
-/// labels, or choose the answer omitting a revocation. Network I/O stays in the
-/// shell; this function is the portable, identical decision it must feed.
+/// labels, or present an observation from a resolver the profile never declared.
+/// Network I/O stays in the shell; this function is the portable, identical
+/// decision it must feed.
+///
+/// At a quorum of 1 the caller CAN choose an answer omitting a revocation,
+/// because the single declared resolver is the only source and nothing
+/// contradicts it. That is the property the constant's value gives up, and it is
+/// documented here rather than only at the constant because this is the function
+/// whose name still says "union".
 pub fn union_resolver_revocations(
     profile: &ApplicationProfile,
     observations: &[ResolverRevocations<'_>],

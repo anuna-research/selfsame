@@ -122,7 +122,7 @@ fn request_has_no_freshness_switch_for_a_nif_caller_to_weaken() {
 }
 
 #[test]
-fn path_b_requires_two_distinct_declared_resolvers_and_unions_revocations() {
+fn path_b_unions_revocations_across_distinct_declared_resolvers() {
     let ceremony = Ceremony::accepted();
     let first = vec!["urn:grant:a".to_owned(), "urn:grant:shared".to_owned()];
     let second = vec!["urn:grant:b".to_owned(), "urn:grant:shared".to_owned()];
@@ -134,10 +134,43 @@ fn path_b_requires_two_distinct_declared_resolvers_and_unions_revocations() {
         union_resolver_revocations(&ceremony.profile, &observations).unwrap(),
         vec!["urn:grant:a", "urn:grant:b", "urn:grant:shared"],
     );
-    assert!(union_resolver_revocations(&ceremony.profile, &observations[..1]).is_err());
+
+    // A REPEATED LABEL IS STILL REFUSED, and this is the check that has to
+    // survive the quorum reduction. `MINIMUM_RESOLVER_QUORUM` is 1, so one
+    // observation is now enough — but "one resolver answering twice" must not
+    // become a way to manufacture a second, and at a quorum of 2 this is the
+    // whole substance of "distinct".
     let repeated = [
         ResolverRevocations { resolver_id: "app-own", revoked_credential_ids: &first },
         ResolverRevocations { resolver_id: "app-own", revoked_credential_ids: &second },
     ];
     assert!(union_resolver_revocations(&ceremony.profile, &repeated).is_err());
+
+    // An UNDECLARED resolver is refused whatever the quorum is: the profile is
+    // the roster, and an observation from outside it is not a weaker answer but
+    // no answer at all.
+    let undeclared = [ResolverRevocations { resolver_id: "not-in-the-profile", revoked_credential_ids: &first }];
+    assert!(union_resolver_revocations(&ceremony.profile, &undeclared).is_err());
+}
+
+/// A SINGLE declared resolver is admitted, and that is the reduction rather
+/// than a property worth having.
+///
+/// This test exists to make the change visible: it passes only while
+/// `MINIMUM_RESOLVER_QUORUM` is 1, and raising the constant back to 2 turns it
+/// red — which is the intended way to find every place that assumed one
+/// resolver was enough. There is nothing to contradict the single observation,
+/// so a resolver that omits a revoked id is believed.
+#[test]
+fn path_b_admits_a_single_declared_resolver_at_the_reduced_quorum() {
+    assert_eq!(selfsame_app_identity::path_b::MINIMUM_RESOLVER_QUORUM, 1);
+
+    let ceremony = Ceremony::accepted();
+    let only = vec!["urn:grant:a".to_owned()];
+    let observations = [ResolverRevocations { resolver_id: "app-own", revoked_credential_ids: &only }];
+
+    assert_eq!(
+        union_resolver_revocations(&ceremony.profile, &observations).unwrap(),
+        vec!["urn:grant:a"],
+    );
 }
