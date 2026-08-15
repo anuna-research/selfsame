@@ -304,18 +304,54 @@ jobs:
       # the **flat** prefix is "latest" — not a `latest/` subdirectory, which is
       # what I had first written — plus an immutable per-version copy beneath it.
       # hark keys that by tag; this job has no tags, so it keys by commit.
+      # R2 IS NOT S3, AND THE DEFAULTS ASSUME IT IS.
+      #
+      # This step failed on a real run with `Read timeout on endpoint URL: ...
+      # &partNumber=6` — a multipart PUT that got most of the way and then
+      # stalled, after a 25-minute build had already succeeded. The `aws` CLI's
+      # stock behaviour is tuned for S3: an 8 MB multipart threshold, 8 MB parts,
+      # ten concurrent requests. Against R2 that turns one ~50 MB artefact into
+      # dozens of concurrent small PUTs, and every one of them is a chance to
+      # time out and fail the whole job.
+      #
+      # Three settings, each aimed at a different part of that:
+      #
+      #   - a multipart THRESHOLD above any plausible APK, so the normal case is
+      #     one plain PUT and the multipart machinery never runs. R2 accepts a
+      #     single PUT far above this; the threshold is what decides.
+      #   - if it does run — a bigger artefact one day — 64 MB parts at a
+      #     concurrency of 2, so there are few parts and they are not competing.
+      #   - explicit timeouts and retries, because the failure observed was a
+      #     stall rather than a refusal, and the default read timeout is 60s with
+      #     no retry budget for it.
+      #
+      # The `retry` wrapper on top is deliberate belt-and-braces: botocore's
+      # retries cover the request, not the command, and a part that dies late
+      # leaves an incomplete multipart upload that a fresh `cp` simply replaces.
       - name: Upload to Cloudflare R2
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.CF_R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.CF_R2_SECRET_ACCESS_KEY }}
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
           APK: ${{ steps.apk.outputs.name }}
+          # botocore honours both; they are env rather than CLI flags because
+          # `aws s3 cp` has no equivalent options.
+          AWS_MAX_ATTEMPTS: "5"
+          AWS_RETRY_MODE: standard
+          # aws-cli v2.23+ sends a checksum R2 rejects on some paths. Harmless on
+          # v1 (ignored), load-bearing if the runner image ever ships v2 — which
+          # it may, since the install below only runs when `aws` is absent.
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
         run: |
           set -euo pipefail
           if ! command -v aws >/dev/null 2>&1; then
             SUDO=""; command -v sudo >/dev/null 2>&1 && SUDO="sudo"
             $SUDO apt-get update && $SUDO apt-get install -y awscli
           fi
+          # Printed because the retry/checksum knobs above behave differently on
+          # v1 and v2, and a log that does not say which was used cannot explain
+          # a future failure.
+          aws --version
 
           export AWS_DEFAULT_REGION=auto
           export R2_ENDPOINT="https://${CF_ACCOUNT_ID}.r2.cloudflarestorage.com"
@@ -323,16 +359,40 @@ jobs:
           export PROJECT="selfsame"
           sha=$(git rev-parse --short HEAD)
 
+          aws configure set default.s3.multipart_threshold 512MB
+          aws configure set default.s3.multipart_chunksize 64MB
+          aws configure set default.s3.max_concurrent_requests 2
+
+          # One place, so the two uploads cannot drift in their timeouts.
+          upload() {
+            aws s3 cp "$1" "$2" \
+              --endpoint-url "$R2_ENDPOINT" \
+              --cli-connect-timeout 30 \
+              --cli-read-timeout 300
+          }
+
+          # Three attempts with a widening pause. The observed failure was a
+          # transient stall, so the second attempt is worth far more than a
+          # louder error message on the first.
+          retry() {
+            local attempt=1
+            until "$@"; do
+              if [ "$attempt" -ge 3 ]; then
+                echo "upload failed after $attempt attempts" >&2
+                return 1
+              fi
+              echo "attempt $attempt failed; retrying in $((attempt * 15))s" >&2
+              sleep $((attempt * 15))
+              attempt=$((attempt + 1))
+            done
+          }
+
           # Flat prefix = latest. A stable filename so a download link does not
           # have to change every commit, which is the whole point of hark's flat
           # convention.
-          aws s3 cp "/tmp/${APK}" \
-            "s3://${BUCKET}/${PROJECT}/selfsame-UNSIGNED-DEV.apk" \
-            --endpoint-url "$R2_ENDPOINT"
+          retry upload "/tmp/${APK}" "s3://${BUCKET}/${PROJECT}/selfsame-UNSIGNED-DEV.apk"
           # Immutable per-commit archive — REQ-202.
-          aws s3 cp "/tmp/${APK}" \
-            "s3://${BUCKET}/${PROJECT}/${sha}/${APK}" \
-            --endpoint-url "$R2_ENDPOINT"
+          retry upload "/tmp/${APK}" "s3://${BUCKET}/${PROJECT}/${sha}/${APK}"
           echo "Uploaded: ${APK}"
 
           # Informational and non-fatal: an "Object Read & Write" R2 token can
