@@ -224,15 +224,24 @@ impl PathBResolverQuorum {
 ///
 /// The function does not select a convenient resolver: every roster member is
 /// attempted, all usable replies are replayed through the DID method, and at
-/// least two distinct successful replies are required. The caller can retain
-/// `outcomes` for audit while passing only verified closure facts to the NIF.
+/// least [`MINIMUM_RESOLVER_QUORUM`] distinct successful replies are required.
+/// The caller can retain `outcomes` for audit while passing only verified
+/// closure facts to the NIF.
+///
+/// That constant is currently 1, so "quorum" here means "the declared resolver
+/// answered", not "two parties agreed" — see its documentation for what the
+/// reduction gives up. Every roster member is still attempted and every failure
+/// still lands in `outcomes`, so a profile that grows a second resolver starts
+/// getting the stronger check the moment the constant goes back to 2.
 pub async fn resolve_path_b_quorum(
     profile: &ApplicationProfile,
     did: &str,
 ) -> Result<PathBResolverQuorum, NetError> {
     recognise_did(did)?;
+    // The messages name no count: `MINIMUM_RESOLVER_QUORUM` is the authority and
+    // a literal repeating its value is a lie waiting for the next change to it.
     if profile.state_resolvers.len() < MINIMUM_RESOLVER_QUORUM {
-        return Err(NetError::Refused("Path-B profile declares fewer than two state resolvers"));
+        return Err(NetError::Refused("Path-B profile declares too few state resolvers for the quorum"));
     }
     let mut closures = Vec::new();
     let mut outcomes = Vec::with_capacity(profile.state_resolvers.len());
@@ -246,7 +255,7 @@ pub async fn resolve_path_b_quorum(
         }
     }
     if closures.len() < MINIMUM_RESOLVER_QUORUM {
-        return Err(NetError::Refused("Path-B resolver quorum was not independently established"));
+        return Err(NetError::Refused("Path-B resolver quorum was not established"));
     }
     Ok(PathBResolverQuorum { closures, outcomes })
 }

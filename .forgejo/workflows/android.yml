@@ -24,15 +24,21 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
-  # TEMPORARY — remove before merging.
-  #
-  # SPEC-003 REQ-201 is "on push to main", and NFR-201 says this job must not
-  # gate anything: it takes ~25 minutes against ci.yml's five. Running it on
-  # every pull request would do exactly what NFR-201 forbids.
-  #
-  # It is here only so this workflow can be verified on a branch instead of
-  # being merged untested onto main and discovered there.
-  pull_request:
+
+# THE `pull_request:` TRIGGER IS GONE, and it was labelled "TEMPORARY — remove
+# before merging" when it was added. It outlived that instruction and started
+# doing what NFR-201 forbids: a ~25-minute Android build reporting red on pull
+# requests that ci.yml had already passed in five.
+#
+# It earned its keep — it is how this workflow was verified on a branch rather
+# than merged untested onto main — and it has run on main since, so there is
+# nothing left for it to prove. `workflow_dispatch` covers the case it was
+# actually for: verifying a change to THIS file before it lands.
+#
+# What made it worth removing now rather than later: PR #40 went red on an
+# `aws s3 cp` read timeout mid-multipart, on a build that had already succeeded.
+# A job that gates nothing by spec should not be able to fail a review, and an
+# R2 flake is exactly the failure it will keep contributing.
 
 jobs:
   android:
