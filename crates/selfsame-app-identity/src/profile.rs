@@ -740,8 +740,14 @@ fn rendezvous(value: &Json) -> Result<Vec<RendezvousDescriptor>, ProfileError> {
         uri::recognise(&url, UriPolicy::ORIGIN)
             .map_err(|_| bad("rendezvous[].url", "is not a canonical origin"))?;
         let pairing_url = string(item, "pairingUrl")?.to_string();
-        uri::recognise(&pairing_url, UriPolicy::ORIGIN)
-            .map_err(|_| bad("rendezvous[].pairingUrl", "is not a canonical origin"))?;
+        // `CON-401`, not `CON-301`: "one operated service may expose the blind
+        // mailbox at its origin and the pairing relay below `/selfsame` without
+        // colliding with another protocol at `/pair/v1`." That collision is real
+        // — `cbcl-bus` serves SPEC-016's agent-pairing WebSocket at an ungated
+        // `/pair/v1` — so an origin-only `pairingUrl` cannot name its relay at
+        // all, and this recognised one until now.
+        uri::recognise(&pairing_url, UriPolicy::PAIRING_BASE_URL)
+            .map_err(|_| bad("rendezvous[].pairingUrl", "is not a canonical pairing base URL"))?;
 
         let pairing_route = string(item, "pairingRoute")?.to_string();
         if pairing_route.len() != 2 || !pairing_route.bytes().all(|b| b.is_ascii_digit()) {

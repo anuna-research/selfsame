@@ -2419,10 +2419,15 @@ XML Schema `dateTimeStamp`; an expired descriptor is ineligible. Rendezvous
 
 Every rendezvous descriptor additionally MUST contain `pairingUrl`,
 `pairingProtocol`, and `pairingRoute` as defined by
-[[PROTO-003-selfsame-pairing-v1#CON-401]]. Pairing URLs use the same canonical
-origin grammar. Pairing routes are exactly two ASCII digits and unique within
-the profile; their numeric value has no global meaning. `pairingUrl` and `url`
-MAY have different origins and MAY be operated by different organizations.
+[[PROTO-003-selfsame-pairing-v1#CON-401]], which is the sole grammar for all
+three. In particular `pairingUrl` is **not** origin-only: it uses that
+contract's `pairing-base-url` and MAY carry one absolute, slash-prefixed path
+prefix, which is what lets one operated service expose the blind mailbox at its
+origin and the pairing relay below a prefix without colliding with another
+protocol already served at `/pair/v1`. Pairing routes are exactly two ASCII
+digits and unique within the profile; their numeric value has no global meaning.
+`pairingUrl` and `url` MAY have different origins and MAY be operated by
+different organizations.
 
 `stateResolvers` entries name nodes conforming to the `did:crdt` method's own
 service contract — `CON-003` HTTP Resolution API and, where the node
