@@ -3,17 +3,37 @@ id: PROTO-004
 title: Selfsame Ceremony Envelope v1 — the sealed offer and grant record
 status: draft
 tier: 1
-version: 0.2.0
+version: 0.3.0
 audience: application developer, SDK implementer, wallet implementer, security reviewer
 author: Anuna Research (drafted with Claude, 2026-07-31)
-last-updated: 2026-07-31
+last-updated: 2026-08-17
 owner-repo: selfsame
 affects-repos: selfsame, anuna-ssi, adopting applications, independent client implementations
 review-gate: not-approved — Tier-1; independent AEAD and key-schedule vectors, cross-model adversarial review, and human cryptography sign-off are outstanding
-depends-on: SPEC-004; PROTO-002; PROTO-003; RFC 2119; RFC 4648; RFC 5234; RFC 5869; RFC 6234; RFC 8174; RFC 8439; RFC 8785
+depends-on: SPEC-004; SPEC-007 for the Selfsame credential-pairing disposition; PROTO-002 and PROTO-003 for non-cutover uses; RFC 2119; RFC 4648; RFC 5234; RFC 5869; RFC 6234; RFC 8174; RFC 8439; RFC 8785
 ---
 
 # PROTO-004 — Selfsame Ceremony Envelope v1
+
+## SPEC-007 credential-pairing disposition
+
+Selfsame credential pairing no longer uses this envelope protocol.
+[[SPEC-007-cbcl-pairing-cutover]] carries recognised CON-219 bytes through the
+pinned cbcl secure channel.
+These artifacts remain draft authority for non-cutover consumers and historical comparison:
+
+- REQ-501 through REQ-505 and NFR-501 through NFR-503;
+- ADR-501 through ADR-504;
+- CON-501 through CON-504; and
+- TEST-501 through TEST-506.
+
+CON-219 member sets remain owned by SPEC-004.
+No AEAD, recognition, size, privacy, or human-review gate is weakened.
+Vectors: no protocol octet changes; existing TEST-501 through TEST-506 vectors remain intact.
+Evidence: [[SPEC-007-cbcl-pairing-cutover#TEST-819]].
+Owner: Selfsame human protocol owner.
+Approved for the Selfsame development cutover: 2026-08-17.
+Production approval: not granted.
 
 ## Orientation
 
@@ -1059,6 +1079,12 @@ Standards constraints that are easy to miss:
   is not.
 
 ## Changelog
+
+- **0.3.0 — 2026-08-17 — Selfsame credential-pairing deprecation.**
+  Records the [[SPEC-007-cbcl-pairing-cutover]] disposition.
+  The protocol remains draft authority for non-cutover consumers.
+  No protocol octet or existing vector changes.
+  All cryptography, privacy, and production gates remain open.
 
 - **0.2.0 — 2026-07-31 — draft, normative.** Closes both open questions. This
   is a **wire-format change**: a version-0.1.0 record and a version-0.2.0

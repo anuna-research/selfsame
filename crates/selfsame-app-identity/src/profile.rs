@@ -17,7 +17,7 @@
 //!
 //! That is stricter than it first looks, and the reason is the digest.
 //! `CON-214` signs `SHA-256(RFC8785(profile))`, `CON-220` step 6 requires a
-//! resolving party to recompute it, and PROTO-003's binding puts it in the PAKE
+//! resolving party to recompute it, and the pairing intent binds it to the channel
 //! transcript. If two conforming recognisers disagreed about which documents are
 //! valid, they could still agree on a digest while disagreeing about what they
 //! had agreed to. Steps 1–5 close that: the octets are bounded, the JSON is
@@ -29,8 +29,7 @@
 //! 1. valid UTF-8, no byte-order mark, at most 65,536 octets;
 //! 2. parses as JSON with no duplicate member names, no trailing content, and
 //!    nesting depth at most 8;
-//! 3. the top-level member set is exactly the ten names, of which
-//!    `pairingRecordRelays` is the only optional one;
+//! 3. the top-level member set is exact and closed;
 //! 4. every member value satisfies its grammar; and
 //! 5. re-serialising with RFC 8785 reproduces the input byte for byte.
 //!
@@ -47,10 +46,9 @@
 //! configuration. The closed member set enforces this at every depth without
 //! needing a special case.
 
+use crate::codec;
 use crate::json::{self, Json, JsonError, Limits};
-use crate::time::{self, TimeError};
 use crate::uri::{self, UriError, UriPolicy};
-use crate::UnixSeconds;
 
 /// `CON-201` step 1: the octet bound on a profile document.
 pub const MAX_PROFILE_OCTETS: usize = 65_536;
@@ -86,11 +84,11 @@ const TOP_LEVEL_REQUIRED: &[&str] = &[
     "verifierAudience",
     "allowedPermissions",
     "enrollment",
-    "rendezvous",
+    "cbclPairingRelays",
     "stateResolvers",
     "revocation",
 ];
-const TOP_LEVEL_OPTIONAL: &[&str] = &["pairingRecordRelays"];
+const TOP_LEVEL_OPTIONAL: &[&str] = &[];
 
 /// Why a profile was refused.
 ///
@@ -122,7 +120,10 @@ pub enum ProfileError {
 }
 
 fn bad(path: impl Into<String>, reason: &'static str) -> ProfileError {
-    ProfileError::BadValue { path: path.into(), reason }
+    ProfileError::BadValue {
+        path: path.into(),
+        reason,
+    }
 }
 
 /// A canonical, immutable application identifier (`CON-201`, `REQ-202`).
@@ -146,7 +147,10 @@ impl ApplicationId {
     /// repaired.
     pub fn parse(text: &str) -> Result<Self, UriError> {
         let parts = uri::recognise(text, UriPolicy::APPLICATION_ID)?;
-        Ok(Self { text: text.to_string(), origin: parts.origin.to_string() })
+        Ok(Self {
+            text: text.to_string(),
+            origin: parts.origin.to_string(),
+        })
     }
 
     /// The exact ASCII serialisation. Compared as exact ASCII by every verifier.
@@ -229,30 +233,22 @@ impl MobileBinding {
     }
 }
 
-/// One pairing-capable rendezvous descriptor (`CON-201`, `CON-213`).
+/// One authenticated cbcl-pairing relay descriptor (`SPEC-007 CON-806`).
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct RendezvousDescriptor {
-    /// Provider identifier, unique within this role.
-    pub id: String,
-    /// The mailbox origin. Canonical, with no path.
-    pub url: String,
-    /// Exactly `selfsame-rendezvous-v1` in profile version 1.
-    pub protocol: String,
-    /// The PAKE relay origin, which MAY have a different operator from `url`.
-    pub pairing_url: String,
-    /// Exactly `selfsame-pairing-v1` in profile version 1.
-    pub pairing_protocol: String,
-    /// Exactly two ASCII digits, unique within the profile. Its numeric value
-    /// has no global meaning.
-    pub pairing_route: String,
-    /// Selection group, ascending. `CON-208` step 3.
+pub struct CbclRelayDescriptor {
+    /// Operator identifier, unique within the profile.
+    pub operator_id: String,
+    /// Canonical HTTPS relay origin.
+    pub relay_origin: String,
+    /// Selection group, ascending.
     pub priority: i64,
-    /// Weight within the group. Zero means ineligible. `CON-208` step 6.
+    /// Positive selection weight within the priority group.
     pub weight: i64,
-    /// Expiry, after which the descriptor is ineligible.
-    pub valid_until: UnixSeconds,
-    /// `SHA-256(RFC8785(descriptor))` — what `CON-209` binds and PROTO-003's
-    /// binding commits to.
+    /// SHA-256 of the approved privacy policy.
+    pub privacy_policy_digest: [u8; 32],
+    /// SHA-256 of the relay conformance evidence.
+    pub conformance_evidence_digest: [u8; 32],
+    /// SHA-256 of this complete canonical descriptor.
     pub digest: [u8; 32],
 }
 
@@ -309,7 +305,8 @@ impl RevocationPolicy {
     /// Both are members `CON-201` already defines, which is why the two-tier
     /// rule needed no new profile member and invalidated no published vector.
     pub fn session_establishment_bound(&self) -> i64 {
-        self.max_closure_age_seconds.min(self.propagation_sla_seconds)
+        self.max_closure_age_seconds
+            .min(self.propagation_sla_seconds)
     }
 }
 
@@ -328,12 +325,10 @@ pub struct ApplicationProfile {
     pub enrollment_keys: Vec<EnrollmentKey>,
     /// Platform bindings for the same-device path.
     pub mobile_bindings: Vec<MobileBinding>,
-    /// Pairing-capable rendezvous descriptors.
-    pub rendezvous: Vec<RendezvousDescriptor>,
+    /// Authenticated relay descriptors for cbcl credential pairing.
+    pub cbcl_pairing_relays: Vec<CbclRelayDescriptor>,
     /// `did:crdt` state resolvers.
     pub state_resolvers: Vec<StateResolver>,
-    /// Optional PROTO-003 record relays.
-    pub pairing_record_relays: Vec<String>,
     /// Revocation and freshness policy.
     pub revocation: RevocationPolicy,
 }
@@ -344,8 +339,10 @@ impl ApplicationProfile {
     /// No semantic action is taken on failure: the error carries no profile, so
     /// there is nothing for a caller to act on partially.
     pub fn recognise(octets: &[u8]) -> Result<Self, ProfileError> {
-        let limits =
-            Limits { max_bytes: MAX_PROFILE_OCTETS, max_depth: MAX_PROFILE_DEPTH };
+        let limits = Limits {
+            max_bytes: MAX_PROFILE_OCTETS,
+            max_depth: MAX_PROFILE_DEPTH,
+        };
         // Steps 1 and 2.
         let value = json::recognise(octets, limits)?;
         // Step 5, run before the field grammars so that a non-canonical profile
@@ -365,7 +362,7 @@ impl ApplicationProfile {
     }
 
     /// `SHA-256(RFC8785(profile))` — the `profileDigest` of `CON-214`,
-    /// `CON-220` step 6, and the PROTO-003 binding.
+    /// `CON-220` step 6, and the authenticated pairing intent.
     pub fn digest(&self) -> &[u8; 32] {
         &self.digest
     }
@@ -375,27 +372,41 @@ impl ApplicationProfile {
 
         let version = integer(value, "profileVersion")?;
         if version != PROFILE_VERSION {
-            return Err(bad("profileVersion", "must be exactly 1 in this profile version"));
+            return Err(bad(
+                "profileVersion",
+                "must be exactly 1 in this profile version",
+            ));
         }
 
-        let application_id = ApplicationId::parse(string(value, "applicationId")?)
-            .map_err(|_| bad("applicationId", "is not a canonical HTTPS application identifier"))?;
+        let application_id =
+            ApplicationId::parse(string(value, "applicationId")?).map_err(|_| {
+                bad(
+                    "applicationId",
+                    "is not a canonical HTTPS application identifier",
+                )
+            })?;
 
         // `CON-201`: "applicationId and verifierAudience MUST be identical in
         // version 1." Compared as exact ASCII, after both have been recognised.
         if string(value, "verifierAudience")? != application_id.as_str() {
-            return Err(bad("verifierAudience", "must be identical to applicationId"));
+            return Err(bad(
+                "verifierAudience",
+                "must be identical to applicationId",
+            ));
         }
 
         let account_authority = string(value, "accountAuthority")?.to_string();
-        uri::recognise_dns_name(&account_authority)
-            .map_err(|_| bad("accountAuthority", "is not a lower-case ASCII A-label DNS name"))?;
+        uri::recognise_dns_name(&account_authority).map_err(|_| {
+            bad(
+                "accountAuthority",
+                "is not a lower-case ASCII A-label DNS name",
+            )
+        })?;
 
         let allowed_permissions = permissions(value, &application_id)?;
         let (enrollment_keys, mobile_bindings) = enrollment(value, &application_id)?;
-        let rendezvous = rendezvous(value)?;
+        let cbcl_pairing_relays = cbcl_pairing_relays(value)?;
         let state_resolvers = state_resolvers(value)?;
-        let pairing_record_relays = relays(value)?;
         let revocation = revocation(value)?;
 
         let digest = sha256(&canonical);
@@ -407,9 +418,8 @@ impl ApplicationProfile {
             allowed_permissions,
             enrollment_keys,
             mobile_bindings,
-            rendezvous,
+            cbcl_pairing_relays,
             state_resolvers,
-            pairing_record_relays,
             revocation,
         })
     }
@@ -433,9 +443,12 @@ fn closed_members(
     required: &[&str],
     optional: &[&str],
 ) -> Result<(), ProfileError> {
-    let members = value
-        .as_object()
-        .ok_or_else(|| bad(if path.is_empty() { "<root>" } else { path }, "is not an object"))?;
+    let members = value.as_object().ok_or_else(|| {
+        bad(
+            if path.is_empty() { "<root>" } else { path },
+            "is not an object",
+        )
+    })?;
     for (name, _) in members {
         if !required.contains(&name.as_str()) && !optional.contains(&name.as_str()) {
             return Err(ProfileError::UnknownMember(join(path, name)));
@@ -450,19 +463,27 @@ fn closed_members(
 }
 
 fn member<'a>(value: &'a Json, name: &str) -> Result<&'a Json, ProfileError> {
-    value.get(name).ok_or_else(|| ProfileError::MissingMember(name.to_string()))
+    value
+        .get(name)
+        .ok_or_else(|| ProfileError::MissingMember(name.to_string()))
 }
 
 fn string<'a>(value: &'a Json, name: &str) -> Result<&'a str, ProfileError> {
-    member(value, name)?.as_str().ok_or_else(|| bad(name, "is not a string"))
+    member(value, name)?
+        .as_str()
+        .ok_or_else(|| bad(name, "is not a string"))
 }
 
 fn integer(value: &Json, name: &str) -> Result<i64, ProfileError> {
-    member(value, name)?.as_i64().ok_or_else(|| bad(name, "is not an integer"))
+    member(value, name)?
+        .as_i64()
+        .ok_or_else(|| bad(name, "is not an integer"))
 }
 
 fn array<'a>(value: &'a Json, name: &str) -> Result<&'a [Json], ProfileError> {
-    member(value, name)?.as_array().ok_or_else(|| bad(name, "is not an array"))
+    member(value, name)?
+        .as_array()
+        .ok_or_else(|| bad(name, "is not an array"))
 }
 
 fn bounded_positive(
@@ -499,7 +520,10 @@ fn sha256(bytes: &[u8]) -> [u8; 32] {
 fn permissions(value: &Json, application_id: &ApplicationId) -> Result<Vec<String>, ProfileError> {
     let items = array(value, "allowedPermissions")?;
     if items.is_empty() || items.len() > MAX_PERMISSIONS {
-        return Err(bad("allowedPermissions", "must hold between 1 and 64 entries"));
+        return Err(bad(
+            "allowedPermissions",
+            "must hold between 1 and 64 entries",
+        ));
     }
     let mut out = Vec::with_capacity(items.len());
     for item in items {
@@ -507,10 +531,16 @@ fn permissions(value: &Json, application_id: &ApplicationId) -> Result<Vec<Strin
             .as_str()
             .ok_or_else(|| bad("allowedPermissions", "entry is not a string"))?;
         let parts = uri::recognise(text, UriPolicy::FRAGMENT_ID).map_err(|_| {
-            bad("allowedPermissions", "entry is not a canonical HTTPS URI with a fragment")
+            bad(
+                "allowedPermissions",
+                "entry is not a canonical HTTPS URI with a fragment",
+            )
         })?;
         if parts.origin != application_id.origin() {
-            return Err(bad("allowedPermissions", "entry is not on the applicationId origin"));
+            return Err(bad(
+                "allowedPermissions",
+                "entry is not on the applicationId origin",
+            ));
         }
         out.push(text.to_string());
     }
@@ -518,7 +548,10 @@ fn permissions(value: &Json, application_id: &ApplicationId) -> Result<Vec<Strin
     // ordering is byte order over UTF-8 — the same relation. This is
     // deliberately *not* the UTF-16 order RFC 8785 uses for member names.
     if out.windows(2).any(|w| w[0] >= w[1]) {
-        return Err(bad("allowedPermissions", "is unsorted or contains a duplicate"));
+        return Err(bad(
+            "allowedPermissions",
+            "is unsorted or contains a duplicate",
+        ));
     }
     Ok(out)
 }
@@ -528,18 +561,34 @@ fn enrollment(
     application_id: &ApplicationId,
 ) -> Result<(Vec<EnrollmentKey>, Vec<MobileBinding>), ProfileError> {
     let enrollment = member(value, "enrollment")?;
-    closed_members(enrollment, "enrollment", &["requestSigningKeys"], &["mobileBindings"])?;
+    closed_members(
+        enrollment,
+        "enrollment",
+        &["requestSigningKeys"],
+        &["mobileBindings"],
+    )?;
 
     let key_items = array(enrollment, "requestSigningKeys")?;
     if key_items.is_empty() || key_items.len() > MAX_PROVIDERS {
-        return Err(bad("enrollment.requestSigningKeys", "must hold at least one entry"));
+        return Err(bad(
+            "enrollment.requestSigningKeys",
+            "must hold at least one entry",
+        ));
     }
     let mut keys = Vec::with_capacity(key_items.len());
     for item in key_items {
-        closed_members(item, "enrollment.requestSigningKeys[]", &["kid", "publicKeyJwk"], &[])?;
+        closed_members(
+            item,
+            "enrollment.requestSigningKeys[]",
+            &["kid", "publicKeyJwk"],
+            &[],
+        )?;
         let kid = string(item, "kid")?.to_string();
         let parts = uri::recognise(&kid, UriPolicy::FRAGMENT_ID).map_err(|_| {
-            bad("enrollment.requestSigningKeys[].kid", "is not a canonical HTTPS URI with a fragment")
+            bad(
+                "enrollment.requestSigningKeys[].kid",
+                "is not a canonical HTTPS URI with a fragment",
+            )
         })?;
         if parts.origin != application_id.origin() {
             return Err(bad(
@@ -554,22 +603,32 @@ fn enrollment(
         keys.push(EnrollmentKey { kid, jwk });
     }
     if first_duplicate(keys.iter().map(|k| k.kid.as_str())).is_some() {
-        return Err(bad("enrollment.requestSigningKeys", "contains a duplicate kid"));
+        return Err(bad(
+            "enrollment.requestSigningKeys",
+            "contains a duplicate kid",
+        ));
     }
     // `CON-201`: "MUST contain at least one unique key". Two entries with
     // different `kid` values but the same public key would let one compromised
     // key masquerade as rotation having happened.
     if first_duplicate(keys.iter().map(|k| k.jwk.x.as_str())).is_some() {
-        return Err(bad("enrollment.requestSigningKeys", "contains a duplicate public key"));
+        return Err(bad(
+            "enrollment.requestSigningKeys",
+            "contains a duplicate public key",
+        ));
     }
 
     let bindings = match enrollment.get("mobileBindings") {
         None => Vec::new(),
         Some(value) => {
-            let items =
-                value.as_array().ok_or_else(|| bad("enrollment.mobileBindings", "is not an array"))?;
+            let items = value
+                .as_array()
+                .ok_or_else(|| bad("enrollment.mobileBindings", "is not an array"))?;
             if items.len() > MAX_PROVIDERS {
-                return Err(bad("enrollment.mobileBindings", "holds more than 64 entries"));
+                return Err(bad(
+                    "enrollment.mobileBindings",
+                    "holds more than 64 entries",
+                ));
             }
             let mut out = Vec::with_capacity(items.len());
             for item in items {
@@ -623,7 +682,10 @@ fn mobile_binding(
             let mut certs = Vec::with_capacity(digests.len());
             for d in digests {
                 let text = d.as_str().ok_or_else(|| {
-                    bad("enrollment.mobileBindings[].signingCertificateSha256", "entry is not a string")
+                    bad(
+                        "enrollment.mobileBindings[].signingCertificateSha256",
+                        "entry is not a string",
+                    )
                 })?;
                 crate::codec::decode_b64url_32(text).map_err(|_| {
                     bad(
@@ -649,7 +711,11 @@ fn mobile_binding(
                     "names a certificate digest outside its own rotation set",
                 ));
             }
-            Ok(MobileBinding::Android { id, package_name, signing_certificate_sha256: certs })
+            Ok(MobileBinding::Android {
+                id,
+                package_name,
+                signing_certificate_sha256: certs,
+            })
         }
         "apple" => {
             closed_members(
@@ -662,7 +728,10 @@ fn mobile_binding(
             let bundle_id = string(value, "bundleId")?.to_string();
             let return_uri = string(value, "returnUri")?.to_string();
             let parts = uri::recognise(&return_uri, UriPolicy::PROVIDER_URL).map_err(|_| {
-                bad("enrollment.mobileBindings[].returnUri", "is not a canonical HTTPS URI")
+                bad(
+                    "enrollment.mobileBindings[].returnUri",
+                    "is not a canonical HTTPS URI",
+                )
             })?;
             // `CON-201`: "Apple entries bind an exact Team ID and bundle ID to a
             // claimed HTTPS return URI on the `applicationId` origin."
@@ -679,9 +748,17 @@ fn mobile_binding(
                     "does not spell `apple:<teamId>:<bundleId>:<returnUri origin>`",
                 ));
             }
-            Ok(MobileBinding::Apple { id, team_id, bundle_id, return_uri })
+            Ok(MobileBinding::Apple {
+                id,
+                team_id,
+                bundle_id,
+                return_uri,
+            })
         }
-        _ => Err(bad("enrollment.mobileBindings[].platform", "is neither `android` nor `apple`")),
+        _ => Err(bad(
+            "enrollment.mobileBindings[].platform",
+            "is neither `android` nor `apple`",
+        )),
     }
 }
 
@@ -692,7 +769,9 @@ pub(crate) fn is_provider_id(text: &str) -> bool {
         && bytes
             .first()
             .is_some_and(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
-        && bytes.iter().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || *b == b'-')
+        && bytes
+            .iter()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || *b == b'-')
 }
 
 fn provider_id(text: &str, path: &'static str) -> Result<(), ProfileError> {
@@ -703,102 +782,76 @@ fn provider_id(text: &str, path: &'static str) -> Result<(), ProfileError> {
     }
 }
 
-fn rendezvous(value: &Json) -> Result<Vec<RendezvousDescriptor>, ProfileError> {
-    let items = array(value, "rendezvous")?;
-    if items.is_empty() || items.len() > MAX_PROVIDERS {
-        return Err(bad("rendezvous", "must hold between 1 and 64 entries"));
+fn cbcl_pairing_relays(value: &Json) -> Result<Vec<CbclRelayDescriptor>, ProfileError> {
+    let items = array(value, "cbclPairingRelays")?;
+    if items.is_empty() || items.len() > MAX_RELAYS {
+        return Err(bad(
+            "cbclPairingRelays",
+            "must hold between 1 and 16 entries",
+        ));
     }
     let mut out = Vec::with_capacity(items.len());
     for item in items {
         closed_members(
             item,
-            "rendezvous[]",
+            "cbclPairingRelays[]",
             &[
-                "id",
-                "url",
-                "protocol",
-                "pairingUrl",
-                "pairingProtocol",
-                "pairingRoute",
+                "operatorId",
+                "relayOrigin",
                 "priority",
                 "weight",
-                "validUntil",
+                "privacyPolicyDigest",
+                "conformanceEvidenceDigest",
             ],
             &[],
         )?;
-        let id = string(item, "id")?.to_string();
-        provider_id(&id, "rendezvous[].id")?;
-
-        if string(item, "protocol")? != "selfsame-rendezvous-v1" {
-            return Err(bad("rendezvous[].protocol", "must be exactly selfsame-rendezvous-v1"));
+        let operator_id = string(item, "operatorId")?.to_string();
+        provider_id(&operator_id, "cbclPairingRelays[].operatorId")?;
+        let relay_origin = string(item, "relayOrigin")?.to_string();
+        uri::recognise(&relay_origin, UriPolicy::ORIGIN).map_err(|_| {
+            bad(
+                "cbclPairingRelays[].relayOrigin",
+                "is not a canonical HTTPS origin",
+            )
+        })?;
+        let priority = bounded_range(item, "cbclPairingRelays[]", "priority")?;
+        let weight = bounded_range(item, "cbclPairingRelays[]", "weight")?;
+        if weight == 0 {
+            return Err(bad("cbclPairingRelays[].weight", "must be positive"));
         }
-        if string(item, "pairingProtocol")? != "selfsame-pairing-v1" {
-            return Err(bad("rendezvous[].pairingProtocol", "must be exactly selfsame-pairing-v1"));
-        }
-
-        let url = string(item, "url")?.to_string();
-        uri::recognise(&url, UriPolicy::ORIGIN)
-            .map_err(|_| bad("rendezvous[].url", "is not a canonical origin"))?;
-        let pairing_url = string(item, "pairingUrl")?.to_string();
-        // `CON-401`, not `CON-301`: "one operated service may expose the blind
-        // mailbox at its origin and the pairing relay below `/selfsame` without
-        // colliding with another protocol at `/pair/v1`." That collision is real
-        // — `cbcl-bus` serves SPEC-016's agent-pairing WebSocket at an ungated
-        // `/pair/v1` — so an origin-only `pairingUrl` cannot name its relay at
-        // all, and this recognised one until now.
-        uri::recognise(&pairing_url, UriPolicy::PAIRING_BASE_URL)
-            .map_err(|_| bad("rendezvous[].pairingUrl", "is not a canonical pairing base URL"))?;
-
-        let pairing_route = string(item, "pairingRoute")?.to_string();
-        if pairing_route.len() != 2 || !pairing_route.bytes().all(|b| b.is_ascii_digit()) {
-            return Err(bad("rendezvous[].pairingRoute", "is not exactly two ASCII digits"));
-        }
-
-        let priority = bounded_range(item, "rendezvous[]", "priority")?;
-        let weight = bounded_range(item, "rendezvous[]", "weight")?;
-
-        let valid_until = time::parse_date_time_stamp(string(item, "validUntil")?).map_err(
-            |e| match e {
-                TimeError::Malformed => {
-                    bad("rendezvous[].validUntil", "is not a UTC XML Schema dateTimeStamp")
-                }
-                TimeError::OutOfRange => {
-                    bad("rendezvous[].validUntil", "names a date or time that does not exist")
-                }
-            },
-        )?;
-
-        let digest = sha256(&json::canonicalise(item));
-        out.push(RendezvousDescriptor {
-            id,
-            url,
-            protocol: "selfsame-rendezvous-v1".to_string(),
-            pairing_url,
-            pairing_protocol: "selfsame-pairing-v1".to_string(),
-            pairing_route,
+        let privacy_policy_digest = codec::decode_b64url_32(string(item, "privacyPolicyDigest")?)
+            .map_err(|_| {
+            bad(
+                "cbclPairingRelays[].privacyPolicyDigest",
+                "is not a canonical SHA-256 digest",
+            )
+        })?;
+        let conformance_evidence_digest =
+            codec::decode_b64url_32(string(item, "conformanceEvidenceDigest")?).map_err(|_| {
+                bad(
+                    "cbclPairingRelays[].conformanceEvidenceDigest",
+                    "is not a canonical SHA-256 digest",
+                )
+            })?;
+        out.push(CbclRelayDescriptor {
+            operator_id,
+            relay_origin,
             priority,
             weight,
-            valid_until,
-            digest,
+            privacy_policy_digest,
+            conformance_evidence_digest,
+            digest: sha256(&json::canonicalise(item)),
         });
     }
-
-    if first_duplicate(out.iter().map(|d| d.id.as_str())).is_some() {
-        return Err(bad("rendezvous", "contains a duplicate provider id"));
+    if first_duplicate(out.iter().map(|d| d.operator_id.as_str())).is_some() {
+        return Err(bad("cbclPairingRelays", "contains a duplicate operator id"));
     }
-    if first_duplicate(out.iter().map(|d| d.pairing_route.as_str())).is_some() {
-        return Err(bad("rendezvous", "contains a duplicate pairing route"));
+    if first_duplicate(out.iter().map(|d| d.relay_origin.as_str())).is_some() {
+        return Err(bad(
+            "cbclPairingRelays",
+            "contains a duplicate relay origin",
+        ));
     }
-
-    // `CON-201`: "At least one descriptor in the lowest-priority group MUST have
-    // a non-zero weight, or that group can never be selected from." Without
-    // this, `CON-208` step 6 would draw from an all-zero group and fall through
-    // to the next priority, silently inverting the developer's stated order.
-    let lowest = out.iter().map(|d| d.priority).min().expect("non-empty");
-    if !out.iter().any(|d| d.priority == lowest && d.weight > 0) {
-        return Err(bad("rendezvous", "the lowest-priority group has no non-zero weight"));
-    }
-
     Ok(out)
 }
 
@@ -823,36 +876,22 @@ fn state_resolvers(value: &Json) -> Result<Vec<StateResolver>, ProfileError> {
         let id = string(item, "id")?.to_string();
         provider_id(&id, "stateResolvers[].id")?;
         if string(item, "protocol")? != "did-crdt-service-v1" {
-            return Err(bad("stateResolvers[].protocol", "must be exactly did-crdt-service-v1"));
+            return Err(bad(
+                "stateResolvers[].protocol",
+                "must be exactly did-crdt-service-v1",
+            ));
         }
         let url = string(item, "url")?.to_string();
         uri::recognise(&url, UriPolicy::PROVIDER_URL)
             .map_err(|_| bad("stateResolvers[].url", "is not a canonical HTTPS URL"))?;
-        out.push(StateResolver { id, url, protocol: "did-crdt-service-v1".to_string() });
+        out.push(StateResolver {
+            id,
+            url,
+            protocol: "did-crdt-service-v1".to_string(),
+        });
     }
     if first_duplicate(out.iter().map(|r| r.id.as_str())).is_some() {
         return Err(bad("stateResolvers", "contains a duplicate resolver id"));
-    }
-    Ok(out)
-}
-
-fn relays(value: &Json) -> Result<Vec<String>, ProfileError> {
-    let Some(node) = value.get("pairingRecordRelays") else { return Ok(Vec::new()) };
-    let items =
-        node.as_array().ok_or_else(|| bad("pairingRecordRelays", "is not an array"))?;
-    if items.len() > MAX_RELAYS {
-        return Err(bad("pairingRecordRelays", "holds more than 16 entries"));
-    }
-    let mut out = Vec::with_capacity(items.len());
-    for item in items {
-        let text =
-            item.as_str().ok_or_else(|| bad("pairingRecordRelays", "entry is not a string"))?;
-        uri::recognise(text, UriPolicy::ORIGIN)
-            .map_err(|_| bad("pairingRecordRelays", "entry is not a canonical origin"))?;
-        out.push(text.to_string());
-    }
-    if first_duplicate(out.iter().map(String::as_str)).is_some() {
-        return Err(bad("pairingRecordRelays", "contains a duplicate origin"));
     }
     Ok(out)
 }
@@ -871,7 +910,10 @@ fn revocation(value: &Json) -> Result<RevocationPolicy, ProfileError> {
         &["projection"],
     )?;
     if string(node, "method")? != "did-crdt-revocations-v1" {
-        return Err(bad("revocation.method", "must be exactly did-crdt-revocations-v1"));
+        return Err(bad(
+            "revocation.method",
+            "must be exactly did-crdt-revocations-v1",
+        ));
     }
     let max_grant_lifetime_seconds = bounded_positive(
         node,
@@ -901,19 +943,33 @@ fn revocation(value: &Json) -> Result<RevocationPolicy, ProfileError> {
             closed_members(
                 p,
                 "revocation.projection",
-                &["type", "allocationUrl", "credentialBaseUrl", "maxAgeSeconds"],
+                &[
+                    "type",
+                    "allocationUrl",
+                    "credentialBaseUrl",
+                    "maxAgeSeconds",
+                ],
                 &[],
             )?;
             if string(p, "type")? != "BitstringStatusList" {
-                return Err(bad("revocation.projection.type", "must be exactly BitstringStatusList"));
+                return Err(bad(
+                    "revocation.projection.type",
+                    "must be exactly BitstringStatusList",
+                ));
             }
             let allocation_url = string(p, "allocationUrl")?.to_string();
             uri::recognise(&allocation_url, UriPolicy::PROVIDER_URL).map_err(|_| {
-                bad("revocation.projection.allocationUrl", "is not a canonical HTTPS URL")
+                bad(
+                    "revocation.projection.allocationUrl",
+                    "is not a canonical HTTPS URL",
+                )
             })?;
             let credential_base_url = string(p, "credentialBaseUrl")?.to_string();
             uri::recognise(&credential_base_url, UriPolicy::PROVIDER_URL).map_err(|_| {
-                bad("revocation.projection.credentialBaseUrl", "is not a canonical HTTPS URL")
+                bad(
+                    "revocation.projection.credentialBaseUrl",
+                    "is not a canonical HTTPS URL",
+                )
             })?;
             let max_age_seconds = bounded_positive(
                 p,

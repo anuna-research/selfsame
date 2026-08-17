@@ -1,0 +1,129 @@
+schema_version: 1
+specification: SPEC-007
+recorded_at: "2026-08-17T16:57:44+10:00"
+scope: "Tier-1 cbcl-pairing cutover specification"
+
+intent:
+  cutover_requested: true
+  no_deployed_users_reported: true
+  breaking_compatibility_accepted: true
+  source: "repository-owner conversation on 2026-08-17"
+  approval_persisted_in: "SPEC-007 v0.2.1 and this Gate Evidence Record"
+
+impact:
+  backlinks_checked:
+    - SPEC-007-cbcl-pairing-cutover
+    - SPEC-006-cbcl-pairing-integration
+    - SPEC-004-application-scoped-identity
+    - PROTO-002-selfsame-rendezvous-v1
+    - PROTO-003-selfsame-pairing-v1
+    - PROTO-004-selfsame-ceremony-envelope-v1
+  affected_authorities:
+    - SPEC-006
+    - SPEC-004
+    - PROTO-002
+    - PROTO-003
+    - PROTO-004
+    - cbcl-pairing/SPEC-001
+  compatibility_disposition: "reject legacy inputs; no dual protocol"
+
+gates:
+  - gate: "Specification structure and traceability"
+    mechanism: "USDD lint and zetl checks"
+    result: pass
+    evidence: "USDD descriptive lint: 0 errors and 0 warnings; SPEC-007 adds no dead links or syntax errors"
+    owner: "specification author"
+  - gate: "Fresh-context comprehension review"
+    mechanism: "independent agent using Orientation only"
+    result: pass
+    evidence: "initial ambiguity was revised; fresh rerun correctly predicted sole protocol, legacy refusal, and production hold"
+    owner: "independent reviewer"
+  - gate: "Cross-model adversarial review"
+    mechanism: "independent Tier-1 reviewer"
+    result: pass_after_revision
+    evidence: "two reviews found blockers; final review passed after authority, payload, relay-selection, and boundary repairs"
+    owner: "Selfsame security owner"
+  - gate: "Local authority amendments"
+    mechanism: "versioned changes through each source document's amendment channel"
+    result: pass
+    evidence: "TEST-819 inspection: all five versioned dispositions name affected artifacts, owner approval, vector disposition, retained holds, SPEC-007 trace, and dated changelog; zetl reports zero dead links and zero syntax errors"
+    owner: "affected Selfsame specification and protocol owners"
+  - gate: "Inherited SPEC-004 Tier-1 ledger"
+    mechanism: "25-row preservation and replacement ledger in SPEC-007"
+    result: unverified
+    evidence: "ledger specified; standing SPEC-004 boxes remain open"
+    owner: "SPEC-004 human owner"
+  - gate: "Upstream cbcl-pairing production gates"
+    mechanism: "exact SPEC-001 production gate without local reinterpretation"
+    result: unverified
+    evidence: "upstream specification remains production-not-approved"
+    owner: "cbcl-pairing specification owner"
+  - gate: "No-users and no-migration owner disposition"
+    mechanism: "explicit repository-owner approval persisted in SPEC-007 v0.2.1"
+    result: pass
+    evidence: "owner approved the breaking cutover on 2026-08-17; SPEC-007 v0.2.1 records the no-user disposition"
+    owner: "Selfsame repository owner"
+  - gate: "Selfsame specification-owner approval"
+    mechanism: "reviewed versioned specification revision and Gate Evidence Record"
+    result: pass
+    evidence: "repository owner approved implementation on 2026-08-17; SPEC-007 v0.2.1 is approved for development"
+    owner: "Selfsame specification owner"
+  - gate: "cbcl-pairing specification-owner approval"
+    mechanism: "reviewed merged specification revision"
+    result: unverified
+    evidence: "approval not recorded in repository"
+    owner: "cbcl-pairing specification owner"
+  - gate: "Human cryptography review"
+    mechanism: "named human review of pinned CPace and channel construction"
+    result: unverified
+    evidence: "required before production allocation, not before draft authoring"
+    owner: "human cryptography reviewer"
+  - gate: "Independent CPace and endpoint vectors"
+    mechanism: "second CPace implementation and independent endpoint disposition"
+    result: unverified
+    evidence: "required before production allocation"
+    owner: "cbcl-pairing security owner"
+  - gate: "Independent relay deployments"
+    mechanism: "approval, decline, failure, and expiry against two operators"
+    result: unverified
+    evidence: "required before production allocation"
+    owner: "Selfsame security owner and relay operators"
+  - gate: "Privacy review"
+    mechanism: "relay metadata, telemetry, retention, and traffic analysis"
+    result: unverified
+    evidence: "required before production allocation"
+    owner: "human privacy reviewer"
+  - gate: "Credential-profile security review"
+    mechanism: "human review of CON-219 payload mapping and CON-206 boundary"
+    result: unverified
+    evidence: "required before production allocation"
+    owner: "human security reviewer"
+  - gate: "Implementation conformance suite"
+    mechanism: "core, depth, red, mutation, accessibility, and traceability gates"
+    result: unverified
+    evidence: "implementation is outside this Phase-1 amendment task"
+    owner: "implementation owner"
+
+standing_controls:
+  production_allocation_enabled: false
+  legacy_fallback_permitted: false
+  selfsame_acceptance_required: true
+  explicit_consent_required: true
+  relay_application_aware: false
+
+review_history:
+  - review: "fresh-context comprehension"
+    result: pass_after_revision
+    disposition: "frontmatter gate aggregation clarified; fresh rerun passed"
+  - review: "first cross-model adversarial"
+    result: fail
+    disposition: "six blockers repaired"
+  - review: "second independent Tier-1"
+    result: fail
+    disposition: "authority ledger, provider selection, legacy grammar, and PROTO-002/004 disposition repaired"
+  - review: "final cross-model adversarial"
+    result: pass
+    disposition: "payload bound narrowed to 62,000 octets; ready to request owners and companion amendments"
+  - review: "v0.2.1 executable-plan adversarial audit"
+    result: pass_after_revision
+    disposition: "TEST-819 and TEST-820 separate development authority from owner-split production evidence"

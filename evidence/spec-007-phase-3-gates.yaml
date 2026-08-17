@@ -1,0 +1,186 @@
+schema_version: 1
+specification: SPEC-007
+specification_version: 0.2.1
+recorded_at: "2026-08-17T18:15:03+10:00"
+scope: "development cbcl-pairing cutover; production allocation remains prohibited"
+
+branch:
+  name: feature/cbcl-pairing-demo
+  base_revision: 5f57a586e7dfa5be88c51f36a808fc60faf24c09
+  merge_base: 22801e77dc0c7c493b6e811f79cb17c7cd9352ab
+  implementation_state: uncommitted_working_tree
+
+dependency:
+  cbcl_pairing_pin_file: cbcl-pairing.sha
+  reviewed_revision: 197d4cb3d1560ab5328df28fc984269799c510f9
+  cargo_selection: "workspace path dependency with exact reviewed revision checked by TEST-701"
+  production_owner_approval: unverified
+
+local_tests:
+  TEST-801:
+    result: pass
+    evidence:
+      - "cargo test -p selfsame-pairing --test shell_cutover"
+      - "node --test tests/spec-007-wallet-pairing.mjs"
+    proves: "ordinary Tauri, CLI, web-device, and UI actions select CBCL without a protocol option"
+  TEST-802:
+    result: pass
+    evidence:
+      - "cargo test -p selfsame-pairing --test boundaries"
+      - "production-source and cargo-tree audit"
+    proves: "no legacy engine, module, command, route, profile token, or dependency path remains"
+  TEST-803:
+    result: pass
+    evidence:
+      - "cargo test -p selfsame-pairing --test one_sided test_803_separate_processes_complete_through_the_real_relay_wire -- --exact"
+    proves: "allocator and claimant run in separate OS processes and every canonical frame crosses the pinned relay wire and reducer"
+  TEST-804:
+    result: pass
+    evidence:
+      - "crates/selfsame-pairing/tests/adapter.rs::test_710_decline_releases_no_payload_and_calls_no_selfsame_verifier"
+      - "evidence/spec-006-red.md#Consent mutation gate"
+    proves: "decline and held approval release no payload and the approve-for-decline mutation is killed"
+  TEST-805:
+    result: pass
+    evidence:
+      - "crates/selfsame-pairing/tests/adapter.rs::test_703_and_705_approved_ceremony_reaches_selfsame_acceptance"
+    proves: "one approved credential reaches the complete Selfsame acceptance predicate"
+  TEST-806:
+    result: pass
+    evidence:
+      - "crates/selfsame-pairing/tests/adapter.rs::test_706_invalid_grant_is_transported_but_never_authorized"
+      - "evidence/spec-006-red.md#Selfsame-verifier mutation gate"
+    proves: "a mutated signature creates no accepted credential and the parse-only bypass mutation is killed"
+  TEST-807:
+    result: pass
+    evidence:
+      - "crates/selfsame-pairing/tests/adapter.rs::test_707_and_708_relay_state_is_opaque_and_scope_bounded"
+    proves: "relay debug state and counters expose no application, permission, credential, or verifier meaning"
+  TEST-808:
+    result: pass
+    evidence:
+      - "cargo test -p selfsame-pairing --test boundaries"
+      - "cargo test --test relay_service in the pinned cbcl-pairing checkout"
+    proves: "relay state, queue, membership, crowding, expiry, and work remain mailbox-scoped and bounded"
+  TEST-809:
+    result: pass
+    evidence:
+      - "cargo test -p selfsame-pairing --test legacy_corpus"
+      - "test-vectors/spec-007-legacy/manifest.json"
+    proves: "all LEGACY-001 and LEGACY-002 octets are hash-bound and rejected with empty effects"
+  TEST-810:
+    result: pass
+    evidence:
+      - "cargo test -p selfsame-pairing --test legacy_corpus"
+      - "cargo test -p selfsame-pairing --test rollback_hold"
+      - "cargo test -p selfsame-rendezvous --test spec_007_routes"
+    proves: "retired records and routes have no handler and production allocation stops before effects"
+  TEST-811:
+    result: pass
+    evidence:
+      - "cargo test -p selfsame-pairing --test rollback_hold"
+    proves: "rollback selects only a reviewed CBCL predecessor or disables pairing while preserving unrelated identity functions"
+  TEST-812:
+    result: pass
+    evidence:
+      - "crates/selfsame-pairing/tests/boundaries.rs::test_812_legacy_executables_are_deleted_but_authority_is_retained"
+      - "repository diff and production-source audit"
+    proves: "legacy executable code and positive assets are deleted; versioned authority and the rejection corpus remain"
+  TEST-813:
+    result: pass
+    evidence:
+      - "crates/selfsame-pairing/tests/one_sided.rs::test_813_decline_and_replay_are_terminal_without_payload_effects"
+      - "crates/selfsame-pairing/tests/adapter.rs TEST-718 cancellation, expiry, and replay cases"
+      - "cargo test --test cpace --test channel --test endpoint --test relay_service --test independent_endpoint in the pinned cbcl-pairing checkout"
+    proves: "wrong secret, invalid Finished, cancellation, expiry, crowding, decision/payload replay, competing claims, and invitation reuse close without extra effects"
+  TEST-814:
+    result: pass
+    evidence:
+      - "node --test tests/spec-007-wallet-pairing.mjs"
+      - "node tests/screens.mjs /private/tmp/selfsame-spec007-screens-2"
+    proves: "pairing states pass keyboard, narrow viewport, overflow, and WCAG 2.2 AA checks"
+  TEST-817:
+    result: pass
+    evidence:
+      - "cargo test -p selfsame-app-identity --test spec_007_cbcl_relay"
+    proves: "closed relay descriptors, evidence eligibility, deterministic weighting, exact-origin following, and restart selection"
+  TEST-818:
+    result: pass
+    evidence:
+      - "cargo test -p selfsame-app-identity --test spec_007_cbcl_relay"
+      - "crates/selfsame-pairing/tests/boundaries.rs::test_818_credential_profile_enforces_the_exact_payload_bound"
+    proves: "the CBCL credential payload accepts 62,000 octets and rejects 62,001 without truncation"
+  TEST-819:
+    result: pass
+    evidence:
+      - "evidence/spec-007-phase-1-gates.yaml"
+      - "USDD descriptive lint on SPEC-007 and IMPL-007: zero errors and zero warnings"
+    proves: "each local companion records its versioned Selfsame cutover disposition without weakening unrelated duties"
+
+mutation_gates:
+  consent_bypass:
+    mutation: "decline invoked approve"
+    result: killed
+    evidence: "evidence/spec-006-red.md#Consent mutation gate"
+  selfsame_verifier_bypass:
+    mutation: "parse-only success replaced direct thirteen-step acceptance"
+    result: killed
+    evidence: "evidence/spec-006-red.md#Selfsame-verifier mutation gate"
+  legacy_source_reintroduction:
+    mutation: "inserted selfsame-pairing-v1 into a production module"
+    result: killed
+    evidence: "TEST-802 failed and named crates/selfsame-pairing/src/release.rs; mutation restored"
+  production_hold_enablement:
+    mutation: "set PRODUCTION_ALLOCATION_ENABLED to true"
+    result: killed
+    evidence: "TEST-810 failed at the build-policy assertion; mutation restored"
+
+verification:
+  workspace_command: "cargo test --workspace --quiet"
+  workspace_result: pass
+  cbcl_terminal_command: "cargo test --test cpace --test channel --test endpoint --test relay_service --test independent_endpoint --quiet"
+  cbcl_terminal_result: pass
+  browser_demo_command: "node --test tests/cbcl-pairing-demo.mjs"
+  browser_demo_result: pass
+  wallet_accessibility_command: "node --test tests/spec-007-wallet-pairing.mjs"
+  wallet_accessibility_result: pass
+  screen_traversal_result: pass
+  diff_check_result: pass
+  readme_local_links_result: pass
+
+production_gates:
+  TEST-815-independent-endpoint-implementation:
+    result: unverified
+    owner: cbcl-pairing security owner
+  TEST-816-two-independent-relay-operators:
+    result: unverified
+    owner: Selfsame security owner and independent relay operators
+  spec004-tier1-ledger-evidence:
+    result: unverified
+    owner: SPEC-004 human owner
+  upstream-production-gates:
+    result: unverified
+    owner: cbcl-pairing specification owner
+  fresh-production-adversarial-review:
+    result: unverified
+    owner: independent Tier-1 reviewer
+  human-cryptography-review:
+    result: unverified
+    owner: human cryptography reviewer
+  privacy-review:
+    result: unverified
+    owner: human privacy reviewer
+  credential-boundary-security-review:
+    result: unverified
+    owner: human security reviewer
+  production-release-decision:
+    result: unverified
+    owner: Selfsame repository and specification owners
+
+standing_controls:
+  production_allocation_enabled: false
+  production_gate_evidence_id: null
+  reviewed_cbcl_rollback_release: null
+  legacy_fallback_permitted: false
+  ordinary_development_pairing_protocol: cbcl-pairing
+  unrelated_device_linking_available: true

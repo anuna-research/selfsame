@@ -27,6 +27,7 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 selfsame-core = { workspace = true }
 selfsame-app-identity = { workspace = true }
+selfsame-pairing = { path = "../selfsame-pairing" }
 ed25519-dalek = { workspace = true, features = ["std"] }
 wasm-bindgen = "0.2"
 serde = { workspace = true }
@@ -51,6 +52,7 @@ sha2 = { version = "0.10", default-features = false }
 # to agree.
 base64ct = { workspace = true }
 selfsame-rendezvous = { path = "../selfsame-rendezvous" }
+cbcl-pairing = { workspace = true }
 did-crdt = { workspace = true }
 tokio = { workspace = true }
 reqwest = { version = "0.12", features = ["json", "blocking"] }

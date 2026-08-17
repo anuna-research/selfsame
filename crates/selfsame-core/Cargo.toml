@@ -1,6 +1,6 @@
 [package]
 name = "selfsame-core"
-description = "SPEC-001 pure core: link code, CBCL offer/grant records, sealed rendezvous envelope, acceptance predicate, fingerprints, single-controller profile, and root-key derivation"
+description = "SPEC-001 pure core: link code, CBCL offer/grant records, acceptance predicate, fingerprints, single-controller profile, and root-key derivation"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -25,12 +25,6 @@ ed25519-dalek = { workspace = true, features = ["std"] }
 base64ct = { workspace = true }
 chacha20poly1305 = { version = "0.10", default-features = false, features = ["alloc"] }
 hkdf = { version = "0.12", default-features = false }
-# PROTO-003 CON-404's ciphersuite. `curve25519-dalek` is the same implementation
-# hark's SPAKE2 initiator uses, so the port shares an arithmetic backend with the
-# primitive it is pinned against rather than introducing a second one.
-curve25519-dalek = { version = "4", default-features = false, features = ["alloc", "precomputed-tables", "zeroize"] }
-hmac = { version = "0.12", default-features = false }
-subtle = { version = "2", default-features = false }
 sha2 = { version = "0.10", default-features = false }
 bip39 = { version = "2", default-features = false, features = ["std"] }
 serde = { workspace = true }

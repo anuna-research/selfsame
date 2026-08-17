@@ -76,7 +76,9 @@ pub fn profile_value() -> Json {
                         Json::obj([
                             (
                                 "id",
-                                Json::text("apple:TEAM123456:com.example.photos:https://photos.example"),
+                                Json::text(
+                                    "apple:TEAM123456:com.example.photos:https://photos.example",
+                                ),
                             ),
                             ("platform", Json::text("apple")),
                             ("teamId", Json::text("TEAM123456")),
@@ -91,17 +93,16 @@ pub fn profile_value() -> Json {
             ]),
         ),
         (
-            "rendezvous",
+            "cbclPairingRelays",
             Json::arr([
-                descriptor("au-primary", "rendezvous-au.provider.example", "pairing-au.provider.example", "03", 10, 80),
-                descriptor("global-secondary", "rendezvous.example.net", "pairing.example.net", "17", 20, 20),
-            ]),
-        ),
-        (
-            "pairingRecordRelays",
-            Json::arr([
-                Json::text("https://records-au.provider.example"),
-                Json::text("https://records.example.net"),
+                cbcl_relay("au-primary", "https://cbcl-au.provider.example", 10, 80, 1),
+                cbcl_relay(
+                    "global-secondary",
+                    "https://cbcl.provider.example",
+                    20,
+                    20,
+                    2,
+                ),
             ]),
         ),
         (
@@ -139,25 +140,29 @@ pub fn profile_value() -> Json {
     ])
 }
 
-/// One rendezvous descriptor.
-pub fn descriptor(
-    id: &str,
-    mailbox_host: &str,
-    pairing_host: &str,
-    route: &str,
+/// One SPEC-007 cbcl relay descriptor.
+pub fn cbcl_relay(
+    operator_id: &str,
+    relay_origin: &str,
     priority: i64,
     weight: i64,
+    digest_byte: u8,
 ) -> Json {
     Json::obj([
-        ("id", Json::text(id)),
-        ("url", Json::text(format!("https://{mailbox_host}"))),
-        ("protocol", Json::text("selfsame-rendezvous-v1")),
-        ("pairingUrl", Json::text(format!("https://{pairing_host}"))),
-        ("pairingProtocol", Json::text("selfsame-pairing-v1")),
-        ("pairingRoute", Json::text(route)),
+        ("operatorId", Json::text(operator_id)),
+        ("relayOrigin", Json::text(relay_origin)),
         ("priority", Json::int(priority)),
         ("weight", Json::int(weight)),
-        ("validUntil", Json::text("2027-07-30T00:00:00Z")),
+        (
+            "privacyPolicyDigest",
+            Json::text(selfsame_app_identity::codec::b64url(&[digest_byte; 32])),
+        ),
+        (
+            "conformanceEvidenceDigest",
+            Json::text(selfsame_app_identity::codec::b64url(
+                &[digest_byte + 16; 32],
+            )),
+        ),
     ])
 }
 
@@ -177,7 +182,9 @@ pub fn profile_octets() -> Vec<u8> {
 
 /// Replace one top-level member and re-serialise canonically.
 pub fn with_member(name: &str, value: Json) -> Vec<u8> {
-    let Json::Object(mut members) = profile_value() else { unreachable!() };
+    let Json::Object(mut members) = profile_value() else {
+        unreachable!()
+    };
     match members.iter_mut().find(|(k, _)| k == name) {
         Some(slot) => slot.1 = value,
         None => members.push((name.to_string(), value)),
@@ -187,7 +194,9 @@ pub fn with_member(name: &str, value: Json) -> Vec<u8> {
 
 /// Remove one top-level member and re-serialise canonically.
 pub fn without_member(name: &str) -> Vec<u8> {
-    let Json::Object(members) = profile_value() else { unreachable!() };
+    let Json::Object(members) = profile_value() else {
+        unreachable!()
+    };
     let kept: Vec<(String, Json)> = members.into_iter().filter(|(k, _)| k != name).collect();
     json::canonicalise(&Json::Object(kept))
 }
@@ -201,7 +210,9 @@ pub fn with_nested(path: &str, value: Json) -> Vec<u8> {
 }
 
 fn set_path(node: &mut Json, path: &[&str], value: Json) {
-    let Json::Object(members) = node else { panic!("path does not address an object") };
+    let Json::Object(members) = node else {
+        panic!("path does not address an object")
+    };
     let (head, rest) = path.split_first().expect("non-empty path");
     if rest.is_empty() {
         match members.iter_mut().find(|(k, _)| k == head) {
@@ -272,12 +283,7 @@ impl Ceremony {
         Self::build(0, 1, 3, APPLICATION_ID)
     }
 
-    pub fn build(
-        entropy: u8,
-        scope_byte: u8,
-        device_seed: u8,
-        application_id: &str,
-    ) -> Self {
+    pub fn build(entropy: u8, scope_byte: u8, device_seed: u8, application_id: &str) -> Self {
         let profile = ApplicationProfile::recognise(&profile_octets())
             .expect("the example profile is recognised");
         let app = ApplicationId::parse(application_id).expect("canonical");

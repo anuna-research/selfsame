@@ -35,20 +35,12 @@
 //! [OQ-007]: ../../../../anuna-ssi/specs/SPEC-001-device-key-provisioning.md
 
 pub mod app_grant;
-/// `PROTO-003` — resolving a code, answering the pairing, delivering the bundle.
-pub mod pairing;
-/// `PROTO-003` `CON-405` and `PROTO-002` `CON-303` — the two wires.
-///
-/// Public so `tests/a_live_pairing.rs` can drive it against a real provider.
-/// Nothing else outside this crate should reach for it: the ordering, the burn
-/// rules and the ceremony state all live in [`pairing`], and a caller holding a
-/// `Relay` directly has none of them.
-pub mod pairing_net;
-pub mod replay;
 mod app_identity;
+pub mod cbcl_pairing;
 mod commands;
 pub mod custody;
 pub mod net;
+pub mod replay;
 pub mod session;
 pub mod store;
 
@@ -93,10 +85,8 @@ pub fn run() {
             app_identity::alias_preview,
             app_identity::home_fingerprint,
             app_identity::app_identity_derive,
-            pairing::read_pairing_code,
-            pairing::pairing_answer,
-            pairing::pairing_deliver,
-            pairing::pairing_decline,
+            cbcl_pairing::cbcl_pairing_start,
+            cbcl_pairing::cbcl_pairing_cancel,
             app_grant::app_grant_review,
             app_grant::app_grant_prepare,
             app_grant::app_grant_confirm,

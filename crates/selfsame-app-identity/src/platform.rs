@@ -48,8 +48,28 @@
 //! function here that "verifies" it against anything. Adding one would imply an
 //! authority that does not exist.
 
-use crate::ceremony::DispatchResult;
 use crate::profile::MobileBinding;
+
+/// Result of asking an operating-system adapter to open an authenticated target.
+///
+/// This is transport-neutral policy output. It carries no pairing secret,
+/// invitation, credential, or callback value.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DispatchResult {
+    /// Delivered to the verified installed wallet.
+    Dispatched,
+    /// No conforming wallet is installed.
+    WalletUnavailable,
+    /// A candidate exists but its signing identity did not verify.
+    UnverifiedWalletTarget,
+}
+
+impl DispatchResult {
+    /// Whether the caller must abandon the attempted delivery.
+    pub fn burns_attempt(self) -> bool {
+        self != DispatchResult::Dispatched
+    }
+}
 
 /// `CON-222`: the Android API level floor.
 ///
@@ -431,7 +451,10 @@ mod tests {
         // install action containing no ceremony value." The install action is
         // the caller's to offer, and it can only offer it if the outcome says
         // "no wallet here" rather than "a wallet failed to authenticate".
-        assert_eq!(android_select(&[], 30, None), Err(PlatformError::WalletUnavailable));
+        assert_eq!(
+            android_select(&[], 30, None),
+            Err(PlatformError::WalletUnavailable)
+        );
 
         let two = [target("com.wallet.a"), target("com.wallet.b")];
         // An adapter that picked would be choosing which app receives the
@@ -441,7 +464,9 @@ mod tests {
             Err(PlatformError::UnverifiedWalletTarget)
         );
         assert_eq!(
-            android_select(&two, 30, Some("com.wallet.b")).unwrap().package_name,
+            android_select(&two, 30, Some("com.wallet.b"))
+                .unwrap()
+                .package_name,
             "com.wallet.b"
         );
         // A choice naming something that did not resolve.
@@ -504,7 +529,7 @@ mod tests {
             apple_dispatch(UniversalLinkOutcome::NotHandled, true),
             DispatchResult::WalletUnavailable
         );
-        assert!(apple_dispatch(UniversalLinkOutcome::NotHandled, true).burns_ceremony());
+        assert!(apple_dispatch(UniversalLinkOutcome::NotHandled, true).burns_attempt());
     }
 
     #[test]
@@ -577,8 +602,12 @@ mod tests {
 
     #[test]
     fn both_shipped_adapter_policies_are_conformant_for_their_platform() {
-        assert!(AdapterConformance::ANDROID.is_conformant(Platform::Android).is_ok());
-        assert!(AdapterConformance::APPLE.is_conformant(Platform::Apple).is_ok());
+        assert!(AdapterConformance::ANDROID
+            .is_conformant(Platform::Android)
+            .is_ok());
+        assert!(AdapterConformance::APPLE
+            .is_conformant(Platform::Apple)
+            .is_ok());
     }
 
     #[test]
@@ -586,7 +615,9 @@ mod tests {
         // CON-223 records the gap rather than pretending otherwise, so an Apple
         // adapter without a caller signal conforms. An Android one does not:
         // the platform provides it, so omitting it is a choice.
-        assert!(AdapterConformance::APPLE.is_conformant(Platform::Apple).is_ok());
+        assert!(AdapterConformance::APPLE
+            .is_conformant(Platform::Apple)
+            .is_ok());
         assert_eq!(
             AdapterConformance::APPLE.is_conformant(Platform::Android),
             Err(PlatformError::NonConformantAdapter)
@@ -620,12 +651,18 @@ mod tests {
 
     #[test]
     fn a_binding_identifier_names_its_own_platform() {
-        assert_eq!(binding_platform("android:com.example.photos:AAAA").unwrap(), Platform::Android);
+        assert_eq!(
+            binding_platform("android:com.example.photos:AAAA").unwrap(),
+            Platform::Android
+        );
         assert_eq!(
             binding_platform("apple:TEAM123456:com.example.photos:https://photos.example").unwrap(),
             Platform::Apple
         );
-        assert_eq!(binding_platform("windows:x"), Err(PlatformError::MalformedBindingId));
+        assert_eq!(
+            binding_platform("windows:x"),
+            Err(PlatformError::MalformedBindingId)
+        );
         assert_eq!(binding_platform(""), Err(PlatformError::MalformedBindingId));
     }
 
@@ -641,6 +678,9 @@ mod tests {
             PlatformError::UnverifiedWalletTarget.to_string(),
             "UnverifiedWalletTarget"
         );
-        assert_eq!(PlatformError::BelowMinimumApiLevel.to_string(), "WalletUnavailable");
+        assert_eq!(
+            PlatformError::BelowMinimumApiLevel.to_string(),
+            "WalletUnavailable"
+        );
     }
 }

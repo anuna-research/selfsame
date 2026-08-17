@@ -12,10 +12,9 @@
 //! application is who it claims, derive the account's home key, mint the
 //! credential, and hand back the bundle payload.
 //!
-//! It is **not the transport**. `PROTO-004`'s sealed envelope and `PROTO-002`'s
-//! mailbox are separate specifications with their own open gates, so this takes
-//! offer octets that the shell has already opened and returns bundle octets for
-//! the shell to seal. That split is the same one `selfsame-core` draws for
+//! It is **not the transport**. The cbcl encrypted channel is separate, so this
+//! takes offer octets that the shell has already opened and returns bundle
+//! octets for the shell to send. That split is the same one `selfsame-core` draws for
 //! `SPEC-001`, and it is why this module reads no clock beyond `now()`, opens no
 //! socket, and holds no state.
 //!
@@ -65,7 +64,7 @@ type Result<T> = std::result::Result<T, UiError>;
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AuthorisedGrant {
-    /// The `CON-219` bundle payload, for `PROTO-004` to seal.
+    /// The `CON-219` bundle payload for the cbcl channel to carry.
     pub bundle: Vec<u8>,
     /// The account this grant was issued under, as an RFC 7565 `acct:` URI.
     ///
@@ -126,7 +125,7 @@ pub struct PendingIssuance {
 #[derive(serde::Deserialize, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CeremonyObservation {
-    /// The `profileDigest` this ceremony is bound to, from `PROTO-003`'s record.
+    /// The `profileDigest` this ceremony is bound to.
     pub ceremony_profile_digest: String,
     /// The provider the shell selected, per `CON-208`.
     pub provider_id: String,
@@ -180,9 +179,8 @@ pub async fn app_grant_review(
     profile: Vec<u8>,
     observed: CeremonyObservation,
 ) -> Result<GrantRequestView> {
-    let decided =
-        authorise::authorise(&offer, &profile, &observed.as_observation(now() as i64))
-            .map_err(token)?;
+    let decided = authorise::authorise(&offer, &profile, &observed.as_observation(now() as i64))
+        .map_err(token)?;
 
     // Reported, not consumed: a person looking at a consent screen has decided
     // nothing, and a review that burned the id would make the offer unusable by
@@ -260,9 +258,8 @@ pub async fn app_grant_prepare(
 
     // Every recognition, verification, binding and freshness check is the pure
     // core's, and it has already run by the time a key is touched.
-    let decided =
-        authorise::authorise(&offer, &profile, &observed.as_observation(now() as i64))
-            .map_err(token)?;
+    let decided = authorise::authorise(&offer, &profile, &observed.as_observation(now() as i64))
+        .map_err(token)?;
 
     // `CON-214` step 5, and it happens **before** the key is touched. A ledger
     // updated after signing has already let the second signature happen.
@@ -394,8 +391,10 @@ pub async fn app_grant_confirm(
         let mut guard = session.0.lock().unwrap_or_else(|p| p.into_inner());
         // Taken, not borrowed: one preparation yields at most one bundle, and a
         // second call finds nothing rather than re-releasing the same grant.
-        let pending =
-            guard.pending_issuance.take().ok_or_else(|| UiError::from("NothingToConfirm"))?;
+        let pending = guard
+            .pending_issuance
+            .take()
+            .ok_or_else(|| UiError::from("NothingToConfirm"))?;
         // And it must be the ceremony the person was shown. Without this the
         // caller is confirming "whatever is pending", which is a different
         // question from the one on the screen.
@@ -455,7 +454,9 @@ pub async fn app_grant_confirm(
 /// "no binding" with "could not ask" is exactly the substitution the comparison
 /// exists to catch.
 async fn authority_state(acct_uri: &str, home_did: &str) -> AuthorityState {
-    let Ok(acct) = AcctUri::parse(acct_uri) else { return AuthorityState::Unknown };
+    let Ok(acct) = AcctUri::parse(acct_uri) else {
+        return AuthorityState::Unknown;
+    };
 
     // `fetch` alone recognises syntax. A JRD that parses but whose `subject`
     // names another account — stale, cache-mixed, or substituted — would

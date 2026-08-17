@@ -24,9 +24,9 @@
 
 use std::path::PathBuf;
 
-use selfsame_core::{identity, profile, record::Offer};
 use did_crdt::core::delta::SignedDelta;
 use did_crdt::core::document::Document;
+use selfsame_core::{identity, profile, record::Offer};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, thiserror::Error)]
@@ -65,16 +65,8 @@ pub struct Session {
     /// rather than two, and dropped on rejection — it was never transmitted, so
     /// having signed it conferred nothing.
     pub pending_issuance: Option<crate::app_grant::PendingIssuance>,
-    /// The live `PROTO-003` ceremony, if there is one.
-    ///
-    /// `CON-407` requires the binding, the code, the role token and the terminal
-    /// state to be held "in process-private memory". This field is that memory,
-    /// and it is why the pairing commands take a `binding_hash` rather than the
-    /// code: the page names the ceremony, and holds none of it.
-    ///
-    /// Never persisted. [`Session::save`] writes `state` alone, and `NFR-403`
-    /// requires pairing metadata to be ephemeral.
-    pub pending_pairing: Option<crate::pairing::PendingPairing>,
+    /// The live one-sided cbcl claimant. Never persisted or exposed to the page.
+    pub pending_cbcl_pairing: Option<selfsame_pairing::SelfsameEndpointBootstrap>,
 }
 
 /// An offer that has been fetched, recognised, and signature-verified, and is
@@ -99,7 +91,7 @@ impl Session {
             state,
             pending_offer: None,
             pending_issuance: None,
-            pending_pairing: None,
+            pending_cbcl_pairing: None,
         }
     }
 
@@ -172,7 +164,9 @@ impl Session {
 
     /// Mark a delta acknowledged: move it from pending into the closure.
     pub fn acknowledge(&mut self, delta: &SignedDelta) {
-        let Ok(bytes) = serde_json::to_vec(delta) else { return };
+        let Ok(bytes) = serde_json::to_vec(delta) else {
+            return;
+        };
         let encoded = selfsame_core::mb::encode(&bytes);
         if let Some(i) = self.state.pending.iter().position(|p| *p == encoded) {
             let acknowledged = self.state.pending.remove(i);
@@ -193,7 +187,9 @@ impl Session {
             .filter_map(|d| serde_json::to_vec(d).ok())
             .map(|b| selfsame_core::mb::encode(&b))
             .collect();
-        self.state.pending.retain(|p| !self.state.closure.contains(p));
+        self.state
+            .pending
+            .retain(|p| !self.state.closure.contains(p));
         self.save();
     }
 
@@ -377,8 +373,14 @@ mod tests {
     /// an allocator to state it over — which is the point of the change.
     #[test]
     fn every_fragment_is_new() {
-        let seen: HashSet<String> = (0..10_000).map(|_| Session::new_device_fragment()).collect();
-        assert_eq!(seen.len(), 10_000, "64 random bits collided, which they do not");
+        let seen: HashSet<String> = (0..10_000)
+            .map(|_| Session::new_device_fragment())
+            .collect();
+        assert_eq!(
+            seen.len(),
+            10_000,
+            "64 random bits collided, which they do not"
+        );
     }
 
     /// The shape a DID URL fragment has to have.
@@ -391,10 +393,13 @@ mod tests {
     fn a_fragment_is_dev_and_sixteen_hex_characters() {
         for _ in 0..100 {
             let f = Session::new_device_fragment();
-            let rest = f.strip_prefix("dev-").expect("the `dev-` prefix names what it is");
+            let rest = f
+                .strip_prefix("dev-")
+                .expect("the `dev-` prefix names what it is");
             assert_eq!(rest.len(), 16, "64 bits as hex: {f}");
             assert!(
-                rest.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)),
+                rest.bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)),
                 "lower-case hex only, so the id is stable under any case handling: {f}"
             );
         }

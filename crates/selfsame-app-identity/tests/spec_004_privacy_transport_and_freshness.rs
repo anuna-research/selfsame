@@ -20,7 +20,7 @@ use selfsame_app_identity::json::{self, Json};
 use selfsame_app_identity::profile::{ApplicationId, ApplicationProfile, ProjectionPolicy};
 use selfsame_app_identity::revocation::{self, ProjectionReading};
 use selfsame_app_identity::scope::AccountScopeId;
-use selfsame_app_identity::{accept, alias, ceremony, codec, discovery, hierarchy, pairing};
+use selfsame_app_identity::{accept, alias, ceremony, codec, discovery, hierarchy, provider_hint};
 
 // ── TEST-206: account privacy ──────────────────────────────────────────────
 
@@ -51,7 +51,7 @@ fn no_generated_artefact_carries_the_persons_identity_or_the_account_scope() {
     ])))
     .unwrap();
     let hint = String::from_utf8(json::canonicalise(
-        &selfsame_app_identity::selection::ProviderHint {
+        &provider_hint::ProviderHint {
             application_id: APPLICATION_ID.into(),
             profile_version: 1,
             provider_id: "au-primary".into(),
@@ -73,14 +73,23 @@ fn no_generated_artefact_carries_the_persons_identity_or_the_account_scope() {
 
     for (name, artefact) in artefacts {
         for (kind, value) in FORBIDDEN_IN_ARTEFACTS {
-            assert!(!artefact.contains(value), "the {name} carries the fixture user's {kind}");
+            assert!(
+                !artefact.contains(value),
+                "the {name} carries the fixture user's {kind}"
+            );
         }
         // REQ-217: "The raw or encoded scope SHALL NOT appear in a DID, DID
         // Document, `acct:` URI, VC, JWS header, WebFinger response, provider
         // hint, status entry, log, analytics event, or other public protocol
         // artifact."
-        assert!(!artefact.contains(scope.as_str()), "the {name} carries the account scope");
-        assert!(!artefact.contains(sibling.as_str()), "the {name} carries a sibling's scope");
+        assert!(
+            !artefact.contains(scope.as_str()),
+            "the {name} carries the account scope"
+        );
+        assert!(
+            !artefact.contains(sibling.as_str()),
+            "the {name} carries a sibling's scope"
+        );
     }
 }
 
@@ -126,7 +135,7 @@ fn a_grant_carries_only_the_members_nfr_203_permits() {
 fn two_accounts_in_one_application_share_no_public_value() {
     // NFR-201: "The two profiles SHALL share no derived public key, DID,
     // `acct:` URI, credential ID, revocation entry, projection index,
-    // rendezvous route key, or device key by default."
+    // relay route key, or device key by default."
     let a1 = Ceremony::build(0, 1, 3, APPLICATION_ID);
     let a2 = Ceremony::build(0, 2, 4, APPLICATION_ID);
 
@@ -205,8 +214,14 @@ fn changing_every_provider_endpoint_changes_no_derived_identity() {
 
     // A profile with entirely different operators for every role.
     let moved = with_member(
-        "rendezvous",
-        Json::arr([descriptor("elsewhere", "r.other.example", "p.other.example", "42", 10, 50)]),
+        "cbclPairingRelays",
+        Json::arr([cbcl_relay(
+            "elsewhere",
+            "https://cbcl.other.example",
+            10,
+            50,
+            9,
+        )]),
     );
     let moved = ApplicationProfile::recognise(&moved).unwrap();
     let restated = ApplicationProfile::recognise(&with_member(
@@ -226,7 +241,7 @@ fn changing_every_provider_endpoint_changes_no_derived_identity() {
     );
     // The profiles genuinely differ — the derivation simply cannot see them.
     assert_ne!(moved.digest(), restated.digest());
-    assert_ne!(moved.rendezvous[0].id, "au-primary");
+    assert_ne!(moved.cbcl_pairing_relays[0].operator_id, "au-primary");
 }
 
 // ── TEST-237: profile discovery and origin binding ─────────────────────────
@@ -248,13 +263,16 @@ fn a_profile_fetched_from_its_own_identifier_binds_to_the_origin() {
     let app = ApplicationId::parse(APPLICATION_ID).unwrap();
     let fetched = discovery::recognise_profile_response(&ok_response(&octets), &app).unwrap();
     assert_eq!(fetched.application_id.as_str(), APPLICATION_ID);
-    assert_eq!(discovery::profile_request_path(&app).unwrap(), "/selfsame/application");
+    assert_eq!(
+        discovery::profile_request_path(&app).unwrap(),
+        "/selfsame/application"
+    );
 }
 
 #[test]
 fn step_six_is_what_makes_the_fetch_trustworthy_rather_than_merely_encrypted() {
-    // "TLS authenticates the origin; the record digest — asserted by a party
-    // holding `C` — pins *which* profile that origin served. A host that serves
+    // "TLS authenticates the origin; authenticated intent pins *which* profile
+    // that origin served. A host that serves
     // a substituted profile fails step 6."
     let octets = profile_octets();
     let app = ApplicationId::parse(APPLICATION_ID).unwrap();
@@ -264,7 +282,7 @@ fn step_six_is_what_makes_the_fetch_trustworthy_rather_than_merely_encrypted() {
     assert!(discovery::check_record_digest(&fetched, &genuine).is_ok());
 
     // A substituted profile: valid, from the right origin, naming the right
-    // identifier — and not the one the record pinned.
+    // identifier — and not the one the intent pinned.
     let substituted = ApplicationProfile::recognise(&with_member(
         "allowedPermissions",
         // Sorted by Unicode code point, as CON-201 requires: `#admin` before
@@ -275,7 +293,11 @@ fn step_six_is_what_makes_the_fetch_trustworthy_rather_than_merely_encrypted() {
         ]),
     ))
     .unwrap();
-    assert_eq!(substituted.application_id.as_str(), APPLICATION_ID, "same identifier");
+    assert_eq!(
+        substituted.application_id.as_str(),
+        APPLICATION_ID,
+        "same identifier"
+    );
     assert_eq!(
         discovery::check_record_digest(&substituted, &genuine),
         Err(discovery::DiscoveryError::DigestMismatch),
@@ -290,45 +312,6 @@ fn a_profile_naming_a_different_identifier_than_the_uri_dereferenced_is_refused(
     assert_eq!(
         discovery::recognise_profile_response(&ok_response(&octets), &other),
         Err(discovery::DiscoveryError::IdentifierMismatch)
-    );
-}
-
-#[test]
-fn the_record_resolves_to_exactly_one_declared_descriptor() {
-    // CON-216's on-resolution checks. "The resolving party never repairs,
-    // guesses, broadcasts, or falls back, and never searches for a matching
-    // nameplate."
-    let p = ApplicationProfile::recognise(&profile_octets()).unwrap();
-    let claim = pairing::RecordClaim {
-        application_id: APPLICATION_ID.into(),
-        profile_digest: codec::b64url(p.digest()),
-        provider_id: "au-primary".into(),
-        nameplate: "004821".into(),
-    };
-    let descriptor = pairing::resolve_record(&claim, &p).expect("resolves to one descriptor");
-    assert_eq!(descriptor.id, "au-primary");
-
-    // A provider the profile does not declare.
-    let unknown = pairing::RecordClaim { provider_id: "attacker".into(), ..claim.clone() };
-    assert_eq!(
-        pairing::resolve_record(&unknown, &p),
-        Err(pairing::PairingError::ProviderNotUnique)
-    );
-
-    // A changed profile digest, and a record for another application.
-    let redigested = pairing::RecordClaim {
-        profile_digest: codec::b64url(&[0u8; 32]),
-        ..claim.clone()
-    };
-    assert_eq!(
-        pairing::resolve_record(&redigested, &p),
-        Err(pairing::PairingError::RecordMismatch)
-    );
-    let elsewhere =
-        pairing::RecordClaim { application_id: OTHER_APPLICATION_ID.into(), ..claim };
-    assert_eq!(
-        pairing::resolve_record(&elsewhere, &p),
-        Err(pairing::PairingError::RecordMismatch)
     );
 }
 
@@ -350,7 +333,10 @@ fn the_issuer_can_be_read_before_any_signature_is_checked_and_grants_nothing() {
 
     // …and peeking authorises nothing: the grant still has to pass all thirteen
     // steps, and it fails at step 9 while the alias is unprovisioned.
-    let unprovisioned = Evidence { jrd: None, ..c.evidence() };
+    let unprovisioned = Evidence {
+        jrd: None,
+        ..c.evidence()
+    };
     let err = accept_grant(&c.grant_bytes, &c.expectation(), &unprovisioned).unwrap_err();
     assert_eq!(err.step, AcceptStep::AccountBinding);
 }
@@ -390,7 +376,10 @@ fn a_revoked_device_cannot_start_a_new_session_past_the_composed_bound() {
     // verifier cannot be shown state predating the revocation.
     let mut stale = c.issuer.clone();
     stale.closure_age_seconds = 61;
-    let evidence = Evidence { issuer: Some(&stale), ..c.evidence() };
+    let evidence = Evidence {
+        issuer: Some(&stale),
+        ..c.evidence()
+    };
     let err = accept_grant(&c.grant_bytes, &c.expectation(), &evidence).unwrap_err();
     assert_eq!(err.step, AcceptStep::Status);
 }
@@ -405,12 +394,21 @@ fn a_verifier_that_cannot_tell_which_case_applies_uses_the_stricter_bound() {
     let c = Ceremony::accepted();
     let mut middling = c.issuer.clone();
     middling.closure_age_seconds = 300;
-    let evidence = Evidence { issuer: Some(&middling), ..c.evidence() };
+    let evidence = Evidence {
+        issuer: Some(&middling),
+        ..c.evidence()
+    };
 
-    let strict = Expectation { freshness: Freshness::SessionEstablishment, ..c.expectation() };
+    let strict = Expectation {
+        freshness: Freshness::SessionEstablishment,
+        ..c.expectation()
+    };
     assert!(accept_grant(&c.grant_bytes, &strict, &evidence).is_err());
 
-    let lenient = Expectation { freshness: Freshness::Continuation, ..c.expectation() };
+    let lenient = Expectation {
+        freshness: Freshness::Continuation,
+        ..c.expectation()
+    };
     assert!(accept_grant(&c.grant_bytes, &lenient, &evidence).is_ok());
 }
 
@@ -422,9 +420,15 @@ fn a_bundle_supplied_closure_is_recorded_at_establishment() {
     let c = Ceremony::accepted();
     let mut bundled = c.issuer.clone();
     bundled.source = ClosureSource::BundleOrCache;
-    let evidence = Evidence { issuer: Some(&bundled), ..c.evidence() };
+    let evidence = Evidence {
+        issuer: Some(&bundled),
+        ..c.evidence()
+    };
     let accepted = accept_grant(&c.grant_bytes, &c.expectation(), &evidence).unwrap();
-    assert!(accepted.used_bundle_closure, "the reliance is recorded, not silent");
+    assert!(
+        accepted.used_bundle_closure,
+        "the reliance is recorded, not silent"
+    );
 }
 
 #[test]
@@ -466,13 +470,28 @@ fn no_projection_state_can_rescue_a_grant_the_crdt_set_has_revoked() {
     // CRDT check" — which is why the CRDT check runs whatever the projection
     // said.
     let c = Ceremony::accepted();
-    let id = accept_grant(&c.grant_bytes, &c.expectation(), &c.evidence()).unwrap().grant.id;
+    let id = accept_grant(&c.grant_bytes, &c.expectation(), &c.evidence())
+        .unwrap()
+        .grant
+        .id;
     let mut revoked = c.issuer.clone();
     revoked.revoked_credential_ids.push(id);
 
-    for projection in [None, Some(Projection::BitUnset), Some(Projection::Unavailable)] {
-        let evidence = Evidence { issuer: Some(&revoked), projection, ..c.evidence() };
+    for projection in [
+        None,
+        Some(Projection::BitUnset),
+        Some(Projection::Unavailable),
+    ] {
+        let evidence = Evidence {
+            issuer: Some(&revoked),
+            projection,
+            ..c.evidence()
+        };
         let err = accept_grant(&c.grant_bytes, &c.expectation(), &evidence).unwrap_err();
-        assert_eq!(err.step, AcceptStep::Status, "{projection:?} bypassed the CRDT check");
+        assert_eq!(
+            err.step,
+            AcceptStep::Status,
+            "{projection:?} bypassed the CRDT check"
+        );
     }
 }

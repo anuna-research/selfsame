@@ -12,6 +12,7 @@ last-updated: 2026-08-17
 
 The normative source is `../cbcl-pairing/specs/SPEC-001-reusable-blind-pairing.md`.
 Selfsame consumes the exact local revision recorded by [[SPEC-006-cbcl-pairing-integration#ADR-702]].
+[[SPEC-007-cbcl-pairing-cutover]] proposes making that engine Selfsame's only pairing protocol.
 
 The crate owns invitation recognition, CPace, both Finished values, CBCL role projection,
 secure channel framing, endpoint effects, blind mailbox transitions, and relay limits.

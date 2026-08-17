@@ -136,47 +136,6 @@ const STATE_APPS = {
 const STATE_APPS_WIRED = { ...STATE_APPS, wired_backend: true };
 const STATE_APPS_SETTLED = { ...STATE_APPS_WIRED, revocation_settled: true };
 
-// ── PROTO-003 · the pairing ──────────────────────────────────────────────
-//
-// What `read_pairing_code` returns, field for field. Every one of these is
-// either a claim recovered from an unauthenticated record or a fact the wallet
-// derived, and the shape says which: `claimedApplicationId`, never
-// `applicationId`. CON-409 is blunt that a resolved record's signature "proves
-// only that whoever holds C wrote it; it establishes neither application
-// authority nor an intended recipient".
-//
-// There is no code here, and there is no `profile`. The pairing code is the
-// SPAKE2 password and CON-407 requires it to stay in process-private memory, so
-// the fixture cannot leak what the real command does not return.
-const PAIRING_TARGET = {
-  claimedApplicationId: 'https://photos.example/selfsame/application',
-  claimedOrigin: 'https://photos.example',
-  nameplate: '482715',
-  providerId: 'au-primary',
-  pairingUrl: 'https://pair.au.example',
-  bindingHash: 'YmluZGluZy1oYXNoLTMyLW9jdGV0cy1oZXJlLW9r',
-  expiresIn: 288,
-};
-
-// What `app_grant_review` returns once CON-214 evidence has verified. The
-// application identifier is the same string the target screen showed as a
-// claim — the difference between the two screens is entirely what happened in
-// between, which is why both are captured.
-const GRANT_VIEW = {
-  applicationId: 'https://photos.example/selfsame/application',
-  permissions: [
-    'https://photos.example/selfsame/application#device',
-    'https://photos.example/selfsame/application#upload',
-  ],
-  deviceDid: 'did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK',
-  expiresIn: 96,
-};
-
-// CON-221 fails closed on an authority it could not reach. Not a fiction: no
-// account authority is deployed for the fixture origin, so this is the state a
-// real first enrolment against it lands in today.
-const STATE_PAIRING_CLOSED = { ...STATE_APPS, authority_unreachable: true };
-
 // CON-222: the wallet is opened by a caller whose attribution does not match
 // the CON-214 binding. An arrival state, so it needs no click path.
 const STATE_BAD_CALLER = {
@@ -292,58 +251,13 @@ const bridge = (state) => `
           // CON-606. Never confirmed without a resolved, verified closure.
           case 'revocation_status': return { confirmed: ${JSON.stringify(state)}.revocation_settled === true };
 
-          // ── PROTO-003 ──────────────────────────────────────────────────
-          //
-          // Same rule as above: each case answers what the registered command
-          // answers. All four pairing commands are registered and none of them
-          // refuses structurally, so unlike \`revoke_grant\` there is no
-          // \`wired_backend\` fiction here — what these stubs stand in for is a
-          // provider and an application on the other end of a socket, not a
-          // capability this build lacks.
-          //
-          // CON-409's whole point is carried by the field NAME. If this ever
-          // returns \`applicationId\`, the screen it feeds is rendering a claim
-          // as though something had checked it.
-          case 'read_pairing_code': return ${JSON.stringify(PAIRING_TARGET)};
-          // The offer and profile are octet arrays the page carries and never
-          // reads. Empty here on purpose: a fixture with plausible contents
-          // would invite an assertion on them, and the page having an opinion
-          // about either is the defect the field names exist to prevent.
-          case 'pairing_answer': return {
-            offer: [], profile: [],
-            observed: {
-              ceremonyProfileDigest: 'cHJvZmlsZS1kaWdlc3QtMzItb2N0ZXRzLWhlcmUtb2s',
-              providerId: 'au-primary',
-              descriptorDigest: 'ZGVzY3JpcHRvci1kaWdlc3QtMzItb2N0ZXRzLWhlcmU',
-              platformBindingId: null,
-            },
+          // SPEC-007: the shell receives only the relay origin and an opaque
+          // status. Cryptographic state and frames remain behind the bridge.
+          case 'cbcl_pairing_start': return {
+            relayOrigin: 'wss://pairing-relay.example',
+            status: 'Waiting for the application.',
           };
-          case 'app_grant_review': return ${JSON.stringify(GRANT_VIEW)};
-          // CON-221 decides from AUTHORITY STATE. An authority that cannot be
-          // reached is \`FailClosed\` and the real command turns that into
-          // \`AuthorityUnreachable\` rather than a request — collapsing "no
-          // binding" with "could not ask" is the substitution the comparison
-          // exists to catch, so the wallet refuses instead of guessing.
-          case 'app_grant_prepare':
-            if (${JSON.stringify(state)}.authority_unreachable) throw 'AuthorityUnreachable';
-            return {
-              applicability: 'required',
-              fingerprint: ${JSON.stringify(HOME_FP)},
-              account: ${JSON.stringify(APPLICATIONS[0].account_alias)},
-              ceremonyId: 'Y2VyZW1vbnktaWQtMzItb2N0ZXRzLWhlcmUtb2s',
-            };
-          case 'app_grant_confirm': return {
-            bundle: [],
-            account: ${JSON.stringify(APPLICATIONS[0].account_alias)},
-            issuer: ${JSON.stringify(HOME_DID)},
-            validUntil: Math.floor(Date.now() / 1000) + 2592000,
-            // No conforming did:crdt resolver is deployed — G6 of the Path-B
-            // review — so the real command reports \`false\` and the screen says
-            // what that means rather than staying silent about it.
-            published: false,
-          };
-          case 'pairing_deliver': return null;
-          case 'pairing_decline': return null;
+          case 'cbcl_pairing_cancel': return null;
 
           default: return null;
         }
@@ -394,23 +308,9 @@ const shots = [
   // with two blank evidence fields.
   { name: '29-fingerprint-mismatch', expect: 'fingerprint-mismatch', state: STATE_APPS, steps: ['to-applications', 'open-application', 'to-fingerprint', 'fingerprint-differs'] },
 
-  // ── PROTO-003 · a pairing, end to end ──────────────────────────────────
-  //
-  // The two consent screens are captured separately and deliberately. `31` shows
-  // an application identifier nothing has verified; `32` shows the same string
-  // after CON-214 evidence checked out. CON-217: "a valid confirmation is never
-  // sufficient application authentication or authorization" — so a build that
-  // rendered the first like the second would look right in every screenshot and
-  // be wrong about the only thing this ceremony is for.
+  // SPEC-007: one invitation enters the single CBCL pairing path.
   { name: '30-pairing-enter', expect: 'pairing-enter', state: STATE_APPS, steps: ['to-applications', 'to-pairing'] },
-  { name: '31-pairing-target', expect: 'pairing-target', state: STATE_APPS, steps: ['to-applications', 'to-pairing', 'fill-pairing-words', 'read-pairing-code'] },
-  { name: '32-pairing-grant', expect: 'pairing-grant', state: STATE_APPS, steps: ['to-applications', 'to-pairing', 'fill-pairing-words', 'read-pairing-code', 'pairing-approve'] },
-  { name: '33-pairing-presence', expect: 'pairing-presence', state: STATE_APPS, steps: ['to-applications', 'to-pairing', 'fill-pairing-words', 'read-pairing-code', 'pairing-approve', 'pairing-grant-allow'] },
-  { name: '34-pairing-compare', expect: 'pairing-compare', state: STATE_APPS, steps: ['to-applications', 'to-pairing', 'fill-pairing-words', 'read-pairing-code', 'pairing-approve', 'pairing-grant-allow', 'fill-pairing-passcode', 'pairing-prepare'] },
-  { name: '35-pairing-done', expect: 'pairing-done', state: STATE_APPS, steps: ['to-applications', 'to-pairing', 'fill-pairing-words', 'read-pairing-code', 'pairing-approve', 'pairing-grant-allow', 'fill-pairing-passcode', 'pairing-prepare', 'pairing-confirm'] },
-  // CON-221's fail-closed branch, which is the state a first enrolment reaches
-  // today against an origin with no account authority deployed.
-  { name: '36-pairing-refused', expect: 'pairing-refused', state: STATE_PAIRING_CLOSED, steps: ['to-applications', 'to-pairing', 'fill-pairing-words', 'read-pairing-code', 'pairing-approve', 'pairing-grant-allow', 'fill-pairing-passcode', 'pairing-prepare'] },
+  { name: '31-pairing-wait', expect: 'pairing-wait', state: STATE_APPS, steps: ['to-applications', 'to-pairing', 'fill-cbcl-invitation', 'start-cbcl-pairing'] },
 ];
 
 // ── Negative-output assertions (IMPL-004 TEST-605 / 611 / 613) ───────────
@@ -515,78 +415,15 @@ const SCREEN_RULES = {
     requiredText: "That username isn't available.",
   },
 
-  // ── PROTO-003 assertions ───────────────────────────────────────────────
-
-  '31-pairing-target': {
-    // The claim, and the sentence that makes it a claim. Both, because either
-    // one alone is the defect: the identifier without the caveat reads as
-    // verified, and the caveat without the identifier gives the person nothing
-    // to check the application against.
+  '31-pairing-wait': {
     requiredTextAll: [
-      'https://photos.example',
-      "the code's own words, unchecked",
-      'nothing has verified this yet',
+      'Secure pairing started',
+      'wss://pairing-relay.example',
+      'Nothing is authorised until you see and approve the verified request.',
     ],
-    // The negative half, and the reason this shot exists at all.
-    //
-    // CON-409: a resolved record's signature "proves only that whoever holds C
-    // wrote it; it establishes neither application authority nor an intended
-    // recipient", and a party who knows the code "can publish a coherent record
-    // for a DIFFERENT application and complete the PAKE for it". So this screen
-    // may not speak in the register of the one after it, and it may not ask for
-    // anything a person would only grant to a verified application — there are
-    // no permissions to show yet, because the offer has not been opened.
-    forbiddenText: [
-      ['Verified as', 'CON-409: nothing has verified the claim at this point'],
-      ['Gains', 'the offer has not been opened; there are no permissions to show'],
-      ['Allow', 'this screen approves a pairing target, never a grant'],
-    ],
-  },
-  '32-pairing-grant': {
-    // The same identifier, now stated plainly, beside what it is actually
-    // asking for. Permissions appear verbatim: `app_grant_review` returns them
-    // "exactly as they will appear in the credential", and paraphrasing one
-    // would consent the person to a description nobody wrote.
-    requiredTextAll: [
-      'Verified as',
-      'https://photos.example/selfsame/application',
-      'https://photos.example/selfsame/application#upload',
-    ],
-    forbiddenText: [
-      ["the code's own words", 'CON-214 evidence has verified by this screen'],
-    ],
-  },
-  '34-pairing-compare': {
-    // The compared value and its nickname, as on every other fingerprint
-    // surface, plus the sentence that says which key this is. A person carrying
-    // the onboarding rule "every device shows this same fingerprint" would
-    // otherwise alarm at a correct value, or learn that a mismatch is sometimes
-    // fine — and the second direction is the dangerous one.
-    requiredTextAll: [HOME_FP.hex, HOME_FP.label, 'not'],
-    // REQ-230 gives the comparison no skip and no third control.
     forbidden: [
-      ['[data-action="pairing-approve"]', 'REQ-230: the comparison offers no skip'],
-      ['.back', 'REQ-230: the comparison has no back'],
-    ],
-  },
-  '35-pairing-done': {
-    // G6 made visible. The grant carries its own closure because no conforming
-    // did:crdt resolver is deployed, and a screen that stayed silent about it
-    // would let a person believe a verifier can look this up independently.
-    requiredText: 'no state resolver is deployed',
-  },
-  '36-pairing-refused': {
-    requiredText: 'Nothing was shared and nothing was authorised.',
-    // CON-407: a UI "reports that the code expired or pairing failed; it does
-    // not distinguish a wrong word from an active attack". Those two are the
-    // same event to anyone who can tell them apart, and telling them apart is
-    // what an attacker is doing.
-    forbiddenText: [
-      ['word', 'the refusal must not name which check failed'],
-      ['signature', 'the refusal must not name which check failed'],
-      ['confirmation', 'the refusal must not name which check failed'],
-      ['SPAKE', 'an internal name never reaches a screen'],
-      ['binding', 'an internal name never reaches a screen'],
+      ['[data-protocol-selector]', 'SPEC-007 has no protocol selector'],
+      ['[data-action="pairing-approve"]', 'approval is unavailable before a verified request'],
     ],
   },
   '24-binding-mismatch': {
@@ -743,19 +580,11 @@ for (const shot of shots) {
           'harbour lichen quarry saddle verbena tundra gravel mussel plover basalt ferment willow';
         document.querySelector('#restore-passcode').value = 'correct horse';
       });
-    } else if (step === 'fill-pairing-words') {
-      // Twelve words. The checksum is BIP-39's and is verified in Rust, so the
-      // page counts and never validates — these need to be twelve tokens, not a
-      // valid mnemonic, because a page that could tell the difference would be
-      // a second recogniser disagreeing with the one that matters.
-      await page.evaluate((words) => {
-        const el = document.querySelector('#pairing-input');
-        el.value = words.join(' ');
-        el.dispatchEvent(new Event('input'));
-      }, WORDS);
-    } else if (step === 'fill-pairing-passcode') {
+    } else if (step === 'fill-cbcl-invitation') {
       await page.evaluate(() => {
-        document.querySelector('#pairing-passcode').value = 'correct horse';
+        const el = document.querySelector('#pairing-input');
+        el.value = 'cbcl-pairing-invitation-for-render-check';
+        el.dispatchEvent(new Event('input'));
       });
     } else if (step === 'fill-unlink-passcode') {
       await page.evaluate(() => {

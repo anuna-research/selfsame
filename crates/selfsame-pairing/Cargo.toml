@@ -8,15 +8,16 @@ repository.workspace = true
 description = "Selfsame credential composition for cbcl-pairing"
 
 [dependencies]
+base64ct = { workspace = true }
 cbcl-pairing = { workspace = true }
 cbcl-pairing-core = { package = "cbcl-core", version = "=0.1.0", git = "https://codeberg.org/anuna/cbcl-rs", rev = "febc6691e6dd2d5f7116b1a4d84c984b64717564" }
+ciborium = "=0.2.2"
 selfsame-app-identity = { workspace = true }
 thiserror = { workspace = true }
 zeroize = { version = "1", default-features = false, features = ["alloc"] }
 
 [dev-dependencies]
 axum = "0.7"
-base64ct = { workspace = true }
 bip39 = "2"
 ed25519-dalek = { workspace = true }
 getrandom = "0.2"

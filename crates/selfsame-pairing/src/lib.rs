@@ -11,6 +11,9 @@
 
 #![forbid(unsafe_code)]
 
+pub mod legacy;
+pub mod release;
+
 /// Dependency evidence exposed to conformance tests.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct DependencyBaseline {
@@ -38,8 +41,8 @@ use cbcl_pairing::{
     },
     channel::PendingChannel,
     context::PairingContext,
-    cpace,
-    endpoint::{EndpointEffect, EndpointReducer, InvitationRecord},
+    cpace::{self, CpaceState},
+    endpoint::{EndpointEffect, EndpointReducer, InvitationRecord, TerminalReason},
     limiter::{LimiterConfig, OperationPolicy},
     observability::CapacityCaps,
     profile::{
@@ -49,13 +52,14 @@ use cbcl_pairing::{
     },
     relay::{ConnectionId, RelayConfig, RelayRandomness, RelayService, RoutedMessage},
     wire::{
-        decode_channel_frame, decode_client_message, decode_invitation, decode_server_message,
-        encode_channel_frame, encode_client_message, encode_cpace_message, encode_invitation,
-        encode_server_message, ApplicationPayload, ChannelFrame, ClientMessage, CloseReason,
-        Decision, Invitation, Locator, PairingIntent, ServerMessage, Side,
+        decode_channel_frame, decode_client_message, decode_cpace_message, decode_invitation,
+        decode_server_message, encode_channel_frame, encode_client_message, encode_cpace_message,
+        encode_invitation, encode_server_message, ApplicationPayload, ChannelFrame, ClientMessage,
+        CloseReason, Decision, Invitation, Locator, PairingIntent, ServerMessage, Side,
     },
 };
 use cbcl_pairing_core::message::CausedBy;
+use ciborium::Value;
 use selfsame_app_identity::{
     accept::{
         self, AcceptError, Acceptance, Evidence, Expectation, Freshness, IssuerState, Projection,
@@ -69,9 +73,473 @@ use std::sync::{
     atomic::{AtomicUsize, Ordering},
     Arc,
 };
+use std::{collections::BTreeMap, io::Cursor};
 use zeroize::{Zeroize, Zeroizing};
 
 const RELAY_ORIGIN: &str = "https://relay.demo.invalid";
+
+/// Exact cbcl credential-profile bound for the opaque Selfsame payload.
+pub const MAX_CREDENTIAL_PAYLOAD_OCTETS: usize = 62_000;
+
+/// One side of the cbcl bootstrap before key confirmation.
+///
+/// The value owns only one endpoint's CPace and signing secrets. A shell sends
+/// [`SelfsameEndpointBootstrap::local_cpace_frame`] through its relay, receives
+/// the peer frame, and consumes this value with
+/// [`SelfsameEndpointBootstrap::finish`].
+pub struct SelfsameEndpointBootstrap {
+    side: Side,
+    invitation: Zeroizing<Vec<u8>>,
+    invitation_value: Invitation,
+    mailbox_id: [u8; 32],
+    cpace_state: Option<CpaceState>,
+    local_frame: ChannelFrame,
+    local_control: Vec<u8>,
+    local_body: Vec<u8>,
+    signing_key: Option<CeremonySigningKey>,
+    pairing_verifier_calls: Arc<AtomicUsize>,
+}
+
+impl SelfsameEndpointBootstrap {
+    /// Start Selfsame's claimant endpoint from a complete invitation carrier.
+    pub fn join_claimant(
+        invitation: &[u8],
+        cpace_scalar: [u8; 32],
+        signing_seed: [u8; 32],
+    ) -> Result<Self, IntegrationError> {
+        Self::join(Side::Claimant, invitation, cpace_scalar, signing_seed)
+    }
+
+    /// Start one endpoint directly from a complete out-of-band carrier.
+    ///
+    /// The mailbox locator comes only from the recognised invitation. Callers
+    /// supply fresh cryptographic randomness and no protocol selector.
+    pub fn join(
+        side: Side,
+        invitation: &[u8],
+        cpace_scalar: [u8; 32],
+        signing_seed: [u8; 32],
+    ) -> Result<Self, IntegrationError> {
+        let recognised = decode_selfsame_invitation(invitation)?;
+        let Locator::Direct(mailbox_id) = recognised.locator else {
+            return Err(IntegrationError::Profile);
+        };
+        Self::start(side, invitation, mailbox_id, cpace_scalar, signing_seed)
+    }
+
+    /// Start one independent endpoint from a completely recognised invitation.
+    pub fn start(
+        side: Side,
+        invitation: &[u8],
+        mailbox_id: [u8; 32],
+        cpace_scalar: [u8; 32],
+        signing_seed: [u8; 32],
+    ) -> Result<Self, IntegrationError> {
+        let invitation_value = decode_selfsame_invitation(invitation)?;
+        if invitation_value.application != CREDENTIAL_APPLICATION
+            || invitation_value.locator != Locator::Direct(mailbox_id)
+        {
+            return Err(IntegrationError::Profile);
+        }
+        let (cpace_state, cpace_message) =
+            cpace::start_pairing(side, &invitation_value, mailbox_id, cpace_scalar)
+                .map_err(|_| IntegrationError::Pairing)?;
+        let local_body =
+            encode_cpace_message(&cpace_message).map_err(|_| IntegrationError::Pairing)?;
+        let signing_key =
+            CeremonySigningKey::from_secret(signing_seed).map_err(|_| IntegrationError::Pairing)?;
+        let performative = cpace_performative(side);
+        let local_control = build_bootstrap_control(
+            &signing_key,
+            performative,
+            &cbcl_pairing::cbcl_protocol::ceremony_id(invitation),
+            &local_body,
+            CausedBy::Begin,
+        )
+        .map_err(|_| IntegrationError::Pairing)?;
+        let local_frame = ChannelFrame::Cpace {
+            side,
+            control: local_control.clone(),
+            message: local_body.clone(),
+        };
+        Ok(Self {
+            side,
+            invitation: Zeroizing::new(invitation.to_vec()),
+            invitation_value,
+            mailbox_id,
+            cpace_state: Some(cpace_state),
+            local_frame,
+            local_control,
+            local_body,
+            signing_key: Some(signing_key),
+            pairing_verifier_calls: Arc::new(AtomicUsize::new(0)),
+        })
+    }
+
+    /// Return the canonical CPace frame this endpoint sends to its relay.
+    #[must_use]
+    pub const fn local_cpace_frame(&self) -> &ChannelFrame {
+        &self.local_frame
+    }
+
+    /// Canonical wire bytes for the first frame supplied to the shell transport.
+    pub fn local_cpace_frame_bytes(&self) -> Result<Vec<u8>, IntegrationError> {
+        encode_channel_frame(&self.local_frame).map_err(|_| IntegrationError::Pairing)
+    }
+
+    /// Exact relay origin authenticated by the invitation.
+    #[must_use]
+    pub fn relay_origin(&self) -> &str {
+        &self.invitation_value.relay_origin
+    }
+
+    /// Consume the bootstrap after receiving exactly one peer CPace frame.
+    pub fn finish(
+        mut self,
+        peer_frame: &ChannelFrame,
+    ) -> Result<SelfsameEndpoint, IntegrationError> {
+        let ChannelFrame::Cpace {
+            side: peer_side,
+            control: peer_control,
+            message: peer_body,
+        } = peer_frame
+        else {
+            return Err(IntegrationError::Recognition);
+        };
+        if *peer_side == self.side {
+            return Err(IntegrationError::Pairing);
+        }
+        let peer_message =
+            decode_cpace_message(peer_body).map_err(|_| IntegrationError::Recognition)?;
+        let isk = cpace::finish(
+            self.cpace_state.take().ok_or(IntegrationError::State)?,
+            &peer_message,
+        )
+        .map_err(|_| IntegrationError::Pairing)?;
+        let local_frame_bytes =
+            encode_channel_frame(&self.local_frame).map_err(|_| IntegrationError::Pairing)?;
+        let peer_frame_bytes =
+            encode_channel_frame(peer_frame).map_err(|_| IntegrationError::Pairing)?;
+        let (
+            allocator_control,
+            allocator_body,
+            allocator_frame,
+            claimant_control,
+            claimant_body,
+            claimant_frame,
+        ) = match self.side {
+            Side::Allocator => (
+                self.local_control.as_slice(),
+                self.local_body.as_slice(),
+                local_frame_bytes.as_slice(),
+                peer_control.as_slice(),
+                peer_body.as_slice(),
+                peer_frame_bytes.as_slice(),
+            ),
+            Side::Claimant => (
+                peer_control.as_slice(),
+                peer_body.as_slice(),
+                peer_frame_bytes.as_slice(),
+                self.local_control.as_slice(),
+                self.local_body.as_slice(),
+                local_frame_bytes.as_slice(),
+            ),
+        };
+        let mut monitor =
+            BootstrapMonitor::new(&self.invitation).map_err(|_| IntegrationError::Pairing)?;
+        let allocator_hash = monitor
+            .admit(
+                BootstrapPerformative::CpaceA,
+                allocator_control,
+                allocator_body,
+            )
+            .map_err(|_| IntegrationError::Pairing)?
+            .content_hash()
+            .to_owned();
+        let claimant_hash = monitor
+            .admit(
+                BootstrapPerformative::CpaceB,
+                claimant_control,
+                claimant_body,
+            )
+            .map_err(|_| IntegrationError::Pairing)?
+            .content_hash()
+            .to_owned();
+        let pending_channel = PendingChannel::new_pairing(
+            self.side,
+            isk,
+            &self.invitation_value,
+            self.mailbox_id,
+            allocator_frame,
+            claimant_frame,
+        )
+        .map_err(|_| IntegrationError::Pairing)?;
+        let record = bound_record(
+            &self.invitation,
+            &self.invitation_value,
+            self.mailbox_id,
+            peer_frame_bytes.as_slice(),
+        )?;
+        let reducer = EndpointReducer::new(
+            self.side,
+            &self.invitation,
+            record,
+            self.signing_key.take().ok_or(IntegrationError::State)?,
+            monitor,
+            pending_channel,
+            allocator_hash,
+            claimant_hash,
+            Box::new(CredentialProfile::new(Box::new(PairingGrantGate {
+                calls: self.pairing_verifier_calls.clone(),
+            }))),
+        )
+        .map_err(|_| IntegrationError::Pairing)?;
+        Ok(SelfsameEndpoint {
+            side: self.side,
+            reducer,
+            pairing_verifier_calls: self.pairing_verifier_calls.clone(),
+            selfsame_verifier_calls: 0,
+        })
+    }
+}
+
+impl Drop for SelfsameEndpointBootstrap {
+    fn drop(&mut self) {
+        self.invitation_value.secret.zeroize();
+        self.mailbox_id.zeroize();
+        self.local_control.zeroize();
+        self.local_body.zeroize();
+    }
+}
+
+/// One established, transport-neutral Selfsame cbcl endpoint.
+pub struct SelfsameEndpoint {
+    side: Side,
+    reducer: EndpointReducer,
+    pairing_verifier_calls: Arc<AtomicUsize>,
+    selfsame_verifier_calls: usize,
+}
+
+/// Effect released by the Selfsame adapter after every applicable authority check.
+#[derive(Debug)]
+pub enum SelfsameEndpointEffect {
+    /// Send one protected protocol frame through the selected relay.
+    SendFrame(ChannelFrame),
+    /// Display a fully recognised intent for an explicit human decision.
+    DisplayIntent(DisplayIntent),
+    /// One credential passed both pairing and Selfsame acceptance.
+    Accepted(Box<AcceptedCredential>),
+    /// Close the selected blind mailbox.
+    CloseMailbox,
+}
+
+impl SelfsameEndpoint {
+    /// Return this endpoint's fixed role.
+    #[must_use]
+    pub const fn side(&self) -> Side {
+        self.side
+    }
+
+    /// Build this endpoint's key-confirmation frame.
+    pub fn local_finished_frame(&mut self) -> Result<Option<ChannelFrame>, IntegrationError> {
+        self.reducer
+            .local_finished_frame()
+            .map_err(|_| IntegrationError::Pairing)
+    }
+
+    /// Apply one canonical peer frame and return Selfsame-authorised effects.
+    ///
+    /// The claimant supplies verification evidence before an approved payload
+    /// can be released. No public effect exposes a pairing-only credential.
+    pub fn receive_frame(
+        &mut self,
+        frame: &ChannelFrame,
+        verification: Option<&SelfsameVerificationContext>,
+    ) -> Result<Vec<SelfsameEndpointEffect>, IntegrationError> {
+        let effects = self
+            .reducer
+            .receive_frame(frame)
+            .map_err(|_| IntegrationError::Pairing)?;
+        effects
+            .into_iter()
+            .map(|effect| match effect {
+                EndpointEffect::SendFrame(frame) => Ok(SelfsameEndpointEffect::SendFrame(frame)),
+                EndpointEffect::DisplayIntent(intent) => {
+                    Ok(SelfsameEndpointEffect::DisplayIntent(intent))
+                }
+                EndpointEffect::CloseMailbox => Ok(SelfsameEndpointEffect::CloseMailbox),
+                EndpointEffect::DeliverGrant(grant) => {
+                    let verification = verification.ok_or(IntegrationError::State)?;
+                    let transfer = recognise_credential_grant_body(&grant)?;
+                    recognise_transfer_claims(&transfer, verification)?;
+                    self.selfsame_verifier_calls += 1;
+                    let acceptance = accept_transferred_credential(
+                        verification,
+                        ApprovedCredential {
+                            bundle: transfer.bundle,
+                        },
+                    )?;
+                    Ok(SelfsameEndpointEffect::Accepted(Box::new(
+                        AcceptedCredential { acceptance },
+                    )))
+                }
+            })
+            .collect()
+    }
+
+    /// Send the allocator's exact intent after key confirmation.
+    pub fn send_intent(
+        &mut self,
+        intent: &PairingIntent,
+    ) -> Result<ChannelFrame, IntegrationError> {
+        self.reducer
+            .send_intent(intent)
+            .map_err(|_| IntegrationError::Pairing)
+    }
+
+    /// Commit the claimant's explicit decision.
+    pub fn decide(&mut self, decision: Decision) -> Result<Vec<EndpointEffect>, IntegrationError> {
+        self.reducer
+            .decide(decision)
+            .map_err(|_| IntegrationError::Pairing)
+    }
+
+    /// Send the allocator's application payload after approval.
+    pub fn send_payload(
+        &mut self,
+        payload: &ApplicationPayload,
+    ) -> Result<ChannelFrame, IntegrationError> {
+        self.reducer
+            .send_payload(payload)
+            .map_err(|_| IntegrationError::Pairing)
+    }
+
+    /// Cancel this endpoint and erase its secret-bearing state.
+    pub fn cancel(&mut self) -> Result<Vec<EndpointEffect>, IntegrationError> {
+        self.reducer.cancel().map_err(|_| IntegrationError::Pairing)
+    }
+
+    /// Apply an authenticated relay close.
+    pub fn relay_closed(
+        &mut self,
+        reason: CloseReason,
+    ) -> Result<Vec<EndpointEffect>, IntegrationError> {
+        self.reducer
+            .relay_closed(reason)
+            .map_err(|_| IntegrationError::Pairing)
+    }
+
+    /// Return whether key confirmation and role casting have completed.
+    #[must_use]
+    pub fn session_ready(&self) -> bool {
+        self.reducer.session_ready()
+    }
+
+    /// Return the terminal reason, when closed.
+    #[must_use]
+    pub fn terminal_reason(&self) -> Option<TerminalReason> {
+        self.reducer.terminal_reason()
+    }
+
+    /// Return whether all secret-bearing reducer state is erased.
+    #[must_use]
+    pub fn secrets_erased(&self) -> bool {
+        self.reducer.secrets_erased()
+    }
+
+    /// Return the accepted intent digest, when present.
+    #[must_use]
+    pub fn intent_digest(&self) -> Option<[u8; 32]> {
+        self.reducer.intent_digest()
+    }
+
+    /// Return the number of delivered payloads.
+    #[must_use]
+    pub fn delivered_payloads(&self) -> usize {
+        self.reducer.delivered_payloads()
+    }
+
+    /// Return the number of profile-verifier calls.
+    #[must_use]
+    pub fn pairing_verifier_calls(&self) -> usize {
+        self.pairing_verifier_calls.load(Ordering::Relaxed)
+    }
+
+    /// Return the number of authoritative Selfsame verifier calls.
+    #[must_use]
+    pub const fn selfsame_verifier_calls(&self) -> usize {
+        self.selfsame_verifier_calls
+    }
+}
+
+const fn cpace_performative(side: Side) -> BootstrapPerformative {
+    match side {
+        Side::Allocator => BootstrapPerformative::CpaceA,
+        Side::Claimant => BootstrapPerformative::CpaceB,
+    }
+}
+
+fn recognise_credential_grant_body(
+    grant: &cbcl_pairing::profile::AuthorisedGrant,
+) -> Result<CredentialTransfer, IntegrationError> {
+    if grant.application != CREDENTIAL_APPLICATION || grant.payload_type != CREDENTIAL_PAYLOAD {
+        return Err(IntegrationError::Profile);
+    }
+    let value: Value = ciborium::de::from_reader(Cursor::new(&grant.body))
+        .map_err(|_| IntegrationError::Recognition)?;
+    let Value::Map(entries) = value else {
+        return Err(IntegrationError::Recognition);
+    };
+    if entries.len() != 5 {
+        return Err(IntegrationError::Recognition);
+    }
+    let mut fields = BTreeMap::new();
+    for (key, value) in entries {
+        let Value::Text(key) = key else {
+            return Err(IntegrationError::Recognition);
+        };
+        if fields.insert(key, value).is_some() {
+            return Err(IntegrationError::Recognition);
+        }
+    }
+    let application_id = take_text(&mut fields, "application-id")?;
+    let origin = take_text(&mut fields, "origin")?;
+    let scope = take_text(&mut fields, "scope")?;
+    let recipient = take_text(&mut fields, "recipient")?;
+    let bundle = match fields.remove("credential") {
+        Some(Value::Bytes(value)) => value,
+        _ => return Err(IntegrationError::Recognition),
+    };
+    if !fields.is_empty() {
+        return Err(IntegrationError::Recognition);
+    }
+    let canonical = CredentialGrant {
+        application_id: application_id.clone(),
+        origin: origin.clone(),
+        scope: scope.clone(),
+        recipient: recipient.clone(),
+        credential: bundle.clone(),
+    }
+    .encode()
+    .map_err(|_| IntegrationError::Profile)?;
+    if canonical != grant.body {
+        return Err(IntegrationError::Recognition);
+    }
+    Ok(CredentialTransfer {
+        application_id,
+        origin,
+        scope,
+        recipient,
+        bundle,
+    })
+}
+
+fn take_text(fields: &mut BTreeMap<String, Value>, name: &str) -> Result<String, IntegrationError> {
+    match fields.remove(name) {
+        Some(Value::Text(value)) => Ok(value),
+        _ => Err(IntegrationError::Recognition),
+    }
+}
 
 /// Explicit shell-supplied entropy for one deterministic ceremony.
 pub struct CeremonyEntropy {
@@ -112,7 +580,7 @@ impl Drop for CeremonyEntropy {
     }
 }
 
-/// Application fields and the exact PROTO-004 bundle to transfer.
+/// Application fields and the exact Selfsame credential bundle to transfer.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CredentialTransfer {
     /// Canonical Selfsame application identifier.
@@ -123,14 +591,14 @@ pub struct CredentialTransfer {
     pub scope: String,
     /// Intended recipient.
     pub recipient: String,
-    /// Complete PROTO-004 grant bundle.
+    /// Complete Selfsame grant bundle.
     pub bundle: Vec<u8>,
 }
 
 /// Closed verifier failure at the Selfsame boundary.
 #[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
 pub enum VerificationFailure {
-    /// The transferred value is not a complete PROTO-004 bundle.
+    /// The transferred value is not a complete Selfsame grant bundle.
     #[error("bundle recognition failed")]
     Bundle,
     /// The thirteen-step Selfsame predicate refused the credential.
@@ -190,6 +658,9 @@ pub struct SelfsameVerificationContext {
 /// Closed integration failure.
 #[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
 pub enum IntegrationError {
+    /// A complete retired Selfsame carrier was recognised before any effect.
+    #[error("pairing version unsupported")]
+    PairingVersionUnsupported,
     /// Input failed complete closed-language recognition or exact matching.
     #[error("input recognition failed")]
     Recognition,
@@ -219,6 +690,20 @@ impl From<VerificationFailure> for IntegrationError {
     }
 }
 
+/// Recognise only the pinned CBCL invitation grammar at a surviving carrier ingress.
+///
+/// A complete legacy carrier receives its explicit cutover error before the
+/// CBCL recogniser runs. Malformed or unrelated bytes collapse to ordinary
+/// recognition failure and create no state.
+pub fn decode_selfsame_invitation(input: &[u8]) -> Result<Invitation, IntegrationError> {
+    if legacy::reject(legacy::LegacySurface::Carrier, input).class
+        == legacy::LegacyRejectionClass::PairingVersionUnsupported
+    {
+        return Err(IntegrationError::PairingVersionUnsupported);
+    }
+    decode_invitation(input).map_err(|_| IntegrationError::Recognition)
+}
+
 impl From<std::io::Error> for IntegrationError {
     fn from(_value: std::io::Error) -> Self {
         Self::Io
@@ -240,6 +725,9 @@ impl PendingTransfer {
         verification: SelfsameVerificationContext,
         entropy: CeremonyEntropy,
     ) -> Result<Self, IntegrationError> {
+        if transfer.bundle.len() > MAX_CREDENTIAL_PAYLOAD_OCTETS {
+            return Err(IntegrationError::Profile);
+        }
         recognise_transfer_claims(&transfer, &verification)?;
         let invitation = Invitation {
             application: CREDENTIAL_APPLICATION.into(),
@@ -269,8 +757,7 @@ impl PendingTransfer {
         if presented_carrier != self.carrier.as_slice() {
             return Err(IntegrationError::Recognition);
         }
-        let invitation_value =
-            decode_invitation(presented_carrier).map_err(|_| IntegrationError::Recognition)?;
+        let invitation_value = decode_selfsame_invitation(presented_carrier)?;
         establish(self, invitation_value)
     }
 }

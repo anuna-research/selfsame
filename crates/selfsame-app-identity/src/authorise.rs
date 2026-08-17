@@ -20,8 +20,8 @@
 use crate::ceremony::{self, OfferCore};
 use crate::enrollment::{self, Observed};
 use crate::profile::ApplicationProfile;
+use crate::provider_hint::ProviderHint;
 use crate::scope::AccountScopeId;
-use crate::selection::ProviderHint;
 use crate::UnixSeconds;
 
 /// Why an offer was refused.
@@ -49,7 +49,7 @@ pub enum AuthoriseError {
     ///
     /// Distinct from [`AuthoriseError::UnverifiedApplication`] because it is not
     /// a statement about the application at all: the profile may be perfectly
-    /// genuine and simply not the document `PROTO-003`'s record committed this
+    /// genuine and simply not the document the authenticated intent committed this
     /// ceremony to. Collapsing the two would tell an operator to go looking at
     /// an application that is fine.
     #[error("profile does not match the ceremony binding")]
@@ -87,8 +87,8 @@ pub struct Authorised {
 /// never checked the profile against anything — so it verified that whoever
 /// supplied the profile had signed their own statement with their own key.
 pub struct Observation<'a> {
-    /// The `profileDigest` this ceremony is bound to, from `PROTO-003`'s
-    /// record. The supplied profile must hash to it.
+    /// The `profileDigest` this ceremony is bound to. The supplied profile must
+    /// hash to it.
     ///
     /// Without this the profile is whatever the caller passed, and `CON-214`'s
     /// guarantee — that the `kid` resolves only in an authenticated document —
@@ -146,8 +146,7 @@ pub fn authorise(
         return Err(AuthoriseError::ProfileNotBound);
     }
 
-    let payload =
-        ceremony::recognise_offer(offer).map_err(|_| AuthoriseError::OfferMalformed)?;
+    let payload = ceremony::recognise_offer(offer).map_err(|_| AuthoriseError::OfferMalformed)?;
 
     if payload.core.application_id != profile.application_id.as_str() {
         return Err(AuthoriseError::UnverifiedApplication);
@@ -176,8 +175,8 @@ pub fn authorise(
     // over an object containing itself has no fixed point — so a mismatched
     // hint can sit beside otherwise valid signed evidence. A hint nobody reads
     // binds nothing, which is the opposite of what `CON-209` is for.
-    let hint =
-        ProviderHint::recognise(&payload.provider_hint).map_err(|_| AuthoriseError::HintMismatch)?;
+    let hint = ProviderHint::recognise(&payload.provider_hint)
+        .map_err(|_| AuthoriseError::HintMismatch)?;
     if hint.application_id != profile.application_id.as_str()
         || hint.provider_id != observed.provider_id
         || hint.descriptor_digest != observed.descriptor_digest
@@ -204,5 +203,11 @@ pub fn authorise(
 
     let valid_until = now + profile.revocation.max_grant_lifetime_seconds;
 
-    Ok(Authorised { profile, offer: payload.core, scope, valid_from: now, valid_until })
+    Ok(Authorised {
+        profile,
+        offer: payload.core,
+        scope,
+        valid_from: now,
+        valid_until,
+    })
 }

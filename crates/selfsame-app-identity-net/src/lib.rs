@@ -13,7 +13,6 @@
 //! |---|---|---|
 //! | `CON-220` | the application profile, from its own identifier | [`profile`] |
 //! | `CON-204` | the reciprocal WebFinger JRD | [`webfinger`] |
-//! | `CON-208` | pairing and mailbox capability probes | [`probe`] |
 //! | `CON-206` step 4 | the issuer's signed `did:crdt` closure | [`state`] |
 //! | `CON-210` | revocation delta submission, and the optional projection | [`state`], [`projection`] |
 //!
@@ -54,7 +53,6 @@
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
-pub mod probe;
 pub mod profile;
 pub mod projection;
 pub mod state;
@@ -112,8 +110,8 @@ pub enum NetError {
 ///   disable and no code path that could acquire one. A jar shared across
 ///   ceremonies would also be a correlation handle across providers, which is
 ///   the sort of thing better made impossible than made off-by-default.
-/// - **a deadline on every request.** `CON-208` caps probes at 1500 ms; the
-///   others get one so a hung connection is a failure rather than a hang.
+/// - **a deadline on every request.** A hung connection is a failure rather
+///   than an unbounded wait.
 pub(crate) fn client(deadline: Duration) -> Result<reqwest::Client, NetError> {
     reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
@@ -184,15 +182,23 @@ pub async fn bounded_body(
     // `Content-Length`, where the server offers one, lets an oversized body be
     // refused before it is transferred at all. Where it does not, the loop below
     // is what enforces the bound.
-    if response.content_length().is_some_and(|n| n > max_octets as u64) {
+    if response
+        .content_length()
+        .is_some_and(|n| n > max_octets as u64)
+    {
         return Err(NetError::TooLarge);
     }
     // Capacity from the advertised length where there is one, capped at the
     // bound so a dishonest `Content-Length` cannot make this allocate either.
-    let hint = response.content_length().unwrap_or(0).min(max_octets as u64) as usize;
+    let hint = response
+        .content_length()
+        .unwrap_or(0)
+        .min(max_octets as u64) as usize;
     let mut body = Vec::with_capacity(hint);
-    while let Some(chunk) =
-        response.chunk().await.map_err(|e| NetError::Transport(e.to_string()))?
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|e| NetError::Transport(e.to_string()))?
     {
         if body.len() + chunk.len() > max_octets {
             // Refused before the oversized octets are retained. `response` is
@@ -220,12 +226,14 @@ pub async fn bounded_body(
 ///   cannot be compared with `identity`, and a header a reader cannot read is
 ///   not evidence that the header said nothing. It counts as an encoding.
 pub fn has_content_encoding(response: &reqwest::Response) -> bool {
-    response.headers().get_all(reqwest::header::CONTENT_ENCODING).iter().any(|value| {
-        match value.to_str() {
+    response
+        .headers()
+        .get_all(reqwest::header::CONTENT_ENCODING)
+        .iter()
+        .any(|value| match value.to_str() {
             Ok(text) => !text.trim().eq_ignore_ascii_case("identity"),
             Err(_) => true,
-        }
-    })
+        })
 }
 
 /// The `Content-Type` without parameters, lower-cased.
@@ -278,8 +286,14 @@ mod tests {
     fn a_base_url_is_joined_to_a_path_with_exactly_one_separator() {
         // Both spellings of the same origin have to produce the same request,
         // or a profile's punctuation decides whether revocation propagates.
-        assert_eq!(join("https://state.example", "/did:crdt:abc"), "https://state.example/did:crdt:abc");
-        assert_eq!(join("https://state.example/", "/did:crdt:abc"), "https://state.example/did:crdt:abc");
+        assert_eq!(
+            join("https://state.example", "/did:crdt:abc"),
+            "https://state.example/did:crdt:abc"
+        );
+        assert_eq!(
+            join("https://state.example/", "/did:crdt:abc"),
+            "https://state.example/did:crdt:abc"
+        );
         assert_eq!(
             join("https://state.example/", "/dids/did:crdt:abc/deltas"),
             "https://state.example/dids/did:crdt:abc/deltas"
@@ -303,7 +317,10 @@ mod tests {
             "https://state.example/api/did:crdt:abc"
         );
         // A base that is nothing but slashes keeps all but the boundary one.
-        assert_eq!(join("https://state.example//", "/x"), "https://state.example//x");
+        assert_eq!(
+            join("https://state.example//", "/x"),
+            "https://state.example//x"
+        );
     }
 
     #[test]
@@ -312,6 +329,9 @@ mod tests {
         // a failure rather than a hang at every call site in this crate. The
         // signature is the guarantee; this pins that it stays required.
         let built = client(Duration::from_millis(1));
-        assert!(built.is_ok(), "a one-millisecond deadline is still a valid client");
+        assert!(
+            built.is_ok(),
+            "a one-millisecond deadline is still a valid client"
+        );
     }
 }

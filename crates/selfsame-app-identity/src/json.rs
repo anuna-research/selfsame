@@ -32,7 +32,7 @@
 //! runs them as steps 2 and 5 for a reason: a profile that parses but is not
 //! canonical is **rejected**, never repaired. Postel's rule is refused here
 //! (LangSec Principle 4) because the digest of the canonical bytes is what
-//! `CON-214`, `CON-220`, and PROTO-003's binding all compare — a recogniser
+//! `CON-214`, `CON-220`, and the pairing intent all compare — a recogniser
 //! that quietly repaired input would produce a digest over bytes nobody sent.
 //!
 //! # The typed AST is the output
@@ -137,7 +137,12 @@ pub enum Json {
 impl Json {
     /// Build an object from its members, for constructing payloads and fixtures.
     pub fn obj<const N: usize>(members: [(&str, Json); N]) -> Json {
-        Json::Object(members.into_iter().map(|(k, v)| (k.to_string(), v)).collect())
+        Json::Object(
+            members
+                .into_iter()
+                .map(|(k, v)| (k.to_string(), v))
+                .collect(),
+        )
     }
 
     /// Build an array from its items.
@@ -173,7 +178,10 @@ impl Json {
 
     /// The value of one object member.
     pub fn get(&self, name: &str) -> Option<&Json> {
-        self.as_object()?.iter().find(|(k, _)| k == name).map(|(_, v)| v)
+        self.as_object()?
+            .iter()
+            .find(|(k, _)| k == name)
+            .map(|(_, v)| v)
     }
 
     /// This value as a string.
@@ -225,7 +233,12 @@ pub fn recognise(input: &[u8], limits: Limits) -> Result<Json, JsonError> {
     }
     core::str::from_utf8(input).map_err(|_| JsonError::NotUtf8)?;
 
-    let mut p = Parser { s: input, i: 0, depth: 0, max_depth: limits.max_depth };
+    let mut p = Parser {
+        s: input,
+        i: 0,
+        depth: 0,
+        max_depth: limits.max_depth,
+    };
     let value = p.value()?;
     p.skip_ws();
     if p.i != p.s.len() {
@@ -301,7 +314,11 @@ impl<'a> Parser<'a> {
     }
 
     fn literal(&mut self, word: &[u8], out: Json) -> Result<Json, JsonError> {
-        if self.s.get(self.i..).is_some_and(|rest| rest.starts_with(word)) {
+        if self
+            .s
+            .get(self.i..)
+            .is_some_and(|rest| rest.starts_with(word))
+        {
             self.i += word.len();
             Ok(out)
         } else {
@@ -384,7 +401,9 @@ impl<'a> Parser<'a> {
         self.eat(b'"', "expected `\"`")?;
         let mut out: Vec<u8> = Vec::new();
         loop {
-            let b = self.peek().ok_or(JsonError::Malformed("unterminated string"))?;
+            let b = self
+                .peek()
+                .ok_or(JsonError::Malformed("unterminated string"))?;
             match b {
                 b'"' => {
                     self.i += 1;
@@ -398,7 +417,9 @@ impl<'a> Parser<'a> {
                     self.escape(&mut out)?;
                 }
                 0x00..=0x1F => {
-                    return Err(JsonError::Malformed("unescaped control character in string"))
+                    return Err(JsonError::Malformed(
+                        "unescaped control character in string",
+                    ))
                 }
                 _ => {
                     // Continuation and lead bytes are all >= 0x80 and none equals
@@ -412,7 +433,9 @@ impl<'a> Parser<'a> {
     }
 
     fn escape(&mut self, out: &mut Vec<u8>) -> Result<(), JsonError> {
-        let b = self.peek().ok_or(JsonError::Malformed("truncated escape"))?;
+        let b = self
+            .peek()
+            .ok_or(JsonError::Malformed("truncated escape"))?;
         self.i += 1;
         let simple = match b {
             b'"' => Some(0x22),
@@ -442,7 +465,9 @@ impl<'a> Parser<'a> {
                 self.eat(b'u', "expected a low surrogate escape")?;
                 let second = self.hex4()?;
                 if !(0xDC00..=0xDFFF).contains(&second) {
-                    return Err(JsonError::Malformed("high surrogate not followed by a low one"));
+                    return Err(JsonError::Malformed(
+                        "high surrogate not followed by a low one",
+                    ));
                 }
                 let combined =
                     0x10000 + ((u32::from(first) - 0xD800) << 10) + (u32::from(second) - 0xDC00);
@@ -458,7 +483,10 @@ impl<'a> Parser<'a> {
 
     fn hex4(&mut self) -> Result<u16, JsonError> {
         let end = self.i + 4;
-        let slice = self.s.get(self.i..end).ok_or(JsonError::Malformed("truncated \\u escape"))?;
+        let slice = self
+            .s
+            .get(self.i..end)
+            .ok_or(JsonError::Malformed("truncated \\u escape"))?;
         let mut value: u16 = 0;
         for b in slice {
             let digit = match b {

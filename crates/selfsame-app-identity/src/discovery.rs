@@ -19,19 +19,13 @@
 //! profile from a location the identifier does not name, and the identifier is
 //! the thing a verifier compares as exact ASCII.
 //!
-//! # TLS authenticates the origin; the record digest pins the profile
+//! # TLS authenticates the origin; authenticated intent pins the profile
 //!
 //! Step 6 is what makes the fetch trustworthy rather than merely encrypted. TLS
 //! says the bytes came from `photos.example`. The `profileDigest` in the
-//! PROTO-003 record — asserted by a party holding the code `C` — says *which*
-//! profile that origin served. A host that serves a substituted profile passes
-//! the first check and fails the second. Together they are why no key ever comes
-//! from the caller.
-//!
-//! Under `CON-409` tier 3, where the person supplied an origin because every
-//! transport failed, the profile is fetched before any record exists. Steps 1–5
-//! run, only `pairingRecordRelays` is used from the result, and step 6 is applied
-//! against the profile already held once the record resolves.
+//! authenticated credential intent says *which* profile that origin served. A
+//! host that serves a substituted profile passes the first check and fails the
+//! second. Together they are why no key ever comes from the caller.
 //!
 //! # Offline is a failure, not a grace period
 //!
@@ -135,7 +129,9 @@ pub fn recognise_profile_response(
     // 3.
     if response.status != 200
         || response.content_type != PROFILE_MEDIA_TYPE
-        || response.content_encoding.is_some_and(|e| !e.eq_ignore_ascii_case("identity"))
+        || response
+            .content_encoding
+            .is_some_and(|e| !e.eq_ignore_ascii_case("identity"))
         || response.body.len() > MAX_BODY_OCTETS
     {
         return Err(DiscoveryError::BadResponse);
@@ -149,8 +145,8 @@ pub fn recognise_profile_response(
     Ok(profile)
 }
 
-/// `CON-220` step 6: the record's `profileDigest` pins which profile the origin
-/// served.
+/// `CON-220` step 6: the authenticated `profileDigest` pins which profile the
+/// origin served.
 pub fn check_record_digest(
     profile: &ApplicationProfile,
     record_profile_digest: &str,
@@ -172,28 +168,12 @@ pub fn cache_is_fresh(fetched_at: UnixSeconds, now: UnixSeconds) -> bool {
 }
 
 /// Whether a cached profile may be served at all (`CON-220`).
-///
-/// `CON-220` states two conditions and they are not the same one:
-///
-/// > A party SHALL evict a cached profile immediately on any digest mismatch and
-/// > SHALL NOT serve one whose `validUntil`-bearing descriptors have all
-/// > expired.
-///
-/// [`cache_is_fresh`] answers the first clause's companion — age. This answers
-/// the second. The two come apart in exactly the case worth caring about: a
-/// profile fetched twenty minutes ago, well inside the 3,600-second bound, whose
-/// descriptors expired ten minutes ago. Age says "use it"; `CON-208` then finds
-/// no eligible descriptor and the ceremony fails — while the origin may already
-/// be publishing usable replacements that a re-fetch would have found.
-///
-/// A profile with no descriptors at all cannot arise: `CON-201` requires
-/// `rendezvous` to be a non-empty array, so `all` here is never vacuously true.
 pub fn cache_is_usable(
-    profile: &ApplicationProfile,
+    _profile: &ApplicationProfile,
     fetched_at: UnixSeconds,
     now: UnixSeconds,
 ) -> bool {
-    cache_is_fresh(fetched_at, now) && profile.rendezvous.iter().any(|d| d.valid_until > now)
+    cache_is_fresh(fetched_at, now)
 }
 
 /// Recognise the tier-3 origin-enumeration response (`CON-220`).
@@ -205,7 +185,10 @@ pub fn recognise_application_list(
     body: &[u8],
     queried_origin: &str,
 ) -> Result<Vec<ApplicationId>, DiscoveryError> {
-    let limits = Limits { max_bytes: 8_192, max_depth: 3 };
+    let limits = Limits {
+        max_bytes: 8_192,
+        max_depth: 3,
+    };
     let value = json::recognise(body, limits).map_err(|_| DiscoveryError::BadEnumeration)?;
     let members = value.as_object().ok_or(DiscoveryError::BadEnumeration)?;
     if members.len() != 2 {
@@ -219,7 +202,10 @@ pub fn recognise_application_list(
     if value.get("version").and_then(Json::as_i64) != Some(1) {
         return Err(DiscoveryError::BadEnumeration);
     }
-    let items = value.get("applications").and_then(Json::as_array).ok_or(DiscoveryError::BadEnumeration)?;
+    let items = value
+        .get("applications")
+        .and_then(Json::as_array)
+        .ok_or(DiscoveryError::BadEnumeration)?;
     if items.len() > MAX_ENUMERATED_APPLICATIONS {
         return Err(DiscoveryError::BadEnumeration);
     }
@@ -273,16 +259,21 @@ mod tests {
     fn the_request_path_is_the_identifier_s_own_path() {
         // ADR-201: a fixed well-known path would permit only one application
         // per origin, and one developer may host several security boundaries.
-        assert_eq!(profile_request_path(&app()).unwrap(), "/selfsame/application");
-        let other =
-            ApplicationId::parse("https://photos.example/selfsame/beta").unwrap();
+        assert_eq!(
+            profile_request_path(&app()).unwrap(),
+            "/selfsame/application"
+        );
+        let other = ApplicationId::parse("https://photos.example/selfsame/beta").unwrap();
         assert_eq!(profile_request_path(&other).unwrap(), "/selfsame/beta");
     }
 
     #[test]
     fn a_redirect_is_refused_even_when_it_is_same_origin() {
         let body = b"{}";
-        let response = HttpResponse { redirected: true, ..ok_response(body) };
+        let response = HttpResponse {
+            redirected: true,
+            ..ok_response(body)
+        };
         assert_eq!(
             recognise_profile_response(&response, &app()),
             Err(DiscoveryError::Redirected)
@@ -292,7 +283,10 @@ mod tests {
     #[test]
     fn an_unvalidated_transport_is_refused_before_anything_is_parsed() {
         let body = b"{}";
-        let response = HttpResponse { https_validated: false, ..ok_response(body) };
+        let response = HttpResponse {
+            https_validated: false,
+            ..ok_response(body)
+        };
         assert_eq!(
             recognise_profile_response(&response, &app()),
             Err(DiscoveryError::NotAuthenticatedHttps)
@@ -303,10 +297,22 @@ mod tests {
     fn a_wrong_status_media_type_encoding_or_over_long_body_is_refused() {
         let body = b"{}";
         for response in [
-            HttpResponse { status: 404, ..ok_response(body) },
-            HttpResponse { status: 301, ..ok_response(body) },
-            HttpResponse { content_type: "application/json", ..ok_response(body) },
-            HttpResponse { content_encoding: Some("gzip"), ..ok_response(body) },
+            HttpResponse {
+                status: 404,
+                ..ok_response(body)
+            },
+            HttpResponse {
+                status: 301,
+                ..ok_response(body)
+            },
+            HttpResponse {
+                content_type: "application/json",
+                ..ok_response(body)
+            },
+            HttpResponse {
+                content_encoding: Some("gzip"),
+                ..ok_response(body)
+            },
         ] {
             assert_eq!(
                 recognise_profile_response(&response, &app()),
@@ -314,7 +320,10 @@ mod tests {
             );
         }
         // `identity` is not a content encoding in the sense that matters.
-        let response = HttpResponse { content_encoding: Some("identity"), ..ok_response(body) };
+        let response = HttpResponse {
+            content_encoding: Some("identity"),
+            ..ok_response(body)
+        };
         assert!(matches!(
             recognise_profile_response(&response, &app()),
             Err(DiscoveryError::Profile(_))

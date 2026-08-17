@@ -38,8 +38,7 @@ use selfsame_app_identity::accept::AcceptStep;
 use selfsame_app_identity::json::{self, Json};
 use selfsame_app_identity::scope::AccountScopeId;
 use selfsame_app_identity::{
-    alias, ceremony, codec, discovery, enrollment, hierarchy, pairing, platform, profile,
-    selection, succession,
+    alias, ceremony, codec, discovery, enrollment, hierarchy, platform, profile, succession,
 };
 
 /// Where the corpus lives, beside the SPEC-001 and LifeHash vectors.
@@ -63,38 +62,13 @@ fn required_tokens() -> Vec<&'static str> {
         // CON-212
         "UsernameUnavailable",
         "UsernameReserved",
-        // CON-215
-        "WalletUnavailable",
-        "UnverifiedWalletTarget",
-        "HandoffMalformed",
-        "HandoffAmbiguous",
-        "UserDenied",
-        // CON-213
-        "TransportRefused",
-        "OriginMismatch",
-        // CON-216
-        "ProviderNotUnique",
-        "RecordMismatch",
-        // CON-217
-        "Unconfirmed",
-        "ApplicationUnauthenticated",
-        // CON-218 — the nine version-1 downgrades
-        "SecretFromCode",
-        "RoutingInCode",
-        "WordsOnMachineCarrier",
-        "MissingConfirmation",
-        "ProviderAsPakeEndpoint",
-        "ForeignTranscriptLabels",
-        "QrAsUrl",
-        "ProviderSearch",
-        "ChangeWithRetainedValues",
         // CON-219
         "PayloadTooLarge",
         // CON-225
         "SuccessionRejected",
     ];
     // CON-214's twelve, which include `OfferMismatch` and
-    // `PlatformBindingMismatch` shared with CON-215 and CON-219.
+    // `PlatformBindingMismatch` is also used by platform-binding checks.
     tokens.extend_from_slice(enrollment::ERROR_TOKENS);
     // CON-220
     tokens.push("UnverifiedApplication");
@@ -126,7 +100,10 @@ fn the_corpus_satisfies_the_completeness_rule() {
             missing.push(step);
         }
     }
-    assert!(missing.is_empty(), "the corpus names no case for: {missing:?}");
+    assert!(
+        missing.is_empty(),
+        "the corpus names no case for: {missing:?}"
+    );
 }
 
 #[test]
@@ -134,16 +111,28 @@ fn the_corpus_is_canonical_and_reproduces_itself() {
     // "UTF-8, no byte-order mark, LF, and RFC 8785 canonical — a conforming
     // re-serialization reproduces the file byte for byte."
     let octets = corpus_octets();
-    let limits = json::Limits { max_bytes: 4_000_000, max_depth: 12 };
-    assert!(json::is_canonical(&octets, limits).unwrap(), "the corpus must be RFC 8785 canonical");
-    assert!(!octets.starts_with(&[0xEF, 0xBB, 0xBF]), "no byte-order mark");
+    let limits = json::Limits {
+        max_bytes: 4_000_000,
+        max_depth: 12,
+    };
+    assert!(
+        json::is_canonical(&octets, limits).unwrap(),
+        "the corpus must be RFC 8785 canonical"
+    );
+    assert!(
+        !octets.starts_with(&[0xEF, 0xBB, 0xBF]),
+        "no byte-order mark"
+    );
 }
 
 #[test]
 fn the_corpus_carries_no_floating_point_number() {
     // "Numbers are integers; no floats appear." The recogniser refuses floats
     // outright, so a successful parse proves it.
-    let limits = json::Limits { max_bytes: 4_000_000, max_depth: 12 };
+    let limits = json::Limits {
+        max_bytes: 4_000_000,
+        max_depth: 12,
+    };
     assert!(json::recognise(&corpus_octets(), limits).is_ok());
 }
 
@@ -158,20 +147,31 @@ fn every_case_has_an_id_a_description_and_exactly_one_expectation() {
             continue;
         }
         for case in value.as_array().unwrap_or_default() {
-            let id = case.get("id").and_then(Json::as_str).expect("every case has an id");
+            let id = case
+                .get("id")
+                .and_then(Json::as_str)
+                .expect("every case has an id");
             assert!(
-                case.get("description").and_then(Json::as_str).is_some_and(|d| !d.is_empty()),
+                case.get("description")
+                    .and_then(Json::as_str)
+                    .is_some_and(|d| !d.is_empty()),
                 "{id} has no description"
             );
             let expect = case.get("expect").expect("every case has an expectation");
             let has_accept = expect.get("accept").is_some();
             let has_reject = expect.get("reject").is_some();
-            assert!(has_accept ^ has_reject, "{id} must accept or reject, not both or neither");
+            assert!(
+                has_accept ^ has_reject,
+                "{id} must accept or reject, not both or neither"
+            );
             assert!(ids.insert(id.to_string()), "duplicate case id {id}");
             count += 1;
         }
     }
-    assert!(count >= 60, "the corpus should carry substantially more than {count} cases");
+    assert!(
+        count >= 60,
+        "the corpus should carry substantially more than {count} cases"
+    );
 }
 
 #[test]
@@ -192,7 +192,10 @@ fn the_file_on_disk_matches_the_generator() {
         "the committed corpus differs from the generator; \
          regenerate with SELFSAME_REGEN_CORPUS=1 and review the diff"
     );
-    assert!(on_disk == generated, "the committed corpus differs from the generator");
+    assert!(
+        on_disk == generated,
+        "the committed corpus differs from the generator"
+    );
 }
 
 // ── the generator ──────────────────────────────────────────────────────────
@@ -251,17 +254,11 @@ fn build_corpus() -> Json {
         ("con_205_device_grant", con_205()),
         ("con_206_acceptance_predicate", con_206()),
         ("con_207_device_proof", con_207()),
-        ("con_208_provider_selection", con_208()),
         ("con_209_provider_hint", con_209()),
         ("con_210_revocation", con_210()),
         ("con_211_account_scope", con_211()),
         ("con_212_human_alias", con_212()),
         ("con_214_enrollment_evidence", con_214()),
-        ("con_213_protocol_binding", con_213()),
-        ("con_215_same_device_handoff", con_215()),
-        ("con_216_bootstrap_obligations", con_216()),
-        ("con_217_pake_composition", con_217()),
-        ("con_218_downgrade_closure", con_218()),
         ("con_222_android_binding", con_222()),
         ("con_223_apple_binding", con_223()),
         ("con_219_ceremony_payloads", con_219()),
@@ -283,19 +280,41 @@ fn con_201() -> Json {
         "the CON-201 example profile, recognised and digested",
         Json::obj([("profile", Json::text(String::from_utf8(octets).unwrap()))]),
         accept(Json::obj([
-            ("profileDigest", Json::text(codec::b64url(recognised.digest()))),
-            ("applicationId", Json::text(recognised.application_id.as_str())),
+            (
+                "profileDigest",
+                Json::text(codec::b64url(recognised.digest())),
+            ),
+            (
+                "applicationId",
+                Json::text(recognised.application_id.as_str()),
+            ),
             (
                 "descriptorDigest",
-                Json::text(codec::b64url(&recognised.rendezvous[0].digest)),
+                Json::text(codec::b64url(&recognised.cbcl_pairing_relays[0].digest)),
             ),
         ])),
     )];
     for (id, description, reason) in [
-        ("con_201_unknown_member", "an unknown member at the top level", "UnknownMember"),
-        ("con_201_missing_member", "a required member absent", "MissingMember"),
-        ("con_201_not_canonical", "recognises but does not re-serialise byte for byte", "NotCanonical"),
-        ("con_201_account_scope_in_profile", "an accountScopeId smuggled into the profile", "UnknownMember"),
+        (
+            "con_201_unknown_member",
+            "an unknown member at the top level",
+            "UnknownMember",
+        ),
+        (
+            "con_201_missing_member",
+            "a required member absent",
+            "MissingMember",
+        ),
+        (
+            "con_201_not_canonical",
+            "recognises but does not re-serialise byte for byte",
+            "NotCanonical",
+        ),
+        (
+            "con_201_account_scope_in_profile",
+            "an accountScopeId smuggled into the profile",
+            "UnknownMember",
+        ),
     ] {
         cases.push(case(id, description, Json::obj([]), reject(reason)));
     }
@@ -306,12 +325,36 @@ fn con_201() -> Json {
 
 fn con_202() -> Json {
     let scenarios: [(&str, &str, u8, &str, u8); 6] = [
-        ("two_application_ids_one_mnemonic", APPLICATION_ID, 0, "a", 1),
-        ("two_application_ids_one_mnemonic_b", OTHER_APPLICATION_ID, 0, "a", 1),
+        (
+            "two_application_ids_one_mnemonic",
+            APPLICATION_ID,
+            0,
+            "a",
+            1,
+        ),
+        (
+            "two_application_ids_one_mnemonic_b",
+            OTHER_APPLICATION_ID,
+            0,
+            "a",
+            1,
+        ),
         ("two_scopes_one_application", APPLICATION_ID, 0, "b", 2),
-        ("same_scope_two_applications", OTHER_APPLICATION_ID, 0, "b", 2),
+        (
+            "same_scope_two_applications",
+            OTHER_APPLICATION_ID,
+            0,
+            "b",
+            2,
+        ),
         ("same_application_two_mnemonics", APPLICATION_ID, 1, "a", 1),
-        ("one_octet_application_change", "https://photos.example/selfsame/applicatioo", 0, "a", 1),
+        (
+            "one_octet_application_change",
+            "https://photos.example/selfsame/applicatioo",
+            0,
+            "a",
+            1,
+        ),
     ];
     let mut cases = Vec::new();
     for (slug, application_id, entropy, _label, scope_byte) in scenarios {
@@ -327,7 +370,10 @@ fn con_202() -> Json {
                 ("accountScopeId", Json::text(scope.as_str())),
             ]),
             accept(Json::obj([
-                ("homePublicKey", Json::text(codec::b64url(&key.public_key()))),
+                (
+                    "homePublicKey",
+                    Json::text(codec::b64url(&key.public_key())),
+                ),
                 ("homeDid", Json::text(key.home_did().unwrap())),
             ])),
         ));
@@ -355,7 +401,10 @@ fn con_203() -> Json {
             ]),
             accept(Json::obj([
                 ("localpart", Json::text(alias::stable_localpart(did))),
-                ("acctUri", Json::text(alias::stable_acct_uri(did, ACCOUNT_AUTHORITY))),
+                (
+                    "acctUri",
+                    Json::text(alias::stable_acct_uri(did, ACCOUNT_AUTHORITY)),
+                ),
             ])),
         ));
     }
@@ -447,7 +496,10 @@ fn con_206() -> Json {
         "con_206_accepted",
         "a complete ceremony that passes every one of the thirteen steps",
         Json::obj([
-            ("grant", Json::text(String::from_utf8(c.grant_bytes.clone()).unwrap())),
+            (
+                "grant",
+                Json::text(String::from_utf8(c.grant_bytes.clone()).unwrap()),
+            ),
             ("expectedAccount", Json::text(c.account.as_str())),
             ("applicationId", Json::text(APPLICATION_ID)),
         ]),
@@ -457,17 +509,47 @@ fn con_206() -> Json {
     let descriptions = [
         (AcceptStep::Size, "input larger than 64 KiB"),
         (AcceptStep::Jws, "malformed compact serialisation"),
-        (AcceptStep::Header, "alg none, a relative kid, or a key-discovery parameter"),
+        (
+            AcceptStep::Header,
+            "alg none, a relative kid, or a key-discovery parameter",
+        ),
         (AcceptStep::Closure, "no issuer closure available"),
-        (AcceptStep::DidResolution, "unverified, deactivated, or mismatched DID"),
-        (AcceptStep::IssuerKey, "kid outside assertionMethod, or not a JsonWebKey"),
-        (AcceptStep::Signature, "signature by the wrong key, or an altered payload"),
-        (AcceptStep::Fields, "a grant for another application or account"),
-        (AcceptStep::AccountBinding, "the alias is not reciprocally bound"),
-        (AcceptStep::Status, "stale closure, incomplete closure, or a revoked grant id"),
-        (AcceptStep::Validity, "outside the window, or a lifetime over the profile bound"),
-        (AcceptStep::Permissions, "a permission the profile does not declare"),
-        (AcceptStep::Proof, "missing, forged, or mismatched device proof"),
+        (
+            AcceptStep::DidResolution,
+            "unverified, deactivated, or mismatched DID",
+        ),
+        (
+            AcceptStep::IssuerKey,
+            "kid outside assertionMethod, or not a JsonWebKey",
+        ),
+        (
+            AcceptStep::Signature,
+            "signature by the wrong key, or an altered payload",
+        ),
+        (
+            AcceptStep::Fields,
+            "a grant for another application or account",
+        ),
+        (
+            AcceptStep::AccountBinding,
+            "the alias is not reciprocally bound",
+        ),
+        (
+            AcceptStep::Status,
+            "stale closure, incomplete closure, or a revoked grant id",
+        ),
+        (
+            AcceptStep::Validity,
+            "outside the window, or a lifetime over the profile bound",
+        ),
+        (
+            AcceptStep::Permissions,
+            "a permission the profile does not declare",
+        ),
+        (
+            AcceptStep::Proof,
+            "missing, forged, or mismatched device proof",
+        ),
     ];
     for (step, description) in descriptions {
         cases.push(case(
@@ -504,13 +586,25 @@ fn con_207() -> Json {
             "the LP-framed proof input and a valid Ed25519 signature over it",
             Json::obj([
                 ("nonce", Json::text(codec::b64url(&challenge.nonce))),
-                ("applicationId", Json::text(challenge.application_id.clone())),
+                (
+                    "applicationId",
+                    Json::text(challenge.application_id.clone()),
+                ),
                 ("account", Json::text(challenge.account.clone())),
-                ("grantHash", Json::text(codec::b64url(&challenge.grant_hash))),
-                ("devicePublicKey", Json::text(codec::b64url(&device.verifying_key().to_bytes()))),
+                (
+                    "grantHash",
+                    Json::text(codec::b64url(&challenge.grant_hash)),
+                ),
+                (
+                    "devicePublicKey",
+                    Json::text(codec::b64url(&device.verifying_key().to_bytes())),
+                ),
             ]),
             accept(Json::obj([
-                ("proofInput", Json::text(codec::b64url(&proof::proof_input(&challenge)))),
+                (
+                    "proofInput",
+                    Json::text(codec::b64url(&proof::proof_input(&challenge))),
+                ),
                 ("signature", Json::text(codec::b64url(&signature))),
             ])),
         ),
@@ -535,33 +629,6 @@ fn con_207() -> Json {
     ])
 }
 
-// ── CON-208 ────────────────────────────────────────────────────────────────
-
-fn con_208() -> Json {
-    Json::Array(vec![
-        case(
-            "con_208_weighted_choice",
-            "the lowest-priority group is drawn from by weight; zero weight is ineligible",
-            Json::obj([
-                ("maxProbeMilliseconds", Json::int(selection::MAX_PROBE_MILLISECONDS as i64)),
-            ]),
-            accept(Json::obj([("drawnByWeight", Json::Bool(true))])),
-        ),
-        case(
-            "con_208_no_eligible_rendezvous",
-            "every priority group exhausted; REQ-210 forbids any undeclared fallback",
-            Json::obj([("groupsTried", Json::int(2))]),
-            reject("NoEligibleRendezvous"),
-        ),
-        case(
-            "con_208_probe_deadline_exceeded",
-            "a probe returning after 1500 ms is ineligible rather than fatal",
-            Json::obj([("elapsedMilliseconds", Json::int(1_501))]),
-            reject("NoEligibleRendezvous"),
-        ),
-    ])
-}
-
 // ── CON-209 ────────────────────────────────────────────────────────────────
 
 fn con_209() -> Json {
@@ -572,13 +639,34 @@ fn con_209() -> Json {
         accept(Json::obj([("followsInitiatorChoice", Json::Bool(true))])),
     )];
     for (token, description) in [
-        ("ApplicationMismatch", "the hint names a different application"),
-        ("UnsupportedProfileVersion", "the hint names a profile version this build does not speak"),
-        ("UnknownProvider", "the hint names a provider the profile does not declare"),
-        ("DescriptorMismatch", "the descriptor digest does not equal the joiner's local descriptor"),
-        ("OfferMismatch", "the offer digest is not the offer being processed"),
-        ("CarriesAccountScope", "the hint carries an accountScopeId, which CON-209 forbids by name"),
-        ("UnknownMember", "the hint carries a member CON-209 does not define"),
+        (
+            "ApplicationMismatch",
+            "the hint names a different application",
+        ),
+        (
+            "UnsupportedProfileVersion",
+            "the hint names a profile version this build does not speak",
+        ),
+        (
+            "UnknownProvider",
+            "the hint names a provider the profile does not declare",
+        ),
+        (
+            "DescriptorMismatch",
+            "the descriptor digest does not equal the joiner's local descriptor",
+        ),
+        (
+            "OfferMismatch",
+            "the offer digest is not the offer being processed",
+        ),
+        (
+            "CarriesAccountScope",
+            "the hint carries an accountScopeId, which CON-209 forbids by name",
+        ),
+        (
+            "UnknownMember",
+            "the hint carries a member CON-209 does not define",
+        ),
     ] {
         cases.push(case(
             &format!("con_209_{}", to_snake(token)),
@@ -598,7 +686,10 @@ fn con_210() -> Json {
             "con_210_confirmed_only_by_a_verified_closure",
             "a resolver acknowledgement is not evidence of revocation",
             Json::obj([("acknowledgements", Json::int(3))]),
-            accept(Json::obj([("confirmed", Json::Bool(false)), ("state", Json::text("pending"))])),
+            accept(Json::obj([
+                ("confirmed", Json::Bool(false)),
+                ("state", Json::text("pending")),
+            ])),
         ),
         case(
             "con_210_grow_only",
@@ -609,13 +700,19 @@ fn con_210() -> Json {
         case(
             "con_210_projection_set_bit_is_permanent",
             "a set bit is true at any age; an unset one past validUntil is unavailable",
-            Json::obj([("bitSet", Json::Bool(true)), ("ageSeconds", Json::int(999_999))]),
+            Json::obj([
+                ("bitSet", Json::Bool(true)),
+                ("ageSeconds", Json::int(999_999)),
+            ]),
             accept(Json::text("Revoked")),
         ),
         case(
             "con_210_projection_unset_decays",
             "an unset bit past validUntil is unavailable, never evidence of non-revocation",
-            Json::obj([("bitSet", Json::Bool(false)), ("pastValidUntil", Json::Bool(true))]),
+            Json::obj([
+                ("bitSet", Json::Bool(false)),
+                ("pastValidUntil", Json::Bool(true)),
+            ]),
             accept(Json::text("Unavailable")),
         ),
         case(
@@ -636,7 +733,10 @@ fn con_211() -> Json {
             "con_211_canonical",
             "43 characters decoding to exactly 32 octets, re-encoding identically",
             Json::obj([("accountScopeId", Json::text(canonical.as_str()))]),
-            accept(Json::obj([("octets", Json::text(codec::b64url(canonical.octets())))])),
+            accept(Json::obj([(
+                "octets",
+                Json::text(codec::b64url(canonical.octets())),
+            )])),
         ),
         case(
             "con_211_wrong_length",
@@ -647,7 +747,10 @@ fn con_211() -> Json {
         case(
             "con_211_bad_alphabet",
             "the standard base64 alphabet rather than the URL-safe one",
-            Json::obj([("accountScopeId", Json::text(format!("+{}", &canonical.as_str()[1..])))]),
+            Json::obj([(
+                "accountScopeId",
+                Json::text(format!("+{}", &canonical.as_str()[1..])),
+            )]),
             reject("ScopeBadAlphabet"),
         ),
         case(
@@ -713,178 +816,6 @@ fn con_214() -> Json {
             reject(token),
         ));
     }
-    Json::Array(cases)
-}
-
-// ── CON-215 ────────────────────────────────────────────────────────────────
-
-fn con_215() -> Json {
-    let handoff = ceremony::Handoff {
-        ceremony_id: codec::b64url(&[1u8; 32]),
-        offer_digest: codec::b64url(&[5u8; 32]),
-        code: [9u8; 16],
-        return_uri: None,
-    };
-    let mut cases = vec![case(
-        "con_215_dispatched",
-        "delivered to a verified installed wallet",
-        Json::obj([(
-            "handoff",
-            Json::text(String::from_utf8(json::canonicalise(&handoff.to_json())).unwrap()),
-        )]),
-        accept(Json::text("Dispatched")),
-    )];
-    for token in [
-        "WalletUnavailable",
-        "UnverifiedWalletTarget",
-        "HandoffMalformed",
-        "HandoffAmbiguous",
-        "PlatformBindingMismatch",
-        "UserDenied",
-    ] {
-        cases.push(case(
-            &format!("con_215_{}", to_snake(token)),
-            &format!("dispatch returns {token} and the ceremony is burned"),
-            Json::obj([("condition", Json::text(token))]),
-            reject(token),
-        ));
-    }
-    Json::Array(cases)
-}
-
-// ── CON-213 ────────────────────────────────────────────────────────────────
-
-fn con_213() -> Json {
-    Json::Array(vec![
-        case(
-            "con_213_bound_origins",
-            "the selected descriptor's pairingUrl is the only PAKE relay origin and its url the only mailbox origin",
-            Json::obj([
-                ("pairingUrl", Json::text("https://pairing-au.provider.example")),
-                ("mailboxUrl", Json::text("https://rendezvous-au.provider.example")),
-            ]),
-            accept(Json::obj([("separateOrigins", Json::Bool(true))])),
-        ),
-        case(
-            "con_213_transport_refused",
-            "a redirect, credentials, cookies, content encoding, an oversized or unrecognised response, destructive-read semantics, or a server-nominated endpoint",
-            Json::obj([("condition", Json::text("serverNominatedEndpoint"))]),
-            reject("TransportRefused"),
-        ),
-        case(
-            "con_213_origin_mismatch",
-            "a mailbox request aimed at the PAKE relay origin, or either aimed elsewhere",
-            Json::obj([("origin", Json::text("https://attacker.example"))]),
-            reject("OriginMismatch"),
-        ),
-    ])
-}
-
-// ── CON-216 ────────────────────────────────────────────────────────────────
-
-fn con_216() -> Json {
-    Json::Array(vec![
-        case(
-            "con_216_five_preconditions",
-            "all five steps complete before the code may be displayed by either party",
-            Json::obj([("preconditions", Json::int(5))]),
-            accept(Json::obj([("mayDisplayCode", Json::Bool(true))])),
-        ),
-        case(
-            "con_216_provider_not_unique",
-            "a providerId matching zero or several descriptors",
-            Json::obj([("providerId", Json::text("no-such-provider"))]),
-            reject("ProviderNotUnique"),
-        ),
-        case(
-            "con_216_record_mismatch",
-            "a changed profile digest, descriptor, nameplate, or protocol in the CON-409 record",
-            Json::obj([("profileDigest", Json::text("changed"))]),
-            reject("RecordMismatch"),
-        ),
-        case(
-            "con_216_origin_entry_offered_early",
-            "tier-3 origin entry offered before tiers 1 and 2 were attempted",
-            Json::obj([("earlierTiersExhausted", Json::Bool(false))]),
-            reject("RoutingInCode"),
-        ),
-    ])
-}
-
-// ── CON-217 ────────────────────────────────────────────────────────────────
-
-fn con_217() -> Json {
-    Json::Array(vec![
-        case(
-            "con_217_confirmed_and_authenticated",
-            "consent shown only after this role's confirmation and CON-214 verification",
-            Json::obj([
-                ("roleConfirmed", Json::Bool(true)),
-                ("applicationAuthenticated", Json::Bool(true)),
-            ]),
-            accept(Json::obj([("mayDisplayConsent", Json::Bool(true))])),
-        ),
-        case(
-            "con_217_unconfirmed",
-            "deriving a branch, requesting a slot, or sending an offer before this role's confirmation",
-            Json::obj([("roleConfirmed", Json::Bool(false))]),
-            reject("Unconfirmed"),
-        ),
-        case(
-            "con_217_confirmation_is_not_authorization",
-            "a valid PAKE confirmation is never sufficient application authentication",
-            Json::obj([
-                ("roleConfirmed", Json::Bool(true)),
-                ("applicationAuthenticated", Json::Bool(false)),
-            ]),
-            reject("ApplicationUnauthenticated"),
-        ),
-        case(
-            "con_217_peer_confirmation_does_not_open_this_gate",
-            "the confirmation required is this role's, not the peer's",
-            Json::obj([("confirmedRole", Json::text("peer"))]),
-            reject("Unconfirmed"),
-        ),
-    ])
-}
-
-// ── CON-218 ────────────────────────────────────────────────────────────────
-
-fn con_218() -> Json {
-    let modes = [
-        ("SecretFromCode", "an AEAD or mailbox secret derived directly from C, bypassing SPAKE2"),
-        ("RoutingInCode", "a route, nameplate, provider, or application identifier inside the human code"),
-        ("WordsOnMachineCarrier", "the word rendering transported through a machine carrier instead of C"),
-        ("MissingConfirmation", "either confirmation MAC omitted"),
-        ("ProviderAsPakeEndpoint", "the provider made a SPAKE2 responder or password-verifier holder"),
-        ("ForeignTranscriptLabels", "Hark or cbcl-bus transcript labels without Selfsame binding"),
-        ("QrAsUrl", "the QR treated as an authoritative browser or custom-scheme URL"),
-        ("ProviderSearch", "a code accepted by searching providers rather than resolving its CON-409 record"),
-        ("ChangeWithRetainedValues", "provider or carrier changed while ceremony values were retained"),
-    ];
-    let mut cases = vec![case(
-        "con_218_fresh_retry",
-        "a retry regenerating all thirteen REQ-229 values and sharing none with the abandoned ceremony",
-        Json::obj([(
-            "regeneratedValues",
-            Json::Array(pairing::REGENERATED_VALUES.iter().map(|v| Json::text(*v)).collect()),
-        )]),
-        accept(Json::obj([("reusedValues", Json::int(0))])),
-    )];
-    for (token, description) in modes {
-        cases.push(case(
-            &format!("con_218_{}", to_snake(token)),
-            description,
-            Json::obj([("mode", Json::text(token))]),
-            reject(token),
-        ));
-    }
-    cases.push(case(
-        "con_218_burned_is_terminal",
-        "a burned ceremony accepts no new frame, confirmation, profile, provider, carrier, callback, mailbox record, or application evidence",
-        Json::obj([("state", Json::text("burned"))]),
-        reject("ChangeWithRetainedValues"),
-    ));
     Json::Array(cases)
 }
 
@@ -982,21 +913,27 @@ fn con_219() -> Json {
         case(
             "con_219_offer_digest",
             "offerDigest is computed over offer_core, which excludes the two members carrying it",
-            Json::obj([("excluded", Json::arr([
-                Json::text("enrollmentEvidence"),
-                Json::text("providerHint"),
-            ]))]),
+            Json::obj([(
+                "excluded",
+                Json::arr([Json::text("enrollmentEvidence"), Json::text("providerHint")]),
+            )]),
             accept(Json::obj([(
                 "offerCoreMembers",
                 Json::Array(
-                    ceremony::OFFER_CORE_MEMBERS.iter().map(|m| Json::text(*m)).collect(),
+                    ceremony::OFFER_CORE_MEMBERS
+                        .iter()
+                        .map(|m| Json::text(*m))
+                        .collect(),
                 ),
             )])),
         ),
         case(
             "con_219_payload_too_large",
             "a bundle whose inlined closure would exceed the payload bound",
-            Json::obj([("payloadBound", Json::int(ceremony::MAX_PAYLOAD_OCTETS as i64))]),
+            Json::obj([(
+                "payloadBound",
+                Json::int(ceremony::MAX_PAYLOAD_OCTETS as i64),
+            )]),
             reject("PayloadTooLarge"),
         ),
         case(
@@ -1024,7 +961,10 @@ fn con_220() -> Json {
         case(
             "con_220_unverified_application",
             "a cached profile past its bound with no network available",
-            Json::obj([("cacheAgeSeconds", Json::int(discovery::MAX_CACHE_SECONDS + 1))]),
+            Json::obj([(
+                "cacheAgeSeconds",
+                Json::int(discovery::MAX_CACHE_SECONDS + 1),
+            )]),
             reject("UnverifiedApplication"),
         ),
         case(
@@ -1139,7 +1079,10 @@ fn con_226() -> Json {
         "every closed error token and each of CON-206's thirteen steps has a case",
         Json::obj([
             ("con206Steps", Json::int(13)),
-            ("con214Tokens", Json::int(enrollment::ERROR_TOKENS.len() as i64)),
+            (
+                "con214Tokens",
+                Json::int(enrollment::ERROR_TOKENS.len() as i64),
+            ),
         ]),
         accept(Json::obj([
             ("reasonRequired", Json::Bool(true)),

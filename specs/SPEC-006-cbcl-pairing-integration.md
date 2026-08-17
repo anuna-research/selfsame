@@ -1,13 +1,14 @@
 ---
 id: SPEC-006
 title: cbcl-pairing Integration and End-to-End Web Demo
-status: implemented
+status: superseded
 tier: 1
-version: 0.4.0
+version: 0.5.0
 last-updated: 2026-08-17
 owner-repo: selfsame
 prototype-authorised: 2026-08-17 by the repository owner through the explicit integration goal
-review-gate: production-not-approved
+review-gate: superseded-by-SPEC-007; demo-evidence-only; production-not-approved
+superseded-by: SPEC-007
 depends-on: cbcl-pairing SPEC-001; SPEC-004; PROTO-004; SCREEN-001
 ---
 
@@ -16,6 +17,24 @@ depends-on: cbcl-pairing SPEC-001; SPEC-004; PROTO-004; SCREEN-001
 The key words MUST, MUST NOT, REQUIRED, SHALL, SHALL NOT, SHOULD, SHOULD NOT,
 RECOMMENDED, MAY, and OPTIONAL are interpreted as described in BCP 14. Their
 special meaning applies only when they appear in all capitals.
+
+## Supersession disposition
+
+[[SPEC-007-cbcl-pairing-cutover]] supersedes this prototype specification.
+These artifacts remain historical demo evidence:
+
+- REQ-701 through REQ-716 and NFR-701 through NFR-703;
+- ADR-701 through ADR-704;
+- CON-701 through CON-705; and
+- TEST-701 through TEST-722.
+
+They do not authorize a two-endpoint in-process production shell.
+Vectors: the existing demo corpus remains evidence; this disposition changes no shared wire octet.
+
+Evidence: [[SPEC-007-cbcl-pairing-cutover#TEST-819]].
+Owner: Selfsame human repository owner.
+Approved: 2026-08-17.
+Production approval: not granted.
 
 ## Orientation
 
@@ -782,8 +801,11 @@ No channel can waive a hard stop without a new specification version and the req
 ## Changelog
 
 <details>
-<summary>Revision history — 0.3.0 → 0.4.0</summary>
+<summary>Revision history — 0.3.0 → 0.5.0</summary>
 
+- 0.5.0 — marks this prototype superseded by [[SPEC-007-cbcl-pairing-cutover]].
+  Its demo and vectors remain historical evidence.
+  This disposition changes no shared wire octet and grants no production approval.
 - 0.4.0 — fixes [[SPEC-006-cbcl-pairing-integration#BUG-601]] and verifies ordinary same-browser tabs.
 - 0.3.0 — defines the prototype integration, browser demo, production hold, and verification surface.
 

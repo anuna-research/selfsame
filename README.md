@@ -22,6 +22,10 @@ phone can change the lock.*
 > Mutation testing of the acceptance predicate — which the specification
 > requires at a 100 % kill rate — **has not been run**. Do not put an identity
 > you rely on into this.
+>
+> Credential pairing now has one development protocol, `cbcl-pairing`, but its
+> independent cryptography, relay-operator, privacy, and human-security gates
+> are still open. This build cannot allocate production invitations.
 
 ## What it looks like
 
@@ -56,7 +60,27 @@ convention `cbcl-bus` uses for the `cbcl-erl` NIF.
 crate for invitation recognition, CPace, Finished, CBCL session projection,
 endpoint reduction, and the in-memory blind relay.
 
-## cbcl-pairing browser demo
+## Credential pairing
+
+`cbcl-pairing` is the only credential-pairing protocol in the Tauri app, CLI,
+web-device adapter, and browser demo. The ordinary pairing action accepts one
+CBCL invitation; there is no protocol selector, negotiation, or legacy fallback.
+Recognised legacy carriers fail with `PairingVersionUnsupported` before network,
+key, profile, or identity work begins.
+
+This is a breaking development cutover. There are no deployed users or migration
+state to preserve. The old SPAKE2 carriers, state machines, relay clients,
+commands, routes, stores, and positive tests have been removed. Their authority
+documents remain versioned and deprecated; a closed immutable corpus remains
+only to prove old input is inert.
+
+Production invitation allocation is compile-time disabled with no runtime
+override. It stays disabled until every SPEC-007 production gate has durable
+approval evidence. Before the first reviewed CBCL release exists, rollback
+disables pairing rather than restoring the retired protocol; unrelated identity
+and device-linking functions remain available.
+
+### Browser demo
 
 The loopback demo runs the reusable pairing protocol through a real Selfsame
 credential transfer and the complete 13-step application-identity acceptance
@@ -72,15 +96,15 @@ intent, and approve or decline. The two pages use separate HttpOnly sessions
 and role-bound capabilities. The server rejects public bind addresses.
 
 This is an experimental Tier-1 prototype and is **not production-approved**.
-The existing Tauri SPAKE2/PROTO-003 path remains rollback-only; the adapter and
-demo do not import or call it. Production cutover needs cryptography review,
-migration vectors, and human security approval.
+The demo uses the same CBCL endpoint and Selfsame credential-verification
+boundaries as the ordinary development action.
 
 Run its native and browser acceptance suites with:
 
 ```bash
 cargo test -p selfsame-pairing
 node --test tests/cbcl-pairing-demo.mjs
+node --test tests/spec-007-wallet-pairing.mjs
 ```
 
 ## Quick start
@@ -236,11 +260,15 @@ The original device-provisioning design lives in the
 - [SPEC-004](specs/SPEC-004-application-scoped-identity.md), the
   application/account identity and grant profile;
 - [PROTO-002](specs/PROTO-002-selfsame-rendezvous-v1.md), the blind encrypted
-  offer/grant mailbox;
-- [PROTO-003](specs/PROTO-003-selfsame-pairing-v1.md), the routable
-  `number-word-word` SPAKE2 pairing ceremony; and
-- [SPEC-006](specs/SPEC-006-cbcl-pairing-integration.md), the experimental
-  `cbcl-pairing` integration and production-hold boundary.
+  mailbox retained for non-credential device linking and deprecated for the
+  credential-pairing path;
+- [PROTO-003](specs/PROTO-003-selfsame-pairing-v1.md) and
+  [PROTO-004](specs/PROTO-004-selfsame-ceremony-envelope-v1.md), retained as
+  deprecated historical authority rather than executable Selfsame paths;
+- [SPEC-006](specs/SPEC-006-cbcl-pairing-integration.md), superseded demo
+  evidence; and
+- [SPEC-007](specs/SPEC-007-cbcl-pairing-cutover.md), the breaking CBCL cutover,
+  rejection boundary, rollback policy, and production hold.
 
 [spec]: ../anuna-ssi/specs/SPEC-001-device-key-provisioning.md
 
