@@ -1,13 +1,13 @@
 schema_version: 1
 specification: SPEC-006
-recorded_at: "2026-08-17T00:00:00+10:00"
+recorded_at: "2026-08-17T14:44:18+10:00"
 scope: "Tier-1 experimental integration; not production-approved"
 
 branch:
   name: feature/cbcl-pairing-demo
   main_revision: 22801e77dc0c7c493b6e811f79cb17c7cd9352ab
   merge_base: 22801e77dc0c7c493b6e811f79cb17c7cd9352ab
-  implementation_commit: 28444b1d11a4bbdeb08e01468ab1ae6a3505d3df
+  implementation_commit: d4ecc036214b575b29ef3a39c3ec6f0ffa2746e7
   differs_from_main: true
 
 dependency:
@@ -61,6 +61,9 @@ http_authority:
   max_browser_sessions: 64
   max_ceremonies: 32
   concurrent_decisions_one_terminal_transition: true
+  role_specific_session_cookies: true
+  exact_role_header_required: true
+  application_and_wallet_cookies_coexist: true
 
 browser:
   command: "npm run e2e:pairing"
@@ -92,6 +95,14 @@ browser:
   serious_or_critical_violations: 0
   logical_tab_order: pass
   eight_ordered_gates_both_routes: pass
+  ordinary_same_browser_tabs: pass
+
+regressions:
+  BUG-601:
+    red_mechanism: "load /application and /wallet with one cookie jar, then POST /api/start"
+    red_result: "HTTP 401 before role-specific cookies"
+    green_mechanism: "npm run e2e:pairing"
+    green_result: "2 of 2 tests passed; complete same-browser journeys at 1200px and 320px"
 
 upstream_fuzz:
   working_directory: ../cbcl-pairing
@@ -127,6 +138,6 @@ security_boundary:
 
 independent_review:
   reviewer: spec006_impl_review
-  reviewed_revision: d416681
+  reviewed_revision: d4ecc03
   implementation_code_blockers: 0
   completion_verdict: accept
