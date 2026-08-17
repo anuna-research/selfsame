@@ -79,12 +79,27 @@ async fn test_704_720_approved_flow_obeys_the_closed_role_matrix() {
     let router = router();
     let (mut application, _, application_html) = page(&router, "/application").await;
     let (mut wallet, _, wallet_html) = page(&router, "/wallet").await;
+    assert_ne!(application.cookie, wallet.cookie);
+    assert_ne!(application.capability, wallet.capability);
     assert!(!application_html.contains("Review this request"));
     assert!(wallet_html.contains("Review this request"));
 
+    let application_bootstrap = BrowserAuthority {
+        cookie: application.cookie.clone(),
+        capability: application.capability.clone(),
+        ceremony: None,
+    };
     let (status, started) = mutation(&router, "/api/start", &application, json!({})).await;
     assert_eq!(status, StatusCode::OK);
     adopt(&mut application, &started);
+    assert_ne!(application.capability, application_bootstrap.capability);
+    assert_eq!(
+        mutation(&router, "/api/start", &application_bootstrap, json!({}))
+            .await
+            .0,
+        StatusCode::UNAUTHORIZED,
+        "successful start must retire the bootstrap capability"
+    );
     let invitation = started["invitation"].as_str().unwrap().to_owned();
     assert_eq!(started["state"]["status"], "invitation-created");
     assert!(started["state"]["intent"].is_null());
@@ -119,6 +134,11 @@ async fn test_704_720_approved_flow_obeys_the_closed_role_matrix() {
         StatusCode::UNAUTHORIZED
     );
 
+    let wallet_bootstrap = BrowserAuthority {
+        cookie: wallet.cookie.clone(),
+        capability: wallet.capability.clone(),
+        ceremony: None,
+    };
     let (status, claimed) = mutation(
         &router,
         "/api/claim",
@@ -128,6 +148,19 @@ async fn test_704_720_approved_flow_obeys_the_closed_role_matrix() {
     .await;
     assert_eq!(status, StatusCode::OK);
     adopt(&mut wallet, &claimed);
+    assert_ne!(wallet.capability, wallet_bootstrap.capability);
+    assert_eq!(
+        mutation(
+            &router,
+            "/api/claim",
+            &wallet_bootstrap,
+            json!({ "invitation": invitation }),
+        )
+        .await
+        .0,
+        StatusCode::UNAUTHORIZED,
+        "successful claim must retire the bootstrap capability"
+    );
     assert_eq!(wallet.ceremony, application.ceremony);
     assert_eq!(claimed["state"]["status"], "awaiting-decision");
     assert_eq!(claimed["state"]["version"], 2);
