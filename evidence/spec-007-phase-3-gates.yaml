@@ -1,12 +1,12 @@
 schema_version: 1
 specification: SPEC-007
 specification_version: 0.2.1
-recorded_at: "2026-08-17T18:15:03+10:00"
+recorded_at: "2026-08-17T19:40:00+10:00"
 scope: "development cbcl-pairing cutover; production allocation remains prohibited"
 
 branch:
-  name: feature/cbcl-pairing-demo
-  base_revision: 5f57a586e7dfa5be88c51f36a808fc60faf24c09
+  name: feature/cbcl-pairing-cutover
+  base_revision: 22801e77dc0c7c493b6e811f79cb17c7cd9352ab
   merge_base: 22801e77dc0c7c493b6e811f79cb17c7cd9352ab
   implementation_state: uncommitted_working_tree
 
@@ -33,22 +33,27 @@ local_tests:
     result: pass
     evidence:
       - "cargo test -p selfsame-pairing --test one_sided test_803_separate_processes_complete_through_the_real_relay_wire -- --exact"
+      - "cargo test -p selfsame-pairing --features local-pairing-demo --test live_sessions"
+      - "web-demo --external-wallet allocator and local-wallet claimant completed through ws://localhost:7443/relay in separate OS processes"
     proves: "allocator and claimant run in separate OS processes and every canonical frame crosses the pinned relay wire and reducer"
   TEST-804:
     result: pass
     evidence:
       - "crates/selfsame-pairing/tests/adapter.rs::test_710_decline_releases_no_payload_and_calls_no_selfsame_verifier"
+      - "crates/selfsame-pairing/tests/live_sessions.rs::test_804_decline_releases_no_payload_and_calls_no_selfsame_verifier"
       - "evidence/spec-006-red.md#Consent mutation gate"
     proves: "decline and held approval release no payload and the approve-for-decline mutation is killed"
   TEST-805:
     result: pass
     evidence:
       - "crates/selfsame-pairing/tests/adapter.rs::test_703_and_705_approved_ceremony_reaches_selfsame_acceptance"
+      - "crates/selfsame-pairing/tests/live_sessions.rs::test_803_through_805_live_sessions_complete_over_the_relay_wire"
     proves: "one approved credential reaches the complete Selfsame acceptance predicate"
   TEST-806:
     result: pass
     evidence:
       - "crates/selfsame-pairing/tests/adapter.rs::test_706_invalid_grant_is_transported_but_never_authorized"
+      - "crates/selfsame-pairing/tests/live_sessions.rs::test_806_mutated_grant_is_refused_after_valid_pairing"
       - "evidence/spec-006-red.md#Selfsame-verifier mutation gate"
     proves: "a mutated signature creates no accepted credential and the parse-only bypass mutation is killed"
   TEST-807:
@@ -116,6 +121,25 @@ local_tests:
       - "evidence/spec-007-phase-1-gates.yaml"
       - "USDD descriptive lint on SPEC-007 and IMPL-007: zero errors and zero warnings"
     proves: "each local companion records its versioned Selfsame cutover disposition without weakening unrelated duties"
+
+local_relay_e2e:
+  result: pass
+  capability: local-pairing-demo
+  application_command: "cargo run -p selfsame-pairing --features local-pairing-demo --example web-demo -- --external-wallet 127.0.0.1:7443"
+  claimant_command: "cargo run -p selfsame-pairing --features local-pairing-demo --example local-wallet -- INVITATION"
+  observed:
+    exact_intent_fields: 4
+    selfsame_accepted_steps: 13
+    opaque_relay_frames: 8
+    aggregate_relay_bytes: 8339
+    application_terminal_claim: delivered
+    claimant_terminal_claim: accepted
+  android_build:
+    command: "cargo tauri android build --debug --apk --target aarch64 --features local-pairing-demo"
+    result: pass
+    artifact: src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk
+    sha256: 3811f168c2bbc70e6c94b6ac904fabd9b573931bc058de2d2026143897a889cc
+  production_evidence: false
 
 mutation_gates:
   consent_bypass:

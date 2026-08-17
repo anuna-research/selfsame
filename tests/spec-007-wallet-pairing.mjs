@@ -53,11 +53,28 @@ test("TEST-814 CBCL wallet states are keyboard complete and WCAG-clean", async (
     assert.equal(await page.evaluate(() => document.activeElement?.dataset.screen), "pairing-wait");
     await audit(page, `pending secure channel at ${width}px`);
 
+    await page.evaluate(() => globalThis.__completeCbclPairingStart());
+    await visible(page, "pairing-consent");
+    assert.match(await page.$eval("[data-cbcl-authority]", (node) => node.textContent), /Selfsame device grant/);
+    assert.match(await page.$eval("[data-cbcl-intent-fields]", (node) => node.textContent), /photos\.example/);
+    assert.equal(await page.evaluate(() => document.activeElement?.dataset.screen), "pairing-consent");
+    await audit(page, `exact intent consent at ${width}px`);
+
     await page.keyboard.press("Tab");
     assert.equal(
       await page.evaluate(() => document.activeElement?.dataset.action),
       "cancel-cbcl-pairing",
     );
+    await page.keyboard.press("Tab");
+    assert.equal(
+      await page.evaluate(() => document.activeElement?.dataset.action),
+      "approve-cbcl-pairing",
+    );
+    await page.keyboard.press("Enter");
+    await visible(page, "pairing-result");
+    assert.match(await page.$eval("[data-cbcl-result-message]", (node) => node.textContent), /13 credential checks/);
+    await audit(page, `accepted terminal result at ${width}px`);
+    await page.keyboard.press("Tab");
     await page.keyboard.press("Enter");
     await visible(page, "applications");
 
@@ -90,15 +107,40 @@ function bridge() {
         if (command === "get_state") return state;
         if (command === "flush_publications") return 0;
         if (command === "cbcl_pairing_cancel") return null;
+        if (command === "cbcl_pairing_approve") {
+          return {
+            outcome: "accepted",
+            title: "Application connected",
+            message: "Selfsame accepted all 13 credential checks.",
+          };
+        }
+        if (command === "cbcl_pairing_decline") {
+          return {
+            outcome: "declined",
+            title: "Request declined",
+            message: "No credential was shared and the invitation is spent.",
+          };
+        }
         if (command === "cbcl_pairing_start") {
           if (args.invitation.startsWith("selfsame-pairing-v2:")) {
             throw "PairingVersionUnsupported";
           }
-          return {
-            relayOrigin: "https://relay.example",
-            cpaceFrame: "opaque-frame",
-            status: "Secure pairing started. Waiting for the application.",
-          };
+          return new Promise((resolve) => {
+            globalThis.__completeCbclPairingStart = () => resolve({
+              relayOrigin: "https://relay.example",
+              status: "Secure channel ready. Review the exact request.",
+              intent: {
+                application: "anuna.io/credential/v1",
+                action: "issue-credential",
+                authoritySummary: "Transfer one Selfsame device grant",
+                fields: [
+                  { label: "Application", value: "https://photos.example/selfsame/application", claimedBySecretHolder: true },
+                  { label: "Origin", value: "https://photos.example", claimedBySecretHolder: true },
+                  { label: "Scope", value: "device", claimedBySecretHolder: true },
+                ],
+              },
+            });
+          });
         }
         return null;
       },

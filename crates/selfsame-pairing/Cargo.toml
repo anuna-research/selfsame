@@ -7,6 +7,10 @@ license.workspace = true
 repository.workspace = true
 description = "Selfsame credential composition for cbcl-pairing"
 
+[features]
+default = []
+local-pairing-demo = ["dep:bip39", "dep:ed25519-dalek"]
+
 [dependencies]
 base64ct = { workspace = true }
 cbcl-pairing = { workspace = true }
@@ -15,9 +19,11 @@ ciborium = "=0.2.2"
 selfsame-app-identity = { workspace = true }
 thiserror = { workspace = true }
 zeroize = { version = "1", default-features = false, features = ["alloc"] }
+bip39 = { version = "2", optional = true }
+ed25519-dalek = { workspace = true, features = ["std"], optional = true }
 
 [dev-dependencies]
-axum = "0.7"
+axum = { version = "0.7", features = ["ws"] }
 bip39 = "2"
 ed25519-dalek = { workspace = true }
 getrandom = "0.2"
@@ -26,3 +32,4 @@ serde_json = { workspace = true }
 sha2 = "0.11"
 tokio = { workspace = true }
 tower = { version = "0.5", features = ["util"] }
+tungstenite = { version = "=0.30.0", default-features = false, features = ["handshake"] }

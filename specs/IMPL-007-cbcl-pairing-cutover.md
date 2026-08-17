@@ -2,7 +2,7 @@
 id: IMPL-007
 title: cbcl-pairing Protocol Cutover Implementation
 status: draft
-version: 0.2.1
+version: 0.3.0
 last-updated: 2026-08-17
 implements: SPEC-007
 ---
@@ -29,6 +29,7 @@ Keep production invitation allocation disabled until its independent gate passes
 | `rollback-hold` | production-disabled build policy and release rollback checks | [[SPEC-007-cbcl-pairing-cutover#TEST-810]], [[SPEC-007-cbcl-pairing-cutover#TEST-811]] | `legacy-removal` | [[SPEC-007-cbcl-pairing-cutover#REQ-809]] |
 | `documentation` | current architecture and user guidance | user and architecture documents identify cbcl as the only pairing path and retain the production hold | `legacy-removal`, `rollback-hold` | [[SPEC-007-cbcl-pairing-cutover#REQ-808]] |
 | `verification` | focused, workspace, mutation, accessibility, and traceability evidence | [[SPEC-007-cbcl-pairing-cutover#TEST-820]] | `documentation` | [[SPEC-007-cbcl-pairing-cutover#TEST-820]] |
+| `local-relay-e2e` | development-only application allocator, blind WebSocket relay, and Tauri claimant consent/acceptance flow | [[SPEC-007-cbcl-pairing-cutover#TEST-803]] through [[SPEC-007-cbcl-pairing-cutover#TEST-806]] and [[SPEC-007-cbcl-pairing-cutover#TEST-814]] pass through the real application and wallet shells | `shell-cutover`, `verification` | [[SPEC-007-cbcl-pairing-cutover#CON-802]] |
 | `spec004-ledger-evidence` | durable evidence for all inherited Tier-1 rows | all 25 rows name retained or replacement evidence without weakening standing duties | `verification` | [[SPEC-007-cbcl-pairing-cutover#REQ-809]] |
 | `upstream-profile-approval` | approved exact pin and credential-profile disposition | the cbcl specification owner approves the pinned revision and Selfsame profile | `verification` | [[SPEC-007-cbcl-pairing-cutover#REQ-809]] |
 | `upstream-production-gates` | exact upstream production evidence | every upstream production gate passes without local reinterpretation | `upstream-profile-approval` | [[SPEC-007-cbcl-pairing-cutover#REQ-809]] |
@@ -77,6 +78,13 @@ Legacy protocol state and tolerant parsing do not survive.
 Tauri, CLI, and wasm bindings call the same `selfsame-pairing` adapter.
 No shell contains protocol choreography.
 
+The local E2E harness composes the pinned relay service behind a binary
+WebSocket boundary. Its allocator and Tauri claimant exchange only canonical
+CBCL messages. A compile-time development capability admits the loopback
+HTTPS-origin to plain-WebSocket mapping needed by `adb reverse`. The capability
+does not select a protocol. It cannot admit a non-loopback origin and is absent
+from ordinary builds. It does not change the production-allocation hold.
+
 ## Purity Boundary Map
 
 ```text
@@ -102,8 +110,12 @@ The shells own effects. Both protocol cores remain independent of Selfsame shell
 - `crates/selfsame-app-identity/src/profile.rs`: recognise cbcl relay descriptors and remove legacy pairing fields.
 - `crates/selfsame-web-device/src/lib.rs`: expose the cbcl endpoint surface and remove legacy pairing exports.
 - `src-tauri/src/lib.rs`: register only cbcl pairing commands.
-- `src-tauri/src/cbcl_pairing.rs`: host the development claimant bootstrap without protocol duplication.
-- `src/pairing.js`: drive invitation entry, the pending development state, and cancellation while production relay allocation remains held.
+- `crates/selfsame-pairing/src/live.rs`: drive typed allocator and claimant relay sessions without shell protocol choreography.
+- `crates/selfsame-pairing/src/local_demo.rs`: provide compile-time-gated, deterministic local credential evidence for the complete Selfsame verifier.
+- `crates/selfsame-pairing/examples/web-demo/live.rs`: expose the development-only binary WebSocket relay and external-wallet application mode.
+- `crates/selfsame-pairing/examples/local-wallet.rs`: drive the same relay as an independent claimant process for local conformance checks.
+- `src-tauri/src/cbcl_pairing.rs`: drive the claimant transport and retain endpoint state only for the current ceremony.
+- `src/pairing.js`: drive invitation entry, exact-intent consent, terminal outcome, and cancellation while production relay allocation remains held.
 - `test-vectors/spec-007-legacy/`: retain immutable legacy rejection fixtures and their manifest.
 - `evidence/spec-007-phase-3-gates.yaml`: externalise every implementation result and open gate.
 - `README.md`: describe cbcl-pairing as the only path and retain the production warning.
@@ -123,10 +135,14 @@ The upstream profile disposition remains a production prerequisite owned by the
 8. Switch each shell and remove legacy modules until those checks pass.
 9. Apply the three deliberate mutations from the specification.
 10. Run focused, workspace, accessibility, lint, and traceability checks.
+11. Add a failing real-shell relay test that reaches neither intent nor acceptance.
+12. Implement the typed local relay E2E path and require TEST-803 through TEST-806 and TEST-814 to pass through it.
 
 ## Development completion rule
 
 The development cutover completes after `verification` passes.
+The locally demonstrable application-to-wallet ceremony completes only after
+`local-relay-e2e` passes; it is not evidence for production enablement.
 The production release remains prohibited until `production-release-decision` also completes.
 
 The executable theory is `spec-007`.
@@ -148,6 +164,9 @@ and no production allocation without the complete production gate.
 <details>
 <summary>Revision history</summary>
 
+- 0.3.0 — adds the development-only live WebSocket relay task, application
+  allocator, Tauri claimant consent flow, and real-shell E2E acceptance without
+  changing production allocation.
 - 0.2.1 — corrects the desktop file map and records that the development
   surface stops at the pending claimant state while production relay allocation
   remains held.

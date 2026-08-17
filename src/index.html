@@ -530,6 +530,43 @@
         <button class="btn btn--quiet" data-action="cancel-cbcl-pairing">Cancel</button>
       </section>
 
+      <section class="screen screen--scroll" data-screen="pairing-consent" tabindex="-1" hidden>
+        <button class="back" data-action="cancel-cbcl-pairing">Cancel</button>
+        <h1>Review this request</h1>
+        <p class="lede" data-cbcl-authority></p>
+        <div class="evidence">
+          <div class="evidence__row">
+            <p class="evidence__key">Protocol</p>
+            <p class="evidence__val">cbcl-pairing</p>
+            <p class="evidence__note">CPace and both Finished values verified</p>
+          </div>
+          <div class="evidence__row">
+            <p class="evidence__key">Request profile</p>
+            <p class="evidence__val evidence__val--mono" data-cbcl-application></p>
+            <p class="evidence__note" data-cbcl-action></p>
+          </div>
+        </div>
+        <dl class="intent-fields" data-cbcl-intent-fields></dl>
+        <p class="caution">
+          Approve only if these exact fields match the application in front of you.
+          Approval releases one credential; decline releases none.
+        </p>
+        <div class="spacer"></div>
+        <button class="btn btn--primary" data-action="approve-cbcl-pairing">Approve request</button>
+        <button class="btn btn--quiet" data-action="decline-cbcl-pairing">Decline</button>
+      </section>
+
+      <section class="screen" data-screen="pairing-result" tabindex="-1" hidden>
+        <div class="mark mark--lg mark--ok" data-cbcl-result-mark aria-hidden="true"></div>
+        <h1 data-cbcl-result-title></h1>
+        <p class="lede" data-cbcl-result-message aria-live="polite"></p>
+        <p class="caution">
+          This local conformance ceremony does not enable production pairing.
+        </p>
+        <div class="spacer"></div>
+        <button class="btn btn--primary" data-action="finish-cbcl-pairing">Back to applications</button>
+      </section>
+
       <!-- ══ HP-3 · one application ═════════════════════════════════════ -->
       <section class="screen screen--scroll" data-screen="application" hidden>
         <button class="back" data-action="to-applications">Applications</button>

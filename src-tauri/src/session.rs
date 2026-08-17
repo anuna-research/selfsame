@@ -66,6 +66,11 @@ pub struct Session {
     /// having signed it conferred nothing.
     pub pending_issuance: Option<crate::app_grant::PendingIssuance>,
     /// The live one-sided cbcl claimant. Never persisted or exposed to the page.
+    #[cfg(feature = "local-pairing-demo")]
+    pub pending_cbcl_pairing: Option<crate::cbcl_pairing::PendingCbclPairing>,
+    /// Pending-only bootstrap retained by ordinary builds while production
+    /// relay allocation remains held.
+    #[cfg(not(feature = "local-pairing-demo"))]
     pub pending_cbcl_pairing: Option<selfsame_pairing::SelfsameEndpointBootstrap>,
 }
 

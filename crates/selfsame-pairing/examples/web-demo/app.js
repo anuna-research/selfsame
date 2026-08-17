@@ -10,7 +10,7 @@
   let resetRecoveryAvailable = false;
   const byId = (id) => document.getElementById(id);
   const status = byId("status");
-  const terminalStatuses = ["accepted", "declined", "verifier-refusal", "protocol-failure"];
+  const terminalStatuses = ["accepted", "delivered", "declined", "verifier-refusal", "protocol-failure"];
 
   function announce(message) {
     status.textContent = message;
@@ -63,6 +63,7 @@
       clearInterval(pollTimer);
       const titles = {
         accepted: "Credential accepted",
+        delivered: "Credential delivered",
         declined: "Transfer declined",
         "verifier-refusal": "Verifier refusal",
         "protocol-failure": "Protocol failure",
@@ -88,7 +89,7 @@
       intent: state.version >= 2 ? "Complete" : "Waiting",
       consent: terminal ? "Complete" : "Waiting",
       credential: state.status === "accepted" ? "Complete" : state.status === "declined" ? "Skipped" : terminal ? "Refused" : "Waiting",
-      acceptance: state.status === "accepted" ? "Complete" : state.status === "declined" ? "Skipped" : terminal ? "Refused" : "Waiting",
+      acceptance: state.status === "accepted" ? "Complete" : state.status === "delivered" ? "Wallet only" : state.status === "declined" ? "Skipped" : terminal ? "Refused" : "Waiting",
     };
     document.querySelectorAll("[data-gate]").forEach((item) => {
       const statusText = stage[item.dataset.gate];

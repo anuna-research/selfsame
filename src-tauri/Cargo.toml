@@ -11,6 +11,10 @@ repository.workspace = true
 name = "selfsame_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[features]
+default = []
+local-pairing-demo = ["selfsame-pairing/local-pairing-demo"]
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
@@ -36,6 +40,7 @@ rand = "0.8"
 zeroize = { version = "1", features = ["alloc"] }
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
 tokio = { workspace = true }
+tungstenite = { version = "=0.30.0", default-features = false, features = ["handshake"] }
 
 # ── mobile ──────────────────────────────────────────────────────────────────
 #

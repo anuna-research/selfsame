@@ -1,5 +1,8 @@
 #[path = "../../selfsame-app-identity/tests/common/mod.rs"]
 mod fixture;
+#[cfg(feature = "local-pairing-demo")]
+#[path = "web-demo/live.rs"]
+mod live_server;
 #[path = "web-demo/server.rs"]
 mod server;
 
@@ -62,11 +65,17 @@ fn pending(
 
 #[tokio::main]
 async fn main() {
-    let mut arguments = std::env::args().skip(1);
-    let address = match server::parse_loopback(arguments.next().as_deref()) {
-        Ok(address) if arguments.next().is_none() => address,
+    let mut arguments: Vec<String> = std::env::args().skip(1).collect();
+    let external_wallet = arguments
+        .first()
+        .is_some_and(|value| value == "--external-wallet");
+    if external_wallet {
+        arguments.remove(0);
+    }
+    let address = match server::parse_loopback(arguments.first().map(String::as_str)) {
+        Ok(address) if arguments.len() <= 1 => address,
         Ok(_) => {
-            eprintln!("usage: web-demo [127.0.0.1:PORT]");
+            eprintln!("usage: web-demo [--external-wallet] [127.0.0.1:PORT]");
             std::process::exit(2);
         }
         Err(error) => {
@@ -84,6 +93,21 @@ async fn main() {
     let selected = listener
         .local_addr()
         .expect("bound listener has an address");
+    if external_wallet {
+        #[cfg(feature = "local-pairing-demo")]
+        {
+            if let Err(error) = live_server::serve(listener).await {
+                eprintln!("live demo server failed: {error}");
+                std::process::exit(1);
+            }
+            return;
+        }
+        #[cfg(not(feature = "local-pairing-demo"))]
+        {
+            eprintln!("--external-wallet requires --features local-pairing-demo");
+            std::process::exit(2);
+        }
+    }
     println!("Selfsame cbcl-pairing demo: http://{selected}/application");
     println!("Experimental — not production-approved");
     let _ = std::io::stdout().flush();

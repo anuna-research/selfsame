@@ -12,6 +12,9 @@
 #![forbid(unsafe_code)]
 
 pub mod legacy;
+pub mod live;
+#[cfg(feature = "local-pairing-demo")]
+pub mod local_demo;
 pub mod release;
 
 /// Dependency evidence exposed to conformance tests.

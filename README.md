@@ -99,10 +99,49 @@ This is an experimental Tier-1 prototype and is **not production-approved**.
 The demo uses the same CBCL endpoint and Selfsame credential-verification
 boundaries as the ordinary development action.
 
+### Android and web end to end
+
+An explicit development feature connects the Android claimant to the browser
+demo's loopback WebSocket relay. It accepts only an invitation naming the exact
+`https://localhost:PORT` origin and maps that origin to `ws://localhost:PORT`
+after `adb reverse`. The feature is absent from ordinary builds and cannot
+enable production invitation allocation.
+
+Build and install the arm64 debug APK:
+
+```bash
+cargo tauri android build --debug --apk --target aarch64 \
+  --features local-pairing-demo
+adb install -r src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk
+```
+
+Run the application and relay on the development machine:
+
+```bash
+cargo run -p selfsame-pairing --features local-pairing-demo \
+  --example web-demo -- --external-wallet 127.0.0.1:7443
+adb reverse tcp:7443 tcp:7443
+```
+
+Open `http://127.0.0.1:7443/application` on the development machine and create
+an invitation. In Selfsame, finish local identity setup if needed, open
+**Applications → Connect an application**, paste the invitation, review the
+four exact intent fields, and approve or decline. The application reports
+delivery only; the wallet alone reports the result of all 13 Selfsame checks.
+Create a fresh invitation for every attempt.
+
+The local claimant can also preflight the same live relay without Android:
+
+```bash
+cargo run -p selfsame-pairing --features local-pairing-demo \
+  --example local-wallet -- 'PASTE_INVITATION_HERE'
+```
+
 Run its native and browser acceptance suites with:
 
 ```bash
 cargo test -p selfsame-pairing
+cargo test -p selfsame-pairing --features local-pairing-demo --test live_sessions
 node --test tests/cbcl-pairing-demo.mjs
 node --test tests/spec-007-wallet-pairing.mjs
 ```

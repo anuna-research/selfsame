@@ -86,6 +86,8 @@ pub fn run() {
             app_identity::home_fingerprint,
             app_identity::app_identity_derive,
             cbcl_pairing::cbcl_pairing_start,
+            cbcl_pairing::cbcl_pairing_approve,
+            cbcl_pairing::cbcl_pairing_decline,
             cbcl_pairing::cbcl_pairing_cancel,
             app_grant::app_grant_review,
             app_grant::app_grant_prepare,
