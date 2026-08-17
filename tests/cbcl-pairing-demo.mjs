@@ -13,7 +13,7 @@ const CLEAN_TARGET = mkdtempSync(join(tmpdir(), "selfsame-pairing-demo-"));
 
 after(() => rmSync(CLEAN_TARGET, { recursive: true, force: true }));
 
-test("TEST-704 approved and declined ceremonies run in isolated browsers", async (t) => {
+test("TEST-704 approved and declined ceremonies run in same-browser tabs", async (t) => {
   const server = await startServer();
   t.after(() => stopServer(server));
   const browser = await puppeteer.launch({
@@ -52,11 +52,10 @@ test("TEST-709 demo rejects a non-loopback bind", async () => {
 });
 
 async function approvedJourney(browser, origin, width) {
-  const applicationContext = await browser.createBrowserContext();
-  const walletContext = await browser.createBrowserContext();
-  await applicationContext.overridePermissions(origin, ["clipboard-read", "clipboard-write"]);
-  const application = await applicationContext.newPage();
-  const wallet = await walletContext.newPage();
+  const context = await browser.createBrowserContext();
+  await context.overridePermissions(origin, ["clipboard-read", "clipboard-write"]);
+  const application = await context.newPage();
+  const wallet = await context.newPage();
   await Promise.all([
     application.setViewport({ width, height: 900, deviceScaleFactor: 1 }),
     wallet.setViewport({ width, height: 900, deviceScaleFactor: 1 }),
@@ -75,21 +74,22 @@ async function approvedJourney(browser, origin, width) {
 
   const startFeedback = await pendingFeedback(application, "#start", "Creating a single-use invitation");
   assert.ok(startFeedback < 100, `start feedback took ${startFeedback}ms`);
-  await application.waitForFunction(() => document.querySelector("#invitation").value.length > 80);
+  await waitForInvitation(application);
   const invitation = await application.$eval("#invitation", (node) => node.value);
   assert.match(await application.$eval("#status", (node) => node.textContent), /Invitation created/);
   const copyFeedback = await pendingFeedback(application, "#copy", "Copying invitation");
   assert.ok(copyFeedback < 100, `copy feedback took ${copyFeedback}ms`);
-  await application.waitForFunction(() => /Invitation copied|Copy refused/.test(document.querySelector("#status").textContent));
+  await waitForDom(application, () => /Invitation copied|Copy refused/.test(document.querySelector("#status").textContent));
   assert.equal(await application.$eval("#copy", (node) => node.disabled), false);
   await assertRail(application, ["Complete", "Waiting", "Waiting", "Waiting", "Waiting", "Waiting", "Waiting", "Waiting"]);
   await assertWcag(application, "application invitation-created");
 
+  await wallet.bringToFront();
   await wallet.type("#invitation", invitation);
   const joinFeedback = await pendingFeedback(wallet, "#join", "Establishing the secure ceremony");
   assert.ok(joinFeedback < 100, `join feedback took ${joinFeedback}ms`);
   await wallet.waitForSelector("#consent-panel:not([hidden])");
-  await application.waitForFunction(() => document.querySelector("#result-title").textContent === "Awaiting wallet decision");
+  await waitForDom(application, () => document.querySelector("#result-title").textContent === "Awaiting wallet decision");
   assert.equal(await wallet.evaluate(() => document.activeElement?.id), "consent-panel");
   const intent = await wallet.$$eval("#intent-fields dd", (nodes) => nodes.map((node) => node.textContent));
   assert.ok(intent.includes("https://photos.example/selfsame/application"));
@@ -112,8 +112,8 @@ async function approvedJourney(browser, origin, width) {
   const approveFeedback = await keyboardFeedback(wallet, "Applying explicit approval");
   assert.ok(approveFeedback < 100, `approval feedback took ${approveFeedback}ms`);
   await Promise.all([
-    wallet.waitForFunction(() => document.querySelector("#result-title").textContent === "Credential accepted"),
-    application.waitForFunction(() => document.querySelector("#result-title").textContent === "Credential accepted"),
+    waitForDom(wallet, () => document.querySelector("#result-title").textContent === "Credential accepted"),
+    waitForDom(application, () => document.querySelector("#result-title").textContent === "Credential accepted"),
   ]);
   assert.match(await wallet.$eval("#verifier-summary", (node) => node.textContent), /13 of 13/);
   assert.equal(await wallet.$eval("#reset", (node) => node.disabled), false);
@@ -146,7 +146,7 @@ async function approvedJourney(browser, origin, width) {
     };
     wallet.on("request", abortReset);
     await wallet.click("#reset");
-    await wallet.waitForFunction(() => document.querySelector("#status").textContent.includes("Retry reset"));
+    await waitForDom(wallet, () => document.querySelector("#status").textContent.includes("Retry reset"));
     assert.equal(await wallet.$eval("#reset", (node) => node.disabled), false);
     assert.equal(await wallet.$eval("#reset", (node) => node.hasAttribute("aria-busy")), false);
     await wallet.setRequestInterception(false);
@@ -159,14 +159,13 @@ async function approvedJourney(browser, origin, width) {
   assert.equal(await wallet.$eval("#join", (node) => node.disabled), false);
   assert.equal(await wallet.$eval("#consent-panel", (node) => node.hidden), true);
   await assertWcag(wallet, "wallet reset baseline");
-  await Promise.all([applicationContext.close(), walletContext.close()]);
+  await context.close();
 }
 
 async function declinedJourney(browser, origin, width) {
-  const applicationContext = await browser.createBrowserContext();
-  const walletContext = await browser.createBrowserContext();
-  const application = await applicationContext.newPage();
-  const wallet = await walletContext.newPage();
+  const context = await browser.createBrowserContext();
+  const application = await context.newPage();
+  const wallet = await context.newPage();
   await Promise.all([
     application.setViewport({ width, height: 900, deviceScaleFactor: 1 }),
     wallet.setViewport({ width, height: 900, deviceScaleFactor: 1 }),
@@ -176,19 +175,22 @@ async function declinedJourney(browser, origin, width) {
   await wallet.goto(`${origin}/wallet`);
   await assertBaseline(application, "Application endpoint");
   await assertBaseline(wallet, "Selfsame wallet endpoint");
+  await wallet.bringToFront();
   await wallet.type("#invitation", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
   await wallet.click("#join");
-  await wallet.waitForFunction(() => document.querySelector("#result-title").textContent === "Invitation mismatch");
+  await waitForDom(wallet, () => document.querySelector("#result-title").textContent === "Invitation mismatch");
   await assertWcag(wallet, "invitation mismatch");
   await wallet.$eval("#invitation", (node) => { node.value = ""; });
+  await application.bringToFront();
   await application.click("#start");
-  await application.waitForFunction(() => document.querySelector("#invitation").value.length > 80);
+  await waitForInvitation(application);
   await assertWcag(application, "application invitation-created before decline");
   const invitation = await application.$eval("#invitation", (node) => node.value);
+  await wallet.bringToFront();
   await wallet.type("#invitation", invitation);
   await wallet.click("#join");
   await wallet.waitForSelector("#consent-panel:not([hidden])");
-  await application.waitForFunction(() => document.querySelector("#result-title").textContent === "Awaiting wallet decision");
+  await waitForDom(application, () => document.querySelector("#result-title").textContent === "Awaiting wallet decision");
   await Promise.all([
     assertWcag(application, "application awaiting decline"),
     assertWcag(wallet, "wallet awaiting decline"),
@@ -201,8 +203,9 @@ async function declinedJourney(browser, origin, width) {
       else request.continue();
     };
     wallet.on("request", abortDecision);
+    await wallet.bringToFront();
     await wallet.click("#decline");
-    await wallet.waitForFunction(() => document.querySelector("#status").textContent.includes("Retry, or reset"));
+    await waitForDom(wallet, () => document.querySelector("#status").textContent.includes("Retry, or reset"));
     assert.equal(await wallet.$eval("#approve", (node) => node.disabled), false);
     assert.equal(await wallet.$eval("#decline", (node) => node.disabled), false);
     assert.equal(await wallet.$eval("#reset", (node) => node.disabled), false);
@@ -214,8 +217,8 @@ async function declinedJourney(browser, origin, width) {
   const declineFeedback = await keyboardFeedback(wallet, "Recording decline");
   assert.ok(declineFeedback < 100, `decline feedback took ${declineFeedback}ms`);
   await Promise.all([
-    wallet.waitForFunction(() => document.querySelector("#result-title").textContent === "Transfer declined"),
-    application.waitForFunction(() => document.querySelector("#result-title").textContent === "Transfer declined"),
+    waitForDom(wallet, () => document.querySelector("#result-title").textContent === "Transfer declined"),
+    waitForDom(application, () => document.querySelector("#result-title").textContent === "Transfer declined"),
   ]);
   assert.equal(await wallet.$("#relay-mailboxes"), null);
   assert.match(await wallet.$eval("#verifier-summary", (node) => node.textContent), /No accepted credential/);
@@ -234,7 +237,7 @@ async function declinedJourney(browser, origin, width) {
   await applicationNavigation;
   assert.equal(await application.$eval("#start", (node) => node.disabled), false);
   await assertWcag(application, "application reset baseline");
-  await Promise.all([applicationContext.close(), walletContext.close()]);
+  await context.close();
 }
 
 async function verifierRefusalJourney(browser, origin, width) {
@@ -248,16 +251,18 @@ async function verifierRefusalJourney(browser, origin, width) {
   ]);
   await Promise.all([application.setBypassCSP(true), wallet.setBypassCSP(true)]);
   await Promise.all([application.goto(`${origin}/application`), wallet.goto(`${origin}/wallet`)]);
+  await application.bringToFront();
   await application.click("#start");
-  await application.waitForFunction(() => document.querySelector("#invitation").value.length > 80);
+  await waitForInvitation(application);
   const invitation = await application.$eval("#invitation", (node) => node.value);
+  await wallet.bringToFront();
   await wallet.type("#invitation", invitation);
   await wallet.click("#join");
   await wallet.waitForSelector("#consent-panel:not([hidden])");
   await wallet.click("#approve");
   await Promise.all([
-    wallet.waitForFunction(() => document.querySelector("#result-title").textContent === "Verifier refusal"),
-    application.waitForFunction(() => document.querySelector("#result-title").textContent === "Verifier refusal"),
+    waitForDom(wallet, () => document.querySelector("#result-title").textContent === "Verifier refusal"),
+    waitForDom(application, () => document.querySelector("#result-title").textContent === "Verifier refusal"),
   ]);
   for (const page of [application, wallet]) {
     await assertRail(page, ["Complete", "Complete", "Complete", "Complete", "Complete", "Complete", "Refused", "Refused"]);
@@ -282,16 +287,18 @@ async function protocolFailureJourney(browser, origin, width) {
   ]);
   await Promise.all([application.setBypassCSP(true), wallet.setBypassCSP(true)]);
   await Promise.all([application.goto(`${origin}/application`), wallet.goto(`${origin}/wallet`)]);
+  await application.bringToFront();
   await application.click("#start");
-  await application.waitForFunction(() => document.querySelector("#invitation").value.length > 80);
+  await waitForInvitation(application);
   const invitation = await application.$eval("#invitation", (node) => node.value);
+  await wallet.bringToFront();
   await wallet.type("#invitation", invitation);
   await wallet.click("#join");
   await wallet.waitForSelector("#consent-panel:not([hidden])");
   await wallet.click("#approve");
   await Promise.all([
-    wallet.waitForFunction(() => document.querySelector("#result-title").textContent === "Protocol failure"),
-    application.waitForFunction(() => document.querySelector("#result-title").textContent === "Protocol failure"),
+    waitForDom(wallet, () => document.querySelector("#result-title").textContent === "Protocol failure"),
+    waitForDom(application, () => document.querySelector("#result-title").textContent === "Protocol failure"),
   ]);
   for (const page of [application, wallet]) {
     await assertRail(page, ["Complete", "Complete", "Complete", "Complete", "Complete", "Complete", "Refused", "Refused"]);
@@ -314,6 +321,7 @@ async function assertBaseline(page, eyebrow) {
 }
 
 async function localAccessibilityAudit(page) {
+  await page.bringToFront();
   return page.evaluate(() => {
     const violations = [];
     if (document.documentElement.lang !== "en") violations.push("document-language");
@@ -383,6 +391,7 @@ async function localAccessibilityAudit(page) {
 }
 
 async function assertWcag(page, state) {
+  await page.bringToFront();
   assert.equal(
     await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth),
     true,
@@ -403,6 +412,7 @@ async function assertWcag(page, state) {
 }
 
 async function assertRail(page, expected) {
+  await page.bringToFront();
   assert.deepEqual(
     await page.$$eval("[data-gate] em", (nodes) => nodes.map((node) => node.textContent)),
     expected,
@@ -410,12 +420,14 @@ async function assertRail(page, expected) {
 }
 
 async function enabledButtons(page) {
+  await page.bringToFront();
   return page.$$eval("button:not(:disabled)", (nodes) => nodes
     .filter((node) => !node.closest("[hidden]"))
     .map((node) => node.id));
 }
 
 async function assertTabOrder(page, expected) {
+  await page.bringToFront();
   await page.focus("#home");
   const observed = [await page.evaluate(() => document.activeElement?.id)];
   for (let index = 1; index < expected.length; index += 1) {
@@ -426,6 +438,7 @@ async function assertTabOrder(page, expected) {
 }
 
 async function keyboardFeedback(page, expected) {
+  await page.bringToFront();
   await page.evaluate((message) => {
     const status = document.querySelector("#status");
     globalThis.__selfsameFeedback = new Promise((resolve, reject) => {
@@ -449,6 +462,7 @@ async function keyboardFeedback(page, expected) {
 }
 
 async function pendingFeedback(page, selector, expected) {
+  await page.bringToFront();
   return page.$eval(selector, (button, message) => {
     const started = performance.now();
     button.click();
@@ -456,6 +470,25 @@ async function pendingFeedback(page, selector, expected) {
     if (!status.includes(message)) throw new Error(`missing pending feedback: ${status}`);
     return performance.now() - started;
   }, expected);
+}
+
+async function waitForInvitation(page) {
+  try {
+    await waitForDom(page, () => document.querySelector("#invitation").value.length > 80);
+  } catch (error) {
+    const state = await page.evaluate(() => ({
+      role: document.documentElement.dataset.role,
+      status: document.querySelector("#status").textContent,
+      invitationLength: document.querySelector("#invitation").value.length,
+    }));
+    const cookieNames = (await page.cookies()).map((cookie) => cookie.name);
+    throw new Error(`invitation did not appear: ${JSON.stringify({ state, cookieNames })}`, { cause: error });
+  }
+}
+
+async function waitForDom(page, predicate) {
+  await page.bringToFront();
+  await page.waitForFunction(predicate, { polling: 50 });
 }
 
 async function startServer({ verifierRefusal = false, protocolFailure = false } = {}) {

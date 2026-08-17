@@ -16,7 +16,10 @@
   }
 
   async function api(path, body, method = "POST") {
-    const headers = { "X-Selfsame-Capability": capability };
+    const headers = {
+      "X-Selfsame-Capability": capability,
+      "X-Selfsame-Role": role,
+    };
     if (ceremonyId) headers["X-Selfsame-Ceremony"] = ceremonyId;
     if (body !== undefined) headers["Content-Type"] = "application/json";
     const response = await fetch(path, {

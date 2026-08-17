@@ -50,9 +50,11 @@ fn verification(example: &fixture::Ceremony) -> SelfsameVerificationContext {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct BrowserAuthority {
+    cookie_name: &'static str,
     cookie: String,
+    role: &'static str,
     capability: String,
     ceremony: Option<String>,
 }
@@ -80,16 +82,26 @@ async fn test_704_720_approved_flow_obeys_the_closed_role_matrix() {
     let (mut application, _, application_html) = page(&router, "/application").await;
     let (mut wallet, _, wallet_html) = page(&router, "/wallet").await;
     assert_ne!(application.cookie, wallet.cookie);
+    assert_ne!(application.cookie_name, wallet.cookie_name);
     assert_ne!(application.capability, wallet.capability);
     assert!(!application_html.contains("Review this request"));
     assert!(wallet_html.contains("Review this request"));
 
     let application_bootstrap = BrowserAuthority {
+        cookie_name: application.cookie_name,
         cookie: application.cookie.clone(),
+        role: application.role,
         capability: application.capability.clone(),
         ceremony: None,
     };
-    let (status, started) = mutation(&router, "/api/start", &application, json!({})).await;
+    let mut same_browser_start = mutation_request("/api/start", &application, "{}");
+    same_browser_start.headers_mut().insert(
+        header::COOKIE,
+        format!("{}; {}", cookie(&application), cookie(&wallet))
+            .parse()
+            .unwrap(),
+    );
+    let (status, started) = mutation_response(&router, same_browser_start).await;
     assert_eq!(status, StatusCode::OK);
     adopt(&mut application, &started);
     assert_ne!(application.capability, application_bootstrap.capability);
@@ -135,7 +147,9 @@ async fn test_704_720_approved_flow_obeys_the_closed_role_matrix() {
     );
 
     let wallet_bootstrap = BrowserAuthority {
+        cookie_name: wallet.cookie_name,
         cookie: wallet.cookie.clone(),
+        role: wallet.role,
         capability: wallet.capability.clone(),
         ceremony: None,
     };
@@ -241,7 +255,9 @@ async fn test_704_720_approved_flow_obeys_the_closed_role_matrix() {
         "reset must rotate the linked application capability too"
     );
     let rotated_wallet = BrowserAuthority {
+        cookie_name: wallet.cookie_name,
         cookie: wallet.cookie.clone(),
+        role: wallet.role,
         capability: reset["capability"].as_str().unwrap().to_owned(),
         ceremony: None,
     };
@@ -343,7 +359,7 @@ async fn test_712_720_invalid_http_inputs_are_effect_free() {
             .header(header::CONTENT_TYPE, "application/json")
             .header(
                 header::COOKIE,
-                "selfsame_demo_session=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+                "selfsame_demo_application_session=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
             )
             .header("x-selfsame-capability", &application.capability)
             .body(Body::from("{}"))
@@ -356,10 +372,20 @@ async fn test_712_720_invalid_http_inputs_are_effect_free() {
     }
 
     let wrong_authority = BrowserAuthority {
+        cookie_name: application.cookie_name,
         cookie: application.cookie.clone(),
+        role: application.role,
         capability: "wrong-capability".into(),
         ceremony: None,
     };
+    let mut wrong_role = mutation_request("/api/start", &application, "{}");
+    wrong_role
+        .headers_mut()
+        .insert("x-selfsame-role", "wallet".parse().unwrap());
+    assert_eq!(
+        mutation_response(&router, wrong_role).await.0,
+        StatusCode::UNAUTHORIZED
+    );
     let exact_head = mutation_request_with_head_octets(&wrong_authority, 16 * 1024);
     assert_eq!(request_head_octets(&exact_head), 16 * 1024);
     assert_eq!(
@@ -386,6 +412,7 @@ async fn test_712_720_invalid_http_inputs_are_effect_free() {
         .header(header::CONTENT_TYPE, "application/json")
         .header(header::COOKIE, cookie(&application))
         .header(header::COOKIE, cookie(&application))
+        .header("x-selfsame-role", application.role)
         .header("x-selfsame-capability", &application.capability)
         .body(Body::from("{}"))
         .unwrap();
@@ -495,7 +522,9 @@ async fn test_721_concurrent_browser_authorities_cannot_cross() {
     assert_ne!(app_a.ceremony, app_b.ceremony);
 
     let stolen = BrowserAuthority {
+        cookie_name: app_a.cookie_name,
         cookie: app_a.cookie.clone(),
+        role: app_a.role,
         capability: app_b.capability.clone(),
         ceremony: app_b.ceremony.clone(),
     };
@@ -605,6 +634,11 @@ fn pending(
 }
 
 async fn page(router: &Router, route: &str) -> (BrowserAuthority, Response<Body>, String) {
+    let (cookie_name, role) = match route {
+        "/application" => ("selfsame_demo_application_session", "application"),
+        "/wallet" => ("selfsame_demo_wallet_session", "wallet"),
+        _ => panic!("page helper requires one demo endpoint"),
+    };
     let response = router
         .clone()
         .oneshot(
@@ -616,16 +650,15 @@ async fn page(router: &Router, route: &str) -> (BrowserAuthority, Response<Body>
         )
         .await
         .unwrap();
-    let cookie_value = response.headers()[header::SET_COOKIE]
+    let cookie_pair = response.headers()[header::SET_COOKIE]
         .to_str()
         .unwrap()
         .split(';')
         .next()
-        .unwrap()
-        .split_once('=')
-        .unwrap()
-        .1
-        .to_owned();
+        .unwrap();
+    let (actual_cookie_name, cookie_value) = cookie_pair.split_once('=').unwrap();
+    assert_eq!(actual_cookie_name, cookie_name);
+    let cookie_value = cookie_value.to_owned();
     let (parts, body) = response.into_parts();
     let bytes = to_bytes(body, 64 * 1024).await.unwrap();
     let html = String::from_utf8(bytes.to_vec()).unwrap();
@@ -641,7 +674,9 @@ async fn page(router: &Router, route: &str) -> (BrowserAuthority, Response<Body>
     let response = Response::from_parts(parts, Body::empty());
     (
         BrowserAuthority {
+            cookie_name,
             cookie: cookie_value,
+            role,
             capability,
             ceremony: None,
         },
@@ -670,11 +705,11 @@ async fn mutation_raw(
     authority: &BrowserAuthority,
     body: &str,
 ) -> (StatusCode, Value) {
-    let response = router
-        .clone()
-        .oneshot(mutation_request(route, authority, body))
-        .await
-        .unwrap();
+    mutation_response(router, mutation_request(route, authority, body)).await
+}
+
+async fn mutation_response(router: &Router, request: Request<Body>) -> (StatusCode, Value) {
+    let response = router.clone().oneshot(request).await.unwrap();
     let status = response.status();
     assert_security_headers(&response);
     let bytes = to_bytes(response.into_body(), 64 * 1024).await.unwrap();
@@ -696,6 +731,7 @@ fn mutation_request(route: &str, authority: &BrowserAuthority, body: &str) -> Re
         .header(header::ORIGIN, ORIGIN)
         .header(header::CONTENT_TYPE, "application/json")
         .header(header::COOKIE, cookie(authority))
+        .header("x-selfsame-role", authority.role)
         .header("x-selfsame-capability", &authority.capability);
     if let Some(ceremony) = &authority.ceremony {
         builder = builder.header("x-selfsame-ceremony", ceremony);
@@ -746,6 +782,7 @@ async fn state_response(router: &Router, authority: &BrowserAuthority) -> Respon
                 .uri("/api/state")
                 .header(header::HOST, HOST)
                 .header(header::COOKIE, cookie(authority))
+                .header("x-selfsame-role", authority.role)
                 .header("x-selfsame-capability", &authority.capability)
                 .header("x-selfsame-ceremony", authority.ceremony.as_ref().unwrap())
                 .body(Body::empty())
@@ -756,7 +793,7 @@ async fn state_response(router: &Router, authority: &BrowserAuthority) -> Respon
 }
 
 fn cookie(authority: &BrowserAuthority) -> String {
-    format!("selfsame_demo_session={}", authority.cookie)
+    format!("{}={}", authority.cookie_name, authority.cookie)
 }
 
 fn assert_security_headers(response: &Response<Body>) {

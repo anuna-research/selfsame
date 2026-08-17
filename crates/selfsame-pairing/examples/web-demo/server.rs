@@ -23,9 +23,11 @@ use std::{
 };
 use zeroize::Zeroize;
 
-const SESSION_COOKIE: &str = "selfsame_demo_session";
+const APPLICATION_SESSION_COOKIE: &str = "selfsame_demo_application_session";
+const WALLET_SESSION_COOKIE: &str = "selfsame_demo_wallet_session";
 const CAPABILITY_HEADER: &str = "x-selfsame-capability";
 const CEREMONY_HEADER: &str = "x-selfsame-ceremony";
+const ROLE_HEADER: &str = "x-selfsame-role";
 const APPLICATION_HTML: &str = include_str!("application.html");
 const WALLET_HTML: &str = include_str!("wallet.html");
 const APP_JS: &str = include_str!("app.js");
@@ -63,6 +65,23 @@ struct Model {
 enum Role {
     Application,
     Wallet,
+}
+
+impl Role {
+    const fn cookie_name(self) -> &'static str {
+        match self {
+            Self::Application => APPLICATION_SESSION_COOKIE,
+            Self::Wallet => WALLET_SESSION_COOKIE,
+        }
+    }
+
+    fn from_headers(headers: &HeaderMap) -> Result<Self, ApiError> {
+        match required_header(headers, ROLE_HEADER)? {
+            "application" => Ok(Self::Application),
+            "wallet" => Ok(Self::Wallet),
+            _ => Err(ApiError(StatusCode::UNAUTHORIZED, "unauthorized")),
+        }
+    }
 }
 
 struct BrowserSession {
@@ -312,7 +331,8 @@ fn issue_page(
     response.headers_mut().insert(
         SET_COOKIE,
         HeaderValue::from_str(&format!(
-            "{SESSION_COOKIE}={session_id}; HttpOnly; SameSite=Strict; Path=/"
+            "{}={session_id}; HttpOnly; SameSite=Strict; Path=/",
+            role.cookie_name()
         ))
         .map_err(|_| ApiError(StatusCode::INTERNAL_SERVER_ERROR, "internal"))?,
     );
@@ -341,7 +361,8 @@ async fn start(
     let (parts, body) = request.into_parts();
     let headers = parts.headers;
     require_mutation_head(&headers, &state.config)?;
-    let session_id = session_cookie(&headers)?;
+    require_role(&headers, Role::Application)?;
+    let session_id = session_cookie(&headers, Role::Application)?;
     let capability = required_header(&headers, CAPABILITY_HEADER)?.to_owned();
     {
         let model = state
@@ -407,7 +428,8 @@ async fn claim(
     let (parts, body) = request.into_parts();
     let headers = parts.headers;
     require_mutation_head(&headers, &state.config)?;
-    let session_id = session_cookie(&headers)?;
+    require_role(&headers, Role::Wallet)?;
+    let session_id = session_cookie(&headers, Role::Wallet)?;
     let capability = required_header(&headers, CAPABILITY_HEADER)?.to_owned();
     {
         let model = state
@@ -502,7 +524,8 @@ async fn decision_request(
     let (parts, body) = request.into_parts();
     let headers = parts.headers;
     require_mutation_head(&headers, &state.config)?;
-    let session_id = session_cookie(&headers)?;
+    require_role(&headers, Role::Wallet)?;
+    let session_id = session_cookie(&headers, Role::Wallet)?;
     let capability = required_header(&headers, CAPABILITY_HEADER)?.to_owned();
     let ceremony_id = required_header(&headers, CEREMONY_HEADER)?.to_owned();
     {
@@ -529,7 +552,8 @@ fn decide(
     approve: bool,
 ) -> Result<PublicState, ApiError> {
     require_mutation_head(headers, &state.config)?;
-    let session_id = session_cookie(headers)?;
+    require_role(headers, Role::Wallet)?;
+    let session_id = session_cookie(headers, Role::Wallet)?;
     let capability = required_header(headers, CAPABILITY_HEADER)?;
     let ceremony_id = required_header(headers, CEREMONY_HEADER)?;
     let mut model = state
@@ -592,14 +616,15 @@ async fn read_state(
     headers: HeaderMap,
 ) -> Result<Json<PublicState>, ApiError> {
     require_host(&headers, &state.config)?;
-    let session_id = session_cookie(&headers)?;
+    let role = Role::from_headers(&headers)?;
+    let session_id = session_cookie(&headers, role)?;
     let capability = required_header(&headers, CAPABILITY_HEADER)?;
     let ceremony_id = required_header(&headers, CEREMONY_HEADER)?;
     let model = state
         .model
         .lock()
         .map_err(|_| ApiError(StatusCode::INTERNAL_SERVER_ERROR, "internal"))?;
-    require_ceremony(&model, &session_id, capability, ceremony_id, None)?;
+    require_ceremony(&model, &session_id, capability, ceremony_id, Some(role))?;
     let record = model
         .ceremonies
         .get(ceremony_id)
@@ -614,7 +639,8 @@ async fn reset(
     let (parts, body) = request.into_parts();
     let headers = parts.headers;
     require_mutation_head(&headers, &state.config)?;
-    let session_id = session_cookie(&headers)?;
+    let role = Role::from_headers(&headers)?;
+    let session_id = session_cookie(&headers, role)?;
     let capability = required_header(&headers, CAPABILITY_HEADER)?.to_owned();
     let ceremony_id = required_header(&headers, CEREMONY_HEADER)?.to_owned();
     {
@@ -622,14 +648,14 @@ async fn reset(
             .model
             .lock()
             .map_err(|_| ApiError(StatusCode::INTERNAL_SERVER_ERROR, "internal"))?;
-        require_ceremony(&model, &session_id, &capability, &ceremony_id, None)?;
+        require_ceremony(&model, &session_id, &capability, &ceremony_id, Some(role))?;
     }
     let request: VersionRequest = recognise_body(body).await?;
     let mut model = state
         .model
         .lock()
         .map_err(|_| ApiError(StatusCode::INTERNAL_SERVER_ERROR, "internal"))?;
-    require_ceremony(&model, &session_id, &capability, &ceremony_id, None)?;
+    require_ceremony(&model, &session_id, &capability, &ceremony_id, Some(role))?;
     let record = model
         .ceremonies
         .get(&ceremony_id)
@@ -723,7 +749,14 @@ fn required_header<'a>(headers: &'a HeaderMap, name: &str) -> Result<&'a str, Ap
         .map_err(|_| ApiError(StatusCode::BAD_REQUEST, "invalid-request"))
 }
 
-fn session_cookie(headers: &HeaderMap) -> Result<String, ApiError> {
+fn require_role(headers: &HeaderMap, expected: Role) -> Result<(), ApiError> {
+    if Role::from_headers(headers)? != expected {
+        return Err(ApiError(StatusCode::UNAUTHORIZED, "unauthorized"));
+    }
+    Ok(())
+}
+
+fn session_cookie(headers: &HeaderMap, role: Role) -> Result<String, ApiError> {
     let mut cookie_headers = headers.get_all(COOKIE).iter();
     let raw = cookie_headers
         .next()
@@ -736,7 +769,7 @@ fn session_cookie(headers: &HeaderMap) -> Result<String, ApiError> {
     let values: Vec<&str> = raw
         .split(';')
         .filter_map(|item| item.trim().split_once('='))
-        .filter_map(|(name, value)| (name == SESSION_COOKIE).then_some(value))
+        .filter_map(|(name, value)| (name == role.cookie_name()).then_some(value))
         .collect();
     if values.len() != 1 || values[0].len() != 43 {
         return Err(ApiError(StatusCode::UNAUTHORIZED, "unauthorized"));

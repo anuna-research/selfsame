@@ -3,7 +3,7 @@ id: SPEC-006
 title: cbcl-pairing Integration and End-to-End Web Demo
 status: implemented
 tier: 1
-version: 0.3.0
+version: 0.4.0
 last-updated: 2026-08-17
 owner-repo: selfsame
 prototype-authorised: 2026-08-17 by the repository owner through the explicit integration goal
@@ -20,7 +20,7 @@ special meaning applies only when they appear in all capitals.
 ## Orientation
 
 **Intent.** Selfsame adopts [[cbcl-pairing]] as the protocol authority for this
-prototype integration. Two isolated browser clients demonstrate one complete
+prototype integration. Two isolated endpoint sessions in ordinary same-browser tabs demonstrate one complete
 [[Selfsame Credential Transfer]] through the real adapter and blind relay.
 
 **Metaphor.** Selfsame supplies the sealed credential. `cbcl-pairing` supplies the guarded courier route.
@@ -82,6 +82,38 @@ Stakeholder: [[SPEC-006-cbcl-pairing-integration#Requirements]] to
 
 Selfsame currently owns a separate SPAKE2 ceremony, relay API, mailbox derivation,
 and browser binding. This duplicates the reusable protocol now present in [[cbcl-pairing]].
+
+### BUG-601: ordinary application and wallet tabs shared one session cookie
+
+**Severity:** S2
+**Priority:** P1
+**Status:** verified
+**Reported by:** user
+**Assigned to:** Codex
+
+**Specification reference:** This bug violates [[SPEC-006-cbcl-pairing-integration#REQ-702]]
+and [[SPEC-006-cbcl-pairing-integration#CON-704]].
+[[SPEC-006-cbcl-pairing-integration#TEST-704]] provides the regression path.
+
+**Environment:** Chromium loaded `/application` and `/wallet` as ordinary tabs in one browser context.
+
+**Reproduction:** Load the application tab. Load the wallet tab. Select **Create Invitation** in the application tab.
+
+**Expected behavior:** Both endpoint sessions coexist. The application creates one invitation.
+
+**Actual behavior:** The wallet page replaced the application session cookie. The start request returned HTTP 401.
+
+**Root cause:** The implementation used one cookie name for both endpoint roles.
+The browser test hid the defect by creating one isolated browser context per endpoint.
+
+**Resolution:** The server issues distinct application and wallet cookies.
+Every request carries an exact role header. [[SPEC-006-cbcl-pairing-integration#TEST-704]] now runs both endpoints as ordinary tabs.
+
+**Evidence:** `cargo test -p selfsame-pairing --locked --no-fail-fast` passes 19 integration tests and one compile-fail test.
+`npm run e2e:pairing` passes both browser tests across the complete state set.
+
+**AI detection context:** Codex GPT-5 reproduced the user report with loopback HTTP and Chromium.
+Confidence is high because the failure and regression path both ran directly.
 
 The duplicate path creates two authorities for pairing order, transcript binding,
 consent, burn behavior, and relay limits. A fix in one implementation does not protect the other.
@@ -340,8 +372,9 @@ No pairing verdict becomes a Selfsame authorization result.
 
 **Status:** accepted for the prototype.
 
-One Axum process serves two isolated browser clients and composes two real
-endpoint reducers with a real in-memory `RelayService` boundary.
+One Axum process serves two isolated endpoint sessions.
+The sessions coexist in one browser context.
+The process composes two real endpoint reducers with a real in-memory `RelayService` boundary.
 
 This arrangement exercises the protocol core end to end. It does not claim independent deployment, TLS, or production readiness.
 
@@ -436,8 +469,10 @@ Each endpoint page response creates one 256-bit browser-session identifier in
 an HttpOnly, SameSite-Strict, path-bound cookie. It embeds a separate 256-bit
 bootstrap capability in a role-specific HTML meta element.
 
-The cookie is `selfsame_demo_session=` followed by 43 canonical base64url characters.
-Duplicate session cookies are invalid. Other cookie names carry no authority.
+The application cookie is `selfsame_demo_application_session=` and the wallet
+cookie is `selfsame_demo_wallet_session=`, each followed by 43 canonical
+base64url characters. Both cookies MAY coexist in one browser context.
+Duplicate cookies for the selected role are invalid. Other cookie names carry no authority.
 
 `start` requires the application bootstrap capability and session cookie.
 It returns the new ceremony identifier and rotated application capability.
@@ -460,8 +495,8 @@ transition, payload effect, verifier call, capability rotation, or response deta
 
 **Input contract:** request heads are at most 16 KiB. Bodies are at most 4 KiB.
 Mutations require `application/json`, an exact loopback `Host`, an exact `Origin`,
-the session cookie, and `X-Selfsame-Capability`. Post-bootstrap mutations also
-require `X-Selfsame-Ceremony`.
+the role-specific session cookie, `X-Selfsame-Role`, and `X-Selfsame-Capability`.
+Post-bootstrap mutations also require `X-Selfsame-Ceremony`.
 
 `start` accepts an empty object. `claim` accepts only an encoded invitation.
 `approve`, `decline`, and `reset` accept only the current state version.
@@ -553,7 +588,8 @@ intent, approval, payload, and one Selfsame acceptance.
 
 **Validates:** [[SPEC-006-cbcl-pairing-integration#REQ-702]].
 
-Start the loopback server. Drive isolated application and wallet pages through
+Start the loopback server. Drive application and wallet tabs in one browser
+context through
 invitation, relay frames, approval, `accept_grant`, and the accepted result.
 
 #### TEST-705: Selfsame verifier positive
@@ -746,8 +782,9 @@ No channel can waive a hard stop without a new specification version and the req
 ## Changelog
 
 <details>
-<summary>Revision history — 0.1.0</summary>
+<summary>Revision history — 0.3.0 → 0.4.0</summary>
 
-- 0.1.0 — defines the prototype integration, browser demo, production hold, and verification surface.
+- 0.4.0 — fixes [[SPEC-006-cbcl-pairing-integration#BUG-601]] and verifies ordinary same-browser tabs.
+- 0.3.0 — defines the prototype integration, browser demo, production hold, and verification surface.
 
 </details>
