@@ -7,6 +7,7 @@ members = [
     "crates/selfsame-rendezvous",
     "crates/selfsame-cli",
     "crates/selfsame-web-device",
+    "crates/selfsame-pairing",
     "crates/selfsame-beam",
     "crates/tauri-plugin-selfsame-store",
     "src-tauri",
@@ -25,6 +26,7 @@ repository = "https://git.anuna.io/anuna-research/selfsame"
 [workspace.dependencies]
 selfsame-core = { path = "crates/selfsame-core", default-features = false }
 selfsame-app-identity = { path = "crates/selfsame-app-identity" }
+cbcl-pairing = { path = "../cbcl-pairing", features = ["relay"] }
 
 # ── pinned upstream dependencies (SPEC-001 ADR-010, ADR-013) ─────────────────
 #
@@ -32,8 +34,9 @@ selfsame-app-identity = { path = "crates/selfsame-app-identity" }
 #
 #   git clone https://git.anuna.io/anuna-research/did-crdt ../did-crdt
 #   git clone https://git.anuna.io/anuna-research/cbcl-rs  ../cbcl-rs
+#   git clone ssh://git@git.anuna.io/anuna-research/cbcl-pairing.git ../cbcl-pairing
 #
-# `cbcl-rs.sha` at the repository root pins the second of these; the first is
+# `cbcl-rs.sha` and `cbcl-pairing.sha` pin their sibling checkouts; the first is
 # pinned by the revision recorded in crates/selfsame-core/tests/vectors.rs.
 # .forgejo/workflows/ci.yml clones both from those pins.
 #

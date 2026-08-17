@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en" data-role="application">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="selfsame-role" content="application">
+  <meta name="selfsame-bootstrap" content="{{BOOTSTRAP_CAPABILITY}}">
+  <title>Selfsame pairing — Application</title>
+  <link rel="stylesheet" href="/assets/style.css">
+  <script src="/assets/app.js" defer></script>
+</head>
+<body>
+  <header class="site-header">
+    <a id="home" class="brand" href="/application" aria-label="Selfsame demo home">selfsame<span>°</span></a>
+    <div class="boundary"><strong>Experimental</strong><span>cbcl-pairing · Not production-approved</span></div>
+    <button id="reset" class="quiet" type="button" disabled>Reset</button>
+  </header>
+  <main>
+    <section class="hero" aria-labelledby="page-title">
+      <p class="eyebrow">Application endpoint</p>
+      <h1 id="page-title">Send a credential without showing it to the courier.</h1>
+      <p class="lede">Create a single-use invitation, hand it to the Selfsame wallet, then watch both protocol and authorization finish.</p>
+    </section>
+    <div class="layout">
+      <section class="card endpoint" aria-labelledby="invitation-title">
+        <div class="card-heading"><span class="step-number">01</span><div><p class="eyebrow">Application</p><h2 id="invitation-title">Create invitation</h2></div></div>
+        <p>The invitation opens a private ceremony for this credential request.</p>
+        <dl class="intent-fields" aria-label="Credential request summary">
+          <div><dt>Application</dt><dd>Photos example</dd></div>
+          <div><dt>Origin</dt><dd>https://photos.example</dd></div>
+          <div><dt>Scope</dt><dd>Device access</dd></div>
+          <div><dt>Recipient</dt><dd>Joining Selfsame wallet</dd></div>
+        </dl>
+        <button id="start" class="primary" type="button">Create invitation</button>
+        <div id="invitation-panel" class="reveal" hidden>
+          <label for="invitation">Complete invitation carrier</label>
+          <textarea id="invitation" rows="5" readonly spellcheck="false"></textarea>
+          <button id="copy" class="secondary" type="button">Copy invitation</button>
+        </div>
+      </section>
+      <section class="card protocol" aria-labelledby="rail-title">
+        <div class="card-heading"><span class="step-number">02</span><div><p class="eyebrow">Protocol</p><h2 id="rail-title">Ceremony gates</h2></div></div>
+        <ol class="rail" aria-label="Pairing ceremony progress">
+          <li data-gate="invitation"><span>Invitation</span><em>Waiting</em></li>
+          <li data-gate="cpace"><span>CPace</span><em>Waiting</em></li>
+          <li data-gate="finished"><span>Finished</span><em>Waiting</em></li>
+          <li data-gate="roles"><span>Roles</span><em>Waiting</em></li>
+          <li data-gate="intent"><span>Intent</span><em>Waiting</em></li>
+          <li data-gate="consent"><span>Consent</span><em>Waiting</em></li>
+          <li data-gate="credential"><span>Credential</span><em>Waiting</em></li>
+          <li data-gate="acceptance"><span>Selfsame acceptance</span><em>Waiting</em></li>
+        </ol>
+      </section>
+      <section class="card relay" aria-labelledby="relay-title">
+        <div class="card-heading"><span class="step-number">03</span><div><p class="eyebrow">Blind courier</p><h2 id="relay-title">Opaque relay</h2></div></div>
+        <p>The relay sees bounded encrypted frames and mailbox bookkeeping only. It cannot see intent, decisions, or credentials.</p>
+        <dl class="metrics">
+          <div><dt>Opaque frames</dt><dd id="relay-frames">0</dd></div>
+          <div><dt>Aggregate bytes</dt><dd id="relay-bytes">0</dd></div>
+        </dl>
+      </section>
+      <section id="result-panel" class="card result" aria-labelledby="result-title" tabindex="-1">
+        <div class="card-heading"><span class="step-number">04</span><div><p class="eyebrow">Outcome</p><h2 id="result-title">Awaiting ceremony</h2></div></div>
+        <p id="result-copy">No credential has moved.</p>
+        <p id="verifier-summary" class="verifier">Selfsame verifier has not run.</p>
+      </section>
+    </div>
+  </main>
+  <div id="status" class="status" role="status" aria-live="polite">Ready to create an invitation.</div>
+</body>
+</html>

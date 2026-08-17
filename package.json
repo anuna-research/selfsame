@@ -6,9 +6,11 @@
     "screens": "node tests/screens.mjs screens-out",
     "e2e:wasm": "wasm-pack build crates/selfsame-web-device --target web --out-dir ../../tests/e2e/device/pkg --dev -- --locked",
     "e2e:preflight": "node tests/e2e/preflight.mjs",
-    "e2e": "node tests/e2e/driver.mjs"
+    "e2e": "node tests/e2e/driver.mjs",
+    "e2e:pairing": "node --test tests/cbcl-pairing-demo.mjs"
   },
   "devDependencies": {
+    "axe-core": "^4.13.0",
     "puppeteer": "^23.0.0"
   }
 }

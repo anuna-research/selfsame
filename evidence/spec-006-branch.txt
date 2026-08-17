@@ -1,0 +1,21 @@
+SPEC-006 branch provenance
+recorded: 2026-08-17 Australia/Sydney
+
+branch: feature/cbcl-pairing-demo
+main: 22801e77dc0c7c493b6e811f79cb17c7cd9352ab
+HEAD at branch creation: 22801e77dc0c7c493b6e811f79cb17c7cd9352ab
+merge-base main HEAD: 22801e77dc0c7c493b6e811f79cb17c7cd9352ab
+
+Commands:
+  git branch --show-current
+  git rev-parse main
+  git rev-parse HEAD
+  git merge-base main HEAD
+
+Result: TEST-719 passes. The named feature branch starts at the exact main revision.
+
+Reviewed cbcl-pairing source:
+  sibling HEAD: 197d4cb3d1560ab5328df28fc984269799c510f9
+  tracked drift exit: 0
+
+Untracked sibling .zetl metadata predates this branch and is not compiled by Cargo.

@@ -32,14 +32,15 @@ phone can change the lock.*
 
 ## Before you build
 
-Selfsame depends on two sibling repositories by path. Clone them next to this
+Selfsame depends on three sibling repositories by path. Clone them next to this
 one or nothing compiles:
 
 ```
 Code/
 ├── selfsame/     ← you are here
 ├── did-crdt/     git clone https://git.anuna.io/anuna-research/did-crdt
-└── cbcl-rs/      git clone https://git.anuna.io/anuna-research/cbcl-rs
+├── cbcl-rs/      git clone https://git.anuna.io/anuna-research/cbcl-rs
+└── cbcl-pairing/ git clone https://git.anuna.io/anuna-research/cbcl-pairing
 ```
 
 `did-crdt` is pinned at `9a53bff1ed3eb88680fe19db0366ffd13d6b240a` — its DID
@@ -50,6 +51,37 @@ against, which is the copy CI clones.
 
 `cbcl-rs` is pinned by `cbcl-rs.sha` at the repository root — the same
 convention `cbcl-bus` uses for the `cbcl-erl` NIF.
+
+`cbcl-pairing` is pinned by `cbcl-pairing.sha`. The Selfsame adapter uses that
+crate for invitation recognition, CPace, Finished, CBCL session projection,
+endpoint reduction, and the in-memory blind relay.
+
+## cbcl-pairing browser demo
+
+The loopback demo runs the reusable pairing protocol through a real Selfsame
+credential transfer and the complete 13-step application-identity acceptance
+predicate. Start it with one command:
+
+```bash
+cargo run -p selfsame-pairing --example web-demo
+```
+
+Open the printed `/application` URL, then open `/wallet` in another browser
+context. Create an invitation, paste it into the wallet, review the recognised
+intent, and approve or decline. The two pages use separate HttpOnly sessions
+and role-bound capabilities. The server rejects public bind addresses.
+
+This is an experimental Tier-1 prototype and is **not production-approved**.
+The existing Tauri SPAKE2/PROTO-003 path remains rollback-only; the adapter and
+demo do not import or call it. Production cutover needs cryptography review,
+migration vectors, and human security approval.
+
+Run its native and browser acceptance suites with:
+
+```bash
+cargo test -p selfsame-pairing
+node --test tests/cbcl-pairing-demo.mjs
+```
 
 ## Quick start
 
@@ -78,6 +110,7 @@ hand*. Full walkthrough: [docs/using-selfsame.md](docs/using-selfsame.md).
 | `src-tauri`, `src` | the phone app: custody, consent, signing, revocation |
 | `crates/selfsame-rendezvous` | the blind mailbox and resolver routes, destined for `did-crdt` |
 | `crates/selfsame-cli` | the device client — the reference for `hark link` |
+| `crates/selfsame-pairing` | the `cbcl-pairing` credential adapter and loopback browser demo |
 
 ## How it works
 
@@ -203,9 +236,11 @@ The original device-provisioning design lives in the
 - [SPEC-004](specs/SPEC-004-application-scoped-identity.md), the
   application/account identity and grant profile;
 - [PROTO-002](specs/PROTO-002-selfsame-rendezvous-v1.md), the blind encrypted
-  offer/grant mailbox; and
+  offer/grant mailbox;
 - [PROTO-003](specs/PROTO-003-selfsame-pairing-v1.md), the routable
-  `number-word-word` SPAKE2 pairing ceremony.
+  `number-word-word` SPAKE2 pairing ceremony; and
+- [SPEC-006](specs/SPEC-006-cbcl-pairing-integration.md), the experimental
+  `cbcl-pairing` integration and production-hold boundary.
 
 [spec]: ../anuna-ssi/specs/SPEC-001-device-key-provisioning.md
 
