@@ -94,7 +94,8 @@ browser:
   eight_ordered_gates_both_routes: pass
 
 upstream_fuzz:
-  command: "../cbcl-pairing/tools/run-fuzz-budgets.sh"
+  working_directory: ../cbcl-pairing
+  command: "tools/run-fuzz-budgets.sh"
   wire_recognition_runs: 10000
   mailbox_transition_runs: 5000
   channel_receiver_runs: 1000
