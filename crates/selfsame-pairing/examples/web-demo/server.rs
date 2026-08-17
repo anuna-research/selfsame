@@ -30,6 +30,7 @@ const APPLICATION_HTML: &str = include_str!("application.html");
 const WALLET_HTML: &str = include_str!("wallet.html");
 const APP_JS: &str = include_str!("app.js");
 const STYLE_CSS: &str = include_str!("style.css");
+const SELFSAME_LOGO: &str = include_str!("../../../../src-tauri/icons/icon.svg");
 const MAX_REQUEST_HEAD_OCTETS: usize = 16 * 1024;
 const MAX_BROWSER_SESSIONS: usize = 64;
 const MAX_CEREMONIES: usize = 32;
@@ -189,6 +190,7 @@ pub fn app(config: DemoConfig, factory: PendingFactory) -> Router {
         .route("/wallet", get(wallet_page))
         .route("/assets/app.js", get(javascript))
         .route("/assets/style.css", get(stylesheet))
+        .route("/assets/selfsame-logo.svg", get(selfsame_logo))
         .route("/api/start", post(start))
         .route("/api/claim", post(claim))
         .route("/api/approve", post(approve))
@@ -323,6 +325,13 @@ async fn javascript() -> impl IntoResponse {
 
 async fn stylesheet() -> impl IntoResponse {
     ([(CONTENT_TYPE, "text/css; charset=utf-8")], STYLE_CSS)
+}
+
+async fn selfsame_logo() -> impl IntoResponse {
+    (
+        [(CONTENT_TYPE, "image/svg+xml; charset=utf-8")],
+        SELFSAME_LOGO,
+    )
 }
 
 async fn start(

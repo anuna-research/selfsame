@@ -26,8 +26,9 @@ button:disabled { cursor: not-allowed; opacity: .52; }
 .quiet { color: var(--ink); background: transparent; border-color: #77847d; }
 
 .site-header { min-height: 76px; display: flex; align-items: center; gap: 1rem; padding: 1rem clamp(1rem, 4vw, 4rem); border-bottom: 1px solid var(--line); }
-.brand { color: var(--ink); font: 800 1.35rem/1 Georgia, serif; text-decoration: none; letter-spacing: -.03em; }
-.brand span { color: var(--green); }
+.brand { display: inline-flex; align-items: center; gap: .65rem; color: var(--ink); text-decoration: none; }
+.brand-logo { display: block; width: 40px; height: 40px; border-radius: 11px; }
+.brand-name { font: 800 1.35rem/1 Georgia, serif; letter-spacing: -.03em; }
 .boundary { margin-left: auto; display: flex; align-items: center; gap: .65rem; color: #4e3420; font-size: .82rem; }
 .boundary strong { border: 1px solid #9d7429; background: #fff1c9; border-radius: 999px; padding: .3rem .65rem; text-transform: uppercase; letter-spacing: .08em; }
 
