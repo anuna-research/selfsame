@@ -7,6 +7,7 @@
   let version = 0;
   let pollTimer = null;
   let lastStatus = null;
+  let resetRecoveryAvailable = false;
   const byId = (id) => document.getElementById(id);
   const status = byId("status");
   const terminalStatuses = ["accepted", "declined", "verifier-refusal", "protocol-failure"];
@@ -48,7 +49,7 @@
     const relayMailboxes = byId("relay-mailboxes");
     if (relayMailboxes) relayMailboxes.textContent = state.relay.retained_mailboxes;
     const terminal = terminalStatuses.includes(state.status);
-    byId("reset").disabled = !terminal;
+    byId("reset").disabled = !(terminal || resetRecoveryAvailable);
     if (terminal && role === "application") {
       byId("start").disabled = true;
       byId("copy").disabled = true;
@@ -207,10 +208,15 @@
       byId(action).addEventListener("click", async () => {
         pending(byId(action), action === "approve" ? "Applying explicit approval…" : "Recording decline…");
         byId(action === "approve" ? "decline" : "approve").disabled = true;
-        try { render(await api(`/api/${action}`, { version })); }
+        try {
+          const value = await api(`/api/${action}`, { version });
+          resetRecoveryAvailable = false;
+          render(value);
+        }
         catch (error) {
           byId("approve").disabled = false;
           byId("decline").disabled = false;
+          resetRecoveryAvailable = true;
           byId("reset").disabled = false;
           byId(action).removeAttribute("aria-busy");
           announce(`Decision refused: ${error.message}. Retry, or reset to start a fresh ceremony.`);
