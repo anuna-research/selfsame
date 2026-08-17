@@ -7,7 +7,11 @@ use selfsame_pairing::release::{
 
 #[test]
 fn test_810_production_allocation_is_held_before_every_effect_boundary() {
-    assert!(!PRODUCTION_ALLOCATION_ENABLED);
+    // Keep this as a runtime mutation gate: changing the production constant
+    // to `true` must make TEST-810 fail, not merely make this test fail to
+    // compile under Clippy's `assertions_on_constants` lint.
+    let allocation_enabled = std::hint::black_box(PRODUCTION_ALLOCATION_ENABLED);
+    assert!(!allocation_enabled);
     assert_eq!(PRODUCTION_GATE_EVIDENCE_ID, None);
     assert!(require_production_allocation().is_err());
 

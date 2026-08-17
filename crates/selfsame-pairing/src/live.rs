@@ -86,8 +86,8 @@ pub enum LiveEffect {
 enum AllocatorPhase {
     AwaitWelcome,
     AwaitAllocation,
-    Bootstrap(Option<SelfsameEndpointBootstrap>),
-    Endpoint(SelfsameEndpoint),
+    Bootstrap(Box<Option<SelfsameEndpointBootstrap>>),
+    Endpoint(Box<SelfsameEndpoint>),
     Terminal,
 }
 
@@ -218,7 +218,7 @@ impl AllocatorRelaySession {
             entropy.signing_seed,
         )?;
         let cpace = bootstrap.local_cpace_frame_bytes()?;
-        self.phase = AllocatorPhase::Bootstrap(Some(bootstrap));
+        self.phase = AllocatorPhase::Bootstrap(Box::new(Some(bootstrap)));
         Ok(vec![
             LiveEffect::Invitation(carrier),
             self.put_bytes(cpace)?,
@@ -246,7 +246,7 @@ impl AllocatorRelaySession {
                 let finished = endpoint
                     .local_finished_frame()?
                     .ok_or(IntegrationError::Pairing)?;
-                self.phase = AllocatorPhase::Endpoint(endpoint);
+                self.phase = AllocatorPhase::Endpoint(Box::new(endpoint));
                 effects.push(self.put_frame(&finished)?);
             }
             AllocatorPhase::Endpoint(_) => {
@@ -359,7 +359,7 @@ enum ClaimantPhase {
     AwaitWelcome(Option<SelfsameEndpointBootstrap>),
     AwaitClaim(Option<SelfsameEndpointBootstrap>),
     Bootstrap(Option<SelfsameEndpointBootstrap>),
-    Endpoint(SelfsameEndpoint),
+    Endpoint(Box<SelfsameEndpoint>),
     Terminal,
 }
 
@@ -498,7 +498,7 @@ impl ClaimantRelaySession {
                 let finished = endpoint
                     .local_finished_frame()?
                     .ok_or(IntegrationError::Pairing)?;
-                self.phase = ClaimantPhase::Endpoint(endpoint);
+                self.phase = ClaimantPhase::Endpoint(Box::new(endpoint));
                 effects.push(self.put_frame(&finished)?);
             }
             ClaimantPhase::Endpoint(_) => {
