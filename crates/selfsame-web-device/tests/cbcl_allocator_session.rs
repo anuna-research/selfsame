@@ -125,7 +125,12 @@ fn browser_allocator_surface_completes_a_ceremony_over_the_relay_wire() {
                             &cbcl_invitation_qr_modules_json(&carrier).expect("qr modules"),
                         )
                         .expect("qr json");
-                        assert!(qr["width"].as_u64().expect("qr width") >= 21);
+                        let size = qr["size"].as_u64().expect("qr size");
+                        assert!(size >= 21);
+                        assert_eq!(
+                            qr["dark"].as_array().expect("qr dark").len() as u64,
+                            size * size
+                        );
                         let fixture =
                             local_demo::credential(RELAY_ORIGIN).expect("claimant credential");
                         let session = ClaimantRelaySession::new(

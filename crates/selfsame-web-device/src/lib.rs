@@ -334,17 +334,16 @@ pub fn cbcl_invitation_qr_modules_json(carrier: &[u8]) -> Result<String, JsError
     let payload = selfsame_app_identity::codec::b64url(carrier);
     let code = qrcode::QrCode::with_error_correction_level(payload.as_bytes(), qrcode::EcLevel::Q)
         .map_err(|_| JsError::new("the CBCL invitation does not fit a QR symbol"))?;
-    let width = code.width();
-    let modules: Vec<Vec<u8>> = (0..width)
-        .map(|y| {
-            (0..width)
-                .map(|x| u8::from(code[(x, y)] == qrcode::Color::Dark))
-                .collect()
-        })
+    // `{size, dark}` with `dark` as one flat row-major 0/1 array is the shape
+    // the chat application's painter already consumes; keep that contract.
+    let size = code.width();
+    let dark: Vec<u8> = (0..size)
+        .flat_map(|y| (0..size).map(move |x| (x, y)))
+        .map(|(x, y)| u8::from(code[(x, y)] == qrcode::Color::Dark))
         .collect();
     serde_json::to_string(&serde_json::json!({
-        "width": width,
-        "modules": modules,
+        "size": size,
+        "dark": dark,
     }))
     .map_err(|_| JsError::new("the CBCL invitation does not fit a QR symbol"))
 }
