@@ -32,7 +32,7 @@ fn b64url_decode(text: &str) -> Vec<u8> {
     let table: Vec<u8> = (b'A'..=b'Z')
         .chain(b'a'..=b'z')
         .chain(b'0'..=b'9')
-        .chain([b'-', b'_'])
+        .chain(*b"-_")
         .collect();
     let mut bits = 0u32;
     let mut have = 0u8;
