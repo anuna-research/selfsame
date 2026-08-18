@@ -27,6 +27,23 @@ pub fn credential(relay_origin: &str) -> Result<LocalDemoCredential, Integration
     credential_fixture(relay_origin, false)
 }
 
+/// Exact profile octets the fixture recognises, for shells that must present
+/// the profile at a boundary (the browser allocator) rather than hold the
+/// recognised value.
+#[must_use]
+pub fn profile_octets(relay_origin: &str) -> Vec<u8> {
+    fixture::with_member(
+        "cbclPairingRelays",
+        Json::arr([fixture::cbcl_relay(
+            "local-development",
+            relay_origin,
+            1,
+            1,
+            3,
+        )]),
+    )
+}
+
 /// Build a fixture whose transferred grant signature was mutated after issue.
 ///
 /// Pairing remains valid, but the authoritative Selfsame verifier must refuse
@@ -42,16 +59,7 @@ fn credential_fixture(
     mutate_signature: bool,
 ) -> Result<LocalDemoCredential, IntegrationError> {
     let example = fixture::Ceremony::accepted();
-    let profile = fixture::with_member(
-        "cbclPairingRelays",
-        Json::arr([fixture::cbcl_relay(
-            "local-development",
-            relay_origin,
-            1,
-            1,
-            3,
-        )]),
-    );
+    let profile = profile_octets(relay_origin);
     let profile = ApplicationProfile::recognise(&profile).map_err(|_| IntegrationError::Profile)?;
     let mut grant = example.grant_bytes.clone();
     if mutate_signature {

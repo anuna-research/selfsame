@@ -132,6 +132,223 @@ impl CbclPairingSession {
     }
 }
 
+/// Browser shell for Selfsame's CBCL allocator endpoint — the inviting side.
+///
+/// The browser owns the WebSocket, the randomness, and the ordering; this
+/// value owns every recognition and transition. Each complete binary relay
+/// message goes in through [`CbclAllocatorSession::receive`], and what comes
+/// back is a JSON effect list whose `send` entries are the only bytes the
+/// browser may write to the socket. The invitation carrier appears exactly
+/// once, as an `invitation` effect, for out-of-band transfer (QR).
+///
+/// The constructor performs no allocation-policy decision: allocation is the
+/// relay's to refuse, and a production relay refuses it. This surface is for
+/// relays that have deliberately enabled allocation (loopback conformance
+/// builds).
+#[wasm_bindgen]
+pub struct CbclAllocatorSession {
+    session: Option<selfsame_pairing::live::AllocatorRelaySession>,
+}
+
+#[wasm_bindgen]
+impl CbclAllocatorSession {
+    /// Prepare one allocator attempt from caller-supplied CSPRNG values.
+    ///
+    /// `transfer_json` carries `applicationId`, `origin`, `scope`, and
+    /// `recipient`; the exact credential bundle travels separately as octets.
+    /// `profile` is the complete authenticated Selfsame application profile.
+    /// The four random values are drawn by the browser
+    /// (`crypto.getRandomValues`): a 16-octet invitation secret, a 32-octet
+    /// CPace scalar, a 32-octet signing seed, and a 32-octet intent nonce.
+    #[wasm_bindgen(constructor)]
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        relay_origin: String,
+        transfer_json: &str,
+        bundle: &[u8],
+        profile: &[u8],
+        account: &str,
+        device_public_key: &[u8],
+        invitation_secret: &[u8],
+        cpace_scalar: &[u8],
+        signing_seed: &[u8],
+        intent_nonce: &[u8],
+    ) -> Result<CbclAllocatorSession, JsError> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields, rename_all = "camelCase")]
+        struct TransferClaims {
+            application_id: String,
+            origin: String,
+            scope: String,
+            recipient: String,
+        }
+        let claims: TransferClaims = serde_json::from_str(transfer_json)
+            .map_err(|_| JsError::new("the CBCL transfer claims were refused"))?;
+        let transfer = selfsame_pairing::CredentialTransfer {
+            application_id: claims.application_id,
+            origin: claims.origin,
+            scope: claims.scope.clone(),
+            recipient: claims.recipient,
+            bundle: bundle.to_vec(),
+        };
+        let profile = ApplicationProfile::recognise(profile)
+            .map_err(|_| JsError::new("the CBCL application profile was refused"))?;
+        let account = AcctUri::parse(account)
+            .map_err(|_| JsError::new("the CBCL account identifier was refused"))?;
+        let device_public_key: [u8; 32] = device_public_key
+            .try_into()
+            .map_err(|_| JsError::new("the CBCL device key is exactly 32 octets"))?;
+        // The allocator never runs the thirteen-step verifier — that predicate
+        // is the claimant's. Construction uses only the profile identity,
+        // account, device key, and permission claims, so the verifier-only
+        // evidence stays deliberately absent here.
+        let verification = selfsame_pairing::SelfsameVerificationContext {
+            profile,
+            account,
+            device_public_key,
+            operation_permissions: vec![claims.scope],
+            now: 0,
+            clock_skew_seconds: 0,
+            freshness: selfsame_app_identity::accept::Freshness::SessionEstablishment,
+            issuer: None,
+            jrd: None,
+            projection: None,
+            proof: None,
+        };
+        let entropy = selfsame_pairing::live::AllocatorEntropy {
+            invitation_secret: invitation_secret
+                .try_into()
+                .map_err(|_| JsError::new("the CBCL invitation secret is exactly 16 octets"))?,
+            cpace_scalar: cpace_scalar
+                .try_into()
+                .map_err(|_| JsError::new("CBCL CPace randomness is exactly 32 octets"))?,
+            signing_seed: signing_seed
+                .try_into()
+                .map_err(|_| JsError::new("CBCL signing randomness is exactly 32 octets"))?,
+            intent_nonce: intent_nonce
+                .try_into()
+                .map_err(|_| JsError::new("the CBCL intent nonce is exactly 32 octets"))?,
+        };
+        let session = selfsame_pairing::live::AllocatorRelaySession::new(
+            relay_origin,
+            transfer,
+            &verification,
+            entropy,
+        )
+        .map_err(|_| JsError::new("the CBCL allocator attempt was refused"))?;
+        Ok(Self {
+            session: Some(session),
+        })
+    }
+
+    /// First canonical relay message for a newly opened connection.
+    pub fn start(&self) -> Result<Vec<u8>, JsError> {
+        self.session
+            .as_ref()
+            .ok_or_else(|| JsError::new("the CBCL pairing was cancelled"))?
+            .start()
+            .map_err(|_| JsError::new("the CBCL pairing frame was refused"))
+    }
+
+    /// Apply one complete binary relay message; returns a JSON effect list.
+    pub fn receive(&mut self, input: &[u8]) -> Result<String, JsError> {
+        let session = self
+            .session
+            .as_mut()
+            .ok_or_else(|| JsError::new("the CBCL pairing was cancelled"))?;
+        let effects = session
+            .receive(input)
+            .map_err(|_| JsError::new("the CBCL pairing message was refused"))?;
+        Ok(live_effects_json(&effects))
+    }
+
+    /// Cancel locally; returns the closing effects, then burns the attempt.
+    pub fn cancel(&mut self) -> Result<String, JsError> {
+        let Some(mut session) = self.session.take() else {
+            return Ok("[]".into());
+        };
+        let effects = session
+            .cancel()
+            .map_err(|_| JsError::new("the CBCL pairing message was refused"))?;
+        Ok(live_effects_json(&effects))
+    }
+}
+
+/// Encode live-session effects as the closed JSON list the browser executes.
+fn live_effects_json(effects: &[selfsame_pairing::live::LiveEffect]) -> String {
+    use selfsame_pairing::live::{LiveEffect, LiveOutcome};
+    let entries: Vec<serde_json::Value> = effects
+        .iter()
+        .map(|effect| match effect {
+            LiveEffect::Send(body) => serde_json::json!({
+                "type": "send",
+                "bodyB64u": selfsame_app_identity::codec::b64url(body),
+            }),
+            LiveEffect::Invitation(carrier) => serde_json::json!({
+                "type": "invitation",
+                "carrierB64u": selfsame_app_identity::codec::b64url(carrier),
+            }),
+            LiveEffect::DisplayIntent(intent) => serde_json::json!({
+                "type": "display-intent",
+                "application": intent.application,
+                "action": intent.action,
+                "authoritySummary": intent.authority_summary,
+                "fields": intent
+                    .fields
+                    .iter()
+                    .map(|field| serde_json::json!({
+                        "label": field.label,
+                        "value": field.value,
+                        "claimedBySecretHolder": field.claimed_by_secret_holder,
+                    }))
+                    .collect::<Vec<_>>(),
+            }),
+            LiveEffect::AwaitingDecision => serde_json::json!({"type": "awaiting-decision"}),
+            LiveEffect::PayloadSent => serde_json::json!({"type": "payload-sent"}),
+            LiveEffect::Accepted => serde_json::json!({"type": "accepted"}),
+            LiveEffect::Terminal(outcome) => serde_json::json!({
+                "type": "terminal",
+                "outcome": match outcome {
+                    LiveOutcome::Accepted => "accepted",
+                    LiveOutcome::Delivered => "delivered",
+                    LiveOutcome::Declined => "declined",
+                    LiveOutcome::Cancelled => "cancelled",
+                    LiveOutcome::Closed => "closed",
+                    LiveOutcome::Refused => "refused",
+                },
+            }),
+        })
+        .collect();
+    serde_json::Value::Array(entries).to_string()
+}
+
+/// QR module matrix for one complete CBCL invitation carrier.
+///
+/// Encoded here rather than in JavaScript so the symbol a browser paints and
+/// any symbol another shell prints come from one encoder: a subtly wrong
+/// symbol does not fail to render, it scans as something else. The payload is
+/// the unpadded base64url of the carrier — exactly the text a wallet's paste
+/// affordance accepts — so a camera scan and a paste recognise identical input.
+#[wasm_bindgen]
+pub fn cbcl_invitation_qr_modules_json(carrier: &[u8]) -> Result<String, JsError> {
+    let payload = selfsame_app_identity::codec::b64url(carrier);
+    let code = qrcode::QrCode::with_error_correction_level(payload.as_bytes(), qrcode::EcLevel::Q)
+        .map_err(|_| JsError::new("the CBCL invitation does not fit a QR symbol"))?;
+    let width = code.width();
+    let modules: Vec<Vec<u8>> = (0..width)
+        .map(|y| {
+            (0..width)
+                .map(|x| u8::from(code[(x, y)] == qrcode::Color::Dark))
+                .collect()
+        })
+        .collect();
+    serde_json::to_string(&serde_json::json!({
+        "width": width,
+        "modules": modules,
+    }))
+    .map_err(|_| JsError::new("the CBCL invitation does not fit a QR symbol"))
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct BrowserClosure {

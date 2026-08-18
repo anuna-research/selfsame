@@ -1,7 +1,7 @@
 use sha2::{Digest, Sha256};
 use std::{path::PathBuf, process::Command};
 
-const REVIEWED_REVISION: &str = "197d4cb3d1560ab5328df28fc984269799c510f9";
+const REVIEWED_REVISION: &str = "8e55160a3234127bd60ce723fd93ba6b2b67a06b";
 
 #[test]
 fn test_701_compiled_dependency_matches_the_reviewed_baseline() {

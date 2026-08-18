@@ -22,6 +22,12 @@ zeroize = { version = "1", default-features = false, features = ["alloc"] }
 bip39 = { version = "2", optional = true }
 ed25519-dalek = { workspace = true, features = ["std"], optional = true }
 
+# The browser allocator's local fixture inputs come from the same
+# `local_demo::credential` the wallet rebuilds; the example only serialises.
+[[example]]
+name = "local-pairing-fixture"
+required-features = ["local-pairing-demo"]
+
 [dev-dependencies]
 axum = { version = "0.7", features = ["ws"] }
 bip39 = "2"
