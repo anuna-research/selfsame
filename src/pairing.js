@@ -15,9 +15,9 @@ export function initPairing(d) {
     $('[data-action="start-cbcl-pairing"]').disabled = value.length === 0;
   }
 
-  async function start() {
+  async function start(presented) {
     const input = $("#pairing-input");
-    const invitation = input.value.trim();
+    const invitation = typeof presented === "string" ? presented.trim() : input.value.trim();
     busy("Starting secure pairing…");
     $("[data-cbcl-relay]").textContent = "Checking invitation…";
     $("[data-cbcl-status]").textContent = "Establishing CPace, Finished, and fixed roles.";
@@ -94,6 +94,59 @@ export function initPairing(d) {
     }
   }
 
+  // The QR payload IS the paste payload: the application encodes the unpadded
+  // base64url carrier into the symbol, so a scan and a paste recognise
+  // identical input and everything after this line is the one ordinary
+  // `start` path. The camera choreography mirrors the linking screen's:
+  // `scan` checks the permission and throws rather than requesting it, so the
+  // asking is this caller's job; `windowed: true` renders the preview beneath
+  // the webview, so the page must get out of its way for the duration.
+  async function scan() {
+    const note = $("[data-pairing-scanner-note]");
+    const say = (text) => {
+      if (note) {
+        note.hidden = !text;
+        note.textContent = text;
+      }
+    };
+    const camera = window.__TAURI__?.barcodeScanner;
+    if (!camera) {
+      say("No camera in this build — paste the invitation instead.");
+      return;
+    }
+    try {
+      let access = await camera.checkPermissions();
+      if (access !== "granted") {
+        access = await camera.requestPermissions();
+      }
+      if (access !== "granted") {
+        say(
+          "Camera access is off for Selfsame — turn it on in Settings, " +
+            "or paste the invitation instead.",
+        );
+        return;
+      }
+      document.body.classList.add("scanning");
+      let scanned;
+      try {
+        scanned = await camera.scan({ formats: ["QRCode"], windowed: true });
+      } finally {
+        document.body.classList.remove("scanning");
+      }
+      say("");
+      await start(scanned.content);
+    } catch (error) {
+      const reason = String(error?.message ?? error ?? "unknown");
+      console.error("pairing scan unavailable:", reason);
+      say(
+        /denied|permission|not allowed/i.test(reason)
+          ? "Camera access is off for Selfsame — turn it on in Settings, " +
+              "or paste the invitation instead."
+          : "The camera isn’t available. Paste the invitation instead.",
+      );
+    }
+  }
+
   function forget() {
     const input = $("#pairing-input");
     if (input) input.value = "";
@@ -106,6 +159,7 @@ export function initPairing(d) {
       show("pairing-enter");
     },
     "start-cbcl-pairing": start,
+    "scan-cbcl-pairing": scan,
     "approve-cbcl-pairing": () => decide(true),
     "decline-cbcl-pairing": () => decide(false),
     "cancel-cbcl-pairing": cancel,
@@ -114,5 +168,11 @@ export function initPairing(d) {
 
   const input = $("#pairing-input");
   if (input) input.addEventListener("input", onInput);
+  // Desktop: the pasted route is the route. Hide the dead camera affordance
+  // rather than offering a button that can only apologise.
+  if (!window.__TAURI__?.barcodeScanner) {
+    const scanButton = $('[data-action="scan-cbcl-pairing"]');
+    if (scanButton) scanButton.hidden = true;
+  }
   return { forget };
 }

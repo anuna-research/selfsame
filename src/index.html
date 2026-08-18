@@ -499,9 +499,12 @@
         <button class="back" data-action="to-applications">Back</button>
         <h1>Connect an application</h1>
         <p class="lede">
-          Paste the single-use invitation from the application. Selfsame will
-          show who is asking and what it wants only after the secure channel is established.
+          Scan the application’s QR code, or paste the single-use invitation.
+          Selfsame will show who is asking and what it wants only after the
+          secure channel is established.
         </p>
+        <button class="btn btn--primary" data-action="scan-cbcl-pairing">Scan the QR code</button>
+        <p class="code-state" data-pairing-scanner-note aria-live="polite" hidden></p>
         <label class="field">
           <span class="field__label">CBCL pairing invitation</span>
           <textarea id="pairing-input" rows="4" autocomplete="off" spellcheck="false"
