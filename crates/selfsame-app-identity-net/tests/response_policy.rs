@@ -75,7 +75,9 @@ async fn identity_is_not_a_content_encoding_in_the_sense_that_matters() {
         );
     }
     let r = response(200, &json_headers(), b"{}".to_vec());
-    assert!(!selfsame_app_identity_net::testing::has_content_encoding(&r));
+    assert!(!selfsame_app_identity_net::testing::has_content_encoding(
+        &r
+    ));
 }
 
 #[tokio::test]
@@ -110,7 +112,9 @@ async fn a_second_content_encoding_field_line_is_not_hidden_by_the_first() {
         ],
         b"{}".to_vec(),
     );
-    assert!(!selfsame_app_identity_net::testing::has_content_encoding(&r));
+    assert!(!selfsame_app_identity_net::testing::has_content_encoding(
+        &r
+    ));
 }
 
 #[tokio::test]
@@ -120,12 +124,18 @@ async fn a_content_encoding_that_is_not_utf8_counts_as_an_encoding() {
     // could read into evidence that the header said nothing — which is the one
     // reading `CON-213` and `CON-220` step 3 cannot afford, since both refuse
     // encoding outright.
-    let mut builder = http::Response::builder().status(200).header("content-type", PROFILE_MEDIA_TYPE);
+    let mut builder = http::Response::builder()
+        .status(200)
+        .header("content-type", PROFILE_MEDIA_TYPE);
     builder = builder.header(
         "content-encoding",
         http::HeaderValue::from_bytes(&[0xff, 0xfe, b'g', b'z']).expect("a header value"),
     );
-    let r = reqwest::Response::from(builder.body(b"{}".to_vec()).expect("a well-formed response"));
+    let r = reqwest::Response::from(
+        builder
+            .body(b"{}".to_vec())
+            .expect("a well-formed response"),
+    );
     assert!(selfsame_app_identity_net::testing::has_content_encoding(&r));
 }
 
@@ -138,7 +148,10 @@ async fn the_media_type_is_read_without_its_parameters_and_case_folded() {
     // and CON-220 step 3 refuses it.
     for (header, expected) in [
         (PROFILE_MEDIA_TYPE, PROFILE_MEDIA_TYPE),
-        ("application/selfsame-profile+json; charset=utf-8", PROFILE_MEDIA_TYPE),
+        (
+            "application/selfsame-profile+json; charset=utf-8",
+            PROFILE_MEDIA_TYPE,
+        ),
         ("APPLICATION/SELFSAME-PROFILE+JSON", PROFILE_MEDIA_TYPE),
         ("  application/selfsame-profile+json  ", PROFILE_MEDIA_TYPE),
         ("application/json", "application/json"),
@@ -180,7 +193,11 @@ async fn a_set_cookie_header_is_seen() {
     // CON-213 rejects cookies. This crate cannot *store* one — the `cookies`
     // feature is not compiled in — but a server can still send one, and a
     // pairing or mailbox response that tries to set state is refused.
-    let r = response(200, &[("set-cookie", "session=abc; Path=/")], b"{}".to_vec());
+    let r = response(
+        200,
+        &[("set-cookie", "session=abc; Path=/")],
+        b"{}".to_vec(),
+    );
     assert!(selfsame_app_identity_net::testing::carried_cookies(&r));
 
     let r = response(200, &json_headers(), b"{}".to_vec());
@@ -193,7 +210,9 @@ async fn a_set_cookie_header_is_seen() {
 async fn a_body_within_the_bound_is_returned_whole() {
     let body = vec![b'a'; 1_000];
     let r = response(200, &json_headers(), body.clone());
-    let read = selfsame_app_identity_net::testing::bounded_body(r, 4_096).await.unwrap();
+    let read = selfsame_app_identity_net::testing::bounded_body(r, 4_096)
+        .await
+        .unwrap();
     assert_eq!(read, body);
 }
 
@@ -214,7 +233,9 @@ async fn a_declared_content_length_over_the_bound_is_refused_before_transfer() {
     // rather than a full transfer.
     let body = vec![b'a'; 5_000];
     let r = response(200, &[("content-length", "5000")], body);
-    assert!(selfsame_app_identity_net::testing::bounded_body(r, 4_096).await.is_err());
+    assert!(selfsame_app_identity_net::testing::bounded_body(r, 4_096)
+        .await
+        .is_err());
 }
 
 #[tokio::test]
@@ -230,7 +251,9 @@ async fn a_chunked_response_with_no_declared_length_is_still_bounded() {
     // constructed-response test passing, because `reqwest` derives an honest
     // Content-Length from the body it was handed — so no response built in
     // memory can ever exercise it. Only a real chunked server can.
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("binds");
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("binds");
     let port = listener.local_addr().unwrap().port();
 
     tokio::spawn(async move {
@@ -265,7 +288,10 @@ async fn a_chunked_response_with_no_declared_length_is_still_bounded() {
         .await
         .expect("the chunked response arrives");
 
-    assert!(r.content_length().is_none(), "a chunked response declares no length");
+    assert!(
+        r.content_length().is_none(),
+        "a chunked response declares no length"
+    );
     let outcome = selfsame_app_identity_net::testing::bounded_body(r, 4_096).await;
     assert!(
         outcome.is_err(),
@@ -284,7 +310,9 @@ async fn an_endless_chunked_body_is_abandoned_at_the_bound_rather_than_buffered(
     // unbounded from the client's side. A `bounded_body` that buffered first
     // would keep accepting them until memory ran out; one that checks per chunk
     // returns after the fifth and drops the connection.
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("binds");
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("binds");
     let port = listener.local_addr().unwrap().port();
 
     let written = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -345,7 +373,10 @@ async fn the_bound_is_inclusive_at_its_own_value() {
     let body = vec![b'a'; 4_096];
     let r = response(200, &json_headers(), body.clone());
     assert_eq!(
-        selfsame_app_identity_net::testing::bounded_body(r, 4_096).await.unwrap().len(),
+        selfsame_app_identity_net::testing::bounded_body(r, 4_096)
+            .await
+            .unwrap()
+            .len(),
         4_096
     );
 }
@@ -392,7 +423,9 @@ async fn refuses_plaintext_http() {
     // is stood up on loopback and the client refuses to speak to it at all,
     // because `https_only(true)` is set — so a profile served over plaintext is
     // not a bad response, it is not a request.
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("binds");
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("binds");
     let port = listener.local_addr().unwrap().port();
 
     // A server that would answer, if anything ever connected.
@@ -412,8 +445,14 @@ async fn refuses_plaintext_http() {
         .build()
         .expect("builds");
 
-    let outcome = client.get(format!("http://127.0.0.1:{port}/selfsame/application")).send().await;
-    assert!(outcome.is_err(), "a plaintext URL must not be fetched at all");
+    let outcome = client
+        .get(format!("http://127.0.0.1:{port}/selfsame/application"))
+        .send()
+        .await;
+    assert!(
+        outcome.is_err(),
+        "a plaintext URL must not be fetched at all"
+    );
 }
 
 #[tokio::test]
@@ -422,7 +461,9 @@ async fn a_redirect_is_returned_rather_than_followed() {
     // back as a response to be refused, rather than being chased to wherever it
     // pointed. Following and checking afterwards would already have made a
     // request somewhere the identifier does not name.
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("binds");
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("binds");
     let port = listener.local_addr().unwrap().port();
 
     tokio::spawn(async move {
@@ -449,7 +490,11 @@ async fn a_redirect_is_returned_rather_than_followed() {
         .send()
         .await
         .expect("the redirect itself is delivered");
-    assert_eq!(r.status().as_u16(), 301, "the 3xx was returned, not followed");
+    assert_eq!(
+        r.status().as_u16(),
+        301,
+        "the 3xx was returned, not followed"
+    );
     assert!(r.status().is_redirection());
 }
 
@@ -468,7 +513,9 @@ async fn a_well_formed_profile_response_reaches_the_recogniser_and_is_accepted()
     let redirected = r.status().is_redirection();
     let encoded = selfsame_app_identity_net::testing::has_content_encoding(&r);
     let content_type = selfsame_app_identity_net::testing::media_type(&r);
-    let body = selfsame_app_identity_net::testing::bounded_body(r, MAX_BODY_OCTETS).await.unwrap();
+    let body = selfsame_app_identity_net::testing::bounded_body(r, MAX_BODY_OCTETS)
+        .await
+        .unwrap();
 
     let observed = HttpResponse {
         https_validated: true,
@@ -493,7 +540,9 @@ async fn a_compressed_profile_response_is_refused_through_the_same_path() {
     let r = response(200, &headers, octets);
     let encoded = selfsame_app_identity_net::testing::has_content_encoding(&r);
     let content_type = selfsame_app_identity_net::testing::media_type(&r);
-    let body = selfsame_app_identity_net::testing::bounded_body(r, MAX_BODY_OCTETS).await.unwrap();
+    let body = selfsame_app_identity_net::testing::bounded_body(r, MAX_BODY_OCTETS)
+        .await
+        .unwrap();
 
     let observed = HttpResponse {
         https_validated: true,
@@ -515,12 +564,20 @@ fn fixture_profile() -> Vec<u8> {
     use selfsame_app_identity::json::{self, Json};
     json::canonicalise(&Json::obj([
         ("profileVersion", Json::int(1)),
-        ("applicationId", Json::text("https://photos.example/selfsame/application")),
+        (
+            "applicationId",
+            Json::text("https://photos.example/selfsame/application"),
+        ),
         ("accountAuthority", Json::text("accounts.photos.example")),
-        ("verifierAudience", Json::text("https://photos.example/selfsame/application")),
+        (
+            "verifierAudience",
+            Json::text("https://photos.example/selfsame/application"),
+        ),
         (
             "allowedPermissions",
-            Json::arr([Json::text("https://photos.example/selfsame/application#device")]),
+            Json::arr([Json::text(
+                "https://photos.example/selfsame/application#device",
+            )]),
         ),
         (
             "enrollment",
@@ -529,7 +586,9 @@ fn fixture_profile() -> Vec<u8> {
                 Json::arr([Json::obj([
                     (
                         "kid",
-                        Json::text("https://photos.example/selfsame/application#enrollment-2026-01"),
+                        Json::text(
+                            "https://photos.example/selfsame/application#enrollment-2026-01",
+                        ),
                     ),
                     (
                         "publicKeyJwk",
@@ -543,17 +602,20 @@ fn fixture_profile() -> Vec<u8> {
             )]),
         ),
         (
-            "rendezvous",
+            "cbclPairingRelays",
             Json::arr([Json::obj([
-                ("id", Json::text("au-primary")),
-                ("url", Json::text("https://r.provider.example")),
-                ("protocol", Json::text("selfsame-rendezvous-v1")),
-                ("pairingUrl", Json::text("https://p.provider.example")),
-                ("pairingProtocol", Json::text("selfsame-pairing-v1")),
-                ("pairingRoute", Json::text("03")),
+                ("operatorId", Json::text("au-primary")),
+                ("relayOrigin", Json::text("https://cbcl.provider.example")),
                 ("priority", Json::int(10)),
                 ("weight", Json::int(80)),
-                ("validUntil", Json::text("2027-07-30T00:00:00Z")),
+                (
+                    "privacyPolicyDigest",
+                    Json::text(codec::b64url(&[11u8; 32])),
+                ),
+                (
+                    "conformanceEvidenceDigest",
+                    Json::text(codec::b64url(&[12u8; 32])),
+                ),
             ])]),
         ),
         (

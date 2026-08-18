@@ -43,8 +43,9 @@ pub fn sign_enrollment_statement(
     let recognised =
         enrollment::recognise_unsigned(statement, kid).map_err(|_| String::from(REFUSED))?;
 
-    let declared: &[u8; 32] =
-        declared_public_key.try_into().map_err(|_| String::from(REFUSED))?;
+    let declared: &[u8; 32] = declared_public_key
+        .try_into()
+        .map_err(|_| String::from(REFUSED))?;
     let seed: &[u8; 32] = private_key.try_into().map_err(|_| String::from(REFUSED))?;
     let compact = {
         let signing_key = ed25519_dalek::SigningKey::from_bytes(seed);
@@ -91,12 +92,11 @@ pub fn sign_enrollment<'a>(
         }
         let kid = std::str::from_utf8(kid.as_slice()).map_err(|_| String::from(REFUSED))?;
 
-        let statement: Binary<'a> =
-            statement.decode().map_err(|_| String::from(REFUSED))?;
-        let declared_public_key: Binary<'a> =
-            declared_public_key.decode().map_err(|_| String::from(REFUSED))?;
-        let private_key: Binary<'a> =
-            private_key.decode().map_err(|_| String::from(REFUSED))?;
+        let statement: Binary<'a> = statement.decode().map_err(|_| String::from(REFUSED))?;
+        let declared_public_key: Binary<'a> = declared_public_key
+            .decode()
+            .map_err(|_| String::from(REFUSED))?;
+        let private_key: Binary<'a> = private_key.decode().map_err(|_| String::from(REFUSED))?;
 
         sign_enrollment_statement(
             statement.as_slice(),
@@ -138,7 +138,8 @@ pub fn sign_enrollment_profile_bound(
     }
     // Recognition of the profile precedes everything, including any use of the
     // `kid` as a lookup key: an unrecognised profile has no declared set.
-    let profile = ApplicationProfile::recognise(profile_bytes).map_err(|_| String::from(REFUSED))?;
+    let profile =
+        ApplicationProfile::recognise(profile_bytes).map_err(|_| String::from(REFUSED))?;
     let declared = profile
         .enrollment_keys
         .iter()
@@ -151,7 +152,6 @@ pub fn sign_enrollment_profile_bound(
     // declared key differs, which is the entire point of this entry point.
     sign_enrollment_statement(statement, kid, &declared.jwk.public_key, private_key)
 }
-
 
 /// `cbcl_selfsame_erl:sign_enrollment_profile_bound/4`.
 ///
@@ -242,7 +242,7 @@ mod tests {
             issued_at: NOW,
             expires_at: NOW + 120,
         };
-        let descriptor = &profile.rendezvous[0];
+        let descriptor = &profile.cbcl_pairing_relays[0];
         let statement = EnrollmentStatement {
             request_id: offer.request_id.clone(),
             ceremony_id: offer.ceremony_id.clone(),
@@ -252,7 +252,7 @@ mod tests {
             account_scope_id: offer.account_scope_id.clone(),
             device_key_digest: enrollment::device_key_digest(&offer),
             requested_permissions: offer.requested_permissions.clone(),
-            provider_id: descriptor.id.clone(),
+            provider_id: descriptor.operator_id.clone(),
             descriptor_digest: codec::b64url(&descriptor.digest),
             offer_digest: offer.digest(),
             platform_binding_id: PLATFORM_BINDING.to_string(),
@@ -306,17 +306,20 @@ mod tests {
                 ]),
             ),
             (
-                "rendezvous",
+                "cbclPairingRelays",
                 Json::arr([Json::obj([
-                    ("id", Json::text("au-primary")),
-                    ("url", Json::text("https://rendezvous.example")),
-                    ("protocol", Json::text("selfsame-rendezvous-v1")),
-                    ("pairingUrl", Json::text("https://pairing.example")),
-                    ("pairingProtocol", Json::text("selfsame-pairing-v1")),
-                    ("pairingRoute", Json::text("03")),
+                    ("operatorId", Json::text("au-primary")),
+                    ("relayOrigin", Json::text("https://cbcl.example")),
                     ("priority", Json::int(10)),
                     ("weight", Json::int(80)),
-                    ("validUntil", Json::text("2027-07-30T00:00:00Z")),
+                    (
+                        "privacyPolicyDigest",
+                        Json::text(codec::b64url(&[11u8; 32])),
+                    ),
+                    (
+                        "conformanceEvidenceDigest",
+                        Json::text(codec::b64url(&[12u8; 32])),
+                    ),
                 ])]),
             ),
             (
@@ -346,13 +349,9 @@ mod tests {
         let fixture = fixture();
         let key = backend_key();
         let public_key = key.verifying_key().to_bytes();
-        let compact = sign_enrollment_statement(
-            &fixture.statement_octets,
-            KID,
-            &public_key,
-            key.as_bytes(),
-        )
-        .expect("the accepting fixture must sign");
+        let compact =
+            sign_enrollment_statement(&fixture.statement_octets, KID, &public_key, key.as_bytes())
+                .expect("the accepting fixture must sign");
 
         let (recognised, signed) =
             enrollment::recognise(&compact).expect("the producer output must recognise");
@@ -372,11 +371,11 @@ mod tests {
             "holding the declaration and kid fixed while varying only the seed must refuse"
         );
 
-        let descriptor_digest = codec::b64url(&fixture.profile.rendezvous[0].digest);
+        let descriptor_digest = codec::b64url(&fixture.profile.cbcl_pairing_relays[0].digest);
         let observed = Observed {
             profile: &fixture.profile,
             offer: &fixture.offer,
-            provider_id: &fixture.profile.rendezvous[0].id,
+            provider_id: &fixture.profile.cbcl_pairing_relays[0].operator_id,
             descriptor_digest: &descriptor_digest,
             platform_binding_id: None,
             now: NOW + 1,
@@ -396,12 +395,7 @@ mod tests {
         let key = backend_key();
         let public_key = key.verifying_key().to_bytes();
         assert_eq!(
-            sign_enrollment_statement(
-                &fixture.statement_octets,
-                KID,
-                &public_key,
-                key.as_bytes(),
-            ),
+            sign_enrollment_statement(&fixture.statement_octets, KID, &public_key, key.as_bytes(),),
             Err(String::from(REFUSED))
         );
     }
@@ -489,14 +483,10 @@ mod tests {
     fn profile_bound_signing_refuses_unrecognised_profile_bytes() {
         let f = fixture();
         for bytes in [&b""[..], &b"{}"[..], &b"not json at all"[..]] {
-            assert!(sign_enrollment_profile_bound(
-                &f.statement_octets,
-                KID,
-                bytes,
-                &[0x41; 32],
-            )
-            .is_err());
+            assert!(
+                sign_enrollment_profile_bound(&f.statement_octets, KID, bytes, &[0x41; 32],)
+                    .is_err()
+            );
         }
     }
-
 }

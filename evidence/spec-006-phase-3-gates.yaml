@@ -1,0 +1,143 @@
+schema_version: 1
+specification: SPEC-006
+recorded_at: "2026-08-17T14:44:18+10:00"
+scope: "Tier-1 experimental integration; not production-approved"
+
+branch:
+  name: feature/cbcl-pairing-demo
+  main_revision: 22801e77dc0c7c493b6e811f79cb17c7cd9352ab
+  merge_base: 22801e77dc0c7c493b6e811f79cb17c7cd9352ab
+  implementation_commit: d4ecc036214b575b29ef3a39c3ec6f0ffa2746e7
+  differs_from_main: true
+
+dependency:
+  sibling: ../cbcl-pairing
+  reviewed_revision: 197d4cb3d1560ab5328df28fc984269799c510f9
+  head_matches_pin: true
+  tracked_drift: false
+  bootstrap_hash_matches_published_constant: true
+  session_hash_matches_published_constant: true
+  ci_rejects_warm_checkout_tracked_drift: true
+
+red_gates:
+  dependency_stub:
+    killed_by: TEST-701
+    behavioral_failure: true
+  unavailable_adapter:
+    killed_by: TEST-703 and TEST-710
+    behavioral_failure: true
+  http_not_implemented:
+    killed_by: TEST-704
+    behavioral_failure: true
+  consent_bypass_mutation:
+    mutation: "decline called approve"
+    killed_by: TEST-710
+    behavioral_failure: true
+  selfsame_bypass_mutation:
+    mutation: "parse-only Acceptance replaced direct thirteen-step accept_grant"
+    killed_by: TEST-706
+    behavioral_failure: true
+    compile_failure_excluded: true
+
+rust:
+  package_command: "cargo test -p selfsame-pairing --all-targets --no-fail-fast"
+  package_result: pass
+  integration_tests: 19
+  doc_compile_fail_boundary: pass
+  strict_clippy_command: "cargo clippy -p selfsame-pairing --all-targets -- -D warnings"
+  strict_clippy_result: pass
+  workspace_command: "cargo test --workspace --locked --no-fail-fast"
+  workspace_result: pass
+
+http_authority:
+  auth_precedes_body_recognition: true
+  auth_rechecked_after_body_await: true
+  distinct_bootstrap_sessions_and_capabilities: true
+  stale_start_capability_refused: true
+  stale_claim_capability_refused: true
+  reset_rotates_both_linked_capabilities: true
+  exact_head_limit_octets: 16384
+  body_limit_octets: 4096
+  max_browser_sessions: 64
+  max_ceremonies: 32
+  concurrent_decisions_one_terminal_transition: true
+  role_specific_session_cookies: true
+  exact_role_header_required: true
+  application_and_wallet_cookies_coexist: true
+
+browser:
+  command: "npm run e2e:pairing"
+  launch_command_under_test: "cargo run -p selfsame-pairing --example web-demo"
+  clean_cargo_target: true
+  result: pass
+  node_tests: 2
+  viewport_widths: [1200, 320]
+  action_feedback_under_100ms:
+    - start
+    - copy
+    - join
+    - approve
+    - decline
+    - reset
+  journeys:
+    - accepted
+    - declined
+    - invitation-mismatch
+    - verifier-refusal
+    - protocol-failure
+    - decision-transport-retry
+    - reset-transport-retry
+  keyboard_completion: [approve, decline]
+  focus_polling_stability_ms: 800
+  horizontal_overflow: false
+  axe_engine: axe-core
+  axe_standard: "WCAG 2.2 AA"
+  serious_or_critical_violations: 0
+  logical_tab_order: pass
+  eight_ordered_gates_both_routes: pass
+  ordinary_same_browser_tabs: pass
+
+regressions:
+  BUG-601:
+    red_mechanism: "load /application and /wallet with one cookie jar, then POST /api/start"
+    red_result: "HTTP 401 before role-specific cookies"
+    green_mechanism: "npm run e2e:pairing"
+    green_result: "2 of 2 tests passed; complete same-browser journeys at 1200px and 320px"
+
+upstream_fuzz:
+  working_directory: ../cbcl-pairing
+  command: "tools/run-fuzz-budgets.sh"
+  wire_recognition_runs: 10000
+  mailbox_transition_runs: 5000
+  channel_receiver_runs: 1000
+  result: pass
+  tracked_drift_after_run: false
+
+documentation:
+  controlled_language_mode: descriptive
+  controlled_language_errors: 0
+  controlled_language_warnings: 0
+  zetl_dead_links: 195
+  zetl_syntax_errors: 1
+  zetl_spl_errors: 0
+  zetl_drift_warnings: 0
+  new_dead_links: 0
+  new_syntax_errors: 0
+  note: "Dead links and the syntax error are pre-existing vault debt; IMPL-006 is a new orphan."
+
+security_boundary:
+  direct_selfsame_accept_grant: true
+  private_approved_credential_consumed: true
+  displayed_authority_bound_to_grant_and_context: true
+  invitation_carrier_zeroized: true
+  entropy_zeroized_on_drop: true
+  terminal_erasure_visible_in_safe_state: true
+  relay_plaintext_or_secrets_observed: false
+  legacy_pairing_imported: false
+  production_approved: false
+
+independent_review:
+  reviewer: spec006_impl_review
+  reviewed_revision: d4ecc03
+  implementation_code_blockers: 0
+  completion_verdict: accept

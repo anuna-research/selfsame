@@ -478,6 +478,30 @@ code {
   color: var(--dim);
 }
 
+.intent-fields {
+  display: grid;
+  gap: 0;
+  margin: 20px 0;
+}
+
+.intent-fields > div {
+  border-bottom: 1px solid var(--hairline);
+  display: grid;
+  gap: 4px;
+  padding: 12px 0;
+}
+
+.intent-fields dt {
+  color: var(--dim);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.intent-fields dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
 /*
  * The trust boundary, drawn. SCREEN-001 requires the untrusted claim be marked
  * by border style *and* type treatment *and* the lead-in phrase — never by

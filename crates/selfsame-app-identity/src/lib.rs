@@ -74,29 +74,26 @@
 pub mod accept;
 pub mod alias;
 pub mod authorise;
+pub mod cbcl_relay;
 pub mod ceremony;
 pub mod codec;
 pub mod confirm;
 pub mod context;
-pub mod discovery;
 pub mod didkey;
+pub mod discovery;
 pub mod enrollment;
 pub mod grant;
 pub mod hierarchy;
 pub mod issuer;
 pub mod json;
 pub mod jws;
-pub mod pairing;
-/// `PROTO-003` `CON-402`/`CON-409` — the pairing code's carriers and the
-/// meeting point they route to.
-pub mod pairing_code;
 pub mod path_b;
 pub mod platform;
 pub mod profile;
 pub mod proof;
+pub mod provider_hint;
 pub mod revocation;
 pub mod scope;
-pub mod selection;
 pub mod succession;
 pub mod time;
 pub mod uri;

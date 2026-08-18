@@ -3,18 +3,40 @@ id: SPEC-004
 title: Application- and Account-Scoped Identity — deterministic home keys, acct aliases, portable device grants, and provider discovery
 status: draft
 tier: 1
-version: 0.14.0-draft
+version: 0.15.0-draft
 audience: agent, human, application developer, infrastructure provider
 author: Anuna Research (drafted with Codex, 2026-07-30; amended with Claude, 2026-07-31; hierarchy re-rooted with Claude, 2026-08-10)
-last-updated: 2026-08-13
+last-updated: 2026-08-17
 owner-repo: selfsame
 affects-repos: selfsame, anuna-ssi, did-crdt, adopting applications
 prototype-authorised: 2026-08-10 by the repository owner for hierarchy version 2; widened 2026-08-13 to cover the contracts SPEC-053 adopts — see Tier-1 Gate
-review-gate: not-approved — Tier-1; all ADRs are PROPOSED; cross-model adversarial review, independent KDF/SPAKE2/AEAD vectors, privacy review, and human cryptography/security sign-off are outstanding. **0.14.0 is `-draft` because it does not yet satisfy this document's own Amendment Channels**: a key-derivation change requires new vectors plus renewed security sign-off *for the amendment*, and neither exists. It is a proposal for review, not an accepted version, and the version number does not advance until both land
-depends-on: did:crdt Method Specification; PROTO-002 Selfsame Rendezvous Protocol v1; PROTO-003 Selfsame Pairing Protocol v1; PROTO-004 Selfsame Ceremony Envelope v1; W3C VC Data Model 2.0; W3C VC JOSE/COSE; W3C DID Core 1.0; optional W3C Bitstring Status List 1.0 projection; RFC 7565; RFC 7033; RFC 3986; RFC 4648; RFC 5234; RFC 5869; RFC 7515; RFC 8032; RFC 8439; RFC 8785; RFC 9382; RFC 9496
+review-gate: not-approved — Tier-1; all unsuperseded ADRs are PROPOSED; cross-model adversarial review, independent KDF and cbcl-pairing vectors, privacy review, and human cryptography/security sign-off are outstanding. **0.15.0 remains `-draft` because it does not yet satisfy this document's production gate.** It is a proposal for review, not an accepted production version, and the accepted version does not advance until those gates land
+depends-on: did:crdt Method Specification; SPEC-007 cbcl-pairing Protocol Cutover for Selfsame credential pairing; cbcl-pairing SPEC-001; PROTO-002 Selfsame Rendezvous Protocol v1 for non-cutover uses; PROTO-003 Selfsame Pairing Protocol v1 as a legacy rejection source; PROTO-004 Selfsame Ceremony Envelope v1 for non-cutover uses; W3C VC Data Model 2.0; W3C VC JOSE/COSE; W3C DID Core 1.0; optional W3C Bitstring Status List 1.0 projection; RFC 7565; RFC 7033; RFC 3986; RFC 4648; RFC 5234; RFC 5869; RFC 7515; RFC 8032; RFC 8439; RFC 8785; RFC 9382; RFC 9496
 ---
 
 # SPEC-004 — Application- and Account-Scoped Identity
+
+## SPEC-007 pairing cutover disposition
+
+For Selfsame credential pairing, [[SPEC-007-cbcl-pairing-cutover]] supersedes
+the following artifacts only to the extent listed in its Amendment disposition table:
+
+- REQ-209 through REQ-212, REQ-219, and REQ-226 through REQ-229;
+- ADR-215 through ADR-218;
+- CON-216 through CON-219; and
+- TEST-226 and TEST-232 through TEST-235.
+
+CON-206 remains the credential-acceptance authority.
+CON-219 retains its member sets and narrows its cbcl payload bound to 62,000 octets.
+Unrelated identity, credential, revocation, recovery, and protocol duties remain unchanged.
+All 25 Tier-1 production rows remain open through the exact SPEC-007 disposition.
+Vectors: TEST-818 covers the new cbcl payload bound; unrelated identity vectors are unchanged.
+
+Evidence: [[SPEC-007-cbcl-pairing-cutover#TEST-819]] and the
+[[SPEC-007-cbcl-pairing-cutover#Inherited SPEC-004 Tier-1 gate ledger]].
+Owner: Selfsame human repository owner.
+Approved for development: 2026-08-17.
+Production approval: not granted.
 
 ## Orientation
 
@@ -6422,6 +6444,13 @@ component precedents but no surveyed system with the complete Selfsame
 combination; that is an engineering conclusion, not a legal novelty claim.
 
 ## Changelog
+
+- **0.15.0-draft — 2026-08-17 — pairing cutover disposition.**
+  Records the owner-approved [[SPEC-007-cbcl-pairing-cutover]] development cutover.
+  Affected artifacts are named in the cutover disposition above.
+  TEST-818 owns the new payload-bound vectors.
+  CON-206 remains authoritative and every unrelated Tier-1 duty remains open.
+  This revision grants no production approval.
 
 - **0.14.0-draft — 2026-08-10 — PROPOSAL, not an accepted version.**
   Re-roots [[SPEC-004-application-scoped-identity#CON-202]] at a new

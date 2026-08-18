@@ -9,7 +9,7 @@
 //! # Two things authenticate the result, and neither is sufficient alone
 //!
 //! TLS says the octets came from `photos.example`. The `profileDigest` in the
-//! PROTO-003 record — asserted by a party holding the code `C` — says *which*
+//! authenticated credential intent says *which*
 //! profile that origin served. A host that serves a substituted profile passes
 //! the first and fails the second.
 //!
@@ -17,7 +17,7 @@
 //! is [`selfsame_app_identity::discovery::check_record_digest`], applied by the
 //! caller once it has a record. They are separate functions because under
 //! `CON-409` tier 3 they happen at different times: the profile is fetched
-//! before any record exists, and only `pairingRecordRelays` may be used from it
+//! before any credential is accepted
 //! until the digest check passes.
 
 use std::time::Duration;
@@ -110,7 +110,11 @@ pub async fn fetch(
     let profile = discovery::recognise_profile_response(&observed, application_id)
         .map_err(|e: DiscoveryError| NetError::Recognition(e.to_string()))?;
 
-    Ok(FetchedProfile { profile, octets: body.to_vec(), fetched_at: now })
+    Ok(FetchedProfile {
+        profile,
+        octets: body.to_vec(),
+        fetched_at: now,
+    })
 }
 
 /// Fetch, or reuse a cached profile that is still inside `CON-220`'s bound.
@@ -184,7 +188,9 @@ pub async fn enumerate_applications(
     let parts = uri::recognise(typed_origin, UriPolicy::PROVIDER_URL)
         .map_err(|_| NetError::Refused("the typed value is not an HTTPS origin"))?;
     if !parts.path.is_empty() && parts.path != "/" {
-        return Err(NetError::Refused("origin enumeration takes an origin, not a path"));
+        return Err(NetError::Refused(
+            "origin enumeration takes an origin, not a path",
+        ));
     }
     let typed_origin = parts.origin;
     let url = format!("{typed_origin}{}", discovery::ENUMERATION_PATH);
@@ -194,7 +200,11 @@ pub async fn enumerate_applications(
         .send()
         .await
         .map_err(|e| {
-            if e.is_timeout() { NetError::Timeout } else { NetError::Transport(e.to_string()) }
+            if e.is_timeout() {
+                NetError::Timeout
+            } else {
+                NetError::Transport(e.to_string())
+            }
         })?;
 
     if response.status().is_redirection() {
@@ -214,7 +224,10 @@ mod tests {
 
     #[test]
     fn the_enumeration_path_is_the_well_known_one_con_220_fixes() {
-        assert_eq!(discovery::ENUMERATION_PATH, "/.well-known/selfsame/applications");
+        assert_eq!(
+            discovery::ENUMERATION_PATH,
+            "/.well-known/selfsame/applications"
+        );
     }
 
     #[test]
@@ -231,8 +244,14 @@ mod tests {
         };
 
         // Both spellings of the origin yield the origin itself.
-        assert_eq!(recognised("https://photos.example").as_deref(), Some("https://photos.example"));
-        assert_eq!(recognised("https://photos.example/").as_deref(), Some("https://photos.example"));
+        assert_eq!(
+            recognised("https://photos.example").as_deref(),
+            Some("https://photos.example")
+        );
+        assert_eq!(
+            recognised("https://photos.example/").as_deref(),
+            Some("https://photos.example")
+        );
         assert_eq!(
             recognised("https://photos.example:8443/").as_deref(),
             Some("https://photos.example:8443")
@@ -247,13 +266,19 @@ mod tests {
             "photos.example",
             "",
         ] {
-            assert!(recognised(typed).is_none(), "`{typed}` was accepted as an origin");
+            assert!(
+                recognised(typed).is_none(),
+                "`{typed}` was accepted as an origin"
+            );
         }
 
         // The recognised origin is exactly what `recognise_application_list`
         // compares against, so a conforming answer now matches.
         let id = ApplicationId::parse("https://photos.example/selfsame/application").unwrap();
-        assert_eq!(Some(id.origin().to_string()), recognised("https://photos.example/"));
+        assert_eq!(
+            Some(id.origin().to_string()),
+            recognised("https://photos.example/")
+        );
     }
 
     #[test]
@@ -274,7 +299,11 @@ mod tests {
         let profile = ApplicationProfile::recognise(&octets).unwrap();
         // The fixture names photos.example, so build a cache entry whose
         // identifier matches what we ask for.
-        let held = FetchedProfile { profile, octets: octets.clone(), fetched_at: 1_000 };
+        let held = FetchedProfile {
+            profile,
+            octets: octets.clone(),
+            fetched_at: 1_000,
+        };
         let outcome = fetch_or_cached(&held.profile.application_id.clone(), Some(&held), 1_500)
             .await
             .expect("a fresh cache entry is reused");
@@ -287,7 +316,11 @@ mod tests {
         let octets = fixture_profile_octets();
         let profile = ApplicationProfile::recognise(&octets).unwrap();
         let id = profile.application_id.clone();
-        let held = FetchedProfile { profile, octets: octets.clone(), fetched_at: 1_000 };
+        let held = FetchedProfile {
+            profile,
+            octets: octets.clone(),
+            fetched_at: 1_000,
+        };
         // Past 3,600 seconds the cache is dead and the fetch is attempted —
         // against `photos.example`, which does not resolve, so this is an
         // error rather than a stale hit. That is the point: no grace period.
@@ -295,64 +328,39 @@ mod tests {
         assert!(outcome.is_err(), "a stale cache entry must not be served");
     }
 
-    #[tokio::test]
-    async fn a_cached_profile_whose_descriptors_have_all_expired_is_not_reused() {
-        // CON-220: a party "SHALL NOT serve one whose `validUntil`-bearing
-        // descriptors have all expired". A separate condition from age, and this
-        // is the case where they disagree: comfortably inside the 3,600-second
-        // bound, and every descriptor already dead.
-        //
-        // Serving it means CON-208 finds no eligible descriptor and the ceremony
-        // fails — while the origin may already be publishing replacements.
-        let octets = fixture_profile_octets();
-        let profile = ApplicationProfile::recognise(&octets).unwrap();
-        let last_expiry =
-            profile.rendezvous.iter().map(|d| d.valid_until).max().expect("a descriptor");
-        let id = profile.application_id.clone();
-        let held = FetchedProfile { profile, octets: octets.clone(), fetched_at: last_expiry - 60 };
-
-        // Sixty seconds old — well inside the bound — and one second past the
-        // last descriptor's expiry.
-        assert!(discovery::cache_is_fresh(held.fetched_at, last_expiry + 1));
-        let outcome = fetch_or_cached(&id, Some(&held), last_expiry + 1).await;
-        assert!(
-            outcome.is_err(),
-            "a profile with no live descriptor was served from cache instead of revalidated"
-        );
-
-        // One second earlier the last descriptor is still live, so the same
-        // entry is served without a request.
-        let reused = fetch_or_cached(&id, Some(&held), last_expiry - 1)
-            .await
-            .expect("a profile with a live descriptor is still cacheable");
-        assert_eq!(reused.fetched_at, held.fetched_at);
-    }
-
     /// The `CON-201` example profile, canonically serialised.
     fn fixture_profile_octets() -> Vec<u8> {
         use selfsame_app_identity::codec;
         use selfsame_app_identity::json::{self, Json};
-        let descriptor = |id: &str, host: &str, pairing: &str, route: &str, w: i64| {
+        let descriptor = |id: &str, origin: &str, weight: i64| {
             Json::obj([
-                ("id", Json::text(id)),
-                ("url", Json::text(format!("https://{host}"))),
-                ("protocol", Json::text("selfsame-rendezvous-v1")),
-                ("pairingUrl", Json::text(format!("https://{pairing}"))),
-                ("pairingProtocol", Json::text("selfsame-pairing-v1")),
-                ("pairingRoute", Json::text(route)),
+                ("operatorId", Json::text(id)),
+                ("relayOrigin", Json::text(origin)),
                 ("priority", Json::int(10)),
-                ("weight", Json::int(w)),
-                ("validUntil", Json::text("2027-07-30T00:00:00Z")),
+                ("weight", Json::int(weight)),
+                ("privacyPolicyDigest", Json::text(codec::b64url(&[1u8; 32]))),
+                (
+                    "conformanceEvidenceDigest",
+                    Json::text(codec::b64url(&[2u8; 32])),
+                ),
             ])
         };
         json::canonicalise(&Json::obj([
             ("profileVersion", Json::int(1)),
-            ("applicationId", Json::text("https://photos.example/selfsame/application")),
+            (
+                "applicationId",
+                Json::text("https://photos.example/selfsame/application"),
+            ),
             ("accountAuthority", Json::text("accounts.photos.example")),
-            ("verifierAudience", Json::text("https://photos.example/selfsame/application")),
+            (
+                "verifierAudience",
+                Json::text("https://photos.example/selfsame/application"),
+            ),
             (
                 "allowedPermissions",
-                Json::arr([Json::text("https://photos.example/selfsame/application#device")]),
+                Json::arr([Json::text(
+                    "https://photos.example/selfsame/application#device",
+                )]),
             ),
             (
                 "enrollment",
@@ -361,7 +369,9 @@ mod tests {
                     Json::arr([Json::obj([
                         (
                             "kid",
-                            Json::text("https://photos.example/selfsame/application#enrollment-2026-01"),
+                            Json::text(
+                                "https://photos.example/selfsame/application#enrollment-2026-01",
+                            ),
                         ),
                         (
                             "publicKeyJwk",
@@ -375,8 +385,12 @@ mod tests {
                 )]),
             ),
             (
-                "rendezvous",
-                Json::arr([descriptor("au-primary", "r.provider.example", "p.provider.example", "03", 80)]),
+                "cbclPairingRelays",
+                Json::arr([descriptor(
+                    "au-primary",
+                    "https://cbcl.provider.example",
+                    80,
+                )]),
             ),
             (
                 "stateResolvers",

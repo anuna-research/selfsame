@@ -1,0 +1,478 @@
+{
+  "entries": [
+    {
+      "class": "LEGACY-001",
+      "expected": "PairingVersionUnsupported",
+      "id": "LEGACY-001-001",
+      "name": "canonical-twelve-word-code",
+      "octets": "YWJhbmRvbi1hYmFuZG9uLWFiYW5kb24tYWJhbmRvbi1hYmFuZG9uLWFiYW5kb24tYWJhbmRvbi1hYmFuZG9uLWFiYW5kb24tYWJhbmRvbi1hYmFuZG9uLWFib3V0",
+      "permittedPreRejectionSideEffects": [],
+      "recognitionSource": "legacy-human",
+      "sha256": "def6bda107425f02228339b92e685728b1504de7265bdadd0add970385ecdd62",
+      "surface": "carrier"
+    },
+    {
+      "class": "LEGACY-001",
+      "expected": "RecognitionFailed",
+      "id": "LEGACY-001-002",
+      "name": "eleven-word-code",
+      "octets": "YWJhbmRvbi1hYmFuZG9uLWFiYW5kb24tYWJhbmRvbi1hYmFuZG9uLWFiYW5kb24tYWJhbmRvbi1hYmFuZG9uLWFiYW5kb24tYWJhbmRvbi1hYm91dA",
+      "permittedPreRejectionSideEffects": [],
+      "recognitionSource": "legacy-human",
+      "sha256": "7c2248d50a13a8f0cc05dad6f48196f0011531ca5135a0179101461bb6acc440",
+      "surface": "carrier"
+    },
+    {
+      "class": "LEGACY-001",
+      "expected": "RecognitionFailed",
+      "id": "LEGACY-001-003",
+      "name": "thirteen-word-code",
+      "octets": "YWJhbmRvbi1hYmFuZG9uLWFiYW5kb24tYWJhbmRvbi1hYmFuZG9uLWFiYW5kb24tYWJhbmRvbi1hYmFuZG9uLWFiYW5kb24tYWJhbmRvbi1hYmFuZG9uLWFiYW5kb24tYWJvdXQ",
+      "permittedPreRejectionSideEffects": [],
+      "recognitionSource": "legacy-human",
+      "sha256": "a40cdd543c8ca855e5d357960529c967a3b5eb57622e2550214aebfbdcadcf95",
+      "surface": "carrier"
+    },
+    {
+      "class": "LEGACY-001",
+      "expected": "PairingVersionUnsupported",
+      "id": "LEGACY-001-004",
+      "name": "unknown-lowercase-word",
+      "octets": "bm90YXdvcmQtYWJhbmRvbi1hYmFuZG9uLWFiYW5kb24tYWJhbmRvbi1hYmFuZG9uLWFiYW5kb24tYWJhbmRvbi1hYmFuZG9uLWFiYW5kb24tYWJhbmRvbi1hYm91dA",
+      "permittedPreRejectionSideEffects": [],
+      "recognitionSource": "legacy-human",
+      "sha256": "b32031b0a3d6acb31a136fbb312e05f844bface2686c29118b7d76bd6b91f8df",
+      "surface": "carrier"
+    },
+    {
+      "class": "LEGACY-001",
+      "expected": "PairingVersionUnsupported",
+      "id": "LEGACY-001-005",
+      "name": "checksum-error",
+      "octets": "YWJhbmRvbi1hYmFuZG9uLWFiYW5kb24tYWJhbmRvbi1hYmFuZG9uLWFiYW5kb24tYWJhbmRvbi1hYmFuZG9uLWFiYW5kb24tYWJhbmRvbi1hYmFuZG9uLXpvbw",
+      "permittedPreRejectionSideEffects": [],
+      "recognitionSource": "legacy-human",
+      "sha256": "ffa5c30630872d441bba14c32cbecd58e41aeb20a7cb7f0b8c65fae0fd00730a",
+      "surface": "carrier"
+    },
+    {
+      "class": "LEGACY-001",
+      "expected": "RecognitionFailed",
+      "id": "LEGACY-001-006",
+      "name": "case-mutation",
+      "octets": "QWJhbmRvbi1hYmFuZG9uLWFiYW5kb24tYWJhbmRvbi1hYmFuZG9uLWFiYW5kb24tYWJhbmRvbi1hYmFuZG9uLWFiYW5kb24tYWJhbmRvbi1hYmFuZG9uLWFib3V0",
+      "permittedPreRejectionSideEffects": [],
+      "recognitionSource": "legacy-human",
+      "sha256": "8b23256bab22395d794ac44f7a4352465c11fa4d179647a1f00e65ee8e1254aa",
+      "surface": "carrier"
+    },
+    {
+      "class": "LEGACY-002",
+      "expected": "PairingVersionUnsupported",
+      "id": "LEGACY-002-001",
+      "name": "canonical-machine-carrier",
+      "octets": "c2VsZnNhbWUtcGFpcmluZy12MjpleUpqSWpvaVFVRkJRVUZCUVVGQlFVRkJRVUZCUVVGQlFVRkJRU0lzSW5abGNuTnBiMjRpT2pKOQ",
+      "permittedPreRejectionSideEffects": [],
+      "recognitionSource": "legacy-qr",
+      "sha256": "56b89d8716e9f9bad02450fb204f93f0dbf8058daf81b65717259aca780d1ba3",
+      "surface": "carrier"
+    },
+    {
+      "class": "LEGACY-002",
+      "expected": "RecognitionFailed",
+      "id": "LEGACY-002-002",
+      "name": "invalid-base64url",
+      "octets": "c2VsZnNhbWUtcGFpcmluZy12MjpAQEA",
+      "permittedPreRejectionSideEffects": [],
+      "recognitionSource": "legacy-qr",
+      "sha256": "cb38b155a8082da00a5fc7e4ad9a0070c78c23005f630db5b0454c28f7361893",
+      "surface": "carrier"
+    },
+    {
+      "class": "LEGACY-002",
+      "expected": "RecognitionFailed",
+      "id": "LEGACY-002-003",
+      "name": "duplicate-member",
+      "octets": "c2VsZnNhbWUtcGFpcmluZy12MjpleUpqSWpvaVFVRkJRVUZCUVVGQlFVRkJRVUZCUVVGQlFVRkJRU0lzSW1NaU9pSkJRVUZCUVVGQlFVRkJRVUZCUVVGQlFVRkJRVUZCSWl3aWRtVnljMmx2YmlJNk1uMA",
+      "permittedPreRejectionSideEffects": [],
+      "recognitionSource": "legacy-qr",
+      "sha256": "6fd289fe0c1f4a2be1e5a550df76eb7c3a9e80abbd50d0e2e13499d0cc5a589e",
+      "surface": "carrier"
+    },
+    {
+      "class": "LEGACY-002",
+      "expected": "RecognitionFailed",
+      "id": "LEGACY-002-004",
+      "name": "trailing-input",
+      "octets": "c2VsZnNhbWUtcGFpcmluZy12MjpleUpqSWpvaVFVRkJRVUZCUVVGQlFVRkJRVUZCUVVGQlFVRkJRU0lzSW5abGNuTnBiMjRpT2pKOWVB",
+      "permittedPreRejectionSideEffects": [],
+      "recognitionSource": "legacy-qr",
+      "sha256": "2d85d53feed67df75a52d2d0340e8e16f05d3a1499e4ce1d10211ebe23bba941",
+      "surface": "carrier"
+    },
+    {
+      "class": "LEGACY-002",
+      "expected": "RecognitionFailed",
+      "id": "LEGACY-002-005",
+      "name": "wrong-version",
+      "octets": "c2VsZnNhbWUtcGFpcmluZy12MjpleUpqSWpvaVFVRkJRVUZCUVVGQlFVRkJRVUZCUVVGQlFVRkJRU0lzSW5abGNuTnBiMjRpT2pGOQ",
+      "permittedPreRejectionSideEffects": [],
+      "recognitionSource": "legacy-qr",
+      "sha256": "96939b8c604549effc14a2bb5fac1140e96c4496f66859ff90ef5c4586ec524b",
+      "surface": "carrier"
+    },
+    {
+      "class": "LEGACY-002",
+      "expected": "RecognitionFailed",
+      "id": "LEGACY-002-006",
+      "name": "non-canonical-json",
+      "octets": "c2VsZnNhbWUtcGFpcmluZy12MjpleUFpWXlJNklrRkJRVUZCUVVGQlFVRkJRVUZCUVVGQlFVRkJRVUVpTENKMlpYSnphVzl1SWpveWZR",
+      "permittedPreRejectionSideEffects": [],
+      "recognitionSource": "legacy-qr",
+      "sha256": "84eb30ea14e980872e6ee77a450dbe5784df07986a2bf22baff572cb6f3034b5",
+      "surface": "carrier"
+    },
+    {
+      "class": "LEGACY-003",
+      "expected": "PairingVersionUnsupported",
+      "id": "LEGACY-003-001",
+      "name": "canonical-pairing-descriptor",
+      "octets": "eyJpZCI6ImF1LXByaW1hcnkiLCJwYWlyaW5nUHJvdG9jb2wiOiJzZWxmc2FtZS1wYWlyaW5nLXYxIiwicGFpcmluZ1JvdXRlIjoiMDMiLCJwYWlyaW5nVXJsIjoiaHR0cHM6Ly9wYWlyaW5nLmV4YW1wbGUiLCJwcmlvcml0eSI6MTAsInByb3RvY29sIjoic2VsZnNhbWUtcmVuZGV6dm91cy12MSIsInVybCI6Imh0dHBzOi8vcmVuZGV6dm91cy5leGFtcGxlIiwidmFsaWRVbnRpbCI6IjIwMjctMDctMzBUMDA6MDA6MDBaIiwid2VpZ2h0Ijo4MH0",
+      "permittedPreRejectionSideEffects": [],
+      "recognitionSource": "selfsame-pairing-v1",
+      "sha256": "4edfcf1ed180e357d1c49f925b0ea97257513c1cb959cf2ac45ce3647e9cf3d1",
+      "surface": "profile"
+    },
+    {
+      "class": "LEGACY-003",
+      "expected": "RecognitionFailed",
+      "id": "LEGACY-003-002",
+      "name": "missing-field",
+      "octets": "eyJpZCI6ImF1LXByaW1hcnkiLCJwYWlyaW5nUm91dGUiOiIwMyIsInBhaXJpbmdVcmwiOiJodHRwczovL3BhaXJpbmcuZXhhbXBsZSIsInByaW9yaXR5IjoxMCwicHJvdG9jb2wiOiJzZWxmc2FtZS1yZW5kZXp2b3VzLXYxIiwidXJsIjoiaHR0cHM6Ly9yZW5kZXp2b3VzLmV4YW1wbGUiLCJ2YWxpZFVudGlsIjoiMjAyNy0wNy0zMFQwMDowMDowMFoiLCJ3ZWlnaHQiOjgwfQ",
+      "permittedPreRejectionSideEffects": [],
+      "recognitionSource": "selfsame-pairing-v1",
+      "sha256": "7dd9c928f351cbca3aa19a5c5ca969d8861f3dedd32feecda5b2a51d1ea94470",
+      "surface": "profile"
+    },
+    {
+      "class": "LEGACY-003",
+      "expected": "RecognitionFailed",
+      "id": "LEGACY-003-003",
+      "name": "extra-field",
+      "octets": "eyJpZCI6ImF1LXByaW1hcnkiLCJwYWlyaW5nUHJvdG9jb2wiOiJzZWxmc2FtZS1wYWlyaW5nLXYxIiwicGFpcmluZ1JvdXRlIjoiMDMiLCJwYWlyaW5nVXJsIjoiaHR0cHM6Ly9wYWlyaW5nLmV4YW1wbGUiLCJwcmlvcml0eSI6MTAsInByb3RvY29sIjoic2VsZnNhbWUtcmVuZGV6dm91cy12MSIsInN1cnByaXNlIjp0cnVlLCJ1cmwiOiJodHRwczovL3JlbmRlenZvdXMuZXhhbXBsZSIsInZhbGlkVW50aWwiOiIyMDI3LTA3LTMwVDAwOjAwOjAwWiIsIndlaWdodCI6ODB9",
+      "permittedPreRejectionSideEffects": [],
+      "recognitionSource": "selfsame-pairing-v1",
+      "sha256": "da7b107b9cd9fac880b437791c25c211da57755122b9671a82b96551ae2dcdc8",
+      "surface": "profile"
+    },
+    {
+      "class": "LEGACY-003",
+      "expected": "RecognitionFailed",
+      "id": "LEGACY-003-004",
+      "name": "wrong-origin",
+      "octets": "eyJpZCI6ImF1LXByaW1hcnkiLCJwYWlyaW5nUHJvdG9jb2wiOiJzZWxmc2FtZS1wYWlyaW5nLXYxIiwicGFpcmluZ1JvdXRlIjoiMDMiLCJwYWlyaW5nVXJsIjoiaHR0cDovL3BhaXJpbmcuZXhhbXBsZSIsInByaW9yaXR5IjoxMCwicHJvdG9jb2wiOiJzZWxmc2FtZS1yZW5kZXp2b3VzLXYxIiwidXJsIjoiaHR0cHM6Ly9yZW5kZXp2b3VzLmV4YW1wbGUiLCJ2YWxpZFVudGlsIjoiMjAyNy0wNy0zMFQwMDowMDowMFoiLCJ3ZWlnaHQiOjgwfQ",
+      "permittedPreRejectionSideEffects": [],
+      "recognitionSource": "selfsame-pairing-v1",
+      "sha256": "e4c29ccbe18372ecc9cf0327ecc91d7619c1d691ddceed6a47542388f7845c05",
+      "surface": "profile"
+    },
+    {
+      "class": "LEGACY-003",
+      "expected": "RecognitionFailed",
+      "id": "LEGACY-003-005",
+      "name": "wrong-protocol",
+      "octets": "eyJpZCI6ImF1LXByaW1hcnkiLCJwYWlyaW5nUHJvdG9jb2wiOiJjYmNsLXBhaXJpbmctdjEiLCJwYWlyaW5nUm91dGUiOiIwMyIsInBhaXJpbmdVcmwiOiJodHRwczovL3BhaXJpbmcuZXhhbXBsZSIsInByaW9yaXR5IjoxMCwicHJvdG9jb2wiOiJzZWxmc2FtZS1yZW5kZXp2b3VzLXYxIiwidXJsIjoiaHR0cHM6Ly9yZW5kZXp2b3VzLmV4YW1wbGUiLCJ2YWxpZFVudGlsIjoiMjAyNy0wNy0zMFQwMDowMDowMFoiLCJ3ZWlnaHQiOjgwfQ",
+      "permittedPreRejectionSideEffects": [],
+      "recognitionSource": "selfsame-pairing-v1",
+      "sha256": "d32cf611b4abd048e5cea7cfb4fc18f62aefff5c96fca2cf2018a0dc22151e46",
+      "surface": "profile"
+    },
+    {
+      "class": "LEGACY-004",
+      "expected": "PairingVersionUnsupported",
+      "id": "LEGACY-004-001",
+      "name": "offered-state",
+      "octets": "eyJzdGFnZSI6Im9mZmVyZWQiLCJ2ZXJzaW9uIjoxfQ",
+      "permittedPreRejectionSideEffects": [],
+      "recognitionSource": "proto-003-session-record",
+      "sha256": "88bcc58b29c68b5fce343a75a3485233cf4863b9b67f8c934ba37a4a825e0935",
+      "surface": "session-record"
+    },
+    {
+      "class": "LEGACY-004",
+      "expected": "PairingVersionUnsupported",
+      "id": "LEGACY-004-002",
+      "name": "confirmed-state",
+      "octets": "eyJzdGFnZSI6ImNvbmZpcm1lZCIsInZlcnNpb24iOjF9",
+      "permittedPreRejectionSideEffects": [],
+      "recognitionSource": "proto-003-session-record",
+      "sha256": "cbe740954ed715f1ef6adeab332fe941de42db6a65502ea43f8ffba3f841c7f1",
+      "surface": "session-record"
+    },
+    {
+      "class": "LEGACY-004",
+      "expected": "PairingVersionUnsupported",
+      "id": "LEGACY-004-003",
+      "name": "spent-state",
+      "octets": "eyJzdGFnZSI6InNwZW50IiwidmVyc2lvbiI6MX0",
+      "permittedPreRejectionSideEffects": [],
+      "recognitionSource": "proto-003-session-record",
+      "sha256": "754b116d4857e934b513e62c4d01d5d20a6c156e85deeb47e1dbd561b4f7f0ed",
+      "surface": "session-record"
+    },
+    {
+      "class": "LEGACY-004",
+      "expected": "RecognitionFailed",
+      "id": "LEGACY-004-004",
+      "name": "unknown-state",
+      "octets": "eyJzdGFnZSI6InVua25vd24iLCJ2ZXJzaW9uIjoxfQ",
+      "permittedPreRejectionSideEffects": [],
+      "recognitionSource": "proto-003-session-record",
+      "sha256": "98609e228a6a0ec098b53e16b3d24cb0471203eba44f96af1e865ade7ff8ec1c",
+      "surface": "session-record"
+    },
+    {
+      "class": "LEGACY-004",
+      "expected": "RecognitionFailed",
+      "id": "LEGACY-004-005",
+      "name": "wrong-version",
+      "octets": "eyJzdGFnZSI6Im9mZmVyZWQiLCJ2ZXJzaW9uIjoyfQ",
+      "permittedPreRejectionSideEffects": [],
+      "recognitionSource": "proto-003-session-record",
+      "sha256": "0a24c31c611b10cde0c6d7625cfc5d48a476f2f5e6ec8dc066ea011d97e2c201",
+      "surface": "session-record"
+    },
+    {
+      "class": "LEGACY-004",
+      "expected": "RecognitionFailed",
+      "id": "LEGACY-004-006",
+      "name": "truncation",
+      "octets": "eyJzdGFnZSI6Im9mZmVyZWQiLCJ2ZXJzaW9uIjo",
+      "permittedPreRejectionSideEffects": [],
+      "recognitionSource": "proto-003-session-record",
+      "sha256": "ca7fcf44fdbf9576b562d6c3cd647c02ed7d3aade5064b1780d9fc50c578919a",
+      "surface": "session-record"
+    },
+    {
+      "class": "LEGACY-004",
+      "expected": "RecognitionFailed",
+      "id": "LEGACY-004-007",
+      "name": "trailing-input",
+      "octets": "eyJzdGFnZSI6Im9mZmVyZWQiLCJ2ZXJzaW9uIjoxfXg",
+      "permittedPreRejectionSideEffects": [],
+      "recognitionSource": "proto-003-session-record",
+      "sha256": "80461114a50b54f6863b97f0eac7e75af14a1d86b6d18a5be52f878d7eec4410",
+      "surface": "session-record"
+    },
+    {
+      "class": "LEGACY-005",
+      "expected": "SurfaceUnavailable",
+      "id": "LEGACY-005-001",
+      "name": "proto-002-health",
+      "octets": "R0VUIC9oZWFsdGh6",
+      "permittedPreRejectionSideEffects": [],
+      "recognitionSource": "removed-http-route",
+      "sha256": "e5c6f2f2c093bc6fb340257bc93a7682bb08a934cae243fe692dd4d558856a2a",
+      "surface": "transport"
+    },
+    {
+      "class": "LEGACY-005",
+      "expected": "SurfaceUnavailable",
+      "id": "LEGACY-005-002",
+      "name": "proto-002-read",
+      "octets": "R0VUIC9wcm90bzAwMi9yZW5kZXp2b3VzL0FBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUE",
+      "permittedPreRejectionSideEffects": [],
+      "recognitionSource": "removed-http-route",
+      "sha256": "5412ab2543b22bbadf12931da370f13f3f6f9c0ca99d6daa464977789b6b0bcf",
+      "surface": "transport"
+    },
+    {
+      "class": "LEGACY-005",
+      "expected": "SurfaceUnavailable",
+      "id": "LEGACY-005-003",
+      "name": "proto-002-write",
+      "octets": "UFVUIC9wcm90bzAwMi9yZW5kZXp2b3VzL0FBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUE",
+      "permittedPreRejectionSideEffects": [],
+      "recognitionSource": "removed-http-route",
+      "sha256": "2ea65540d5790c75c4fb50de96b823414a5ac5773e10b194011f9b3bee973c58",
+      "surface": "transport"
+    },
+    {
+      "class": "LEGACY-005",
+      "expected": "SurfaceUnavailable",
+      "id": "LEGACY-005-004",
+      "name": "pairing-record-read",
+      "octets": "R0VUIC9wYWlyaW5nL3JlY29yZHMvQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQQ",
+      "permittedPreRejectionSideEffects": [],
+      "recognitionSource": "removed-http-route",
+      "sha256": "138f4c7c645a6623f6c68b1e08ce80ecb6692ba5868cf403be316e63d6b76183",
+      "surface": "transport"
+    },
+    {
+      "class": "LEGACY-005",
+      "expected": "SurfaceUnavailable",
+      "id": "LEGACY-005-005",
+      "name": "pairing-record-write",
+      "octets": "UFVUIC9wYWlyaW5nL3JlY29yZHMvQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQQ",
+      "permittedPreRejectionSideEffects": [],
+      "recognitionSource": "removed-http-route",
+      "sha256": "3b3d45c7576444bd032158f7c7c95c67afe2283ff362c37441bf7878649c9c31",
+      "surface": "transport"
+    },
+    {
+      "class": "LEGACY-005",
+      "expected": "SurfaceUnavailable",
+      "id": "LEGACY-005-006",
+      "name": "pairing-health",
+      "octets": "R0VUIC9wYWlyL3YxL2hlYWx0aHo",
+      "permittedPreRejectionSideEffects": [],
+      "recognitionSource": "removed-http-route",
+      "sha256": "62fa9988ef2c9f7dbc121653f7356da116334f5415f2951b7d3983b36a210150",
+      "surface": "transport"
+    },
+    {
+      "class": "LEGACY-005",
+      "expected": "SurfaceUnavailable",
+      "id": "LEGACY-005-007",
+      "name": "pairing-allocate",
+      "octets": "UE9TVCAvcGFpci92MS9zZXNzaW9ucw",
+      "permittedPreRejectionSideEffects": [],
+      "recognitionSource": "removed-http-route",
+      "sha256": "f8e30e0bc0709cefa91de420876289778d00a34d31ffb3ceed6886ab7bcf058b",
+      "surface": "transport"
+    },
+    {
+      "class": "LEGACY-005",
+      "expected": "SurfaceUnavailable",
+      "id": "LEGACY-005-008",
+      "name": "pairing-claim",
+      "octets": "UE9TVCAvcGFpci92MS9zZXNzaW9ucy80ODI3MTUvY2xhaW0",
+      "permittedPreRejectionSideEffects": [],
+      "recognitionSource": "removed-http-route",
+      "sha256": "3c5b3ec35072b985386001d525ca084b9bb75cc88e996f8a7bce05bfcf1cf840",
+      "surface": "transport"
+    },
+    {
+      "class": "LEGACY-005",
+      "expected": "SurfaceUnavailable",
+      "id": "LEGACY-005-009",
+      "name": "pairing-frame-pa",
+      "octets": "UFVUIC9wYWlyL3YxL3Nlc3Npb25zLzQ4MjcxNS9wQQ",
+      "permittedPreRejectionSideEffects": [],
+      "recognitionSource": "removed-http-route",
+      "sha256": "92b7fd2e58cb6e52bae274a4c3998da64d8f68014e8d7ba5aac0760616b954b1",
+      "surface": "transport"
+    },
+    {
+      "class": "LEGACY-005",
+      "expected": "SurfaceUnavailable",
+      "id": "LEGACY-005-010",
+      "name": "pairing-frame-pb",
+      "octets": "UFVUIC9wYWlyL3YxL3Nlc3Npb25zLzQ4MjcxNS9wQg",
+      "permittedPreRejectionSideEffects": [],
+      "recognitionSource": "removed-http-route",
+      "sha256": "1e161a14597ce52c03afa84efe1a00db39233f1f50a14867ec92f1d016b91b63",
+      "surface": "transport"
+    },
+    {
+      "class": "LEGACY-005",
+      "expected": "SurfaceUnavailable",
+      "id": "LEGACY-005-011",
+      "name": "pairing-frame-ca",
+      "octets": "UFVUIC9wYWlyL3YxL3Nlc3Npb25zLzQ4MjcxNS9jQQ",
+      "permittedPreRejectionSideEffects": [],
+      "recognitionSource": "removed-http-route",
+      "sha256": "3580b7415e8972019a0d8e42dd04bb4f65014aef806d3ba9a399659abce5dfb5",
+      "surface": "transport"
+    },
+    {
+      "class": "LEGACY-005",
+      "expected": "SurfaceUnavailable",
+      "id": "LEGACY-005-012",
+      "name": "pairing-frame-cb",
+      "octets": "UFVUIC9wYWlyL3YxL3Nlc3Npb25zLzQ4MjcxNS9jQg",
+      "permittedPreRejectionSideEffects": [],
+      "recognitionSource": "removed-http-route",
+      "sha256": "2b273118dc3ca3e15d34e778cfc8d13144d7976f1854ecf4303891d70059e465",
+      "surface": "transport"
+    },
+    {
+      "class": "LEGACY-005",
+      "expected": "SurfaceUnavailable",
+      "id": "LEGACY-005-013",
+      "name": "sse1-offer",
+      "octets": {
+        "prefixBase64url": "U1NFMQE",
+        "repeatByte": 0,
+        "repeatCount": 69627
+      },
+      "permittedPreRejectionSideEffects": [],
+      "recognitionSource": "proto-004-sse1",
+      "sha256": "77e01ad68765b8511d3b0fd58088fdc29d15308bc9a73dc0d7218ab36bad5c95",
+      "surface": "transport"
+    },
+    {
+      "class": "LEGACY-005",
+      "expected": "SurfaceUnavailable",
+      "id": "LEGACY-005-014",
+      "name": "sse1-bundle",
+      "octets": {
+        "prefixBase64url": "U1NFMQI",
+        "repeatByte": 0,
+        "repeatCount": 69627
+      },
+      "permittedPreRejectionSideEffects": [],
+      "recognitionSource": "proto-004-sse1",
+      "sha256": "624ca2bfbd63b19288bad9c8829992a22cc1e96fa6b2ebf27a946aeb2d573e8d",
+      "surface": "transport"
+    },
+    {
+      "class": "LEGACY-005",
+      "expected": "RecognitionFailed",
+      "id": "LEGACY-005-015",
+      "name": "sse1-wrong-role",
+      "octets": {
+        "prefixBase64url": "U1NFMQM",
+        "repeatByte": 0,
+        "repeatCount": 69627
+      },
+      "permittedPreRejectionSideEffects": [],
+      "recognitionSource": "proto-004-sse1",
+      "sha256": "1d58033691111492e92049973d402b0d04bbfe8d6833c3f676765aa3e1c8c566",
+      "surface": "transport"
+    },
+    {
+      "class": "LEGACY-005",
+      "expected": "RecognitionFailed",
+      "id": "LEGACY-005-016",
+      "name": "sse1-oversize",
+      "octets": {
+        "prefixBase64url": "U1NFMQE",
+        "repeatByte": 0,
+        "repeatCount": 69628
+      },
+      "permittedPreRejectionSideEffects": [],
+      "recognitionSource": "proto-004-sse1",
+      "sha256": "2adc14aabfab49cb93d66ecd05f51a5771b60573d23dd0b4fbcd8d643df7663e",
+      "surface": "transport"
+    },
+    {
+      "class": "LEGACY-005",
+      "expected": "RecognitionFailed",
+      "id": "LEGACY-005-017",
+      "name": "non-canonical-route",
+      "octets": "R0VUICAvaGVhbHRoeg",
+      "permittedPreRejectionSideEffects": [],
+      "recognitionSource": "removed-http-route",
+      "sha256": "dc882ab090ecf9aa79ad0e28ee57ab27e00b36d0fb46b8a8dc3f5c32e881ec62",
+      "surface": "transport"
+    }
+  ],
+  "generator": {
+    "command": "python3 test-vectors/spec-007-legacy/generate.py --write",
+    "path": "test-vectors/spec-007-legacy/generate.py",
+    "sha256": "d11944f47164ed093132c9b61256f9a108a647fa35de80c5a529d7f2e1d4dc85"
+  },
+  "schema": "selfsame-legacy-rejection-corpus-v1",
+  "sourceRevision": "5f57a586e7dfa5be88c51f36a808fc60faf24c09"
+}

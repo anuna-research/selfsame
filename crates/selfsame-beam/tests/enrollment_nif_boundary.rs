@@ -100,11 +100,11 @@ fn exported_nif_binds_the_declared_key_and_refuses_hostile_beam_terms_opaquely()
 
     let compact = fs::read_to_string(directory.path().join("compact.bin"))
         .expect("the accepting NIF call must write its compact JWS");
-    let descriptor_digest = codec::b64url(&fixture.profile.rendezvous[0].digest);
+    let descriptor_digest = codec::b64url(&fixture.profile.cbcl_pairing_relays[0].digest);
     let observed = Observed {
         profile: &fixture.profile,
         offer: &fixture.offer,
-        provider_id: &fixture.profile.rendezvous[0].id,
+        provider_id: &fixture.profile.cbcl_pairing_relays[0].operator_id,
         descriptor_digest: &descriptor_digest,
         platform_binding_id: None,
         now: NOW + 1,
@@ -235,7 +235,7 @@ fn fixture() -> Fixture {
         issued_at: NOW,
         expires_at: NOW + 120,
     };
-    let descriptor = &profile.rendezvous[0];
+    let descriptor = &profile.cbcl_pairing_relays[0];
     let statement = EnrollmentStatement {
         request_id: offer.request_id.clone(),
         ceremony_id: offer.ceremony_id.clone(),
@@ -245,7 +245,7 @@ fn fixture() -> Fixture {
         account_scope_id: offer.account_scope_id.clone(),
         device_key_digest: enrollment::device_key_digest(&offer),
         requested_permissions: offer.requested_permissions.clone(),
-        provider_id: descriptor.id.clone(),
+        provider_id: descriptor.operator_id.clone(),
         descriptor_digest: codec::b64url(&descriptor.digest),
         offer_digest: offer.digest(),
         platform_binding_id: PLATFORM_BINDING.to_string(),
@@ -299,17 +299,20 @@ fn profile(public_key: &[u8; 32]) -> ApplicationProfile {
             ]),
         ),
         (
-            "rendezvous",
+            "cbclPairingRelays",
             Json::arr([Json::obj([
-                ("id", Json::text("au-primary")),
-                ("url", Json::text("https://rendezvous.example")),
-                ("protocol", Json::text("selfsame-rendezvous-v1")),
-                ("pairingUrl", Json::text("https://pairing.example")),
-                ("pairingProtocol", Json::text("selfsame-pairing-v1")),
-                ("pairingRoute", Json::text("03")),
+                ("operatorId", Json::text("au-primary")),
+                ("relayOrigin", Json::text("https://cbcl.example")),
                 ("priority", Json::int(10)),
                 ("weight", Json::int(80)),
-                ("validUntil", Json::text("2027-07-30T00:00:00Z")),
+                (
+                    "privacyPolicyDigest",
+                    Json::text(codec::b64url(&[11u8; 32])),
+                ),
+                (
+                    "conformanceEvidenceDigest",
+                    Json::text(codec::b64url(&[12u8; 32])),
+                ),
             ])]),
         ),
         (

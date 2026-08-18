@@ -1,19 +1,40 @@
 ---
 id: PROTO-003
 title: Selfsame Pairing Protocol v1 — routable num-word-word SPAKE2
-status: draft
+status: deprecated
 tier: 1
-version: 0.5.2
+version: 0.6.0
 audience: application developer, SDK implementer, wallet implementer, infrastructure operator, security reviewer
 author: Anuna Research (drafted with Codex, 2026-07-30; amended with Claude, 2026-07-31)
-last-updated: 2026-08-07
+last-updated: 2026-08-17
 owner-repo: selfsame
 affects-repos: selfsame, hark, cbcl-bus, adopting applications, independent pairing implementations
-review-gate: not-approved — Tier-1; independent cryptographic vectors, cross-model adversarial review, privacy review, production-operator review, and human cryptography sign-off are outstanding
+review-gate: deprecated-for-selfsame-by-SPEC-007; production-not-approved
+superseded-by: SPEC-007
 depends-on: SPEC-004; PROTO-002; PROTO-004; RFC 2104; RFC 2119; RFC 3986; RFC 4648; RFC 5234; RFC 5869; RFC 6234; RFC 8174; RFC 8785; RFC 9110; RFC 9382; RFC 9496; BIP-39
 ---
 
 # PROTO-003 — Selfsame Pairing Protocol v1
+
+## Deprecation disposition
+
+[[SPEC-007-cbcl-pairing-cutover]] deprecates this protocol for Selfsame.
+These artifacts are no longer executable Selfsame pairing authority:
+
+- REQ-401 through REQ-409 and NFR-401 through NFR-403;
+- ADR-401 through ADR-411;
+- CON-401 through CON-409; and
+- TEST-401 through TEST-414.
+
+The exact legacy carriers and records remain immutable rejection fixtures only.
+No positive legacy path, fallback, negotiation, or storage importer survives the cutover.
+Vectors: no legacy octet changes; TEST-809 and TEST-810 preserve their exact provenance.
+Evidence: [[SPEC-007-cbcl-pairing-cutover#TEST-809]],
+[[SPEC-007-cbcl-pairing-cutover#TEST-810]], and
+[[SPEC-007-cbcl-pairing-cutover#TEST-819]].
+Owner: Selfsame human protocol owner.
+Approved: 2026-08-17.
+Production approval: not granted.
 
 ## Orientation
 
@@ -2218,6 +2239,12 @@ Standards constraints that are easy to miss:
   mnemonic and MUST NOT be entered as one.
 
 ## Changelog
+
+- **0.6.0 — 2026-08-17 — deprecated for Selfsame.**
+  [[SPEC-007-cbcl-pairing-cutover]] replaces the complete executable path.
+  Immutable legacy octets remain rejection evidence only.
+  No legacy octet changes.
+  All previous production gates remain unpassed.
 
 - **0.5.2 — 2026-08-07 — draft, normative.** Permits an optional canonical
   path prefix in `pairingUrl`, while leaving the mailbox `url` origin-only.

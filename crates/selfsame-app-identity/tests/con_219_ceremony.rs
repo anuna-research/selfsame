@@ -1,6 +1,5 @@
-//! `TEST-228`, `TEST-231`, `TEST-236` — enrollment evidence and replay, the
-//! non-authoritative callback, and the ceremony payloads with their offer
-//! digest.
+//! `TEST-228` and `TEST-236` — enrollment evidence and replay, and the ceremony
+//! payloads with their offer digest.
 //!
 //! The three obligations these tests exist for, in the order they bite:
 //!
@@ -11,21 +10,17 @@
 //! 2. **`requestId` is consumed before the first side effect**, whether the
 //!    request is approved or denied, so a denial cannot be retried into an
 //!    approval.
-//! 3. **The callback carries no authority.** `REQ-224`: authorization follows
-//!    only the bundle and `CON-206`, "never from an OS callback, foreground
-//!    event, URL parameter, success screen, or wallet process exit."
-
 mod common;
 
 use common::*;
-use selfsame_app_identity::ceremony::{
-    self, BundlePayload, CeremonyError, DispatchResult, Handoff, HandoffReturn, OfferCore, Outcome,
-};
+use selfsame_app_identity::ceremony::{self, BundlePayload, CeremonyError, OfferCore};
 use selfsame_app_identity::codec;
-use selfsame_app_identity::enrollment::{self, EnrollmentError, EnrollmentStatement, Observed, RequestLedger};
+use selfsame_app_identity::enrollment::{
+    self, EnrollmentError, EnrollmentStatement, Observed, RequestLedger,
+};
 use selfsame_app_identity::json::{self, Json};
-use selfsame_app_identity::profile::{ApplicationProfile, MobileBinding};
-use selfsame_app_identity::{didkey, selection};
+use selfsame_app_identity::profile::ApplicationProfile;
+use selfsame_app_identity::{didkey, provider_hint};
 
 const NOW_OFFER: i64 = NOW;
 
@@ -34,7 +29,9 @@ fn profile() -> ApplicationProfile {
 }
 
 fn offer_core(p: &ApplicationProfile) -> OfferCore {
-    let device = ed25519_dalek::SigningKey::from_bytes(&[3u8; 32]).verifying_key().to_bytes();
+    let device = ed25519_dalek::SigningKey::from_bytes(&[3u8; 32])
+        .verifying_key()
+        .to_bytes();
     OfferCore {
         ceremony_id: codec::b64url(&[1u8; 32]),
         request_id: codec::b64url(&[2u8; 32]),
@@ -60,12 +57,15 @@ const KID: &str = "https://photos.example/selfsame/application#enrollment-2026-0
 /// A profile whose enrollment key is the one [`backend_key`] holds.
 fn profile_with_real_key() -> ApplicationProfile {
     let public = backend_key().verifying_key().to_bytes();
-    let octets = with_nested("enrollment.requestSigningKeys.publicKeyJwk.x", Json::text(codec::b64url(&public)));
+    let octets = with_nested(
+        "enrollment.requestSigningKeys.publicKeyJwk.x",
+        Json::text(codec::b64url(&public)),
+    );
     ApplicationProfile::recognise(&octets).unwrap()
 }
 
 fn statement(p: &ApplicationProfile, core: &OfferCore) -> EnrollmentStatement {
-    let descriptor = &p.rendezvous[0];
+    let descriptor = &p.cbcl_pairing_relays[0];
     EnrollmentStatement {
         request_id: core.request_id.clone(),
         ceremony_id: core.ceremony_id.clone(),
@@ -75,7 +75,7 @@ fn statement(p: &ApplicationProfile, core: &OfferCore) -> EnrollmentStatement {
         account_scope_id: core.account_scope_id.clone(),
         device_key_digest: enrollment::device_key_digest(core),
         requested_permissions: core.requested_permissions.clone(),
-        provider_id: descriptor.id.clone(),
+        provider_id: descriptor.operator_id.clone(),
         descriptor_digest: codec::b64url(&descriptor.digest),
         offer_digest: core.digest(),
         platform_binding_id: "apple:TEAM123456:com.example.photos:https://photos.example".into(),
@@ -93,7 +93,7 @@ fn observed<'a>(
     Observed {
         profile: p,
         offer: core,
-        provider_id: &p.rendezvous[0].id,
+        provider_id: &p.cbcl_pairing_relays[0].operator_id,
         descriptor_digest,
         platform_binding_id: None,
         now: NOW_OFFER + 1,
@@ -123,11 +123,11 @@ fn the_offer_digest_is_computed_over_offer_core_and_not_over_the_sealed_payload(
     let core = offer_core(&p);
     let digest = core.digest();
 
-    let hint = selection::ProviderHint {
+    let hint = provider_hint::ProviderHint {
         application_id: APPLICATION_ID.into(),
         profile_version: 1,
-        provider_id: p.rendezvous[0].id.clone(),
-        descriptor_digest: codec::b64url(&p.rendezvous[0].digest),
+        provider_id: p.cbcl_pairing_relays[0].operator_id.clone(),
+        descriptor_digest: codec::b64url(&p.cbcl_pairing_relays[0].digest),
         offer_digest: digest.clone(),
     };
     let evidence = enrollment::sign(&statement(&p, &core), KID, &backend_key());
@@ -146,7 +146,10 @@ fn the_offer_digest_is_computed_over_offer_core_and_not_over_the_sealed_payload(
     // Digesting the whole payload gives a different value — which is what an
     // implementation that "accommodated" the self-reference would compute.
     let whole = ceremony::offer_digest(&json::recognise(&sealed, LIMITS).unwrap());
-    assert_ne!(whole, digest, "the two excluded members must change the digest");
+    assert_ne!(
+        whole, digest,
+        "the two excluded members must change the digest"
+    );
 }
 
 #[test]
@@ -154,10 +157,22 @@ fn changing_any_offer_core_member_changes_the_digest() {
     let p = profile();
     let base = offer_core(&p).digest();
     for mutated in [
-        OfferCore { request_id: codec::b64url(&[9u8; 32]), ..offer_core(&p) },
-        OfferCore { account_scope_id: codec::b64url(&[9u8; 32]), ..offer_core(&p) },
-        OfferCore { expires_at: NOW_OFFER + 119, ..offer_core(&p) },
-        OfferCore { requested_permissions: vec![format!("{APPLICATION_ID}#other")], ..offer_core(&p) },
+        OfferCore {
+            request_id: codec::b64url(&[9u8; 32]),
+            ..offer_core(&p)
+        },
+        OfferCore {
+            account_scope_id: codec::b64url(&[9u8; 32]),
+            ..offer_core(&p)
+        },
+        OfferCore {
+            expires_at: NOW_OFFER + 119,
+            ..offer_core(&p)
+        },
+        OfferCore {
+            requested_permissions: vec![format!("{APPLICATION_ID}#other")],
+            ..offer_core(&p)
+        },
     ] {
         assert_ne!(mutated.digest(), base);
     }
@@ -172,7 +187,9 @@ fn an_offer_with_an_unknown_or_missing_member_is_refused() {
     let evidence = enrollment::sign(&statement(&p, &core), KID, &backend_key());
     let hint = Json::obj([("applicationId", Json::text(APPLICATION_ID))]);
 
-    let Json::Object(mut members) = core.to_json() else { unreachable!() };
+    let Json::Object(mut members) = core.to_json() else {
+        unreachable!()
+    };
     members.push(("enrollmentEvidence".into(), Json::text(evidence.clone())));
     members.push(("providerHint".into(), hint.clone()));
     members.push(("surprise".into(), Json::int(1)));
@@ -182,9 +199,13 @@ fn an_offer_with_an_unknown_or_missing_member_is_refused() {
         Err(CeremonyError::UnknownMember("surprise".into()))
     );
 
-    let Json::Object(members) = core.to_json() else { unreachable!() };
-    let short: Vec<(String, Json)> =
-        members.into_iter().filter(|(k, _)| k != "accountScopeId").collect();
+    let Json::Object(members) = core.to_json() else {
+        unreachable!()
+    };
+    let short: Vec<(String, Json)> = members
+        .into_iter()
+        .filter(|(k, _)| k != "accountScopeId")
+        .collect();
     let mut short = short;
     short.push(("enrollmentEvidence".into(), Json::text(evidence)));
     short.push(("providerHint".into(), hint));
@@ -203,7 +224,9 @@ fn an_offer_whose_device_did_does_not_encode_its_own_jwk_is_refused() {
     core.device_did = didkey::encode(&[7u8; 32].map(|_| 0u8));
     let core = OfferCore {
         device_did: didkey::encode(
-            &ed25519_dalek::SigningKey::from_bytes(&[88u8; 32]).verifying_key().to_bytes(),
+            &ed25519_dalek::SigningKey::from_bytes(&[88u8; 32])
+                .verifying_key()
+                .to_bytes(),
         ),
         ..core
     };
@@ -223,8 +246,13 @@ fn the_bundle_carries_the_grant_verbatim_and_round_trips_it() {
     // extraction by a non-CBCL application." Byte identity is the whole claim.
     let c = Ceremony::accepted();
     let grant = String::from_utf8(c.grant_bytes.clone()).unwrap();
-    let octets = ceremony::build_bundle(&codec::b64url(&[1u8; 32]), &codec::b64url(&[2u8; 32]), &grant, None)
-        .unwrap();
+    let octets = ceremony::build_bundle(
+        &codec::b64url(&[1u8; 32]),
+        &codec::b64url(&[2u8; 32]),
+        &grant,
+        None,
+    )
+    .unwrap();
     let bundle = ceremony::recognise_bundle(&octets).unwrap();
     assert_eq!(bundle.grant, grant);
     assert_eq!(bundle.grant.as_bytes(), c.grant_bytes.as_slice());
@@ -239,7 +267,10 @@ fn a_bundle_may_inline_a_closure_and_refuses_rather_than_truncating() {
 
     let small = vec![7u8; 1_000];
     let octets = ceremony::build_bundle(&ids.0, &ids.1, &grant, Some(&small)).unwrap();
-    assert_eq!(ceremony::recognise_bundle(&octets).unwrap().issuer_closure, Some(small));
+    assert_eq!(
+        ceremony::recognise_bundle(&octets).unwrap().issuer_closure,
+        Some(small)
+    );
 
     // "A payload exceeding the bound is a `PayloadTooLarge` failure, never a
     // silent truncation."
@@ -313,7 +344,7 @@ fn a_bundle_with_the_wrong_media_type_or_role_is_refused() {
 fn a_well_formed_statement_verifies_against_the_authenticated_profile() {
     let p = profile_with_real_key();
     let core = offer_core(&p);
-    let digest = codec::b64url(&p.rendezvous[0].digest);
+    let digest = codec::b64url(&p.cbcl_pairing_relays[0].digest);
     let compact = enrollment::sign(&statement(&p, &core), KID, &backend_key());
     let verified = enrollment::verify(&compact, &observed(&p, &core, &digest)).unwrap();
     assert_eq!(verified.request_id, core.request_id);
@@ -327,7 +358,7 @@ fn a_statement_signed_by_a_key_outside_the_profile_is_unverified() {
     // credential CON-201 forbids embedding in a native app.
     let p = profile_with_real_key();
     let core = offer_core(&p);
-    let digest = codec::b64url(&p.rendezvous[0].digest);
+    let digest = codec::b64url(&p.cbcl_pairing_relays[0].digest);
 
     let impostor = ed25519_dalek::SigningKey::from_bytes(&[123u8; 32]);
     let compact = enrollment::sign(&statement(&p, &core), KID, &impostor);
@@ -355,11 +386,14 @@ fn each_binding_mismatch_returns_its_own_closed_token() {
     // CON-226 requires two stacks to agree on *which* check fired.
     let p = profile_with_real_key();
     let core = offer_core(&p);
-    let digest = codec::b64url(&p.rendezvous[0].digest);
+    let digest = codec::b64url(&p.cbcl_pairing_relays[0].digest);
 
     let cases: Vec<(EnrollmentStatement, EnrollmentError)> = vec![
         (
-            EnrollmentStatement { profile_digest: codec::b64url(&[0u8; 32]), ..statement(&p, &core) },
+            EnrollmentStatement {
+                profile_digest: codec::b64url(&[0u8; 32]),
+                ..statement(&p, &core)
+            },
             EnrollmentError::ProfileMismatch,
         ),
         // The profile block has three clauses and only its third was ever the
@@ -384,7 +418,10 @@ fn each_binding_mismatch_returns_its_own_closed_token() {
         // value either, which is what leaves the offer comparison as the only
         // thing that can refuse it.
         (
-            EnrollmentStatement { expires_at: core.expires_at - 30, ..statement(&p, &core) },
+            EnrollmentStatement {
+                expires_at: core.expires_at - 30,
+                ..statement(&p, &core)
+            },
             EnrollmentError::OfferMismatch,
         ),
         (
@@ -409,15 +446,24 @@ fn each_binding_mismatch_returns_its_own_closed_token() {
             EnrollmentError::PermissionMismatch,
         ),
         (
-            EnrollmentStatement { provider_id: "global-secondary".into(), ..statement(&p, &core) },
+            EnrollmentStatement {
+                provider_id: "global-secondary".into(),
+                ..statement(&p, &core)
+            },
             EnrollmentError::ProviderMismatch,
         ),
         (
-            EnrollmentStatement { offer_digest: codec::b64url(&[9u8; 32]), ..statement(&p, &core) },
+            EnrollmentStatement {
+                offer_digest: codec::b64url(&[9u8; 32]),
+                ..statement(&p, &core)
+            },
             EnrollmentError::OfferMismatch,
         ),
         (
-            EnrollmentStatement { request_id: codec::b64url(&[9u8; 32]), ..statement(&p, &core) },
+            EnrollmentStatement {
+                request_id: codec::b64url(&[9u8; 32]),
+                ..statement(&p, &core)
+            },
             EnrollmentError::OfferMismatch,
         ),
         (
@@ -454,16 +500,34 @@ fn inherited_con_214_grammars_are_part_of_recognition_for_both_paths() {
     }
 
     let cases = [
-        EnrollmentStatement { profile_version: 2, ..base.clone() },
-        EnrollmentStatement { application_id: "not-an-https-uri".into(), ..base.clone() },
-        EnrollmentStatement { account_scope_id: "not-base64url".into(), ..base.clone() },
+        EnrollmentStatement {
+            profile_version: 2,
+            ..base.clone()
+        },
+        EnrollmentStatement {
+            application_id: "not-an-https-uri".into(),
+            ..base.clone()
+        },
+        EnrollmentStatement {
+            account_scope_id: "not-base64url".into(),
+            ..base.clone()
+        },
         EnrollmentStatement {
             requested_permissions: vec!["https://elsewhere.example/app#device".into()],
             ..base.clone()
         },
-        EnrollmentStatement { requested_permissions: too_many_permissions, ..base.clone() },
-        EnrollmentStatement { provider_id: "Not-A-Provider".into(), ..base.clone() },
-        EnrollmentStatement { platform_binding_id: "not-a-binding".into(), ..base.clone() },
+        EnrollmentStatement {
+            requested_permissions: too_many_permissions,
+            ..base.clone()
+        },
+        EnrollmentStatement {
+            provider_id: "Not-A-Provider".into(),
+            ..base.clone()
+        },
+        EnrollmentStatement {
+            platform_binding_id: "not-a-binding".into(),
+            ..base.clone()
+        },
         EnrollmentStatement {
             return_uri: "https://elsewhere.example/return".into(),
             ..base.clone()
@@ -507,11 +571,14 @@ fn an_android_binding_with_nothing_attributed_is_refused_and_an_apple_one_is_not
     // having its adapter report nothing.
     let p = profile_with_real_key();
     let core = offer_core(&p);
-    let digest = codec::b64url(&p.rendezvous[0].digest);
+    let digest = codec::b64url(&p.cbcl_pairing_relays[0].digest);
     let android = format!("android:com.example.photos:{}", codec::b64url(&[2u8; 32]));
 
     let compact = enrollment::sign(
-        &EnrollmentStatement { platform_binding_id: android.clone(), ..statement(&p, &core) },
+        &EnrollmentStatement {
+            platform_binding_id: android.clone(),
+            ..statement(&p, &core)
+        },
         KID,
         &backend_key(),
     );
@@ -522,8 +589,10 @@ fn an_android_binding_with_nothing_attributed_is_refused_and_an_apple_one_is_not
     );
 
     // The same statement, with the package the OS actually reported.
-    let attributed =
-        Observed { platform_binding_id: Some(&android), ..observed(&p, &core, &digest) };
+    let attributed = Observed {
+        platform_binding_id: Some(&android),
+        ..observed(&p, &core, &digest)
+    };
     assert!(
         enrollment::verify(&compact, &attributed).is_ok(),
         "an attributed Android caller matching the binding is admitted",
@@ -549,13 +618,15 @@ fn an_attributed_caller_that_is_not_the_binding_the_statement_names_is_refused()
     // device is exactly what the comparison stands between.
     let p = profile_with_real_key();
     let core = offer_core(&p);
-    let digest = codec::b64url(&p.rendezvous[0].digest);
+    let digest = codec::b64url(&p.cbcl_pairing_relays[0].digest);
     let android = format!("android:com.example.photos:{}", codec::b64url(&[2u8; 32]));
 
     // The statement names Apple; the platform attributed Android.
     let apple = enrollment::sign(&statement(&p, &core), KID, &backend_key());
-    let elsewhere =
-        Observed { platform_binding_id: Some(&android), ..observed(&p, &core, &digest) };
+    let elsewhere = Observed {
+        platform_binding_id: Some(&android),
+        ..observed(&p, &core, &digest)
+    };
     assert_eq!(
         enrollment::verify(&apple, &elsewhere),
         Err(EnrollmentError::PlatformBindingMismatch),
@@ -566,8 +637,10 @@ fn an_attributed_caller_that_is_not_the_binding_the_statement_names_is_refused()
     // refusal above is the comparison rather than the presence of an
     // observation.
     let apple_id = "apple:TEAM123456:com.example.photos:https://photos.example";
-    let matching =
-        Observed { platform_binding_id: Some(apple_id), ..observed(&p, &core, &digest) };
+    let matching = Observed {
+        platform_binding_id: Some(apple_id),
+        ..observed(&p, &core, &digest)
+    };
     assert!(enrollment::verify(&apple, &matching).is_ok());
 }
 
@@ -589,7 +662,7 @@ fn a_statement_matching_the_profile_and_contradicting_the_offer_is_refused() {
     // agreeing with the profile. `offerDigest` is taken from the mutated offer
     // so the digest check does not fire first and mask which clause refused.
     let p = profile_with_real_key();
-    let digest = codec::b64url(&p.rendezvous[0].digest);
+    let digest = codec::b64url(&p.cbcl_pairing_relays[0].digest);
 
     let mut by_application = offer_core(&p);
     by_application.application_id = OTHER_APPLICATION_ID.into();
@@ -640,12 +713,21 @@ fn a_statement_matching_the_profile_and_contradicting_the_offer_is_refused() {
 fn both_timestamp_boundaries_are_exercised() {
     let p = profile_with_real_key();
     let core = offer_core(&p);
-    let digest = codec::b64url(&p.rendezvous[0].digest);
+    let digest = codec::b64url(&p.cbcl_pairing_relays[0].digest);
     let compact = enrollment::sign(&statement(&p, &core), KID, &backend_key());
 
-    let at = |now: i64| Observed { now, ..observed(&p, &core, &digest) };
-    assert!(enrollment::verify(&compact, &at(core.issued_at)).is_ok(), "at issuedAt");
-    assert!(enrollment::verify(&compact, &at(core.expires_at - 1)).is_ok(), "one second before");
+    let at = |now: i64| Observed {
+        now,
+        ..observed(&p, &core, &digest)
+    };
+    assert!(
+        enrollment::verify(&compact, &at(core.issued_at)).is_ok(),
+        "at issuedAt"
+    );
+    assert!(
+        enrollment::verify(&compact, &at(core.expires_at - 1)).is_ok(),
+        "one second before"
+    );
     assert_eq!(
         enrollment::verify(&compact, &at(core.issued_at - 1)),
         Err(EnrollmentError::EnrollmentExpired)
@@ -661,7 +743,7 @@ fn both_timestamp_boundaries_are_exercised() {
 fn a_window_longer_than_one_hundred_and_twenty_seconds_is_malformed() {
     let p = profile_with_real_key();
     let core = offer_core(&p);
-    let digest = codec::b64url(&p.rendezvous[0].digest);
+    let digest = codec::b64url(&p.cbcl_pairing_relays[0].digest);
     let long = EnrollmentStatement {
         expires_at: core.issued_at + 121,
         ..statement(&p, &core)
@@ -684,9 +766,15 @@ fn every_retry_of_byte_identical_evidence_returns_enrollment_replay() {
     let core = offer_core(&p);
     let mut ledger = RequestLedger::new();
 
-    assert!(ledger.consume(&core.request_id).is_ok(), "the first use succeeds");
+    assert!(
+        ledger.consume(&core.request_id).is_ok(),
+        "the first use succeeds"
+    );
     for _ in 0..5 {
-        assert_eq!(ledger.consume(&core.request_id), Err(EnrollmentError::EnrollmentReplay));
+        assert_eq!(
+            ledger.consume(&core.request_id),
+            Err(EnrollmentError::EnrollmentReplay)
+        );
     }
     // A crash after consumption loses the ceremony rather than permitting a
     // second one, because the record is what survives, not the decision.
@@ -708,7 +796,10 @@ fn a_denial_consumes_the_request_id_just_as_an_approval_does() {
     let mut ledger = RequestLedger::new();
     ledger.consume(&core.request_id).unwrap();
     // The person then declines. Nothing gives the identifier back.
-    assert_eq!(ledger.consume(&core.request_id), Err(EnrollmentError::EnrollmentReplay));
+    assert_eq!(
+        ledger.consume(&core.request_id),
+        Err(EnrollmentError::EnrollmentReplay)
+    );
 }
 
 #[test]
@@ -733,226 +824,24 @@ fn every_closed_token_is_reachable_and_named() {
     for token in enrollment::ERROR_TOKENS {
         assert!(!token.is_empty());
     }
-    assert_eq!(EnrollmentError::EnrollmentReplay.to_string(), "EnrollmentReplay");
-    assert_eq!(EnrollmentError::OfferMismatch.to_string(), "OfferMismatch");
-}
-
-// ── TEST-227 / TEST-230: the handoff ───────────────────────────────────────
-
-#[test]
-fn the_handoff_carries_the_code_and_no_routing_information() {
-    // CON-215: "Application identity and provider selection are not carried
-    // here … so the handoff cannot become a second routing path."
-    let handoff = Handoff {
-        ceremony_id: codec::b64url(&[1u8; 32]),
-        offer_digest: codec::b64url(&[5u8; 32]),
-        code: [9u8; 16],
-        return_uri: Some("https://photos.example/.well-known/selfsame/return".into()),
-    };
-    let octets = json::canonicalise(&handoff.to_json());
-    let recognised = Handoff::recognise(&octets).unwrap();
-    assert_eq!(recognised, handoff);
-
-    let text = String::from_utf8(octets).unwrap();
-    for absent in ["applicationId", "providerId", "pairingUrl", "nameplate", "route"] {
-        assert!(!text.contains(absent), "the handoff carries `{absent}`");
-    }
-}
-
-#[test]
-fn a_handoff_with_an_unknown_member_or_a_wrong_version_is_refused() {
-    let base = Handoff {
-        ceremony_id: codec::b64url(&[1u8; 32]),
-        offer_digest: codec::b64url(&[5u8; 32]),
-        code: [9u8; 16],
-        return_uri: None,
-    };
-    let Json::Object(mut members) = base.to_json() else { unreachable!() };
-    members.push(("applicationId".into(), Json::text(APPLICATION_ID)));
     assert_eq!(
-        Handoff::recognise(&json::canonicalise(&Json::Object(members))),
-        Err(CeremonyError::UnknownMember("applicationId".into()))
+        EnrollmentError::EnrollmentReplay.to_string(),
+        "EnrollmentReplay"
     );
-
-    let Json::Object(mut members) = base.to_json() else { unreachable!() };
-    members.iter_mut().find(|(k, _)| k == "handoffVersion").unwrap().1 = Json::int(2);
-    assert!(matches!(
-        Handoff::recognise(&json::canonicalise(&Json::Object(members))),
-        Err(CeremonyError::BadValue { path, .. }) if path == "handoffVersion"
-    ));
-}
-
-#[test]
-fn a_malformed_return_uri_is_refused_rather_than_read_as_absent() {
-    // `and_then(Json::as_str)` turned every present-but-not-a-string value into
-    // `None`, so a malformed handoff recognised as a well-formed one with no
-    // return — the difference between "refused" and "silently accepted".
-    let base = Handoff {
-        ceremony_id: codec::b64url(&[1u8; 32]),
-        offer_digest: codec::b64url(&[5u8; 32]),
-        code: [9u8; 16],
-        return_uri: None,
-    };
-    for value in [
-        Json::int(7),
-        Json::Null,
-        Json::Bool(true),
-        Json::arr([Json::text("https://photos.example/return")]),
-        Json::obj([("href", Json::text("https://photos.example/return"))]),
-    ] {
-        let Json::Object(mut members) = base.to_json() else { unreachable!() };
-        members.push(("returnUri".into(), value.clone()));
-        assert!(
-            Handoff::recognise(&json::canonicalise(&Json::Object(members))).is_err(),
-            "a returnUri of {value:?} was read as absent"
-        );
-    }
-
-    // Present, a string, and not a canonical HTTPS URI.
-    for text in ["", "not a uri", "http://photos.example/return", "javascript:alert(1)"] {
-        let Json::Object(mut members) = base.to_json() else { unreachable!() };
-        members.push(("returnUri".into(), Json::text(text)));
-        assert!(
-            Handoff::recognise(&json::canonicalise(&Json::Object(members))).is_err(),
-            "`{text}` was recognised as a return URI"
-        );
-    }
-}
-
-#[test]
-fn a_return_uri_is_bound_to_the_authenticated_platform_binding() {
-    // A destination the caller chose is a destination an attacker chose. Only
-    // the URI the CON-214-authenticated binding declares may be used, and
-    // equality is exact: two paths on one origin are two destinations.
-    let declared = "https://photos.example/.well-known/selfsame/return";
-    let apple = MobileBinding::Apple {
-        id: "apple:TEAM123456:com.example.photos:https://photos.example".into(),
-        team_id: "TEAM123456".into(),
-        bundle_id: "com.example.photos".into(),
-        return_uri: declared.into(),
-    };
-    let android = MobileBinding::Android {
-        id: "android:com.example.photos:AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI".into(),
-        package_name: "com.example.photos".into(),
-        signing_certificate_sha256: vec![
-            "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI".into(),
-        ],
-    };
-    let handoff = |uri: Option<&str>| Handoff {
-        ceremony_id: codec::b64url(&[1u8; 32]),
-        offer_digest: codec::b64url(&[5u8; 32]),
-        code: [9u8; 16],
-        return_uri: uri.map(str::to_string),
-    };
-
-    assert!(handoff(Some(declared)).binds_to(&apple).is_ok());
-    // No return at all is the ordinary case and binds to anything.
-    assert!(handoff(None).binds_to(&apple).is_ok());
-    assert!(handoff(None).binds_to(&android).is_ok());
-
-    for attacker in [
-        "https://attacker.example/.well-known/selfsame/return",
-        // Same origin, different path.
-        "https://photos.example/attacker-controlled",
-        // Same host, different scheme-authority.
-        "https://photos.example.attacker.test/.well-known/selfsame/return",
-    ] {
-        assert!(
-            handoff(Some(attacker)).binds_to(&apple).is_err(),
-            "`{attacker}` was accepted against a binding declaring `{declared}`"
-        );
-    }
-
-    // CON-222's return path is a verified App Link, not a handoff member.
-    assert!(handoff(Some(declared)).binds_to(&android).is_err());
-}
-
-#[test]
-fn every_dispatch_result_except_dispatched_burns_the_ceremony() {
-    // REQ-225: ambiguous or failed delivery "permanently abandons that
-    // ceremony", and a retry starts with fresh everything.
-    for result in [
-        DispatchResult::WalletUnavailable,
-        DispatchResult::UnverifiedWalletTarget,
-        DispatchResult::HandoffMalformed,
-        DispatchResult::HandoffAmbiguous,
-        DispatchResult::PlatformBindingMismatch,
-        DispatchResult::UserDenied,
-    ] {
-        assert!(result.burns_ceremony(), "{result:?}");
-    }
-    assert!(!DispatchResult::Dispatched.burns_ceremony());
-}
-
-// ── TEST-231: the callback is non-authoritative ────────────────────────────
-
-#[test]
-fn the_serialised_callback_has_exactly_three_fields_and_no_secret() {
-    let ret = HandoffReturn { ceremony_id: codec::b64url(&[1u8; 32]), outcome: Outcome::Completed };
-    let octets = json::canonicalise(&ret.to_json());
-    let value = json::recognise(&octets, LIMITS).unwrap();
-    assert_eq!(value.member_names(), vec!["ceremonyId", "handoffVersion", "outcome"]);
-    assert_eq!(value.member_names().len(), 3);
-    assert_eq!(HandoffReturn::recognise(&octets).unwrap(), ret);
-}
-
-#[test]
-fn a_callback_carrying_anything_else_is_refused() {
-    // CON-215 lists what it must not contain. The closed member set is what
-    // makes that a property of the format rather than a promise about the code.
-    for extra in ["grant", "did", "accountScopeId", "error", "permissions", "c"] {
-        let mut members = vec![
-            ("handoffVersion".to_string(), Json::int(1)),
-            ("ceremonyId".to_string(), Json::text(codec::b64url(&[1u8; 32]))),
-            ("outcome".to_string(), Json::text("completed")),
-        ];
-        members.push((extra.to_string(), Json::text("x")));
-        assert!(
-            HandoffReturn::recognise(&json::canonicalise(&Json::Object(members))).is_err(),
-            "a callback carrying `{extra}` was accepted"
-        );
-    }
-}
-
-#[test]
-fn a_callback_may_only_foreground_an_exactly_matching_pending_session() {
-    // TEST-231: "Send `completed` before consent, after denial, for a different
-    // application/account/ceremony, and with no pending local session. The app
-    // may foreground only the exactly matching pending session."
-    let mine = codec::b64url(&[1u8; 32]);
-    let theirs = codec::b64url(&[2u8; 32]);
-    let ret = HandoffReturn { ceremony_id: mine.clone(), outcome: Outcome::Completed };
-
-    assert!(ret.may_foreground(Some(&mine)));
-    assert!(!ret.may_foreground(Some(&theirs)), "a different ceremony");
-    assert!(!ret.may_foreground(None), "no pending local session");
-}
-
-#[test]
-fn every_outcome_round_trips_and_no_other_value_is_admitted() {
-    for outcome in [Outcome::Completed, Outcome::Cancelled, Outcome::Failed] {
-        let ret = HandoffReturn { ceremony_id: codec::b64url(&[1u8; 32]), outcome };
-        let octets = json::canonicalise(&ret.to_json());
-        assert_eq!(HandoffReturn::recognise(&octets).unwrap().outcome, outcome);
-    }
-    let value = Json::obj([
-        ("handoffVersion", Json::int(1)),
-        ("ceremonyId", Json::text(codec::b64url(&[1u8; 32]))),
-        ("outcome", Json::text("succeeded")),
-    ]);
-    assert!(matches!(
-        HandoffReturn::recognise(&json::canonicalise(&value)),
-        Err(CeremonyError::BadValue { path, .. }) if path == "outcome"
-    ));
+    assert_eq!(EnrollmentError::OfferMismatch.to_string(), "OfferMismatch");
 }
 
 // ── helpers ────────────────────────────────────────────────────────────────
 
-const LIMITS: selfsame_app_identity::json::Limits =
-    selfsame_app_identity::json::Limits { max_bytes: 69_607, max_depth: 8 };
+const LIMITS: selfsame_app_identity::json::Limits = selfsame_app_identity::json::Limits {
+    max_bytes: 69_607,
+    max_depth: 8,
+};
 
 fn seal_offer(core: &OfferCore, evidence: &str, hint: &Json) -> Vec<u8> {
-    let Json::Object(mut members) = core.to_json() else { unreachable!() };
+    let Json::Object(mut members) = core.to_json() else {
+        unreachable!()
+    };
     members.push(("enrollmentEvidence".into(), Json::text(evidence)));
     members.push(("providerHint".into(), hint.clone()));
     json::canonicalise(&Json::Object(members))

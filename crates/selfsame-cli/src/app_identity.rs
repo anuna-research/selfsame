@@ -28,6 +28,8 @@
 //! [SPEC-004]: ../../../specs/SPEC-004-application-scoped-identity.md
 
 use anyhow::{anyhow, bail, Result};
+use base64ct::{Base64UrlUnpadded, Encoding as _};
+use rand::RngCore as _;
 use zeroize::Zeroize as _;
 
 use selfsame_app_identity::profile::{ApplicationId, ApplicationProfile};
@@ -47,6 +49,7 @@ pub fn run(args: &[String]) -> Result<()> {
         Some("alias") => show_alias(&args[1..]),
         Some("fetch-profile") => fetch_profile(&args[1..]),
         Some("verify-profile") => verify_profile(&args[1..]),
+        Some("pair") => pair(&args[1..]),
         _ => {
             print_usage();
             Ok(())
@@ -85,11 +88,45 @@ pub fn print_usage() {
          \x20     dereference an applicationId and recognise the profile (CON-220)\n\
          \x20 selfsame app-identity verify-profile FILE\n\
          \x20     recognise a profile from a file and print its digest (CON-201)\n\
+         \x20 selfsame app-identity pair\n\
+         \x20     begin one cbcl-pairing claimant from an invitation read on stdin\n\
          \n\
          APP_ID is a canonical HTTPS application identifier.\n\
          SCOPE  is a canonical 43-character accountScopeId (CON-211), or `-` to\n\
          \x20      generate one for demonstration.\n"
     );
+}
+
+/// Start the CLI's one-sided CBCL claimant. Relay I/O remains the shell's next
+/// effect; this command exposes only the exact origin and first opaque frame.
+fn pair(args: &[String]) -> Result<()> {
+    if !args.is_empty() {
+        bail!("usage: selfsame app-identity pair < INVITATION");
+    }
+    use std::io::Read as _;
+    let mut carrier = String::new();
+    std::io::stdin().read_to_string(&mut carrier)?;
+    let invitation = Base64UrlUnpadded::decode_vec(carrier.trim())
+        .map_err(|_| anyhow!("the cbcl-pairing invitation was not recognised"))?;
+    let mut cpace_scalar = [0_u8; 32];
+    let mut signing_seed = [0_u8; 32];
+    rand::rngs::OsRng.fill_bytes(&mut cpace_scalar);
+    rand::rngs::OsRng.fill_bytes(&mut signing_seed);
+    let endpoint = selfsame_pairing::SelfsameEndpointBootstrap::join_claimant(
+        &invitation,
+        cpace_scalar,
+        signing_seed,
+    )
+    .map_err(|error| anyhow!(error.to_string()))?;
+
+    println!("  pairing       cbcl-pairing");
+    println!("  relay         {}", endpoint.relay_origin());
+    println!(
+        "  first frame   {}",
+        Base64UrlUnpadded::encode_string(&endpoint.local_cpace_frame_bytes()?)
+    );
+    println!("  status        waiting for the application");
+    Ok(())
 }
 
 /// `CON-202` derivation, end to end and offline.
@@ -123,22 +160,21 @@ fn derive(args: &[String]) -> Result<()> {
     eprintln!("  recovery phrase (twelve words, then Enter — not echoed):");
     let mut phrase = rpassword::read_password()
         .map_err(|e| anyhow!("could not read the recovery phrase without echo: {e}"))?;
-    let parsed = hierarchy::Mnemonic::parse_in_normalized(
-        bip39::Language::English,
-        phrase.trim(),
-    )
-    .map_err(|_| {
-        // Zeroed on the failure path too — a mistyped phrase is usually a
-        // correct phrase with one wrong word.
-        phrase.zeroize();
-        anyhow!("that is not a valid BIP-39 recovery phrase")
-    })?;
+    let parsed = hierarchy::Mnemonic::parse_in_normalized(bip39::Language::English, phrase.trim())
+        .map_err(|_| {
+            // Zeroed on the failure path too — a mistyped phrase is usually a
+            // correct phrase with one wrong word.
+            phrase.zeroize();
+            anyhow!("that is not a valid BIP-39 recovery phrase")
+        })?;
     // The parsed `Mnemonic` owns the entropy from here; the transcription does
     // not need to outlive the parse.
     phrase.zeroize();
 
     let home = hierarchy::derive_from_mnemonic(&parsed, &application, &scope);
-    let did = home.home_did().map_err(|e| anyhow!("did:crdt derivation failed: {e}"))?;
+    let did = home
+        .home_did()
+        .map_err(|e| anyhow!("did:crdt derivation failed: {e}"))?;
 
     println!("  application  {application}");
     println!("  account      <scope withheld>");
@@ -184,7 +220,10 @@ fn fetch_profile(args: &[String]) -> Result<()> {
 
     let runtime = tokio::runtime::Runtime::new()?;
     let fetched = runtime
-        .block_on(selfsame_app_identity_net::profile::fetch(&application, crate::now() as i64))
+        .block_on(selfsame_app_identity_net::profile::fetch(
+            &application,
+            crate::now() as i64,
+        ))
         .map_err(|e| anyhow!("{e}"))?;
 
     report(&fetched.profile);
@@ -212,7 +251,7 @@ fn report(profile: &ApplicationProfile) {
     println!("  profileDigest    {}", codec::b64url(profile.digest()));
     println!("  permissions      {}", profile.allowed_permissions.len());
     println!("  enrollment keys  {}", profile.enrollment_keys.len());
-    println!("  rendezvous       {}", profile.rendezvous.len());
+    println!("  cbcl relays      {}", profile.cbcl_pairing_relays.len());
     println!("  state resolvers  {}", profile.state_resolvers.len());
     println!(
         "  freshness        establishment {}s · continuation {}s",
@@ -221,7 +260,11 @@ fn report(profile: &ApplicationProfile) {
     );
     println!(
         "  projection       {}",
-        if profile.revocation.projection.is_some() { "enabled" } else { "absent" }
+        if profile.revocation.projection.is_some() {
+            "enabled"
+        } else {
+            "absent"
+        }
     );
 }
 

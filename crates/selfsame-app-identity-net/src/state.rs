@@ -80,8 +80,8 @@
 //! [`confirm_revocation`] — which re-resolves and looks for the credential ID in
 //! a verified closure — can move it.
 
-use std::time::Duration;
 use base64ct::{Base64UrlUnpadded, Encoding};
+use std::time::Duration;
 
 use did_crdt::core::delta::{DeltaHash, DeltaOp, SignedDelta, VerificationRelationship};
 use did_crdt::core::document::Document;
@@ -148,7 +148,12 @@ pub struct PathBClosureFacts {
 }
 #[allow(missing_docs)]
 #[derive(Clone, Debug, serde::Serialize)]
-pub struct PathBAssertionMethod { pub id: String, pub kind: String, pub public_key: Vec<u8>, pub has_private_component: bool }
+pub struct PathBAssertionMethod {
+    pub id: String,
+    pub kind: String,
+    pub public_key: Vec<u8>,
+    pub has_private_component: bool,
+}
 
 impl PathBResolverQuorum {
     /// Convert verified documents to the exact closed resolver facts expected by
@@ -156,66 +161,109 @@ impl PathBResolverQuorum {
     /// `fetched_at_seconds` is the caller's OWN observation of when it fetched.
     /// A parameter rather than a clock read, so this stays a pure projection and
     /// a caller cannot be handed a freshness claim it did not make itself.
-    pub fn nif_closures(&self, fetched_at_seconds: i64) -> Result<Vec<PathBClosureFacts>, NetError> {
-        self.closures.iter().map(|(resolver_id, document)| {
-            // The projection is built HERE, from did-crdt's neutral accessors,
-            // rather than asked of the document. Path B is this application's
-            // protocol; a generic DID CRDT should not carry a type named for it,
-            // and the decision of which relationship counts is ours.
-            //
-            // Assertion methods are taken by relationship alone and are NOT
-            // filtered by revocation: the verifier distinguishes a method that
-            // exists and is revoked from one that never existed, which is why
-            // `Document::resolve` — which drops revoked methods and yields
-            // nothing at all for a deactivated DID — is not the right source.
-            //
-            // THE ID IS THE `JsonWebKey` TWIN'S, NOT THE RAW METHOD'S, and that
-            // is the whole reason this loop is more than a map.
-            //
-            // `CON-206` step 6 requires the grant's `kid` to name a `JsonWebKey`
-            // in `assertionMethod`, and `grant::header` signs under
-            // `{did}#jwk-0`. That fragment does not exist among the raw
-            // verification methods — `issuer::create` writes `#key-1` and says
-            // so: *"the resolver then projects that method into the JsonWebKey
-            // twin the VC JOSE/COSE profile requires, at `#jwk-0`"*. This
-            // function IS that resolver-side projection for the NIF path, and it
-            // used to emit `entry.id`, so every grant `issuer::create` minted was
-            // refused `IssuerKey: "kid is not in assertionMethod"` — through the
-            // sidecar, through `cbcl_selfsame_erl:verify_path_b/2`, by every
-            // route that did not go through `Document::resolve`. The `kind` was
-            // already hard-coded to `JsonWebKey` here, which is the tell: this
-            // was always meant to be the twin, and only the id was left raw.
-            //
-            // The numbering rule is `did-crdt`'s and is reproduced exactly —
-            // asserting methods ordered BY ID, then twinned positionally as
-            // `#jwk-{index}`. Ordering by id rather than by arrival is what makes
-            // the fragment a function of state; sorting differently here would
-            // hand `#jwk-0` to a different key than the one a resolver serves,
-            // which is worse than not projecting at all.
-            let mut asserting: Vec<_> = document.verification_methods().into_iter()
-                .filter(|entry| entry.relationships.contains(&VerificationRelationship::AssertionMethod))
-                .collect();
-            asserting.sort_by(|a, b| a.id.cmp(&b.id));
-            let assertion_methods = asserting.into_iter()
-                .enumerate()
-                .map(|(index, entry)| {
-                    let raw = entry.public_key_multibase.strip_prefix('u').ok_or(NetError::Refused("Path-B assertion key is not base64url multibase"))
-                        .and_then(|text| Base64UrlUnpadded::decode_vec(text).map_err(|_| NetError::Refused("Path-B assertion key is malformed")))?;
-                    if raw.len() != 32 { return Err(NetError::Refused("Path-B assertion key is not Ed25519 length")); }
-                    Ok(PathBAssertionMethod { id: format!("{}#jwk-{index}", document.did), kind: "JsonWebKey".into(), public_key: raw, has_private_component: false })
-                }).collect::<Result<Vec<_>, NetError>>()?;
-            // These three are true BY CONSTRUCTION, not by assertion: a document
-            // reaches this vector only via `replay_closure`, which refuses unless
-            // it found exactly one genesis delta whose root key derives the DID
-            // asked about, every signature verified, and no parent dangled.
-            //
-            // `closure_age_seconds` is REPLACED by the verifier's own fetch time,
-            // not deleted. The resolver used to report the age while nothing
-            // computed it, so `maxClosureAgeSeconds` compared against a constant
-            // zero and could not fail. The bound is a real control; it was
-            // starved, not wrong.
-            Ok(PathBClosureFacts { resolver_id: resolver_id.clone(), did: document.did.to_string(), did_recomputed_ok: true, deltas_verified: true, locally_closed: true, deactivated: document.is_deactivated(), assertion_methods, revoked_credential_ids: document.revoked_credential_ids(), also_known_as: document.also_known_as(), fetched_at_seconds })
-        }).collect()
+    pub fn nif_closures(
+        &self,
+        fetched_at_seconds: i64,
+    ) -> Result<Vec<PathBClosureFacts>, NetError> {
+        self.closures
+            .iter()
+            .map(|(resolver_id, document)| {
+                // The projection is built HERE, from did-crdt's neutral accessors,
+                // rather than asked of the document. Path B is this application's
+                // protocol; a generic DID CRDT should not carry a type named for it,
+                // and the decision of which relationship counts is ours.
+                //
+                // Assertion methods are taken by relationship alone and are NOT
+                // filtered by revocation: the verifier distinguishes a method that
+                // exists and is revoked from one that never existed, which is why
+                // `Document::resolve` — which drops revoked methods and yields
+                // nothing at all for a deactivated DID — is not the right source.
+                //
+                // THE ID IS THE `JsonWebKey` TWIN'S, NOT THE RAW METHOD'S, and that
+                // is the whole reason this loop is more than a map.
+                //
+                // `CON-206` step 6 requires the grant's `kid` to name a `JsonWebKey`
+                // in `assertionMethod`, and `grant::header` signs under
+                // `{did}#jwk-0`. That fragment does not exist among the raw
+                // verification methods — `issuer::create` writes `#key-1` and says
+                // so: *"the resolver then projects that method into the JsonWebKey
+                // twin the VC JOSE/COSE profile requires, at `#jwk-0`"*. This
+                // function IS that resolver-side projection for the NIF path, and it
+                // used to emit `entry.id`, so every grant `issuer::create` minted was
+                // refused `IssuerKey: "kid is not in assertionMethod"` — through the
+                // sidecar, through `cbcl_selfsame_erl:verify_path_b/2`, by every
+                // route that did not go through `Document::resolve`. The `kind` was
+                // already hard-coded to `JsonWebKey` here, which is the tell: this
+                // was always meant to be the twin, and only the id was left raw.
+                //
+                // The numbering rule is `did-crdt`'s and is reproduced exactly —
+                // asserting methods ordered BY ID, then twinned positionally as
+                // `#jwk-{index}`. Ordering by id rather than by arrival is what makes
+                // the fragment a function of state; sorting differently here would
+                // hand `#jwk-0` to a different key than the one a resolver serves,
+                // which is worse than not projecting at all.
+                let mut asserting: Vec<_> = document
+                    .verification_methods()
+                    .into_iter()
+                    .filter(|entry| {
+                        entry
+                            .relationships
+                            .contains(&VerificationRelationship::AssertionMethod)
+                    })
+                    .collect();
+                asserting.sort_by(|a, b| a.id.cmp(&b.id));
+                let assertion_methods = asserting
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, entry)| {
+                        let raw = entry
+                            .public_key_multibase
+                            .strip_prefix('u')
+                            .ok_or(NetError::Refused(
+                                "Path-B assertion key is not base64url multibase",
+                            ))
+                            .and_then(|text| {
+                                Base64UrlUnpadded::decode_vec(text).map_err(|_| {
+                                    NetError::Refused("Path-B assertion key is malformed")
+                                })
+                            })?;
+                        if raw.len() != 32 {
+                            return Err(NetError::Refused(
+                                "Path-B assertion key is not Ed25519 length",
+                            ));
+                        }
+                        Ok(PathBAssertionMethod {
+                            id: format!("{}#jwk-{index}", document.did),
+                            kind: "JsonWebKey".into(),
+                            public_key: raw,
+                            has_private_component: false,
+                        })
+                    })
+                    .collect::<Result<Vec<_>, NetError>>()?;
+                // These three are true BY CONSTRUCTION, not by assertion: a document
+                // reaches this vector only via `replay_closure`, which refuses unless
+                // it found exactly one genesis delta whose root key derives the DID
+                // asked about, every signature verified, and no parent dangled.
+                //
+                // `closure_age_seconds` is REPLACED by the verifier's own fetch time,
+                // not deleted. The resolver used to report the age while nothing
+                // computed it, so `maxClosureAgeSeconds` compared against a constant
+                // zero and could not fail. The bound is a real control; it was
+                // starved, not wrong.
+                Ok(PathBClosureFacts {
+                    resolver_id: resolver_id.clone(),
+                    did: document.did.to_string(),
+                    did_recomputed_ok: true,
+                    deltas_verified: true,
+                    locally_closed: true,
+                    deactivated: document.is_deactivated(),
+                    assertion_methods,
+                    revoked_credential_ids: document.revoked_credential_ids(),
+                    also_known_as: document.also_known_as(),
+                    fetched_at_seconds,
+                })
+            })
+            .collect()
     }
 }
 
@@ -241,7 +289,9 @@ pub async fn resolve_path_b_quorum(
     // The messages name no count: `MINIMUM_RESOLVER_QUORUM` is the authority and
     // a literal repeating its value is a lie waiting for the next change to it.
     if profile.state_resolvers.len() < MINIMUM_RESOLVER_QUORUM {
-        return Err(NetError::Refused("Path-B profile declares too few state resolvers for the quorum"));
+        return Err(NetError::Refused(
+            "Path-B profile declares too few state resolvers for the quorum",
+        ));
     }
     let mut closures = Vec::new();
     let mut outcomes = Vec::with_capacity(profile.state_resolvers.len());
@@ -255,7 +305,9 @@ pub async fn resolve_path_b_quorum(
         }
     }
     if closures.len() < MINIMUM_RESOLVER_QUORUM {
-        return Err(NetError::Refused("Path-B resolver quorum was not established"));
+        return Err(NetError::Refused(
+            "Path-B resolver quorum was not established",
+        ));
     }
     Ok(PathBResolverQuorum { closures, outcomes })
 }
@@ -407,7 +459,9 @@ pub async fn resolve_closure(
 
     bundle_is_admissible(&outcomes, acceptance)?;
     let Some(octets) = bundled else {
-        return Err(NetError::Refused("no declared resolver answered and no closure was bundled"));
+        return Err(NetError::Refused(
+            "no declared resolver answered and no closure was bundled",
+        ));
     };
     let document = replay_closure(octets, did)?;
     Ok(ResolvedClosure {
@@ -432,7 +486,10 @@ fn bundle_is_admissible(
     outcomes: &[(String, ResolverOutcome)],
     acceptance: Acceptance,
 ) -> Result<(), NetError> {
-    if outcomes.iter().any(|(_, o)| matches!(o, ResolverOutcome::Reached(_))) {
+    if outcomes
+        .iter()
+        .any(|(_, o)| matches!(o, ResolverOutcome::Reached(_)))
+    {
         return Err(NetError::Refused(
             "a declared resolver was reachable and returned no usable closure; \
              the issuer's own bundled state cannot stand in for it",
@@ -476,7 +533,10 @@ async fn fetch_closure(resolver: &StateResolver, did: &str) -> Result<Document, 
     // signatures — deserialising one would make the resolver authoritative on
     // the DID's own revocations. With it the response also carries the signed
     // deltas, and replaying those makes the signatures authoritative instead.
-    let url = join(&resolver.url, &format!("{RESOLUTION_PATH}{did}{CLOSURE_OPTION}"));
+    let url = join(
+        &resolver.url,
+        &format!("{RESOLUTION_PATH}{did}{CLOSURE_OPTION}"),
+    );
     let response = client(RESOLVER_DEADLINE)?
         .get(&url)
         .header(reqwest::header::ACCEPT, "application/json")
@@ -484,7 +544,11 @@ async fn fetch_closure(resolver: &StateResolver, did: &str) -> Result<Document, 
         .send()
         .await
         .map_err(|e| {
-            if e.is_timeout() { NetError::Timeout } else { NetError::Transport(e.to_string()) }
+            if e.is_timeout() {
+                NetError::Timeout
+            } else {
+                NetError::Transport(e.to_string())
+            }
         })?;
     // Every one of these is an *answer*. `410 Gone` in particular means the DID
     // is deactivated, which is a reason to refuse the grant outright rather than
@@ -509,10 +573,15 @@ async fn fetch_closure(resolver: &StateResolver, did: &str) -> Result<Document, 
 /// evidence, and proceeding on the projection would silently downgrade
 /// signature-checked state to hearsay.
 fn closure_from_resolution(body: &[u8]) -> Result<Vec<u8>, NetError> {
-    let envelope: serde_json::Value = serde_json::from_slice(body)
-        .map_err(|e| NetError::Recognition(format!("resolver response is not a resolution result: {e}")))?;
-    let closure = envelope.get("didDocumentMetadata").and_then(|m| m.get("signedClosure"))
-        .ok_or(NetError::Refused("the resolver returned no signedClosure; it cannot supply evidence for this DID"))?;
+    let envelope: serde_json::Value = serde_json::from_slice(body).map_err(|e| {
+        NetError::Recognition(format!("resolver response is not a resolution result: {e}"))
+    })?;
+    let closure = envelope
+        .get("didDocumentMetadata")
+        .and_then(|m| m.get("signedClosure"))
+        .ok_or(NetError::Refused(
+            "the resolver returned no signedClosure; it cannot supply evidence for this DID",
+        ))?;
     serde_json::to_vec(closure)
         .map_err(|e| NetError::Recognition(format!("signedClosure is not re-serialisable: {e}")))
 }
@@ -547,7 +616,11 @@ fn replay_closure(octets: &[u8], expected_did: &str) -> Result<Document, NetErro
             "a closure has exactly one genesis delta".to_owned(),
         ));
     };
-    let DeltaOp::AddVerificationMethod { public_key_multibase, .. } = &root.op else {
+    let DeltaOp::AddVerificationMethod {
+        public_key_multibase,
+        ..
+    } = &root.op
+    else {
         return Err(NetError::Recognition(
             "the genesis delta does not add a verification method".to_owned(),
         ));
@@ -563,10 +636,13 @@ fn replay_closure(octets: &[u8], expected_did: &str) -> Result<Document, NetErro
         ));
     }
 
-    let bundle = ClosureBundle { target: closure.target, deltas: closure.deltas };
-    document
-        .merge_verified_bundle(bundle)
-        .map_err(|e| NetError::Recognition(format!("a delta in the closure did not verify: {e}")))?;
+    let bundle = ClosureBundle {
+        target: closure.target,
+        deltas: closure.deltas,
+    };
+    document.merge_verified_bundle(bundle).map_err(|e| {
+        NetError::Recognition(format!("a delta in the closure did not verify: {e}"))
+    })?;
     Ok(document)
 }
 
@@ -579,7 +655,9 @@ fn replay_closure(octets: &[u8], expected_did: &str) -> Result<Document, NetErro
 fn revoked_credential_id(delta: &SignedDelta) -> Result<&str, NetError> {
     match &delta.op {
         DeltaOp::RevokeCredential { credential_id } => Ok(credential_id),
-        _ => Err(NetError::Refused("the delta is not a RevokeCredential operation")),
+        _ => Err(NetError::Refused(
+            "the delta is not a RevokeCredential operation",
+        )),
     }
 }
 
@@ -625,7 +703,11 @@ pub async fn submit_revocation(
             return Ok(SubmissionReport {
                 submission: Submission::begin(credential_id),
                 acknowledged: Vec::new(),
-                unreachable: profile.state_resolvers.iter().map(|r| r.id.clone()).collect(),
+                unreachable: profile
+                    .state_resolvers
+                    .iter()
+                    .map(|r| r.id.clone())
+                    .collect(),
             })
         }
     };
@@ -634,8 +716,12 @@ pub async fn submit_revocation(
     // scoped by it. Taking it from the delta rather than from a parameter means
     // the two can never disagree.
     let did = delta.did.to_string();
-    let results = crate::probe::join_all_public(
-        profile.state_resolvers.iter().map(|r| submit_one(r, &did, body.clone())).collect(),
+    let results = join_all(
+        profile
+            .state_resolvers
+            .iter()
+            .map(|r| submit_one(r, &did, body.clone()))
+            .collect(),
     )
     .await;
 
@@ -655,7 +741,40 @@ pub async fn submit_revocation(
     for id in &acknowledged {
         submission = submission.acknowledged(id.clone());
     }
-    Ok(SubmissionReport { submission, acknowledged, unreachable })
+    Ok(SubmissionReport {
+        submission,
+        acknowledged,
+        unreachable,
+    })
+}
+
+async fn join_all<F, T>(futures: Vec<F>) -> Vec<T>
+where
+    F: core::future::Future<Output = T>,
+{
+    let mut pinned: Vec<_> = futures.into_iter().map(Box::pin).collect();
+    let mut results: Vec<Option<T>> = (0..pinned.len()).map(|_| None).collect();
+    let mut remaining = pinned.len();
+    core::future::poll_fn(|cx| {
+        for (index, future) in pinned.iter_mut().enumerate() {
+            if results[index].is_none() {
+                if let core::task::Poll::Ready(value) = future.as_mut().poll(cx) {
+                    results[index] = Some(value);
+                    remaining -= 1;
+                }
+            }
+        }
+        if remaining == 0 {
+            core::task::Poll::Ready(())
+        } else {
+            core::task::Poll::Pending
+        }
+    })
+    .await;
+    results
+        .into_iter()
+        .map(|result| result.expect("every future completed"))
+        .collect()
 }
 
 /// Whether a response to a delta submission is an **acknowledgement**.
@@ -679,7 +798,9 @@ fn acknowledged(status: reqwest::StatusCode) -> bool {
 async fn submit_one(resolver: &StateResolver, did: &str, body: Vec<u8>) -> bool {
     // CON-003: `POST /dids/{did}/deltas`, which answers `202 Accepted`.
     let url = join(&resolver.url, &submission_path(did));
-    let Ok(http) = client(RESOLVER_DEADLINE) else { return false };
+    let Ok(http) = client(RESOLVER_DEADLINE) else {
+        return false;
+    };
     match http
         .post(&url)
         .header(reqwest::header::CONTENT_TYPE, "application/json")
@@ -736,10 +857,19 @@ mod tests {
         // and not the delta, or a proxy answering for one. Counting these
         // dropped the resolver out of `unreachable` and out of the retry set,
         // so the fan-out lost a target and nothing said so.
-        for other in [StatusCode::OK, StatusCode::CREATED, StatusCode::NO_CONTENT, StatusCode::PARTIAL_CONTENT] {
+        for other in [
+            StatusCode::OK,
+            StatusCode::CREATED,
+            StatusCode::NO_CONTENT,
+            StatusCode::PARTIAL_CONTENT,
+        ] {
             assert!(!acknowledged(other), "{other} is not an acknowledgement");
         }
-        for refused in [StatusCode::BAD_REQUEST, StatusCode::CONFLICT, StatusCode::NOT_FOUND] {
+        for refused in [
+            StatusCode::BAD_REQUEST,
+            StatusCode::CONFLICT,
+            StatusCode::NOT_FOUND,
+        ] {
             assert!(!acknowledged(refused), "{refused}");
         }
     }
@@ -844,7 +974,12 @@ mod tests {
 
     #[test]
     fn a_closure_that_is_not_a_signed_did_crdt_closure_is_refused() {
-        for octets in [&b"{}"[..], b"not json", br#"{"deltas":[]}"#, br#"{"target":"x"}"#] {
+        for octets in [
+            &b"{}"[..],
+            b"not json",
+            br#"{"deltas":[]}"#,
+            br#"{"target":"x"}"#,
+        ] {
             assert!(replay_closure(octets, "did:crdt:whatever").is_err());
         }
     }
@@ -945,7 +1080,10 @@ mod tests {
             outcome_of(&NetError::Refused("gone")),
             ResolverOutcome::Reached(_)
         ));
-        assert!(matches!(outcome_of(&NetError::TooLarge), ResolverOutcome::Reached(_)));
+        assert!(matches!(
+            outcome_of(&NetError::TooLarge),
+            ResolverOutcome::Reached(_)
+        ));
         assert!(matches!(
             outcome_of(&NetError::Recognition("bad signature".into())),
             ResolverOutcome::Reached(_)
@@ -973,11 +1111,9 @@ mod tests {
         use ResolverOutcome::{Reached, Unreachable};
 
         // The one admissible case.
-        assert!(bundle_is_admissible(
-            &outcomes(&[Unreachable, Unreachable]),
-            Acceptance::First
-        )
-        .is_ok());
+        assert!(
+            bundle_is_admissible(&outcomes(&[Unreachable, Unreachable]), Acceptance::First).is_ok()
+        );
 
         // Reachable-but-negative: an issuer whose resolvers all answer 410 must
         // not thereby get to supply its own account of its own revocations.
@@ -989,11 +1125,10 @@ mod tests {
 
         // A grant accepted before: a revoked device must not wait out an outage
         // and present stale state that omits its revocation.
-        assert!(bundle_is_admissible(
-            &outcomes(&[Unreachable, Unreachable]),
-            Acceptance::Repeat
-        )
-        .is_err());
+        assert!(
+            bundle_is_admissible(&outcomes(&[Unreachable, Unreachable]), Acceptance::Repeat)
+                .is_err()
+        );
 
         // Neither condition met.
         assert!(bundle_is_admissible(&outcomes(&[Reached("404")]), Acceptance::Repeat).is_err());
@@ -1041,7 +1176,11 @@ mod tests {
             .iter()
             .find(|d| d.parents.is_empty())
             .expect("one genesis delta");
-        let DeltaOp::AddVerificationMethod { public_key_multibase, .. } = &genesis.op else {
+        let DeltaOp::AddVerificationMethod {
+            public_key_multibase,
+            ..
+        } = &genesis.op
+        else {
             panic!("genesis adds a verification method");
         };
         let (mut document, _) = Document::new(public_key_multibase).expect("admissible genesis");

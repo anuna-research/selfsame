@@ -43,7 +43,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # The workspace has path dependencies on two siblings, cloned next to the
+      # The workspace has path dependencies on three siblings, cloned next to the
       # checkout — the layout README.md's "Before you build" section describes.
       # `--locked` cannot pin path-dependency *contents*, so the revisions are
       # pinned explicitly here or CI is not building what a release would.
@@ -57,8 +57,10 @@ jobs:
           set -euo pipefail
           did_sha="$(grep -oE '[0-9a-f]{40}' crates/selfsame-core/tests/vectors.rs | head -1)"
           cbcl_sha="$(tr -d '[:space:]' < cbcl-rs.sha)"
+          pairing_sha="$(tr -d '[:space:]' < cbcl-pairing.sha)"
           echo "did-crdt @ ${did_sha}"
           echo "cbcl-rs  @ ${cbcl_sha}"
+          echo "cbcl-pairing @ ${pairing_sha}"
 
           [ -d ../did-crdt ] || git clone https://git.anuna.io/anuna-research/did-crdt.git ../did-crdt
           # Always fetch: a warm workspace keeps the clone from a previous run,
@@ -75,6 +77,12 @@ jobs:
           git -C ../cbcl-rs fetch --quiet --tags origin
           git -C ../cbcl-rs checkout --detach "${cbcl_sha}"
           test "$(git -C ../cbcl-rs rev-parse HEAD)" = "${cbcl_sha}"
+
+          [ -d ../cbcl-pairing ] || git clone https://git.anuna.io/anuna-research/cbcl-pairing.git ../cbcl-pairing
+          git -C ../cbcl-pairing fetch --quiet --tags origin
+          git -C ../cbcl-pairing checkout --detach "${pairing_sha}"
+          test "$(git -C ../cbcl-pairing rev-parse HEAD)" = "${pairing_sha}"
+          test -z "$(git -C ../cbcl-pairing status --porcelain --untracked-files=no)"
 
       # src-tauri links against the system webview. Without these the workspace
       # does not build on Linux at all — the -sys crates' build scripts look for
@@ -143,7 +151,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-selfsame-${{ hashFiles('Cargo.lock', 'cbcl-rs.sha') }}
+          key: ${{ runner.os }}-cargo-selfsame-${{ hashFiles('Cargo.lock', 'cbcl-rs.sha', 'cbcl-pairing.sha') }}
           restore-keys: |
             ${{ runner.os }}-cargo-selfsame-
 
@@ -197,14 +205,45 @@ jobs:
             >/dev/null || true
 
   # ── Screens: what Rust cannot see ───────────────────────────────────────
-  # Deliberately independent of the Rust job: screens.mjs drives the webview
-  # with a stubbed bridge and needs no Rust at all, so a CSS regression is
-  # reported in about a minute instead of behind a Tauri build.
+  # Deliberately independent of the full Rust job: screens.mjs drives the
+  # webview with a stubbed bridge, while the small pairing example supplies the
+  # real two-context browser ceremony. Neither waits behind the Tauri build.
   screens:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Clone the pinned sibling path dependencies
+        run: |
+          set -euo pipefail
+          did_sha="$(grep -oE '[0-9a-f]{40}' crates/selfsame-core/tests/vectors.rs | head -1)"
+          cbcl_sha="$(tr -d '[:space:]' < cbcl-rs.sha)"
+          pairing_sha="$(tr -d '[:space:]' < cbcl-pairing.sha)"
+          [ -d ../did-crdt ] || git clone https://git.anuna.io/anuna-research/did-crdt.git ../did-crdt
+          git -C ../did-crdt fetch --quiet --tags origin
+          git -C ../did-crdt checkout --detach "${did_sha}"
+          test "$(git -C ../did-crdt rev-parse HEAD)" = "${did_sha}"
+          [ -d ../cbcl-rs ] || git clone https://git.anuna.io/anuna-research/cbcl-rs.git ../cbcl-rs
+          git -C ../cbcl-rs fetch --quiet --tags origin
+          git -C ../cbcl-rs checkout --detach "${cbcl_sha}"
+          test "$(git -C ../cbcl-rs rev-parse HEAD)" = "${cbcl_sha}"
+          [ -d ../cbcl-pairing ] || git clone https://git.anuna.io/anuna-research/cbcl-pairing.git ../cbcl-pairing
+          git -C ../cbcl-pairing fetch --quiet --tags origin
+          git -C ../cbcl-pairing checkout --detach "${pairing_sha}"
+          test "$(git -C ../cbcl-pairing rev-parse HEAD)" = "${pairing_sha}"
+          test -z "$(git -C ../cbcl-pairing status --porcelain --untracked-files=no)"
+
+      - name: Ensure Rust for the pairing demo
+        run: |
+          set -euo pipefail
+          if ! command -v rustup >/dev/null 2>&1; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+              | sh -s -- -y --default-toolchain stable --profile minimal
+            echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+            export PATH="$HOME/.cargo/bin:$PATH"
+          fi
+          rustup show active-toolchain || rustup toolchain install stable --profile minimal
 
       # Puppeteer ships its own Chrome but not the shared libraries it links
       # against; on a bare runner the browser launches and immediately dies
@@ -265,6 +304,11 @@ jobs:
         env:
           CI: "true" # selects the no-sandbox launch flags in screens.mjs
         run: npm run screens
+
+      - name: Run the cbcl-pairing browser ceremony
+        env:
+          CI: "true"
+        run: npm run e2e:pairing
 
       # Kept on failure too — when an assertion trips, the picture of the screen
       # that tripped it is the fastest way to see why.

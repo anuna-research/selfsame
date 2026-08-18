@@ -22,6 +22,10 @@ phone can change the lock.*
 > Mutation testing of the acceptance predicate — which the specification
 > requires at a 100 % kill rate — **has not been run**. Do not put an identity
 > you rely on into this.
+>
+> Credential pairing now has one development protocol, `cbcl-pairing`, but its
+> independent cryptography, relay-operator, privacy, and human-security gates
+> are still open. This build cannot allocate production invitations.
 
 ## What it looks like
 
@@ -32,14 +36,15 @@ phone can change the lock.*
 
 ## Before you build
 
-Selfsame depends on two sibling repositories by path. Clone them next to this
+Selfsame depends on three sibling repositories by path. Clone them next to this
 one or nothing compiles:
 
 ```
 Code/
 ├── selfsame/     ← you are here
 ├── did-crdt/     git clone https://git.anuna.io/anuna-research/did-crdt
-└── cbcl-rs/      git clone https://git.anuna.io/anuna-research/cbcl-rs
+├── cbcl-rs/      git clone https://git.anuna.io/anuna-research/cbcl-rs
+└── cbcl-pairing/ git clone https://git.anuna.io/anuna-research/cbcl-pairing
 ```
 
 `did-crdt` is pinned at `9a53bff1ed3eb88680fe19db0366ffd13d6b240a` — its DID
@@ -50,6 +55,96 @@ against, which is the copy CI clones.
 
 `cbcl-rs` is pinned by `cbcl-rs.sha` at the repository root — the same
 convention `cbcl-bus` uses for the `cbcl-erl` NIF.
+
+`cbcl-pairing` is pinned by `cbcl-pairing.sha`. The Selfsame adapter uses that
+crate for invitation recognition, CPace, Finished, CBCL session projection,
+endpoint reduction, and the in-memory blind relay.
+
+## Credential pairing
+
+`cbcl-pairing` is the only credential-pairing protocol in the Tauri app, CLI,
+web-device adapter, and browser demo. The ordinary pairing action accepts one
+CBCL invitation; there is no protocol selector, negotiation, or legacy fallback.
+Recognised legacy carriers fail with `PairingVersionUnsupported` before network,
+key, profile, or identity work begins.
+
+This is a breaking development cutover. There are no deployed users or migration
+state to preserve. The old SPAKE2 carriers, state machines, relay clients,
+commands, routes, stores, and positive tests have been removed. Their authority
+documents remain versioned and deprecated; a closed immutable corpus remains
+only to prove old input is inert.
+
+Production invitation allocation is compile-time disabled with no runtime
+override. It stays disabled until every SPEC-007 production gate has durable
+approval evidence. Before the first reviewed CBCL release exists, rollback
+disables pairing rather than restoring the retired protocol; unrelated identity
+and device-linking functions remain available.
+
+### Browser demo
+
+The loopback demo runs the reusable pairing protocol through a real Selfsame
+credential transfer and the complete 13-step application-identity acceptance
+predicate. Start it with one command:
+
+```bash
+cargo run -p selfsame-pairing --example web-demo
+```
+
+Open the printed `/application` URL, then open `/wallet` in another browser
+context. Create an invitation, paste it into the wallet, review the recognised
+intent, and approve or decline. The two pages use separate HttpOnly sessions
+and role-bound capabilities. The server rejects public bind addresses.
+
+This is an experimental Tier-1 prototype and is **not production-approved**.
+The demo uses the same CBCL endpoint and Selfsame credential-verification
+boundaries as the ordinary development action.
+
+### Android and web end to end
+
+An explicit development feature connects the Android claimant to the browser
+demo's loopback WebSocket relay. It accepts only an invitation naming the exact
+`https://localhost:PORT` origin and maps that origin to `ws://localhost:PORT`
+after `adb reverse`. The feature is absent from ordinary builds and cannot
+enable production invitation allocation.
+
+Build and install the arm64 debug APK:
+
+```bash
+cargo tauri android build --debug --apk --target aarch64 \
+  --features local-pairing-demo
+adb install -r src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk
+```
+
+Run the application and relay on the development machine:
+
+```bash
+cargo run -p selfsame-pairing --features local-pairing-demo \
+  --example web-demo -- --external-wallet 127.0.0.1:7443
+adb reverse tcp:7443 tcp:7443
+```
+
+Open `http://127.0.0.1:7443/application` on the development machine and create
+an invitation. In Selfsame, finish local identity setup if needed, open
+**Applications → Connect an application**, paste the invitation, review the
+four exact intent fields, and approve or decline. The application reports
+delivery only; the wallet alone reports the result of all 13 Selfsame checks.
+Create a fresh invitation for every attempt.
+
+The local claimant can also preflight the same live relay without Android:
+
+```bash
+cargo run -p selfsame-pairing --features local-pairing-demo \
+  --example local-wallet -- 'PASTE_INVITATION_HERE'
+```
+
+Run its native and browser acceptance suites with:
+
+```bash
+cargo test -p selfsame-pairing
+cargo test -p selfsame-pairing --features local-pairing-demo --test live_sessions
+node --test tests/cbcl-pairing-demo.mjs
+node --test tests/spec-007-wallet-pairing.mjs
+```
 
 ## Quick start
 
@@ -78,6 +173,7 @@ hand*. Full walkthrough: [docs/using-selfsame.md](docs/using-selfsame.md).
 | `src-tauri`, `src` | the phone app: custody, consent, signing, revocation |
 | `crates/selfsame-rendezvous` | the blind mailbox and resolver routes, destined for `did-crdt` |
 | `crates/selfsame-cli` | the device client — the reference for `hark link` |
+| `crates/selfsame-pairing` | the `cbcl-pairing` credential adapter and loopback browser demo |
 
 ## How it works
 
@@ -203,9 +299,15 @@ The original device-provisioning design lives in the
 - [SPEC-004](specs/SPEC-004-application-scoped-identity.md), the
   application/account identity and grant profile;
 - [PROTO-002](specs/PROTO-002-selfsame-rendezvous-v1.md), the blind encrypted
-  offer/grant mailbox; and
-- [PROTO-003](specs/PROTO-003-selfsame-pairing-v1.md), the routable
-  `number-word-word` SPAKE2 pairing ceremony.
+  mailbox retained for non-credential device linking and deprecated for the
+  credential-pairing path;
+- [PROTO-003](specs/PROTO-003-selfsame-pairing-v1.md) and
+  [PROTO-004](specs/PROTO-004-selfsame-ceremony-envelope-v1.md), retained as
+  deprecated historical authority rather than executable Selfsame paths;
+- [SPEC-006](specs/SPEC-006-cbcl-pairing-integration.md), superseded demo
+  evidence; and
+- [SPEC-007](specs/SPEC-007-cbcl-pairing-cutover.md), the breaking CBCL cutover,
+  rejection boundary, rollback policy, and production hold.
 
 [spec]: ../anuna-ssi/specs/SPEC-001-device-key-provisioning.md
 

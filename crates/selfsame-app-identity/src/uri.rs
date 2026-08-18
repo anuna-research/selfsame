@@ -95,22 +95,7 @@ pub enum UriError {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PathRule {
     /// A canonical origin: no path at all, not even a trailing `/`.
-    ///
-    /// The shape `CON-201` gives a rendezvous `url` and `pairingRecordRelays`.
-    /// **Not `pairingUrl`** — `PROTO-003` `CON-401` gives that one a path
-    /// grammar, deliberately, and [`PathRule::PairingBase`] is it.
     Forbidden,
-    /// `CON-401`'s `pairing-base-url`: an optional prefix of one or more
-    /// segments, each `ALPHA / DIGIT / "-" / "_" / "."`, with no trailing slash.
-    ///
-    /// Narrower than [`PathRule::Any`] on purpose. `CON-401` states the grammar
-    /// as its own ABNF and adds that the value has "no query, fragment,
-    /// userinfo, percent-encoding or trailing slash", so a percent-encoded
-    /// segment or a trailing `/` is refused here rather than left to whichever
-    /// endpoint concatenates it — two implementations joining
-    /// `https://host/selfsame/` to `/pair/v1` disagree about the double slash,
-    /// and the ceremony fails at a 404 nobody can attribute.
-    PairingBase,
     /// Any RFC 3986 path, including empty segments and a trailing `/`.
     ///
     /// The shape provider URLs use, whose `credentialBaseUrl` example ends in
@@ -143,19 +128,25 @@ pub struct UriPolicy {
 
 impl UriPolicy {
     /// `applicationId` and `verifierAudience`.
-    pub const APPLICATION_ID: Self =
-        Self { path: PathRule::NonEmptyNoDotSegments, fragment: FragmentRule::Forbidden };
+    pub const APPLICATION_ID: Self = Self {
+        path: PathRule::NonEmptyNoDotSegments,
+        fragment: FragmentRule::Forbidden,
+    };
     /// A permission URI or an enrollment `kid`.
-    pub const FRAGMENT_ID: Self =
-        Self { path: PathRule::Any, fragment: FragmentRule::RequiredNonEmpty };
+    pub const FRAGMENT_ID: Self = Self {
+        path: PathRule::Any,
+        fragment: FragmentRule::RequiredNonEmpty,
+    };
     /// A canonical origin, with no path.
-    pub const ORIGIN: Self = Self { path: PathRule::Forbidden, fragment: FragmentRule::Forbidden };
+    pub const ORIGIN: Self = Self {
+        path: PathRule::Forbidden,
+        fragment: FragmentRule::Forbidden,
+    };
     /// A provider URL that may carry a path.
-    pub const PROVIDER_URL: Self =
-        Self { path: PathRule::Any, fragment: FragmentRule::Forbidden };
-    /// `PROTO-003` `CON-401`'s `pairing-base-url` — a descriptor's `pairingUrl`.
-    pub const PAIRING_BASE_URL: Self =
-        Self { path: PathRule::PairingBase, fragment: FragmentRule::Forbidden };
+    pub const PROVIDER_URL: Self = Self {
+        path: PathRule::Any,
+        fragment: FragmentRule::Forbidden,
+    };
 }
 
 /// The recognised components of an HTTPS URI, borrowed from the input.
@@ -211,7 +202,13 @@ pub fn recognise(text: &str, policy: UriPolicy) -> Result<HttpsUri<'_>, UriError
     }
 
     let origin = text.strip_suffix(tail).ok_or(UriError::BadCharacter)?;
-    Ok(HttpsUri { origin, host, port, path, fragment })
+    Ok(HttpsUri {
+        origin,
+        host,
+        port,
+        path,
+        fragment,
+    })
 }
 
 /// Recognise a bare DNS name, as `CON-201` requires of `accountAuthority`.
@@ -237,13 +234,19 @@ fn recognise_host(host: &str) -> Result<(), UriError> {
         if bytes.first() == Some(&b'-') || bytes.last() == Some(&b'-') {
             return Err(UriError::BadHost);
         }
-        if !bytes.iter().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || *b == b'-') {
+        if !bytes
+            .iter()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || *b == b'-')
+        {
             return Err(UriError::BadHost);
         }
     }
     // An all-digit final label is an IPv4 address or ambiguous with one, and is
     // not an A-label. RFC 1123 §2.1.
-    if labels.last().is_some_and(|l| l.bytes().all(|b| b.is_ascii_digit())) {
+    if labels
+        .last()
+        .is_some_and(|l| l.bytes().all(|b| b.is_ascii_digit()))
+    {
         return Err(UriError::BadHost);
     }
     Ok(())
@@ -268,15 +271,15 @@ fn recognise_port(port: &str) -> Result<u16, UriError> {
 
 fn recognise_path(path: &str, rule: PathRule) -> Result<(), UriError> {
     if rule == PathRule::Forbidden {
-        return if path.is_empty() { Ok(()) } else { Err(UriError::BadPath) };
+        return if path.is_empty() {
+            Ok(())
+        } else {
+            Err(UriError::BadPath)
+        };
     }
     if path.is_empty() {
         return match rule {
             PathRule::NonEmptyNoDotSegments => Err(UriError::BadPath),
-            // `pairing-base-url = base-url [ pairing-path ]` — the prefix is
-            // optional, so an origin-only `pairingUrl` stays valid and every
-            // descriptor written before `CON-401` grew the grammar still
-            // recognises.
             _ => Ok(()),
         };
     }
@@ -285,20 +288,10 @@ fn recognise_path(path: &str, rule: PathRule) -> Result<(), UriError> {
     }
     let path_without_slash = path.strip_prefix('/').ok_or(UriError::BadPath)?;
     let segments: Vec<&str> = path_without_slash.split('/').collect();
-    if rule == PathRule::PairingBase {
-        // `pairing-path = "/" path-segment *( "/" path-segment )` and
-        // `path-segment = 1*( ALPHA / DIGIT / "-" / "_" / "." )`. An empty
-        // segment is both a doubled slash and a trailing one, so this covers
-        // `CON-401`'s "no trailing slash" without a separate check.
-        if segments.iter().any(|s| {
-            s.is_empty()
-                || !s.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'))
-        }) {
-            return Err(UriError::BadPath);
-        }
-    }
     if rule == PathRule::NonEmptyNoDotSegments
-        && (segments.iter().any(|s| s.is_empty() || *s == "." || *s == ".."))
+        && (segments
+            .iter()
+            .any(|s| s.is_empty() || *s == "." || *s == ".."))
     {
         return Err(UriError::BadPath);
     }
@@ -318,8 +311,13 @@ fn recognise_pchars(text: &str) -> Result<(), UriError> {
     while i < bytes.len() {
         let b = bytes.get(i).copied().ok_or(UriError::BadCharacter)?;
         if b == b'%' {
-            let pair = bytes.get(i + 1..i + 3).ok_or(UriError::BadPercentEncoding)?;
-            if !pair.iter().all(|c| c.is_ascii_digit() || (b'A'..=b'F').contains(c)) {
+            let pair = bytes
+                .get(i + 1..i + 3)
+                .ok_or(UriError::BadPercentEncoding)?;
+            if !pair
+                .iter()
+                .all(|c| c.is_ascii_digit() || (b'A'..=b'F').contains(c))
+            {
                 // Lower-case hexadecimal is a second spelling of the same octet.
                 return Err(UriError::BadPercentEncoding);
             }
@@ -352,7 +350,17 @@ fn is_pchar(b: u8) -> bool {
     is_unreserved(b)
         || matches!(
             b,
-            b'!' | b'$' | b'&' | b'\'' | b'(' | b')' | b'*' | b'+' | b',' | b';' | b'=' | b':'
+            b'!' | b'$'
+                | b'&'
+                | b'\''
+                | b'('
+                | b')'
+                | b'*'
+                | b'+'
+                | b','
+                | b';'
+                | b'='
+                | b':'
                 | b'@'
         )
 }
@@ -379,8 +387,11 @@ mod tests {
 
     #[test]
     fn returns_borrowed_components_rather_than_a_rewritten_string() {
-        let uri = recognise("https://photos.example/selfsame/application", UriPolicy::APPLICATION_ID)
-            .unwrap();
+        let uri = recognise(
+            "https://photos.example/selfsame/application",
+            UriPolicy::APPLICATION_ID,
+        )
+        .unwrap();
         assert_eq!(uri.origin, "https://photos.example");
         assert_eq!(uri.host, "photos.example");
         assert_eq!(uri.port, None);
@@ -440,7 +451,10 @@ mod tests {
             Err(UriError::HasUserInfo)
         );
         assert_eq!(
-            recognise("https://user:pw@photos.example/app", UriPolicy::APPLICATION_ID),
+            recognise(
+                "https://user:pw@photos.example/app",
+                UriPolicy::APPLICATION_ID
+            ),
             Err(UriError::HasUserInfo)
         );
     }
@@ -469,7 +483,11 @@ mod tests {
             "https://photos.example/.",
             "https://photos.example/..",
         ] {
-            assert_eq!(recognise(text, UriPolicy::APPLICATION_ID), Err(UriError::BadPath), "{text}");
+            assert_eq!(
+                recognise(text, UriPolicy::APPLICATION_ID),
+                Err(UriError::BadPath),
+                "{text}"
+            );
         }
     }
 
@@ -508,66 +526,24 @@ mod tests {
         assert!(recognise("https://photos.example/%2Fapp", UriPolicy::APPLICATION_ID).is_ok());
     }
 
-    /// `CON-401`'s `pairing-base-url`, both halves.
-    ///
-    /// The prefix is OPTIONAL, so an origin-only `pairingUrl` — every descriptor
-    /// written before the grammar existed — still recognises. And it is narrower
-    /// than a provider URL, because `CON-401` says the value has "no query,
-    /// fragment, userinfo, percent-encoding or trailing slash".
-    #[test]
-    fn a_pairing_base_url_may_carry_one_path_prefix_and_nothing_stranger() {
-        for ok in [
-            // The shape the collision exists for: a hub serving the mailbox at
-            // its origin and PROTO-003's relay below `/selfsame`, so that
-            // appending `/pair/v1` does not land on SPEC-016's WebSocket.
-            "https://chat.anuna.io/selfsame",
-            "https://localhost:8080/selfsame",
-            "https://provider.example",
-            "https://provider.example/a/b/c",
-            "https://provider.example/v1.2/pair_relay-2",
-        ] {
-            assert!(recognise(ok, UriPolicy::PAIRING_BASE_URL).is_ok(), "{ok}");
-        }
-        for bad in [
-            // A trailing slash: two endpoints joining this to `/pair/v1`
-            // disagree about the double slash, and the ceremony fails at a 404
-            // nobody can attribute.
-            "https://provider.example/selfsame/",
-            "https://provider.example/",
-            "https://provider.example/a//b",
-            // Percent-encoding, a query, and a fragment are all excluded by
-            // `path-segment`'s own character set.
-            "https://provider.example/self%2Fsame",
-            "https://provider.example/selfsame?x=1",
-        ] {
-            assert!(recognise(bad, UriPolicy::PAIRING_BASE_URL).is_err(), "{bad}");
-        }
-    }
-
-    /// A `pairingUrl` is not a mailbox `url`, and the difference is the point.
-    ///
-    /// `CON-301` keeps `url` origin-only and `CON-401` is explicit that its own
-    /// value is "deliberately distinct" from it. A build that recognised both
-    /// the same way could not express the one deployment shape the path grammar
-    /// was added for.
-    #[test]
-    fn a_mailbox_url_still_refuses_the_path_a_pairing_url_admits() {
-        let with_path = "https://provider.example/selfsame";
-        assert!(recognise(with_path, UriPolicy::PAIRING_BASE_URL).is_ok());
-        assert_eq!(recognise(with_path, UriPolicy::ORIGIN), Err(UriError::BadPath));
-    }
-
     #[test]
     fn rejects_an_empty_or_bare_root_path_for_an_application_id() {
         for text in ["https://photos.example", "https://photos.example/"] {
-            assert_eq!(recognise(text, UriPolicy::APPLICATION_ID), Err(UriError::BadPath), "{text}");
+            assert_eq!(
+                recognise(text, UriPolicy::APPLICATION_ID),
+                Err(UriError::BadPath),
+                "{text}"
+            );
         }
     }
 
     #[test]
     fn rejects_empty_path_segments_for_an_application_id_but_not_for_a_provider_url() {
         let doubled = "https://photos.example/a//b";
-        assert_eq!(recognise(doubled, UriPolicy::APPLICATION_ID), Err(UriError::BadPath));
+        assert_eq!(
+            recognise(doubled, UriPolicy::APPLICATION_ID),
+            Err(UriError::BadPath)
+        );
         assert!(recognise(doubled, UriPolicy::PROVIDER_URL).is_ok());
         // The trailing slash CON-201's own `credentialBaseUrl` example carries.
         assert!(recognise(
@@ -585,7 +561,10 @@ mod tests {
             Err(UriError::BadPath)
         );
         assert_eq!(
-            recognise("https://rendezvous-au.provider.example/mailbox", UriPolicy::ORIGIN),
+            recognise(
+                "https://rendezvous-au.provider.example/mailbox",
+                UriPolicy::ORIGIN
+            ),
             Err(UriError::BadPath)
         );
     }
@@ -598,11 +577,17 @@ mod tests {
         )
         .is_ok());
         assert_eq!(
-            recognise("https://photos.example/selfsame/application", UriPolicy::FRAGMENT_ID),
+            recognise(
+                "https://photos.example/selfsame/application",
+                UriPolicy::FRAGMENT_ID
+            ),
             Err(UriError::MissingFragment)
         );
         assert_eq!(
-            recognise("https://photos.example/selfsame/application#", UriPolicy::FRAGMENT_ID),
+            recognise(
+                "https://photos.example/selfsame/application#",
+                UriPolicy::FRAGMENT_ID
+            ),
             Err(UriError::MissingFragment)
         );
     }
@@ -610,9 +595,18 @@ mod tests {
     #[test]
     fn recognises_the_account_authority_name_grammar() {
         assert!(recognise_dns_name("accounts.photos.example").is_ok());
-        assert_eq!(recognise_dns_name("Accounts.photos.example"), Err(UriError::BadHost));
-        assert_eq!(recognise_dns_name("accounts.photos.example."), Err(UriError::BadHost));
-        assert_eq!(recognise_dns_name("accounts.photos.example:443"), Err(UriError::BadHost));
+        assert_eq!(
+            recognise_dns_name("Accounts.photos.example"),
+            Err(UriError::BadHost)
+        );
+        assert_eq!(
+            recognise_dns_name("accounts.photos.example."),
+            Err(UriError::BadHost)
+        );
+        assert_eq!(
+            recognise_dns_name("accounts.photos.example:443"),
+            Err(UriError::BadHost)
+        );
         assert_eq!(recognise_dns_name(""), Err(UriError::BadHost));
         assert_eq!(recognise_dns_name("-bad.example"), Err(UriError::BadHost));
         assert_eq!(recognise_dns_name("bad-.example"), Err(UriError::BadHost));
@@ -626,7 +620,9 @@ mod tests {
             Err(UriError::BadHost)
         );
         assert!(recognise_dns_name(&format!("{}.example", "a".repeat(63))).is_ok());
-        let long_host = core::iter::repeat_n("abcdefgh", 32).collect::<Vec<_>>().join(".");
+        let long_host = core::iter::repeat_n("abcdefgh", 32)
+            .collect::<Vec<_>>()
+            .join(".");
         assert_eq!(recognise_dns_name(&long_host), Err(UriError::BadHost));
     }
 }

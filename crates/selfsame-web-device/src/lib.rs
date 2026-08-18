@@ -62,21 +62,291 @@ use selfsame_app_identity::alias::{AcctUri, Jrd};
 use selfsame_app_identity::ceremony::{self as identity_ceremony, BundlePayload, OfferCore};
 use selfsame_app_identity::enrollment::{self as identity_enrollment, EnrollmentStatement};
 use selfsame_app_identity::json::{self as identity_json, Json};
+use selfsame_app_identity::path_b::{
+    agree_closures, issuer_state_of, ClosureAssertionMethod, ResolverObservation,
+};
 use selfsame_app_identity::path_b::{rehydrate_verified_grant, GrantRequest, VerifiedGrant};
-use selfsame_app_identity::path_b::{agree_closures, issuer_state_of, ClosureAssertionMethod, ResolverObservation};
-use selfsame_app_identity::pairing as identity_pairing;
 use selfsame_app_identity::profile::ApplicationProfile;
-use selfsame_core::spake2 as identity_spake2;
 use selfsame_app_identity::proof::{self as identity_proof, Challenge};
-use selfsame_app_identity::selection::ProviderHint;
+use selfsame_app_identity::provider_hint::ProviderHint;
 use selfsame_core::code::{LinkCode, LinkSecret};
 use selfsame_core::record::{Application, Offer};
 use selfsame_core::{accept, seal, LinkContext, UnixSeconds};
 
-/// `PROTO-003` `CON-402`/`CON-409` — minting a code, showing it, publishing its
-/// record.
-mod carrier;
-pub use carrier::PairingCarrier;
+/// Browser shell for Selfsame's one-sided CBCL claimant endpoint.
+///
+/// The constructor accepts no protocol choice. Active cryptographic state stays
+/// inside this opaque wasm value, and the browser transports only canonical
+/// frames returned by [`CbclPairingSession::cpace_frame`].
+#[wasm_bindgen]
+pub struct CbclPairingSession {
+    bootstrap: Option<selfsame_pairing::SelfsameEndpointBootstrap>,
+}
+
+#[wasm_bindgen]
+impl CbclPairingSession {
+    /// Begin from one complete invitation and two caller-supplied CSPRNG values.
+    #[wasm_bindgen(constructor)]
+    pub fn new(
+        invitation: &[u8],
+        cpace_scalar: &[u8],
+        signing_seed: &[u8],
+    ) -> Result<CbclPairingSession, JsError> {
+        let cpace_scalar: [u8; 32] = cpace_scalar
+            .try_into()
+            .map_err(|_| JsError::new("CBCL CPace randomness is exactly 32 octets"))?;
+        let signing_seed: [u8; 32] = signing_seed
+            .try_into()
+            .map_err(|_| JsError::new("CBCL signing randomness is exactly 32 octets"))?;
+        let bootstrap = selfsame_pairing::SelfsameEndpointBootstrap::join_claimant(
+            invitation,
+            cpace_scalar,
+            signing_seed,
+        )
+        .map_err(|_| JsError::new("the CBCL pairing invitation was refused"))?;
+        Ok(Self {
+            bootstrap: Some(bootstrap),
+        })
+    }
+
+    /// Exact invitation-authenticated relay origin.
+    pub fn relay_origin(&self) -> Result<String, JsError> {
+        self.bootstrap
+            .as_ref()
+            .map(|endpoint| endpoint.relay_origin().to_owned())
+            .ok_or_else(|| JsError::new("the CBCL pairing was cancelled"))
+    }
+
+    /// Canonical first CPace frame for the browser-owned relay transport.
+    pub fn cpace_frame(&self) -> Result<Vec<u8>, JsError> {
+        self.bootstrap
+            .as_ref()
+            .ok_or_else(|| JsError::new("the CBCL pairing was cancelled"))?
+            .local_cpace_frame_bytes()
+            .map_err(|_| JsError::new("the CBCL pairing frame was refused"))
+    }
+
+    /// Burn this attempt. Dropping the endpoint zeroizes its secret state.
+    pub fn cancel(&mut self) {
+        self.bootstrap = None;
+    }
+}
+
+/// Browser shell for Selfsame's CBCL allocator endpoint — the inviting side.
+///
+/// The browser owns the WebSocket, the randomness, and the ordering; this
+/// value owns every recognition and transition. Each complete binary relay
+/// message goes in through [`CbclAllocatorSession::receive`], and what comes
+/// back is a JSON effect list whose `send` entries are the only bytes the
+/// browser may write to the socket. The invitation carrier appears exactly
+/// once, as an `invitation` effect, for out-of-band transfer (QR).
+///
+/// The constructor performs no allocation-policy decision: allocation is the
+/// relay's to refuse, and a production relay refuses it. This surface is for
+/// relays that have deliberately enabled allocation (loopback conformance
+/// builds).
+#[wasm_bindgen]
+pub struct CbclAllocatorSession {
+    session: Option<selfsame_pairing::live::AllocatorRelaySession>,
+}
+
+#[wasm_bindgen]
+impl CbclAllocatorSession {
+    /// Prepare one allocator attempt from caller-supplied CSPRNG values.
+    ///
+    /// `transfer_json` carries `applicationId`, `origin`, `scope`, and
+    /// `recipient`; the exact credential bundle travels separately as octets.
+    /// `profile` is the complete authenticated Selfsame application profile.
+    /// The four random values are drawn by the browser
+    /// (`crypto.getRandomValues`): a 16-octet invitation secret, a 32-octet
+    /// CPace scalar, a 32-octet signing seed, and a 32-octet intent nonce.
+    #[wasm_bindgen(constructor)]
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        relay_origin: String,
+        transfer_json: &str,
+        bundle: &[u8],
+        profile: &[u8],
+        account: &str,
+        device_public_key: &[u8],
+        invitation_secret: &[u8],
+        cpace_scalar: &[u8],
+        signing_seed: &[u8],
+        intent_nonce: &[u8],
+    ) -> Result<CbclAllocatorSession, JsError> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields, rename_all = "camelCase")]
+        struct TransferClaims {
+            application_id: String,
+            origin: String,
+            scope: String,
+            recipient: String,
+        }
+        let claims: TransferClaims = serde_json::from_str(transfer_json)
+            .map_err(|_| JsError::new("the CBCL transfer claims were refused"))?;
+        let transfer = selfsame_pairing::CredentialTransfer {
+            application_id: claims.application_id,
+            origin: claims.origin,
+            scope: claims.scope.clone(),
+            recipient: claims.recipient,
+            bundle: bundle.to_vec(),
+        };
+        let profile = ApplicationProfile::recognise(profile)
+            .map_err(|_| JsError::new("the CBCL application profile was refused"))?;
+        let account = AcctUri::parse(account)
+            .map_err(|_| JsError::new("the CBCL account identifier was refused"))?;
+        let device_public_key: [u8; 32] = device_public_key
+            .try_into()
+            .map_err(|_| JsError::new("the CBCL device key is exactly 32 octets"))?;
+        // The allocator never runs the thirteen-step verifier — that predicate
+        // is the claimant's. Construction uses only the profile identity,
+        // account, device key, and permission claims, so the verifier-only
+        // evidence stays deliberately absent here.
+        let verification = selfsame_pairing::SelfsameVerificationContext {
+            profile,
+            account,
+            device_public_key,
+            operation_permissions: vec![claims.scope],
+            now: 0,
+            clock_skew_seconds: 0,
+            freshness: selfsame_app_identity::accept::Freshness::SessionEstablishment,
+            issuer: None,
+            jrd: None,
+            projection: None,
+            proof: None,
+        };
+        let entropy = selfsame_pairing::live::AllocatorEntropy {
+            invitation_secret: invitation_secret
+                .try_into()
+                .map_err(|_| JsError::new("the CBCL invitation secret is exactly 16 octets"))?,
+            cpace_scalar: cpace_scalar
+                .try_into()
+                .map_err(|_| JsError::new("CBCL CPace randomness is exactly 32 octets"))?,
+            signing_seed: signing_seed
+                .try_into()
+                .map_err(|_| JsError::new("CBCL signing randomness is exactly 32 octets"))?,
+            intent_nonce: intent_nonce
+                .try_into()
+                .map_err(|_| JsError::new("the CBCL intent nonce is exactly 32 octets"))?,
+        };
+        let session = selfsame_pairing::live::AllocatorRelaySession::new(
+            relay_origin,
+            transfer,
+            &verification,
+            entropy,
+        )
+        .map_err(|_| JsError::new("the CBCL allocator attempt was refused"))?;
+        Ok(Self {
+            session: Some(session),
+        })
+    }
+
+    /// First canonical relay message for a newly opened connection.
+    pub fn start(&self) -> Result<Vec<u8>, JsError> {
+        self.session
+            .as_ref()
+            .ok_or_else(|| JsError::new("the CBCL pairing was cancelled"))?
+            .start()
+            .map_err(|_| JsError::new("the CBCL pairing frame was refused"))
+    }
+
+    /// Apply one complete binary relay message; returns a JSON effect list.
+    pub fn receive(&mut self, input: &[u8]) -> Result<String, JsError> {
+        let session = self
+            .session
+            .as_mut()
+            .ok_or_else(|| JsError::new("the CBCL pairing was cancelled"))?;
+        let effects = session
+            .receive(input)
+            .map_err(|_| JsError::new("the CBCL pairing message was refused"))?;
+        Ok(live_effects_json(&effects))
+    }
+
+    /// Cancel locally; returns the closing effects, then burns the attempt.
+    pub fn cancel(&mut self) -> Result<String, JsError> {
+        let Some(mut session) = self.session.take() else {
+            return Ok("[]".into());
+        };
+        let effects = session
+            .cancel()
+            .map_err(|_| JsError::new("the CBCL pairing message was refused"))?;
+        Ok(live_effects_json(&effects))
+    }
+}
+
+/// Encode live-session effects as the closed JSON list the browser executes.
+fn live_effects_json(effects: &[selfsame_pairing::live::LiveEffect]) -> String {
+    use selfsame_pairing::live::{LiveEffect, LiveOutcome};
+    let entries: Vec<serde_json::Value> = effects
+        .iter()
+        .map(|effect| match effect {
+            LiveEffect::Send(body) => serde_json::json!({
+                "type": "send",
+                "bodyB64u": selfsame_app_identity::codec::b64url(body),
+            }),
+            LiveEffect::Invitation(carrier) => serde_json::json!({
+                "type": "invitation",
+                "carrierB64u": selfsame_app_identity::codec::b64url(carrier),
+            }),
+            LiveEffect::DisplayIntent(intent) => serde_json::json!({
+                "type": "display-intent",
+                "application": intent.application,
+                "action": intent.action,
+                "authoritySummary": intent.authority_summary,
+                "fields": intent
+                    .fields
+                    .iter()
+                    .map(|field| serde_json::json!({
+                        "label": field.label,
+                        "value": field.value,
+                        "claimedBySecretHolder": field.claimed_by_secret_holder,
+                    }))
+                    .collect::<Vec<_>>(),
+            }),
+            LiveEffect::AwaitingDecision => serde_json::json!({"type": "awaiting-decision"}),
+            LiveEffect::PayloadSent => serde_json::json!({"type": "payload-sent"}),
+            LiveEffect::Accepted => serde_json::json!({"type": "accepted"}),
+            LiveEffect::Terminal(outcome) => serde_json::json!({
+                "type": "terminal",
+                "outcome": match outcome {
+                    LiveOutcome::Accepted => "accepted",
+                    LiveOutcome::Delivered => "delivered",
+                    LiveOutcome::Declined => "declined",
+                    LiveOutcome::Cancelled => "cancelled",
+                    LiveOutcome::Closed => "closed",
+                    LiveOutcome::Refused => "refused",
+                },
+            }),
+        })
+        .collect();
+    serde_json::Value::Array(entries).to_string()
+}
+
+/// QR module matrix for one complete CBCL invitation carrier.
+///
+/// Encoded here rather than in JavaScript so the symbol a browser paints and
+/// any symbol another shell prints come from one encoder: a subtly wrong
+/// symbol does not fail to render, it scans as something else. The payload is
+/// the unpadded base64url of the carrier — exactly the text a wallet's paste
+/// affordance accepts — so a camera scan and a paste recognise identical input.
+#[wasm_bindgen]
+pub fn cbcl_invitation_qr_modules_json(carrier: &[u8]) -> Result<String, JsError> {
+    let payload = selfsame_app_identity::codec::b64url(carrier);
+    let code = qrcode::QrCode::with_error_correction_level(payload.as_bytes(), qrcode::EcLevel::Q)
+        .map_err(|_| JsError::new("the CBCL invitation does not fit a QR symbol"))?;
+    // `{size, dark}` with `dark` as one flat row-major 0/1 array is the shape
+    // the chat application's painter already consumes; keep that contract.
+    let size = code.width();
+    let dark: Vec<u8> = (0..size)
+        .flat_map(|y| (0..size).map(move |x| (x, y)))
+        .map(|(x, y)| u8::from(code[(x, y)] == qrcode::Color::Dark))
+        .collect();
+    serde_json::to_string(&serde_json::json!({
+        "size": size,
+        "dark": dark,
+    }))
+    .map_err(|_| JsError::new("the CBCL invitation does not fit a QR symbol"))
+}
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -171,8 +441,8 @@ impl core::fmt::Display for IdentityError {
 ///
 /// `offer_core_json` and `provider_hint_json` use the snake-case field names of
 /// [`OfferCore`] and [`ProviderHint`] respectively. Both objects are closed.
-/// The result is canonical JSON payload octets; PROTO-004 envelope sealing is a
-/// separate transport operation.
+/// The result is canonical JSON payload octets; cbcl carries it as opaque
+/// authenticated payload.
 #[wasm_bindgen]
 pub fn build_offer_json(
     offer_core_json: &str,
@@ -268,185 +538,6 @@ pub fn bundle_matches_offer_json(bundle: &[u8], offer: &[u8]) -> Result<(), JsEr
     result.map_err(|_| JsError::new("SPEC-004 bundle refused"))
 }
 
-// ── PROTO-003's pairing, so the browser can be role A ───────────────────────
-//
-// The mailbox secret is DOWNSTREAM of the PAKE (`SPEC-004` step 4), so a browser
-// that could not run SPAKE2 could not derive one — it could only be handed a
-// secret, which is a mailbox with the binding removed. This is the ceremony's
-// application side.
-//
-// STATE IS HELD, because SPAKE2 is two round trips and the type-state in
-// `selfsame_core::spake2` cannot cross the wasm boundary. The ordering it
-// enforces is preserved here by consuming the stage on each step: `message` is
-// available before `confirm`, `confirm` before `finish`, and calling one out of
-// turn is an error rather than a different answer. `K` is never exposed at any
-// point — `finish` returns the mailbox secret and nothing else.
-
-enum PairingStage {
-    Offered(Box<identity_spake2::Pairing>),
-    Confirmed(Box<identity_spake2::Confirmed>),
-    Spent,
-}
-
-/// One endpoint of a `PROTO-003` pairing.
-#[wasm_bindgen]
-pub struct PairingSession {
-    stage: PairingStage,
-    message: [u8; 32],
-}
-
-#[wasm_bindgen]
-impl PairingSession {
-    /// Begin as the named party, from the 16-octet code and 64 CSPRNG octets.
-    ///
-    /// `binding_hash` is `CON-403`'s and must be computed by this endpoint from
-    /// its own profile and selection — see [`binding_hash_json`]. Accepting a
-    /// peer's is the trust the binding exists to remove.
-    #[wasm_bindgen(constructor)]
-    pub fn new(
-        party: &str,
-        wib: &[u8],
-        binding_hash: &[u8],
-        ephemeral: &[u8],
-    ) -> Result<PairingSession, JsError> {
-        let party = match party {
-            "application" => identity_spake2::Party::Application,
-            "wallet" => identity_spake2::Party::Wallet,
-            _ => return Err(JsError::new("a party is \"application\" or \"wallet\"")),
-        };
-        let wib: [u8; identity_spake2::WIB_OCTETS] = wib
-            .try_into()
-            .map_err(|_| JsError::new("a pairing code is exactly 16 octets"))?;
-        let binding_hash: [u8; 32] = binding_hash
-            .try_into()
-            .map_err(|_| JsError::new("a binding hash is exactly 32 octets"))?;
-        let ephemeral: [u8; 64] = ephemeral
-            .try_into()
-            .map_err(|_| JsError::new("an ephemeral is exactly 64 octets"))?;
-        let pairing = identity_spake2::Pairing::begin(party, &wib, &binding_hash, &ephemeral)
-            .map_err(|e| JsError::new(&e.to_string()))?;
-        let message = pairing.message();
-        Ok(PairingSession { stage: PairingStage::Offered(Box::new(pairing)), message })
-    }
-
-    /// This endpoint's wire value — `pA` or `pB`, 32 octets.
-    pub fn message(&self) -> Vec<u8> {
-        self.message.to_vec()
-    }
-
-    /// Consume the peer's value; return this endpoint's confirmation MAC.
-    pub fn confirm(&mut self, peer_message: &[u8]) -> Result<Vec<u8>, JsError> {
-        self.confirm_for(peer_message)
-            .map(|mac| mac.to_vec())
-            .map_err(|_| JsError::new("the peer pairing value was refused"))
-    }
-
-    /// Verify the peer's confirmation and return the `CON-408` mailbox secret.
-    ///
-    /// The only way to reach a mailbox secret, and it is unreachable until the
-    /// peer has been confirmed — which is `CON-404`'s rule that `K` is released
-    /// to `CON-408` only after mutual confirmation.
-    pub fn finish(&mut self, peer_confirmation: &[u8]) -> Result<Vec<u8>, JsError> {
-        self.finish_for(peer_confirmation)
-            .map(|secret| secret.to_vec())
-            .map_err(|_| JsError::new("the peer confirmation was refused"))
-    }
-}
-
-/// The native twins. See the note on [`bundle_matches_offer`] — `JsError` only
-/// works inside a wasm host, so every error path is reachable natively or not at
-/// all, and a state machine whose refusals cannot be tested is a state machine
-/// with untested refusals.
-impl PairingSession {
-    /// Begin, from a code the caller already holds as octets.
-    ///
-    /// The route [`crate::carrier::PairingCarrier`] uses, so that a role-A
-    /// session can be started without `C` passing through JavaScript on the way.
-    pub fn begin_for(
-        party: identity_spake2::Party,
-        wib: &[u8; identity_spake2::WIB_OCTETS],
-        binding_hash: &[u8],
-        ephemeral: &[u8],
-    ) -> Result<PairingSession, IdentityError> {
-        let binding_hash: [u8; 32] =
-            binding_hash.try_into().map_err(|_| IdentityError::Refused)?;
-        let ephemeral: [u8; 64] = ephemeral.try_into().map_err(|_| IdentityError::Refused)?;
-        let pairing = identity_spake2::Pairing::begin(party, wib, &binding_hash, &ephemeral)
-            .map_err(|_| IdentityError::Refused)?;
-        let message = pairing.message();
-        Ok(PairingSession { stage: PairingStage::Offered(Box::new(pairing)), message })
-    }
-
-    /// Native twin of [`PairingSession::confirm`].
-    pub fn confirm_for(&mut self, peer_message: &[u8]) -> Result<[u8; 32], IdentityError> {
-        let peer: [u8; 32] = peer_message.try_into().map_err(|_| IdentityError::Refused)?;
-        let stage = std::mem::replace(&mut self.stage, PairingStage::Spent);
-        let PairingStage::Offered(pairing) = stage else {
-            return Err(IdentityError::Refused);
-        };
-        let confirmed = pairing.confirm(&peer).map_err(|_| IdentityError::Refused)?;
-        let ours = confirmed.confirmation();
-        self.stage = PairingStage::Confirmed(Box::new(confirmed));
-        Ok(ours)
-    }
-
-    /// Native twin of [`PairingSession::finish`].
-    pub fn finish_for(&mut self, peer_confirmation: &[u8]) -> Result<[u8; 16], IdentityError> {
-        let peer: [u8; 32] = peer_confirmation.try_into().map_err(|_| IdentityError::Refused)?;
-        let stage = std::mem::replace(&mut self.stage, PairingStage::Spent);
-        let PairingStage::Confirmed(confirmed) = stage else {
-            return Err(IdentityError::Refused);
-        };
-        Ok(confirmed
-            .verify_peer(&peer)
-            .map_err(|_| IdentityError::Refused)?
-            .mailbox_secret())
-    }
-}
-
-/// `CON-403`'s `binding_hash`, from the nine members.
-///
-/// The object is passed as JSON with the contract's own member names, so what a
-/// caller writes can be compared against `CON-403` by eye. It is recognised as a
-/// closed set: an unknown member is an error rather than something silently
-/// dropped, because a member that did not reach the hash is one the two
-/// endpoints could disagree about while still agreeing on the digest.
-#[wasm_bindgen]
-pub fn binding_hash_json(binding_object_json: &str) -> Result<Vec<u8>, JsError> {
-    binding_hash_of(binding_object_json).map_err(|_| JsError::new("SPEC-004 binding object refused"))
-}
-
-/// Native twin of [`binding_hash_json`].
-pub fn binding_hash_of(binding_object_json: &str) -> Result<Vec<u8>, IdentityError> {
-    #[derive(Deserialize)]
-    #[serde(deny_unknown_fields)]
-    struct Wire {
-        #[serde(rename = "applicationId")] application_id: String,
-        #[serde(rename = "descriptorDigest")] descriptor_digest: String,
-        nameplate: String,
-        number: String,
-        #[serde(rename = "profileDigest")] profile_digest: String,
-        protocol: String,
-        #[serde(rename = "providerId")] provider_id: String,
-        route: String,
-        version: i64,
-    }
-    let w: Wire = serde_json::from_str(binding_object_json).map_err(|_| IdentityError::Refused)?;
-    Ok(identity_pairing::BindingObject {
-        application_id: w.application_id,
-        descriptor_digest: w.descriptor_digest,
-        nameplate: w.nameplate,
-        number: w.number,
-        profile_digest: w.profile_digest,
-        protocol: w.protocol,
-        provider_id: w.provider_id,
-        route: w.route,
-        version: w.version,
-    }
-    .binding_hash()
-    .to_vec())
-}
-
 // ── The facts a joiner must compute BEFORE it can build an offer ────────────
 //
 // `build_offer` insists that every check compares against "the JOINER'S OWN
@@ -459,14 +550,8 @@ pub fn binding_hash_of(binding_object_json: &str) -> Result<Vec<u8>, IdentityErr
 // is precisely the trust the sentence above refuses. This exposes them from the
 // joiner's own recognised profile, so the values it binds to are ones it derived.
 //
-// THE ENDPOINTS ARE HERE FOR THE SAME REASON, and their absence had the same
-// consequence one step further out. A descriptor's `url` and `pairingUrl` are
-// what `CON-213` calls the ceremony's only mailbox origin and only PAKE relay
-// origin, and a browser that could not read them from its own recognised profile
-// had to be told where to go — so `cbcl-bus`'s page hard-coded both, and its
-// profile drifted to declaring a `pairingUrl` with no relay behind it without
-// anything failing. A descriptor nobody dereferences is a descriptor nobody
-// checks.
+// The relay origin comes from the same recognised profile. A browser that
+// cannot read it locally would have to trust a caller-supplied endpoint.
 
 /// The profile facts a joiner needs to construct an offer and a provider hint.
 #[wasm_bindgen]
@@ -478,21 +563,19 @@ pub fn profile_facts_json(profile: &[u8]) -> Result<String, JsError> {
 pub fn profile_facts(profile: &[u8]) -> Result<String, IdentityError> {
     let profile = ApplicationProfile::recognise(profile).map_err(|_| IdentityError::Refused)?;
     let descriptors: Vec<String> = profile
-        .rendezvous
+        .cbcl_pairing_relays
         .iter()
         .map(|d| {
             format!(
-                r#"{{"id":{},"descriptorDigest":{},"url":{},"pairingUrl":{},"pairingRoute":{}}}"#,
-                json_string(&d.id),
+                r#"{{"operatorId":{},"descriptorDigest":{},"relayOrigin":{}}}"#,
+                json_string(&d.operator_id),
                 json_string(&selfsame_app_identity::codec::b64url(&d.digest)),
-                json_string(&d.url),
-                json_string(&d.pairing_url),
-                json_string(&d.pairing_route),
+                json_string(&d.relay_origin),
             )
         })
         .collect();
     Ok(format!(
-        r#"{{"applicationId":{},"accountAuthority":{},"profileVersion":{},"profileDigest":{},"allowedPermissions":[{}],"rendezvous":[{}]}}"#,
+        r#"{{"applicationId":{},"accountAuthority":{},"profileVersion":{},"profileDigest":{},"allowedPermissions":[{}],"cbclPairingRelays":[{}]}}"#,
         json_string(profile.application_id.as_str()),
         json_string(profile.account_authority.as_str()),
         selfsame_app_identity::PROFILE_VERSION,
@@ -541,11 +624,8 @@ pub fn offer_core_digest(offer_core_json: &str) -> Result<String, IdentityError>
 // differential, in the one place where being wrong means a bundle that opens for
 // the wrong offer. There is one implementation and this exposes it.
 //
-// WHAT THIS IS NOT. It is `PROTO-002`'s transport, keyed by a 16-octet secret
-// the caller supplies. `PROTO-003` derives that secret from a SPAKE2 exchange,
-// which is unimplemented, so a caller passing a secret carried some other way is
-// running an unauthenticated channel. That is the caller's to declare, and the
-// naming says so: nothing here mentions pairing.
+// This is the separate SPEC-001 device-link transport, keyed by a 16-octet
+// secret the caller supplies. Credential pairing does not use these functions.
 
 /// The two mailbox addresses a secret designates — `CON-002`'s slot derivation.
 ///
@@ -577,7 +657,10 @@ pub fn seal_offer_bytes(secret: &[u8], offer_plaintext: &[u8]) -> Result<Vec<u8>
 /// Native twin of [`seal_offer_bytes`].
 pub fn seal_offer_for(secret: &[u8], offer_plaintext: &[u8]) -> Result<Vec<u8>, IdentityError> {
     let secret = mailbox_secret(secret)?;
-    Ok(seal::seal_offer(&seal::derive_key(&secret), offer_plaintext))
+    Ok(seal::seal_offer(
+        &seal::derive_key(&secret),
+        offer_plaintext,
+    ))
 }
 
 /// Open a bundle **under the caller's own offer**.
@@ -619,90 +702,6 @@ pub fn open_bundle_for(
 /// ceremony that times out rather than one that refuses.
 fn mailbox_secret(secret: &[u8]) -> Result<[u8; 16], IdentityError> {
     secret.try_into().map_err(|_| IdentityError::Refused)
-}
-
-// ── PROTO-004: the envelope a PAIRING uses ─────────────────────────────────
-//
-// THESE ARE NOT THE THREE ABOVE, AND THE DIFFERENCE IS NOT COSMETIC. The
-// functions above are SPEC-001's envelope, keyed by HKDF over the secret alone
-// and bound to the offer through a BLAKE3 transcript. A `PROTO-003` pairing uses
-// `PROTO-004`'s instead: two role-separated keys salted by `CON-403`'s
-// `binding_hash`, a constant nonce, and a record padded to one fixed length so
-// the mailbox operator cannot read a closure's size off a bundle.
-//
-// Both exist because both are live. `Device`/`LinkSession` below are SPEC-001's
-// browser device and keep SPEC-001's envelope; a pairing must use these. Sealing
-// with the wrong pair is not a subtle divergence — the record lengths differ by
-// two orders of magnitude and nothing opens — but it is an easy mistake to make
-// from JavaScript, where both are just functions taking a secret, so the names
-// carry the specification and the arity differs: PROTO-004's take the binding
-// hash, because there is no way to derive its keys without one.
-
-/// `CON-501`/`CON-502` — seal an offer payload for the offer slot.
-///
-/// Role `0x01`, which the wallet opens and never seals. The result is exactly
-/// 69,632 octets whatever the payload was.
-#[wasm_bindgen]
-pub fn seal_offer_envelope(
-    mailbox_secret_16: &[u8],
-    binding_hash: &[u8],
-    offer_payload: &[u8],
-) -> Result<Vec<u8>, JsError> {
-    seal_offer_envelope_for(mailbox_secret_16, binding_hash, offer_payload)
-        .map_err(|_| JsError::new("the offer could not be sealed"))
-}
-
-/// Native twin of [`seal_offer_envelope`].
-pub fn seal_offer_envelope_for(
-    mailbox_secret_16: &[u8],
-    binding_hash: &[u8],
-    offer_payload: &[u8],
-) -> Result<Vec<u8>, IdentityError> {
-    envelope_keys(mailbox_secret_16, binding_hash)?
-        .offer
-        .seal(offer_payload)
-        .map_err(|_| IdentityError::Refused)
-}
-
-/// `CON-502` — open the bundle the wallet sealed.
-///
-/// Role `0x02`. Unlike SPEC-001's [`open_bundle_bytes`] this takes no offer
-/// plaintext: `PROTO-004` binds a record to its ceremony through the
-/// `binding_hash` in the associated data rather than through a transcript of the
-/// offer, so a bundle from another ceremony fails the tag. The reply-to-this-offer
-/// property `REQ-006` gets from the transcript is `CON-219`'s job here — the
-/// `ceremonyId` and `requestId` in the opened payload must be the ones this
-/// application sealed, which [`bundle_matches_offer_json`] checks.
-#[wasm_bindgen]
-pub fn open_bundle_envelope(
-    mailbox_secret_16: &[u8],
-    binding_hash: &[u8],
-    sealed_record: &[u8],
-) -> Result<Vec<u8>, JsError> {
-    open_bundle_envelope_for(mailbox_secret_16, binding_hash, sealed_record)
-        .map_err(|_| JsError::new("sealed record did not authenticate"))
-}
-
-/// Native twin of [`open_bundle_envelope`].
-pub fn open_bundle_envelope_for(
-    mailbox_secret_16: &[u8],
-    binding_hash: &[u8],
-    sealed_record: &[u8],
-) -> Result<Vec<u8>, IdentityError> {
-    envelope_keys(mailbox_secret_16, binding_hash)?
-        .bundle
-        .open(sealed_record)
-        .map_err(|_| IdentityError::Refused)
-}
-
-fn envelope_keys(
-    mailbox_secret_16: &[u8],
-    binding_hash: &[u8],
-) -> Result<selfsame_core::envelope::EnvelopeKeys, IdentityError> {
-    let secret = mailbox_secret(mailbox_secret_16)?;
-    let binding: [u8; 32] = binding_hash.try_into().map_err(|_| IdentityError::Refused)?;
-    selfsame_core::envelope::EnvelopeKeys::derive(&secret, &binding)
-        .map_err(|_| IdentityError::Refused)
 }
 
 /// Native twin of [`bundle_matches_offer_json`].
@@ -897,10 +896,9 @@ pub fn verify_path_b_peer_json(
         // is a broken clock or a caller inventing freshness. Refuse rather than
         // clamp: clamping a future stamp to zero age would present the most
         // suspect input as the freshest.
-        if closures
-            .iter()
-            .any(|closure| closure.fetched_at_seconds < 0 || closure.fetched_at_seconds > now_seconds)
-        {
+        if closures.iter().any(|closure| {
+            closure.fetched_at_seconds < 0 || closure.fetched_at_seconds > now_seconds
+        }) {
             return Err(DeviceError::Refused);
         }
         // Recognise the keys, then hand every decision to the shared quorum.
@@ -925,8 +923,11 @@ pub fn verify_path_b_peer_json(
                         .assertion_methods
                         .iter()
                         .map(|m| {
-                            let public_key: [u8; 32] =
-                                m.public_key.as_slice().try_into().map_err(|_| DeviceError::Refused)?;
+                            let public_key: [u8; 32] = m
+                                .public_key
+                                .as_slice()
+                                .try_into()
+                                .map_err(|_| DeviceError::Refused)?;
                             Ok(ClosureAssertionMethod {
                                 id: m.id.clone(),
                                 kind: m.kind.clone(),
@@ -1418,11 +1419,11 @@ mod tests {
             issued_at: NOW,
             expires_at: NOW + 120,
         };
-        let descriptor = &fixture.profile.rendezvous[0];
+        let descriptor = &fixture.profile.cbcl_pairing_relays[0];
         let hint = ProviderHint {
             application_id: APP_ID.into(),
             profile_version: 1,
-            provider_id: descriptor.id.clone(),
+            provider_id: descriptor.operator_id.clone(),
             descriptor_digest: codec::b64url(&descriptor.digest),
             offer_digest: core.digest(),
         };
@@ -1699,7 +1700,10 @@ mod tests {
         let raw = include_str!("../../../test-vectors/path-b-closure-vectors.json");
         let pinned = include_str!("../../../test-vectors/path-b-closure-vectors.sha256").trim();
         let actual = format!("{:x}", Sha256::digest(raw.as_bytes()));
-        assert_eq!(actual, pinned, "the vendored vectors have drifted from their pin");
+        assert_eq!(
+            actual, pinned,
+            "the vendored vectors have drifted from their pin"
+        );
     }
 
     /// This crate reads the STAMPED wire: ten members.
@@ -1711,9 +1715,10 @@ mod tests {
     /// what everything downstream of a stamp reads.
     #[test]
     fn the_shared_vectors_are_answered_identically_here() {
-        let vectors: serde_json::Value =
-            serde_json::from_str(include_str!("../../../test-vectors/path-b-closure-vectors.json"))
-                .expect("vendored vectors parse");
+        let vectors: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../test-vectors/path-b-closure-vectors.json"
+        ))
+        .expect("vendored vectors parse");
 
         // Exactly the production path: deserialise the closed shape, then
         // recognise every assertion key as Ed25519-length. Nothing here decides
@@ -1727,14 +1732,20 @@ mod tests {
             Ok(())
         };
 
-        for case in vectors["sidecar"]["accept"].as_array().expect("accept cases") {
+        for case in vectors["sidecar"]["accept"]
+            .as_array()
+            .expect("accept cases")
+        {
             assert!(
                 recognise(&case["closure"]).is_ok(),
                 "must accept: {}",
                 case["why"].as_str().unwrap_or_default()
             );
         }
-        for case in vectors["sidecar"]["reject"].as_array().expect("reject cases") {
+        for case in vectors["sidecar"]["reject"]
+            .as_array()
+            .expect("reject cases")
+        {
             assert!(
                 recognise(&case["closure"]).is_err(),
                 "must reject: {}",
@@ -1776,7 +1787,10 @@ mod tests {
             fetched_at_seconds: NOW,
         };
 
-        let agreed = agree_closures(&fixture.profile, &[observation("app-own", 1), observation("state-1", 1)]);
+        let agreed = agree_closures(
+            &fixture.profile,
+            &[observation("app-own", 1), observation("state-1", 1)],
+        );
         assert!(agreed.is_ok(), "control: identical observations agree");
 
         let substituted = [observation("app-own", 1), observation("state-1", 2)];
@@ -2087,7 +2101,12 @@ mod tests {
     fn build_offer_refuses_evidence_that_is_not_a_con_214_jws_and_an_unrecognised_profile() {
         let fixture = grant_fixture();
         let (core, hint, _, evidence) = offer_fixture(&fixture);
-        for bad in ["", "not.a.valid.enrollment-jws", "a.b.c", "eyJhbGciOiJub25lIn0.."] {
+        for bad in [
+            "",
+            "not.a.valid.enrollment-jws",
+            "a.b.c",
+            "eyJhbGciOiJub25lIn0..",
+        ] {
             assert!(
                 build_offer(&core, bad, &hint, &fixture.profile_octets).is_err(),
                 "evidence {bad:?} is not a CON-214 compact JWS"
@@ -2128,7 +2147,6 @@ mod tests {
         assert!(build_enrollment(&statement).is_ok());
     }
 
-
     // ── the transport surface ───────────────────────────────────────────────
 
     /// The offer a device sealed is the offer the phone opens, and the bundle it
@@ -2152,7 +2170,10 @@ mod tests {
         assert_eq!(opened, offer);
 
         let sealed_bundle = seal::seal_bundle(&key, &grant, &seal::transcript(&offer));
-        assert_eq!(open_bundle_for(&secret, &sealed_bundle, &offer).expect("open"), grant);
+        assert_eq!(
+            open_bundle_for(&secret, &sealed_bundle, &offer).expect("open"),
+            grant
+        );
     }
 
     /// A bundle minted against a DIFFERENT offer does not authenticate.
@@ -2179,8 +2200,14 @@ mod tests {
         let b: serde_json::Value =
             serde_json::from_str(&mailbox_slots(&[2u8; 16]).expect("slots")).unwrap();
 
-        assert_ne!(a["offer"], a["bundle"], "one secret, two directions, two mailboxes");
-        assert_ne!(a["offer"], b["offer"], "a different secret is a different mailbox");
+        assert_ne!(
+            a["offer"], a["bundle"],
+            "one secret, two directions, two mailboxes"
+        );
+        assert_ne!(
+            a["offer"], b["offer"],
+            "a different secret is a different mailbox"
+        );
         // The derivation is upstream's and this is the check that they agree.
         assert_eq!(a["offer"], seal::slot(seal::Role::Offer, &[1u8; 16]));
     }
@@ -2192,7 +2219,6 @@ mod tests {
         assert!(mailbox_slots(&[0u8; 17]).is_err());
         assert!(seal_offer_for(&[0u8; 8], b"x").is_err());
     }
-
 
     /// The facts a joiner is given are the ones its own `build_offer` checks.
     ///
@@ -2207,7 +2233,7 @@ mod tests {
         let facts: serde_json::Value =
             serde_json::from_str(&profile_facts(&fixture.profile_octets).expect("facts")).unwrap();
 
-        let descriptor = &facts["rendezvous"][0];
+        let descriptor = &facts["cbclPairingRelays"][0];
         let (core, _, _, _) = offer_fixture(&fixture);
         // Built in the BROWSER'S wire shape, so the digest under test is the one a
         // browser would actually compute rather than one taken off the native
@@ -2227,55 +2253,30 @@ mod tests {
         })
         .to_string();
         let digest = offer_core_digest(&core_json).expect("digest");
-        assert_eq!(digest, core.digest(), "the browser's digest is the native one");
+        assert_eq!(
+            digest,
+            core.digest(),
+            "the browser's digest is the native one"
+        );
 
         let hint = ProviderHint {
             application_id: facts["applicationId"].as_str().unwrap().to_owned(),
             profile_version: facts["profileVersion"].as_i64().unwrap(),
-            provider_id: descriptor["id"].as_str().unwrap().to_owned(),
+            provider_id: descriptor["operatorId"].as_str().unwrap().to_owned(),
             descriptor_digest: descriptor["descriptorDigest"].as_str().unwrap().to_owned(),
             offer_digest: digest.clone(),
         };
         let profile = ApplicationProfile::recognise(&fixture.profile_octets).unwrap();
-        assert!(hint.verify(&profile, &digest).is_ok(),
-                "a hint built from the exposed facts must satisfy CON-209");
+        assert!(
+            hint.verify(&profile, &digest).is_ok(),
+            "a hint built from the exposed facts must satisfy CON-209"
+        );
 
         // And the profile digest the offer core carries is the same one.
-        assert_eq!(facts["profileDigest"].as_str().unwrap(),
-                   selfsame_app_identity::codec::b64url(profile.digest()));
-    }
-
-    /// A joiner can reach the two origins its own profile names.
-    ///
-    /// `CON-213`: the selected descriptor's exact `pairingUrl` is the only PAKE
-    /// relay origin for a ceremony and its exact `url` is the only mailbox
-    /// origin. Exposed for the same reason the digests are — a browser that
-    /// could not read them had to be told where to go, and `cbcl-bus`'s page
-    /// hard-coded both while its profile drifted to declaring a `pairingUrl`
-    /// with no relay behind it. Nothing failed, because nothing dereferenced it.
-    ///
-    /// Asserted through `BoundOrigins`, which is what a conforming client checks
-    /// a request's origin against, rather than against literals: the two must be
-    /// the same strings or the check passes for a descriptor the ceremony is not
-    /// actually bound to.
-    #[test]
-    fn the_facts_name_the_two_origins_a_ceremony_is_bound_to() {
-        let fixture = grant_fixture();
-        let facts: serde_json::Value =
-            serde_json::from_str(&profile_facts(&fixture.profile_octets).expect("facts")).unwrap();
-        let exposed = &facts["rendezvous"][0];
-
-        let profile = ApplicationProfile::recognise(&fixture.profile_octets).unwrap();
-        let descriptor = &profile.rendezvous[0];
-        let bound = identity_pairing::BoundOrigins::of(descriptor);
-
-        assert!(bound.permits_pairing(exposed["pairingUrl"].as_str().unwrap()).is_ok());
-        assert!(bound.permits_mailbox(exposed["url"].as_str().unwrap()).is_ok());
-        // And the route, which `CON-403`'s `number` is `route || nameplate`.
-        assert_eq!(exposed["pairingRoute"].as_str().unwrap(), descriptor.pairing_route);
-        // The two origins are not assumed to be one operator: `NFR-206` requires
-        // that no wire identifier assume they are, so they travel separately.
-        assert!(exposed["url"].is_string() && exposed["pairingUrl"].is_string());
+        assert_eq!(
+            facts["profileDigest"].as_str().unwrap(),
+            selfsame_app_identity::codec::b64url(profile.digest())
+        );
     }
 
     /// An unrecognised profile yields no facts at all.
@@ -2284,81 +2285,4 @@ mod tests {
         assert!(profile_facts(b"{}").is_err());
         assert!(profile_facts(b"not json").is_err());
     }
-
-
-    /// The two wasm endpoints reach the same mailbox secret.
-    ///
-    /// The browser is role A and a wallet is role B, so this is the exchange
-    /// EXP-004 runs with a relay between the two halves. Driving both here means
-    /// a relay failure and a ceremony failure cannot be confused for each other.
-    #[test]
-    fn two_pairing_sessions_reach_one_mailbox_secret() {
-        let binding = serde_json::json!({
-            "applicationId": "https://chat.anuna.io/selfsame/application",
-            "descriptorDigest": "ZGVzY3JpcHRvci1kaWdlc3QtMzItb2N0ZXRzLWhlcmUtb2s",
-            "nameplate": "482715",
-            "number": "03482715",
-            "profileDigest": "cHJvZmlsZS1kaWdlc3QtMzItb2N0ZXRzLWhlcmUtb2sten8",
-            "protocol": "selfsame-pairing-v1",
-            "providerId": "exp-004-loopback",
-            "route": "03",
-            "version": 1,
-        })
-        .to_string();
-        let hash = binding_hash_of(&binding).expect("a closed binding object");
-
-        let code = [5u8; 16];
-        let mut a = PairingSession::new("application", &code, &hash, &[1u8; 64]).unwrap();
-        let mut b = PairingSession::new("wallet", &code, &hash, &[2u8; 64]).unwrap();
-
-        let (pa, pb) = (a.message(), b.message());
-        let ca = a.confirm_for(&pb).unwrap();
-        let cb = b.confirm_for(&pa).unwrap();
-        assert_eq!(a.finish_for(&cb).unwrap(), b.finish_for(&ca).unwrap());
-    }
-
-    /// A different code reaches confirmation and fails there, not at the mailbox.
-    #[test]
-    fn a_wrong_code_fails_at_confirmation_across_the_boundary() {
-        let binding = serde_json::json!({
-            "applicationId": "https://chat.anuna.io/selfsame/application",
-            "descriptorDigest": "ZGVzY3JpcHRvci1kaWdlc3QtMzItb2N0ZXRzLWhlcmUtb2s",
-            "nameplate": "482715", "number": "03482715",
-            "profileDigest": "cHJvZmlsZS1kaWdlc3QtMzItb2N0ZXRzLWhlcmUtb2sten8",
-            "protocol": "selfsame-pairing-v1", "providerId": "exp-004-loopback",
-            "route": "03", "version": 1,
-        }).to_string();
-        let hash = binding_hash_of(&binding).unwrap();
-        let mut a = PairingSession::new("application", &[5u8; 16], &hash, &[1u8; 64]).unwrap();
-        let mut b = PairingSession::new("wallet", &[6u8; 16], &hash, &[2u8; 64]).unwrap();
-        let (pa, pb) = (a.message(), b.message());
-        let ca = a.confirm_for(&pb).unwrap();
-        let cb = b.confirm_for(&pa).unwrap();
-        assert!(a.finish_for(&cb).is_err());
-        assert!(b.finish_for(&ca).is_err());
-    }
-
-    /// The stages cannot be taken out of order.
-    #[test]
-    fn a_pairing_refuses_to_finish_before_it_has_confirmed() {
-        let hash = [3u8; 32];
-        let mut a = PairingSession::new("application", &[5u8; 16], &hash, &[1u8; 64]).unwrap();
-        assert!(a.finish_for(&[0u8; 32]).is_err(), "no mailbox secret without a peer value");
-    }
-
-    /// An unknown member in the binding object is refused, not dropped.
-    #[test]
-    fn the_binding_object_is_a_closed_set() {
-        let extra = serde_json::json!({
-            "applicationId": "https://chat.anuna.io/selfsame/application",
-            "descriptorDigest": "ZGVzY3JpcHRvci1kaWdlc3QtMzItb2N0ZXRzLWhlcmUtb2s",
-            "nameplate": "482715", "number": "03482715",
-            "profileDigest": "cHJvZmlsZS1kaWdlc3QtMzItb2N0ZXRzLWhlcmUtb2sten8",
-            "protocol": "selfsame-pairing-v1", "providerId": "exp-004-loopback",
-            "route": "03", "version": 1,
-            "code": "the one member CON-403 must never carry",
-        }).to_string();
-        assert!(binding_hash_of(&extra).is_err());
-    }
-
 }

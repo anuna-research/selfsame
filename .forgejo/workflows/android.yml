@@ -123,8 +123,10 @@ jobs:
           # like a target problem and is actually a stale sibling.
           did_sha="$(grep -oE '[0-9a-f]{40}' crates/selfsame-core/tests/vectors.rs | head -1)"
           cbcl_sha="$(tr -d '[:space:]' < cbcl-rs.sha)"
+          pairing_sha="$(tr -d '[:space:]' < cbcl-pairing.sha)"
           echo "did-crdt @ ${did_sha}"
           echo "cbcl-rs  @ ${cbcl_sha}"
+          echo "cbcl-pairing @ ${pairing_sha}"
           [ -d ../did-crdt ] || git clone https://git.anuna.io/anuna-research/did-crdt.git ../did-crdt
           # Always fetch: a warm workspace keeps the clone from a previous run,
           # so a pin newer than that clone resolves to "reference is not a tree"
@@ -139,6 +141,11 @@ jobs:
           git -C ../cbcl-rs fetch --quiet --tags origin
           git -C ../cbcl-rs checkout --detach "${cbcl_sha}"
           test "$(git -C ../cbcl-rs rev-parse HEAD)" = "${cbcl_sha}"
+          [ -d ../cbcl-pairing ] || git clone https://git.anuna.io/anuna-research/cbcl-pairing.git ../cbcl-pairing
+          git -C ../cbcl-pairing fetch --quiet --tags origin
+          git -C ../cbcl-pairing checkout --detach "${pairing_sha}"
+          test "$(git -C ../cbcl-pairing rev-parse HEAD)" = "${pairing_sha}"
+          test -z "$(git -C ../cbcl-pairing status --porcelain --untracked-files=no)"
 
       - name: Install the C toolchain and JDK 17
         run: |
@@ -201,7 +208,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             ~/.cargo/bin
-          key: android-cargo-${{ hashFiles('Cargo.lock', 'cbcl-rs.sha') }}
+          key: android-cargo-${{ hashFiles('Cargo.lock', 'cbcl-rs.sha', 'cbcl-pairing.sha') }}
           restore-keys: android-cargo-
 
       - name: Ensure Rust and the aarch64 Android target

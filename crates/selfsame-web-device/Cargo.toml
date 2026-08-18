@@ -27,6 +27,7 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 selfsame-core = { workspace = true }
 selfsame-app-identity = { workspace = true }
+selfsame-pairing = { path = "../selfsame-pairing" }
 ed25519-dalek = { workspace = true, features = ["std"] }
 wasm-bindgen = "0.2"
 serde = { workspace = true }
@@ -51,6 +52,11 @@ sha2 = { version = "0.10", default-features = false }
 # to agree.
 base64ct = { workspace = true }
 selfsame-rendezvous = { path = "../selfsame-rendezvous" }
+cbcl-pairing = { workspace = true }
+# The allocator round-trip test plays the browser surface against the real
+# relay service and the native claimant, both fed by the deterministic local
+# demo credential. The feature reaches test builds only.
+selfsame-pairing = { path = "../selfsame-pairing", features = ["local-pairing-demo"] }
 did-crdt = { workspace = true }
 tokio = { workspace = true }
 reqwest = { version = "0.12", features = ["json", "blocking"] }

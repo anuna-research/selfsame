@@ -3,17 +3,35 @@ id: PROTO-002
 title: Selfsame Rendezvous Protocol v1 — a blind, replaceable link mailbox
 status: draft
 tier: 1
-version: 0.2.1
+version: 0.3.0
 audience: application developer, SDK implementer, infrastructure operator, security reviewer
 author: Anuna Research (drafted with Codex, 2026-07-30; amended with Claude, 2026-07-31)
-last-updated: 2026-07-31
+last-updated: 2026-08-17
 owner-repo: selfsame
 affects-repos: selfsame, adopting applications, independent rendezvous implementations
 review-gate: not-approved — Tier-1; independent interoperability vectors, adversarial protocol review, privacy review, production-operator review, and human security sign-off are outstanding
-depends-on: PROTO-003 Selfsame Pairing Protocol v1 when used by SPEC-004; RFC 2119; RFC 3986; RFC 4648; RFC 5234; RFC 8174; RFC 9110; RFC 9111; WHATWG Fetch; JSON Schema 2020-12; BLAKE3
+depends-on: PROTO-003 Selfsame Pairing Protocol v1 for non-cutover uses; SPEC-007 for the Selfsame credential-pairing disposition; RFC 2119; RFC 3986; RFC 4648; RFC 5234; RFC 8174; RFC 9110; RFC 9111; WHATWG Fetch; JSON Schema 2020-12; BLAKE3
 ---
 
 # PROTO-002 — Selfsame Rendezvous Protocol v1
+
+## SPEC-007 credential-pairing disposition
+
+Selfsame credential pairing no longer uses this mailbox protocol.
+[[SPEC-007-cbcl-pairing-cutover]] selects the pinned cbcl blind relay instead.
+These artifacts remain draft authority for non-cutover consumers and historical comparison:
+
+- REQ-301 through REQ-308 and NFR-301 through NFR-303;
+- ADR-301 through ADR-305;
+- CON-301 through CON-308; and
+- TEST-301 through TEST-310.
+
+No mailbox, privacy, size, TTL, authentication, or human-review gate is weakened.
+Vectors: no protocol octet changes; existing TEST-301 through TEST-310 vectors remain intact.
+Evidence: [[SPEC-007-cbcl-pairing-cutover#TEST-819]].
+Owner: Selfsame human protocol owner.
+Approved for the Selfsame development cutover: 2026-08-17.
+Production approval: not granted.
 
 ## Orientation
 
@@ -1079,7 +1097,13 @@ end-to-end cryptographic verification without a new protocol version.
 ## Changelog
 
 <details>
-<summary>Revision history — 0.1.0 → 0.2.1</summary>
+<summary>Revision history — 0.1.0 → 0.3.0</summary>
+
+- **0.3.0 — 2026-08-17 — Selfsame credential-pairing deprecation.**
+  Records the [[SPEC-007-cbcl-pairing-cutover]] disposition.
+  The protocol remains draft authority for non-cutover consumers.
+  No protocol octet or existing vector changes.
+  All security and production gates remain open.
 
 - **0.2.1 — 2026-07-31 — documentation-only.** Repairs a scope gap rather than
   a behaviour: this document placed "offer, grant, VC, AEAD, transcript, or

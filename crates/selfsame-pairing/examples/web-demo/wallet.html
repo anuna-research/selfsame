@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en" data-role="wallet">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="selfsame-role" content="wallet">
+  <meta name="selfsame-bootstrap" content="{{BOOTSTRAP_CAPABILITY}}">
+  <title>Selfsame pairing — Wallet</title>
+  <link rel="stylesheet" href="/assets/style.css">
+  <script src="/assets/app.js" defer></script>
+</head>
+<body>
+  <header class="site-header">
+    <a id="home" class="brand" href="/wallet" aria-label="Selfsame wallet demo home">
+      <img class="brand-logo" src="/assets/selfsame-logo.svg" alt="" width="40" height="40">
+      <span class="brand-name">Selfsame</span>
+    </a>
+    <div class="boundary"><strong>Experimental</strong><span>cbcl-pairing · Not production-approved</span></div>
+    <button id="reset" class="quiet" type="button" disabled>Reset</button>
+  </header>
+  <main>
+    <section class="hero" aria-labelledby="page-title">
+      <p class="eyebrow">Selfsame wallet endpoint</p>
+      <h1 id="page-title">Know what you approve before anything moves.</h1>
+      <p class="lede">Join with the complete carrier. The wallet reveals the recognized authority only after the secure ceremony is established.</p>
+    </section>
+    <div class="layout">
+      <section class="card endpoint" aria-labelledby="join-title">
+        <div class="card-heading"><span class="step-number">01</span><div><p class="eyebrow">Wallet</p><h2 id="join-title">Join ceremony</h2></div></div>
+        <label for="invitation">Invitation carrier</label>
+        <textarea id="invitation" rows="5" autocomplete="off" spellcheck="false" placeholder="Paste the application invitation"></textarea>
+        <button id="join" class="primary" type="button">Join ceremony</button>
+      </section>
+      <section id="consent-panel" class="card consent" aria-labelledby="consent-title" tabindex="-1" hidden>
+        <div class="card-heading"><span class="step-number">02</span><div><p class="eyebrow">Recognized intent</p><h2 id="consent-title">Review this request</h2></div></div>
+        <p id="authority-summary" class="authority"></p>
+        <dl id="intent-fields" class="intent-fields"></dl>
+        <div class="decision-row">
+          <button id="approve" class="primary" type="button">Approve once</button>
+          <button id="decline" class="danger" type="button">Decline</button>
+        </div>
+      </section>
+      <section class="card protocol" aria-labelledby="rail-title">
+        <div class="card-heading"><span class="step-number">03</span><div><p class="eyebrow">Protocol</p><h2 id="rail-title">Ceremony gates</h2></div></div>
+        <ol class="rail" aria-label="Pairing ceremony progress">
+          <li data-gate="invitation"><span>Invitation</span><em>Waiting</em></li>
+          <li data-gate="cpace"><span>CPace</span><em>Waiting</em></li>
+          <li data-gate="finished"><span>Finished</span><em>Waiting</em></li>
+          <li data-gate="roles"><span>Roles</span><em>Waiting</em></li>
+          <li data-gate="intent"><span>Intent</span><em>Waiting</em></li>
+          <li data-gate="consent"><span>Consent</span><em>Waiting</em></li>
+          <li data-gate="credential"><span>Credential</span><em>Waiting</em></li>
+          <li data-gate="acceptance"><span>Selfsame acceptance</span><em>Waiting</em></li>
+        </ol>
+      </section>
+      <section class="card relay" aria-labelledby="relay-title">
+        <div class="card-heading"><span class="step-number">04</span><div><p class="eyebrow">Blind courier</p><h2 id="relay-title">Opaque relay</h2></div></div>
+        <p>The relay sees bounded encrypted frames and mailbox bookkeeping only. It cannot see intent, decisions, or credentials.</p>
+        <dl class="metrics">
+          <div><dt>Opaque frames</dt><dd id="relay-frames">0</dd></div>
+          <div><dt>Aggregate bytes</dt><dd id="relay-bytes">0</dd></div>
+        </dl>
+      </section>
+      <section id="result-panel" class="card result" aria-labelledby="result-title" tabindex="-1">
+        <div class="card-heading"><span class="step-number">05</span><div><p class="eyebrow">Outcome</p><h2 id="result-title">Awaiting invitation</h2></div></div>
+        <p id="result-copy">No credential has moved.</p>
+        <p id="verifier-summary" class="verifier">Selfsame verifier has not run.</p>
+      </section>
+    </div>
+  </main>
+  <div id="status" class="status" role="status" aria-live="polite">Ready to join an invitation.</div>
+</body>
+</html>

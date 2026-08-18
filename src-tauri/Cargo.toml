@@ -11,6 +11,10 @@ repository.workspace = true
 name = "selfsame_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[features]
+default = []
+local-pairing-demo = ["selfsame-pairing/local-pairing-demo"]
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
@@ -19,6 +23,7 @@ selfsame-core = { workspace = true }
 # IMPL-004 CON-601/603 — the SPEC-004 pure core. No network crate enters here.
 selfsame-app-identity = { workspace = true }
 selfsame-app-identity-net = { path = "../crates/selfsame-app-identity-net" }
+selfsame-pairing = { path = "../crates/selfsame-pairing" }
 # CON-409 record envelopes travel as base64url.
 base64ct = { workspace = true }
 did-crdt = { workspace = true }
@@ -35,6 +40,7 @@ rand = "0.8"
 zeroize = { version = "1", features = ["alloc"] }
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
 tokio = { workspace = true }
+tungstenite = { version = "=0.30.0", default-features = false, features = ["handshake"] }
 
 # ── mobile ──────────────────────────────────────────────────────────────────
 #
@@ -55,12 +61,6 @@ tauri-plugin-biometric = "2"
 tauri-plugin-selfsame-store = { path = "../crates/tauri-plugin-selfsame-store" }
 
 [dev-dependencies]
-# `tests/a_live_pairing.rs` runs the ceremony against the reference provider it
-# starts itself, and drives role A through the browser's own wasm surface —
-# using `pairing_net` for both ends would make the test agree with itself about
-# anything the client gets wrong.
-selfsame-rendezvous = { path = "../crates/selfsame-rendezvous" }
-selfsame-web-device = { path = "../crates/selfsame-web-device" }
 axum = "0.7"
 base64ct = { workspace = true }
 tempfile = "3"
