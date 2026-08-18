@@ -551,7 +551,7 @@ async fn relay_socket(mut socket: WebSocket, state: LiveState) {
             outbound = receiver.recv() => {
                 let Some(outbound) = outbound else { break };
                 let Ok(bytes) = encode_server_message(&outbound) else { break };
-                if socket.send(WsMessage::Binary(bytes.into())).await.is_err() { break; }
+                if socket.send(WsMessage::Binary(bytes)).await.is_err() { break; }
             }
             inbound = socket.recv() => {
                 let Some(Ok(inbound)) = inbound else { break };
