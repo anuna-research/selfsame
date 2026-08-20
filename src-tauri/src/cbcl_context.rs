@@ -244,6 +244,8 @@ pub struct AssembledClaimant {
 pub async fn assemble_claimant(
     record: &PairingTrustRecord,
     passcode: &str,
+    invitation_origin: &str,
+    policy: &RelayPolicy<'_>,
 ) -> Result<AssembledClaimant> {
     // Freshness: the held octets seed CON-220's cache rule; past the bound
     // the profile re-fetches or the assembly fails closed.
@@ -263,6 +265,15 @@ pub async fn assemble_claimant(
             .await
             .map_err(|_| UiError::from("PairingProfileUnavailable"))?;
     let profile = fresh.profile;
+
+    // Review finding M-1: the pre-assembly gate consulted the issuance-time
+    // snapshot; the CURRENT profile is what authorises the socket. An
+    // application that rotated or revoked its relay roster since issuance
+    // refuses here, closed — the revocability profile-carried descriptors
+    // exist for. The same fresh document then feeds every later field, so
+    // trust and scope verify against one profile, not two.
+    cbcl_relay::verify_invitation_origin(&profile, policy, invitation_origin)
+        .map_err(|_| UiError::from("PairingRelayRefused"))?;
 
     let permission = single_permission(&profile)?;
     let scope = AccountScopeId::parse(&record.account_scope_id)

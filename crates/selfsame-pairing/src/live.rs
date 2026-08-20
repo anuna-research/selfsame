@@ -409,6 +409,16 @@ impl ClaimantRelaySession {
         self
     }
 
+    /// Re-stamp the verification clock from the shell (review finding m-3).
+    ///
+    /// `now` anchors the grant's validity window and the deferred challenge's
+    /// `issued_at`. A consent screen is a human pause of unbounded length, so
+    /// the shell supplies a fresh reading when the person decides; the core
+    /// stays sans-io — it never reads a clock itself.
+    pub fn refresh_now(&mut self, now: i64) {
+        self.verification.now = now;
+    }
+
     /// First canonical relay message for a newly opened connection.
     pub fn start(&self) -> Result<Vec<u8>, IntegrationError> {
         encode_client_message(&ClientMessage::Bind).map_err(|_| IntegrationError::Recognition)
@@ -479,6 +489,9 @@ impl ClaimantRelaySession {
 
     /// Cancel locally and close the selected mailbox.
     pub fn cancel(&mut self) -> Result<Vec<LiveEffect>, IntegrationError> {
+        // The custody-derived signer has no further use (review finding M-2);
+        // dropping it zeroizes the key.
+        self.deferred_proof = None;
         let phase = std::mem::replace(&mut self.phase, ClaimantPhase::Terminal);
         let mut effects = match phase {
             ClaimantPhase::Endpoint(mut endpoint) => self.raw_effects(endpoint.cancel()?)?,
@@ -546,6 +559,9 @@ impl ClaimantRelaySession {
                         }
                         SelfsameEndpointEffect::Accepted(value) => {
                             drop(value);
+                            // The signer served its one delivery; dropping it
+                            // zeroizes the device key (review finding M-2).
+                            self.deferred_proof = None;
                             self.accepted = true;
                             effects.push(LiveEffect::Accepted);
                             effects.push(send(ClientMessage::Close)?);
@@ -592,6 +608,7 @@ impl ClaimantRelaySession {
     }
 
     fn relay_closed(&mut self, reason: CloseReason) -> Result<Vec<LiveEffect>, IntegrationError> {
+        self.deferred_proof = None;
         let phase = std::mem::replace(&mut self.phase, ClaimantPhase::Terminal);
         match phase {
             ClaimantPhase::Endpoint(mut endpoint) => {

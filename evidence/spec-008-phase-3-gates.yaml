@@ -97,3 +97,18 @@ depth_deferred:
   - TEST-913 (owner: repository owner) — live chat.anuna.io ceremony; registry entry now exists, still gated on a real application profile carrying the anuna-1 digest, an account authority, and a linked-application trust record
   - TEST-914 (owner: repository owner) — on-device Android scan → wss
   - TEST-915 (owner: cbcl security owner) — two-operator selection
+adversarial_review:
+  performed: 2026-08-20, fresh-context agent (Constitutional Principle 12), spec + full diff + defect mandate
+  blocking: none found
+  major_fixed:
+    - "M-1 stale-trust TOCTOU: the origin gate consulted the issuance-time profile snapshot while assembly fetched fresh — verify_invitation_origin now re-runs on the fresh profile inside assemble_claimant, refusing closed on roster change"
+    - "M-2 device key escaped custody un-zeroized: ed25519-dalek zeroize feature enabled workspace-wide; the deferred signer is erased at every claimant terminal (accepted / cancel / relay close), so the key never outlives its one delivery"
+  minor_fixed:
+    - "m-1 TLS vs post-TLS errors conflated: the rustls handshake is driven to completion before the WebSocket upgrade, so Tls and Handshake are honest classes; the extra-root constructor is now #[cfg(test)]"
+    - "m-2 IP-literal loopback origins passed the production filter: is_loopback covers 127.0.0.0/8 and [::1] (hand-decided — the crate purity gate excludes the networking module), with a spelling-matrix test"
+    - "m-3 frozen clock: ClaimantRelaySession::refresh_now; the shell re-stamps at decision time so grant validity and the challenge issued_at anchor to the moment of consent"
+    - "m-4 second start discarded a live ceremony: the previous pending session is cancelled (erase path + mailbox close) before new work"
+    - "m-5 passcode surface: field defaults visible (fail-safe), demo answer hides it; cleared after handoff and on forget()"
+    - "m-6 carrier bytes: the shell copy is Zeroizing"
+  minor_accepted:
+    - "m-7 a relay dropping TCP after a committed decline surfaces as PairingRelayUnavailable: masking read failures to report success would hide real transport faults for approvals; consent semantics are unaffected. Accepted with rationale."

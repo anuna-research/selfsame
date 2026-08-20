@@ -113,6 +113,23 @@ pub async fn cbcl_pairing_start(
     passcode: Option<String>,
     session: State<'_, AppSession>,
 ) -> Result<CbclPairingStartView> {
+    // Review finding m-4: a second start must not silently drop a live
+    // ceremony mid-flight — cancel it properly (erase path + mailbox close)
+    // before any new work.
+    let previous = {
+        // Scoped so the guard never crosses an await point.
+        let mut guard = session.0.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        guard.pending_cbcl_pairing.take()
+    };
+    if let Some(mut previous) = previous {
+        let _ = tauri::async_runtime::spawn_blocking(move || {
+            if let Ok(effects) = previous.core.cancel() {
+                let _ = send_effects(&mut previous.socket, effects);
+            }
+        })
+        .await;
+    }
+
     #[cfg(feature = "local-pairing-demo")]
     let (pending, view) = {
         let _ = passcode;
@@ -150,7 +167,8 @@ pub async fn cbcl_pairing_start(
 
         // CON-902 — the real context, refused closed on any missing source.
         let passcode = passcode.ok_or_else(|| UiError::from("PresenceRequired"))?;
-        let assembled = cbcl_context::assemble_claimant(&record, &passcode).await?;
+        let assembled =
+            cbcl_context::assemble_claimant(&record, &passcode, &relay_origin, &policy).await?;
 
         // REQ-901/NFR-901 — one TLS connect path, after both gates.
         let target = cbcl_transport::relay_target(&relay_origin)
@@ -303,6 +321,10 @@ fn start_live_demo(invitation: String) -> Result<(PendingCbclPairing, CbclPairin
 }
 
 fn finish_live(mut pending: PendingCbclPairing, approve: bool) -> Result<CbclPairingResultView> {
+    // Review finding m-3: the consent screen is a human pause of unbounded
+    // length; the acceptance clock is the decision moment, not the moment
+    // the socket opened.
+    pending.core.refresh_now(crate::commands::now() as i64);
     let decision = if approve {
         selfsame_pairing::live::Decision::Approve
     } else {
@@ -426,13 +448,17 @@ fn take_pending(session: &State<'_, AppSession>) -> Result<PendingCbclPairing> {
         .ok_or_else(|| UiError::from("PairingUnavailable"))
 }
 
-fn decode_carrier(input: &str) -> Result<Vec<u8>> {
+fn decode_carrier(input: &str) -> Result<zeroize::Zeroizing<Vec<u8>>> {
     if legacy::reject(LegacySurface::Carrier, input.as_bytes()).class
         == LegacyRejectionClass::PairingVersionUnsupported
     {
         return Err(UiError::from("PairingVersionUnsupported"));
     }
-    Base64UrlUnpadded::decode_vec(input.trim()).map_err(|_| UiError::from("RecognitionFailed"))
+    // The carrier holds the 16-octet invitation secret; the shell's copy
+    // erases on drop (review finding m-6).
+    Base64UrlUnpadded::decode_vec(input.trim())
+        .map(zeroize::Zeroizing::new)
+        .map_err(|_| UiError::from("RecognitionFailed"))
 }
 
 fn map_error(error: IntegrationError) -> UiError {
@@ -473,7 +499,7 @@ mod tests {
     // trimming surrounding whitespace is transport hygiene, not repair.
     #[test]
     fn bare_unpadded_base64url_decodes() {
-        assert_eq!(decode_carrier("AAAA").expect("decodes"), vec![0, 0, 0]);
-        assert_eq!(decode_carrier("  AAAA\n").expect("decodes"), vec![0, 0, 0]);
+        assert_eq!(*decode_carrier("AAAA").expect("decodes"), vec![0, 0, 0]);
+        assert_eq!(*decode_carrier("  AAAA\n").expect("decodes"), vec![0, 0, 0]);
     }
 }

@@ -13,11 +13,15 @@ export function initPairing(d) {
   // Until the answer arrives the surface assumes the production shape, which
   // shows no demo copy — the fail-safe direction.
   let capability = { demoRelay: false, productionClaimant: true };
+  const passcodeField = $("[data-pairing-passcode-field]");
+  // Fail-safe default (review finding m-5): the production shape shows the
+  // field; only a build that ANSWERS demo hides it. A failed capability call
+  // leaves the production surface intact.
+  if (passcodeField) passcodeField.hidden = false;
   invoke("cbcl_pairing_capability")
     .then((view) => {
       capability = view;
-      const passcode = $("[data-pairing-passcode-field]");
-      if (passcode) passcode.hidden = !capability.productionClaimant;
+      if (passcodeField) passcodeField.hidden = !capability.productionClaimant;
     })
     .catch(() => {});
 
@@ -36,10 +40,13 @@ export function initPairing(d) {
     show("pairing-wait");
     $("[data-screen='pairing-wait']").focus();
     try {
+      const passcodeInput = $("#pairing-passcode");
       const passcode = capability.productionClaimant
-        ? ($("#pairing-passcode")?.value ?? "")
+        ? (passcodeInput?.value ?? "")
         : null;
       const view = await invoke("cbcl_pairing_start", { invitation, passcode });
+      // The shell holds what it needs; the DOM does not (review finding m-5).
+      if (passcodeInput) passcodeInput.value = "";
       input.value = "";
       onInput();
       $("[data-cbcl-relay]").textContent = view.relayOrigin;
@@ -193,6 +200,8 @@ export function initPairing(d) {
   function forget() {
     const input = $("#pairing-input");
     if (input) input.value = "";
+    const passcode = $("#pairing-passcode");
+    if (passcode) passcode.value = "";
   }
 
   Object.assign(actions, {

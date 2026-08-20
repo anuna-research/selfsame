@@ -20,7 +20,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use selfsame_app_identity::uri::{self, UriPolicy};
-use tungstenite::{client_tls_with_config, stream::MaybeTlsStream, Connector, Error, WebSocket};
+use tungstenite::{stream::MaybeTlsStream, WebSocket};
 
 /// One I/O deadline for connect, read, and write — the demo loop's bound,
 /// kept so `CON-901` reaches "the session's existing timeout discipline".
@@ -66,13 +66,28 @@ pub fn relay_target(origin: &str) -> Result<RelayTarget, TransportError> {
 pub fn connect_wss(
     target: &RelayTarget,
 ) -> Result<WebSocket<MaybeTlsStream<TcpStream>>, TransportError> {
-    connect_with_config(target, client_config(None))
+    connect_with_config(target, client_config())
 }
 
-/// The production rustls client configuration, with one optional extra root
-/// used only by this module's tests to trust a per-run loopback certificate.
-/// Production callers pass `None`; no other root injection point exists.
-fn client_config(extra_root: Option<rustls_pki_types::CertificateDer<'static>>) -> Arc<rustls::ClientConfig> {
+/// The production rustls client configuration: bundled webpki roots, nothing
+/// else. No root-injection parameter exists on this path.
+fn client_config() -> Arc<rustls::ClientConfig> {
+    config_with_roots(None)
+}
+
+/// Test-only: the production configuration plus one per-run loopback root.
+/// Compiled out of ordinary binaries, so no production caller can reach a
+/// widened trust store (review depth note on NFR-901).
+#[cfg(test)]
+fn client_config_with_extra_root(
+    root: rustls_pki_types::CertificateDer<'static>,
+) -> Arc<rustls::ClientConfig> {
+    config_with_roots(Some(root))
+}
+
+fn config_with_roots(
+    extra_root: Option<rustls_pki_types::CertificateDer<'static>>,
+) -> Arc<rustls::ClientConfig> {
     let mut roots = rustls::RootCertStore::empty();
     roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
     if let Some(root) = extra_root {
@@ -107,20 +122,26 @@ fn connect_with_config(
     stream
         .set_write_timeout(Some(IO_TIMEOUT))
         .map_err(|_| TransportError::Connect)?;
-    let (socket, _response) = client_tls_with_config(
-        target.url.as_str(),
-        stream,
-        None,
-        Some(Connector::Rustls(config)),
-    )
-    .map_err(|error| match error {
-        // rustls certificate refusals surface either as Error::Tls or as I/O
-        // on the blocking stream: the alert is written, the peer closes, and
-        // the handshake read fails. After a completed TCP connect, both are
-        // the TLS layer refusing — never a downgrade candidate.
-        tungstenite::HandshakeError::Failure(Error::Tls(_) | Error::Io(_)) => TransportError::Tls,
-        _ => TransportError::Handshake,
-    })?;
+
+    // The TLS handshake is driven to completion HERE, before the WebSocket
+    // upgrade, so its failures are exactly the `Tls` class and everything
+    // after it is exactly the `Handshake` class (review finding m-1) — the
+    // certificate refusal is never conflated with a relay that died after
+    // proving its identity.
+    let server_name = rustls_pki_types::ServerName::try_from(target.host.clone())
+        .map_err(|_| TransportError::Origin)?;
+    let connection = rustls::ClientConnection::new(config, server_name)
+        .map_err(|_| TransportError::Tls)?;
+    let mut tls = rustls::StreamOwned::new(connection, stream);
+    while tls.conn.is_handshaking() {
+        tls.conn
+            .complete_io(&mut tls.sock)
+            .map_err(|_| TransportError::Tls)?;
+    }
+
+    let (socket, _response) =
+        tungstenite::client::client(target.url.as_str(), MaybeTlsStream::Rustls(tls))
+            .map_err(|_| TransportError::Handshake)?;
     Ok(socket)
 }
 
@@ -227,7 +248,7 @@ mod tests {
         let relay = spawn_tls_echo_relay();
         let mut socket = connect_with_config(
             &target(relay.port),
-            client_config(Some(relay.root.clone())),
+            client_config_with_extra_root(relay.root.clone()),
         )
         .expect("TLS connect with test root");
         assert!(

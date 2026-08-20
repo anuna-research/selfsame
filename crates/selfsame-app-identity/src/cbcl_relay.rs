@@ -94,6 +94,59 @@ fn eligible(descriptor: &CbclRelayDescriptor, policy: &RelayPolicy<'_>) -> bool 
 
 fn is_loopback(origin: &str) -> bool {
     let authority = origin.strip_prefix("https://").unwrap_or(origin);
-    let host = authority.split(':').next().unwrap_or(authority);
-    host == "localhost" || host.ends_with(".localhost")
+    // An IPv6 literal keeps its brackets; everything else splits on the port.
+    let host = if let Some(rest) = authority.strip_prefix('[') {
+        rest.split(']').next().unwrap_or(rest)
+    } else {
+        authority.split(':').next().unwrap_or(authority)
+    };
+    // Name forms, the whole 127.0.0.0/8 block, and the IPv6 loopback — an
+    // ordinary build must refuse every spelling of "this machine" (SPEC-008
+    // review finding m-2), not only the ones the demo capability maps. The
+    // IPv4 check is hand-decided because this crate's purity gate keeps
+    // the standard networking module out entirely; a literal is four decimal
+    // octets, so the grammar is small enough to state here directly.
+    host == "localhost" || host.ends_with(".localhost") || host == "::1" || {
+        let mut octets = host.split('.');
+        let first = octets.next() == Some("127");
+        first
+            && (1..=3).all(|_| {
+                octets.next().is_some_and(|part| {
+                    !part.is_empty()
+                        && part.len() <= 3
+                        && part.bytes().all(|b| b.is_ascii_digit())
+                        && part.parse::<u16>().is_ok_and(|value| value <= 255)
+                })
+            })
+            && octets.next().is_none()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_loopback;
+
+    // SPEC-008 review finding m-2: every spelling of "this machine" is
+    // loopback — names, the 127.0.0.0/8 block, and the IPv6 loopback.
+    #[test]
+    fn every_loopback_spelling_is_loopback() {
+        for origin in [
+            "https://localhost:7443",
+            "https://demo.localhost:7443",
+            "https://127.0.0.1:9443",
+            "https://127.1.2.3",
+            "https://[::1]:9443",
+        ] {
+            assert!(is_loopback(origin), "{origin} is loopback");
+        }
+        for origin in [
+            "https://chat.anuna.io:9443",
+            "https://relay.example",
+            "https://127.example.com",
+            "https://128.0.0.1",
+            "https://127.0.0.1.evil.example",
+        ] {
+            assert!(!is_loopback(origin), "{origin} is not loopback");
+        }
+    }
 }
