@@ -681,8 +681,11 @@ pub struct DeferredProofSigner {
     /// The verifier session label for this one ceremony.
     pub verifier_session: String,
     /// Signs `CON-207` `proof_input` with the context's device key.
-    pub signer: Box<dyn FnMut(&[u8]) -> [u8; 64] + Send>,
+    pub signer: ProofInputSigner,
 }
+
+/// A custody-backed closure signing `CON-207` `proof_input` octets.
+pub type ProofInputSigner = Box<dyn FnMut(&[u8]) -> [u8; 64] + Send>;
 
 /// An owned proof resolved by the Selfsame shell for one verifier session.
 #[derive(Clone, Debug, Eq, PartialEq)]

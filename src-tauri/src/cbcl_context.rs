@@ -306,7 +306,7 @@ pub async fn assemble_claimant(
     let jrd = selfsame_app_identity_net::webfinger::fetch_and_verify(
         &account,
         &identity.did,
-        &[identity.acct_uri.clone()],
+        std::slice::from_ref(&identity.acct_uri),
     )
     .await
     .map_err(|_| UiError::from("AuthorityUnreachable"))?;

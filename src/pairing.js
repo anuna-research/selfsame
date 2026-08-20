@@ -20,7 +20,12 @@ export function initPairing(d) {
   if (passcodeField) passcodeField.hidden = false;
   invoke("cbcl_pairing_capability")
     .then((view) => {
-      capability = view;
+      // A bridge that answers with anything but the capability shape leaves
+      // the fail-safe production default standing (screens harness stubs
+      // unknown commands as null).
+      if (view && typeof view.productionClaimant === "boolean") {
+        capability = view;
+      }
       if (passcodeField) passcodeField.hidden = !capability.productionClaimant;
     })
     .catch(() => {});

@@ -8,6 +8,9 @@
 use selfsame_pairing::release;
 
 #[test]
+// The constant IS the subject: this scope-invariant test exists so that the
+// commit which flips the constant must also touch this file, in review.
+#[allow(clippy::assertions_on_constants)]
 fn test_911_production_allocation_hold_is_untouched() {
     assert!(
         !release::PRODUCTION_ALLOCATION_ENABLED,
