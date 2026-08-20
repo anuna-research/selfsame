@@ -9,7 +9,10 @@ fn test_801_every_ordinary_shell_starts_cbcl_without_a_protocol_option() {
     let adapter = include_str!("../src/lib.rs");
 
     for (name, source, marker) in [
-        ("Tauri", tauri, "SelfsameEndpointBootstrap::join_claimant"),
+        // SPEC-008: the Tauri shell starts the endpoint through the live
+        // claimant session (which is the one-sided bootstrap, driven); the
+        // no-protocol-option property is unchanged.
+        ("Tauri", tauri, "ClaimantRelaySession::new"),
         ("CLI", cli, "SelfsameEndpointBootstrap::join_claimant"),
         (
             "web-device",
@@ -24,7 +27,9 @@ fn test_801_every_ordinary_shell_starts_cbcl_without_a_protocol_option() {
         );
     }
     assert!(ui.contains("cbcl_pairing_start"));
-    assert!(ui.contains("{ invitation }"));
+    // SPEC-008: the ordinary build adds the custody passcode — presence for
+    // CON-902 assembly — and still no protocol choice.
+    assert!(ui.contains("{ invitation, passcode }"));
 
     for forbidden in [
         "protocolOption",
@@ -43,8 +48,10 @@ fn test_801_every_ordinary_shell_starts_cbcl_without_a_protocol_option() {
 fn test_801_tauri_keeps_endpoint_state_out_of_the_webview() {
     let command = include_str!("../../../src-tauri/src/cbcl_pairing.rs");
     let session = include_str!("../../../src-tauri/src/session.rs");
-    assert!(session.contains("Option<selfsame_pairing::SelfsameEndpointBootstrap>"));
-    assert!(command.contains("pending_cbcl_pairing = Some(endpoint)"));
+    // SPEC-008: every build now holds the live pending claimant (session +
+    // socket) in the shell session — never the webview.
+    assert!(session.contains("Option<crate::cbcl_pairing::PendingCbclPairing>"));
+    assert!(command.contains("pending_cbcl_pairing = Some(pending)"));
     for secret in ["cpace_scalar:", "signing_seed:", "invitation_secret"] {
         assert!(
             !command

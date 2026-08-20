@@ -1,34 +1,38 @@
 //! Tauri's one-sided `cbcl-pairing` claimant shell.
 //!
-//! Ordinary builds retain only the invitation-authenticated pending endpoint.
-//! A build carrying the explicit `local-pairing-demo` capability connects only
-//! to a canonical `https://localhost:PORT` invitation and maps that origin to
-//! the same loopback port's plain WebSocket conformance listener. Production
-//! invitation allocation remains compile-time disabled.
+//! One pump drives every build (`IMPL-008` `ADR-910`): a blocking WebSocket
+//! loop around the sans-io `ClaimantRelaySession`, over
+//! `MaybeTlsStream<TcpStream>`. An ordinary build reaches it only through
+//! `SPEC-008`'s gates — profile-anchored origin trust (`REQ-906`), real
+//! context assembly (`CON-902`), TLS transport (`REQ-901`/`NFR-901`) — and
+//! commits live approve/decline (`REQ-903`). A build carrying the explicit
+//! `local-pairing-demo` capability keeps its loopback origin→`ws://` mapping
+//! and fixture context. Production invitation allocation remains held
+//! upstream (`REQ-907` does not touch `SPEC-007` `REQ-809`).
 
 use base64ct::{Base64UrlUnpadded, Encoding as _};
 use rand::RngCore as _;
 use serde::Serialize;
+use std::net::TcpStream;
+#[cfg(feature = "local-pairing-demo")]
+use std::time::Duration;
 use tauri::State;
+use tungstenite::{stream::MaybeTlsStream, Message, WebSocket};
 
 use crate::commands::{AppSession, UiError};
-#[cfg(not(feature = "local-pairing-demo"))]
-use selfsame_pairing::SelfsameEndpointBootstrap;
 use selfsame_pairing::{
     legacy::{self, LegacyRejectionClass, LegacySurface},
+    live::{ClaimantRelaySession, LiveEffect, LiveOutcome},
     IntegrationError,
 };
 
+#[cfg(not(feature = "local-pairing-demo"))]
+use crate::{cbcl_context, cbcl_registry, cbcl_transport};
+
 #[cfg(feature = "local-pairing-demo")]
-use {
-    selfsame_app_identity::cbcl_relay::{self, RelayPolicy},
-    selfsame_pairing::{
-        live::{ClaimantRelaySession, LiveEffect, LiveOutcome},
-        local_demo,
-    },
-    std::{net::TcpStream, time::Duration},
-    tungstenite::{client, Message, WebSocket},
-};
+use selfsame_app_identity::cbcl_relay::{self, RelayPolicy};
+#[cfg(feature = "local-pairing-demo")]
+use selfsame_pairing::local_demo;
 
 type Result<T> = std::result::Result<T, UiError>;
 
@@ -71,168 +75,185 @@ pub struct CbclPairingResultView {
     message: &'static str,
 }
 
-/// Live socket state exists only in the compile-time local demo build.
-#[cfg(feature = "local-pairing-demo")]
+/// The live claimant between consent display and the person's decision.
+/// Never persisted or exposed to the page; erased on cancel and terminal.
 pub struct PendingCbclPairing {
     core: ClaimantRelaySession,
-    socket: WebSocket<TcpStream>,
+    socket: WebSocket<MaybeTlsStream<TcpStream>>,
+}
+
+/// What this build's pairing path actually is (`REQ-908`): the screens
+/// derive their copy from this instead of hardcoding either build's prose.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CbclPairingCapabilityView {
+    /// The compile-gated loopback demo relay path.
+    demo_relay: bool,
+    /// The SPEC-008 production claimant path (wss + custody presence).
+    production_claimant: bool,
+}
+
+/// Report the build's pairing capability, derived from the compiled feature.
+#[tauri::command]
+pub async fn cbcl_pairing_capability() -> Result<CbclPairingCapabilityView> {
+    Ok(CbclPairingCapabilityView {
+        demo_relay: cfg!(feature = "local-pairing-demo"),
+        production_claimant: !cfg!(feature = "local-pairing-demo"),
+    })
 }
 
 /// Begin Selfsame's claimant endpoint with no protocol choice or legacy path.
+///
+/// Ordinary builds take the person's passcode here: the origin gate needs no
+/// key, but `CON-902` assembly derives the wallet's per-application identity
+/// inside custody before any socket opens. The demo build ignores it.
 #[tauri::command]
 pub async fn cbcl_pairing_start(
     invitation: String,
+    passcode: Option<String>,
     session: State<'_, AppSession>,
 ) -> Result<CbclPairingStartView> {
-    #[cfg(feature = "local-pairing-demo")]
-    {
-        let (pending, view) = tauri::async_runtime::spawn_blocking(move || start_live(invitation))
-            .await
-            .map_err(|_| UiError::from("PairingFailed"))??;
-        session
-            .0
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .pending_cbcl_pairing = Some(pending);
-        return Ok(view);
+    // Review finding m-4: a second start must not silently drop a live
+    // ceremony mid-flight — cancel it properly (erase path + mailbox close)
+    // before any new work.
+    let previous = {
+        // Scoped so the guard never crosses an await point.
+        let mut guard = session.0.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        guard.pending_cbcl_pairing.take()
+    };
+    if let Some(mut previous) = previous {
+        let _ = tauri::async_runtime::spawn_blocking(move || {
+            if let Ok(effects) = previous.core.cancel() {
+                let _ = send_effects(&mut previous.socket, effects);
+            }
+        })
+        .await;
     }
 
+    #[cfg(feature = "local-pairing-demo")]
+    let (pending, view) = {
+        let _ = passcode;
+        tauri::async_runtime::spawn_blocking(move || start_live_demo(invitation))
+            .await
+            .map_err(|_| UiError::from("PairingFailed"))??
+    };
+
     #[cfg(not(feature = "local-pairing-demo"))]
-    {
-        let invitation = decode_carrier(&invitation)?;
-        let mut cpace_scalar = [0_u8; 32];
-        let mut signing_seed = [0_u8; 32];
-        rand::rngs::OsRng.fill_bytes(&mut cpace_scalar);
-        rand::rngs::OsRng.fill_bytes(&mut signing_seed);
-        let endpoint =
-            SelfsameEndpointBootstrap::join_claimant(&invitation, cpace_scalar, signing_seed)
-                .map_err(map_error)?;
-        let view = CbclPairingStartView {
-            relay_origin: endpoint.relay_origin().to_owned(),
-            cpace_frame: Some(Base64UrlUnpadded::encode_string(
-                &endpoint.local_cpace_frame_bytes().map_err(map_error)?,
-            )),
-            status: "Secure pairing started. Waiting for the application.",
-            intent: None,
-        };
-        session
-            .0
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .pending_cbcl_pairing = Some(endpoint);
-        Ok(view)
-    }
+    let (pending, view) = {
+        let carrier = decode_carrier(&invitation)?;
+        let recognised =
+            selfsame_pairing::decode_selfsame_invitation(&carrier).map_err(map_error)?;
+        let relay_origin = recognised.relay_origin.clone();
+
+        // REQ-906 — before any socket: exactly one held authenticated profile
+        // pre-declares this origin, under the compiled registry.
+        let held = cbcl_context::held_trust_records();
+        let profiles: Vec<_> = held.iter().map(|(_, profile)| profile.clone()).collect();
+        let policy = cbcl_registry::production_relay_policy();
+        let matched = cbcl_context::gate_invitation_origin(&profiles, &policy, &relay_origin)
+            .map_err(|refusal| match refusal {
+                cbcl_context::OriginRefusal::NoEligibleMatch => {
+                    UiError::from("PairingRelayRefused")
+                }
+                cbcl_context::OriginRefusal::AmbiguousMatch => {
+                    UiError::from("PairingRelayAmbiguous")
+                }
+            })?;
+        let record = held
+            .iter()
+            .find(|(record, _)| record.application_id == matched.application_id.as_str())
+            .map(|(record, _)| record.clone())
+            .ok_or_else(|| UiError::from("PairingRelayRefused"))?;
+
+        // CON-902 — the real context, refused closed on any missing source.
+        let passcode = passcode.ok_or_else(|| UiError::from("PresenceRequired"))?;
+        let assembled =
+            cbcl_context::assemble_claimant(&record, &passcode, &relay_origin, &policy).await?;
+
+        // REQ-901/NFR-901 — one TLS connect path, after both gates.
+        let target = cbcl_transport::relay_target(&relay_origin)
+            .map_err(|_| UiError::from("PairingRelayRefused"))?;
+        tauri::async_runtime::spawn_blocking(move || {
+            let socket = cbcl_transport::connect_wss(&target).map_err(transport_error)?;
+            let core = claimant_core(&carrier, assembled.context)?
+                .with_deferred_proof(assembled.deferred);
+            pump_to_intent(core, socket, relay_origin)
+        })
+        .await
+        .map_err(|_| UiError::from("PairingFailed"))??
+    };
+
+    session
+        .0
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .pending_cbcl_pairing = Some(pending);
+    Ok(view)
 }
 
 /// Commit the exact displayed approval and wait for Selfsame acceptance.
 #[tauri::command]
 pub async fn cbcl_pairing_approve(
-    _session: State<'_, AppSession>,
+    session: State<'_, AppSession>,
 ) -> Result<CbclPairingResultView> {
-    #[cfg(feature = "local-pairing-demo")]
-    {
-        let pending = take_pending(&_session)?;
-        return tauri::async_runtime::spawn_blocking(move || finish_live(pending, true))
-            .await
-            .map_err(|_| UiError::from("PairingFailed"))?;
-    }
-    #[cfg(not(feature = "local-pairing-demo"))]
-    Err(UiError::from("PairingUnavailable"))
+    let pending = take_pending(&session)?;
+    tauri::async_runtime::spawn_blocking(move || finish_live(pending, true))
+        .await
+        .map_err(|_| UiError::from("PairingFailed"))?
 }
 
 /// Commit an explicit decline; no payload or Selfsame verifier call follows.
 #[tauri::command]
 pub async fn cbcl_pairing_decline(
-    _session: State<'_, AppSession>,
+    session: State<'_, AppSession>,
 ) -> Result<CbclPairingResultView> {
-    #[cfg(feature = "local-pairing-demo")]
-    {
-        let pending = take_pending(&_session)?;
-        return tauri::async_runtime::spawn_blocking(move || finish_live(pending, false))
-            .await
-            .map_err(|_| UiError::from("PairingFailed"))?;
-    }
-    #[cfg(not(feature = "local-pairing-demo"))]
-    Err(UiError::from("PairingUnavailable"))
+    let pending = take_pending(&session)?;
+    tauri::async_runtime::spawn_blocking(move || finish_live(pending, false))
+        .await
+        .map_err(|_| UiError::from("PairingFailed"))?
 }
 
-/// Burn the pending endpoint locally and close its development mailbox.
+/// Burn the pending endpoint locally and close its relay mailbox.
 #[tauri::command]
 pub async fn cbcl_pairing_cancel(session: State<'_, AppSession>) -> Result<()> {
-    #[cfg(feature = "local-pairing-demo")]
-    {
-        let pending = session
-            .0
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .pending_cbcl_pairing
-            .take();
-        if let Some(mut pending) = pending {
-            let _ = tauri::async_runtime::spawn_blocking(move || {
-                if let Ok(effects) = pending.core.cancel() {
-                    let _ = send_effects(&mut pending.socket, effects);
-                }
-            })
-            .await;
-        }
-    }
-    #[cfg(not(feature = "local-pairing-demo"))]
-    {
-        session
-            .0
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .pending_cbcl_pairing = None;
+    let pending = session
+        .0
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .pending_cbcl_pairing
+        .take();
+    if let Some(mut pending) = pending {
+        let _ = tauri::async_runtime::spawn_blocking(move || {
+            if let Ok(effects) = pending.core.cancel() {
+                let _ = send_effects(&mut pending.socket, effects);
+            }
+        })
+        .await;
     }
     Ok(())
 }
 
-#[cfg(feature = "local-pairing-demo")]
-fn start_live(invitation: String) -> Result<(PendingCbclPairing, CbclPairingStartView)> {
-    let invitation = decode_carrier(&invitation)?;
-    let recognised =
-        selfsame_pairing::decode_selfsame_invitation(&invitation).map_err(map_error)?;
-    let relay_origin = recognised.relay_origin.clone();
-    let fixture = local_demo::credential(&relay_origin).map_err(map_error)?;
-    let approved = [local_demo::LOCAL_CONFORMANCE_DIGEST];
-    cbcl_relay::verify_invitation_origin(
-        &fixture.verification.profile,
-        &RelayPolicy {
-            forbidden_operator_ids: &[],
-            approved_conformance: &approved,
-            allow_loopback: true,
-        },
-        &relay_origin,
-    )
-    .map_err(|_| UiError::from("PairingRelayRefused"))?;
-
-    let (websocket_url, port) = local_websocket_url(&relay_origin)?;
-    let stream = TcpStream::connect(("127.0.0.1", port))
-        .map_err(|_| UiError::from("PairingRelayUnavailable"))?;
-    stream
-        .set_read_timeout(Some(Duration::from_secs(15)))
-        .map_err(|_| UiError::from("PairingRelayUnavailable"))?;
-    stream
-        .set_write_timeout(Some(Duration::from_secs(15)))
-        .map_err(|_| UiError::from("PairingRelayUnavailable"))?;
-    let (mut socket, _) = client(websocket_url.as_str(), stream)
-        .map_err(|_| UiError::from("PairingRelayUnavailable"))?;
-
+/// Fresh ceremony entropy plus the sans-io claimant core.
+fn claimant_core(
+    carrier: &[u8],
+    verification: selfsame_pairing::SelfsameVerificationContext,
+) -> Result<ClaimantRelaySession> {
     let mut cpace_scalar = [0_u8; 32];
     let mut signing_seed = [0_u8; 32];
     rand::rngs::OsRng.fill_bytes(&mut cpace_scalar);
     rand::rngs::OsRng.fill_bytes(&mut signing_seed);
-    let mut core = ClaimantRelaySession::new(
-        &invitation,
-        cpace_scalar,
-        signing_seed,
-        fixture.verification,
-    )
-    .map_err(map_error)?;
+    ClaimantRelaySession::new(carrier, cpace_scalar, signing_seed, verification).map_err(map_error)
+}
+
+/// Drive one connected socket from `start()` to the displayed exact intent.
+fn pump_to_intent(
+    mut core: ClaimantRelaySession,
+    mut socket: WebSocket<MaybeTlsStream<TcpStream>>,
+    relay_origin: String,
+) -> Result<(PendingCbclPairing, CbclPairingStartView)> {
     socket
         .send(Message::Binary(core.start().map_err(map_error)?.into()))
         .map_err(|_| UiError::from("PairingRelayUnavailable"))?;
-
     loop {
         let bytes = read_binary(&mut socket)?;
         let effects = core.receive(&bytes).map_err(map_error)?;
@@ -263,7 +284,47 @@ fn start_live(invitation: String) -> Result<(PendingCbclPairing, CbclPairingStar
 }
 
 #[cfg(feature = "local-pairing-demo")]
+fn start_live_demo(invitation: String) -> Result<(PendingCbclPairing, CbclPairingStartView)> {
+    let carrier = decode_carrier(&invitation)?;
+    let recognised = selfsame_pairing::decode_selfsame_invitation(&carrier).map_err(map_error)?;
+    let relay_origin = recognised.relay_origin.clone();
+    let fixture = local_demo::credential(&relay_origin).map_err(map_error)?;
+    let approved = [local_demo::LOCAL_CONFORMANCE_DIGEST];
+    cbcl_relay::verify_invitation_origin(
+        &fixture.verification.profile,
+        &RelayPolicy {
+            forbidden_operator_ids: &[],
+            approved_conformance: &approved,
+            allow_loopback: true,
+        },
+        &relay_origin,
+    )
+    .map_err(|_| UiError::from("PairingRelayRefused"))?;
+
+    let (websocket_url, port) = local_websocket_url(&relay_origin)?;
+    let stream = TcpStream::connect(("127.0.0.1", port))
+        .map_err(|_| UiError::from("PairingRelayUnavailable"))?;
+    stream
+        .set_read_timeout(Some(Duration::from_secs(15)))
+        .map_err(|_| UiError::from("PairingRelayUnavailable"))?;
+    stream
+        .set_write_timeout(Some(Duration::from_secs(15)))
+        .map_err(|_| UiError::from("PairingRelayUnavailable"))?;
+    let (socket, _) = tungstenite::client::client(
+        websocket_url.as_str(),
+        MaybeTlsStream::Plain(stream),
+    )
+    .map_err(|_| UiError::from("PairingRelayUnavailable"))?;
+
+    let core = claimant_core(&carrier, fixture.verification)?;
+    pump_to_intent(core, socket, relay_origin)
+}
+
 fn finish_live(mut pending: PendingCbclPairing, approve: bool) -> Result<CbclPairingResultView> {
+    // Review finding m-3: the consent screen is a human pause of unbounded
+    // length; the acceptance clock is the decision moment, not the moment
+    // the socket opened.
+    pending.core.refresh_now(crate::commands::now() as i64);
     let decision = if approve {
         selfsame_pairing::live::Decision::Approve
     } else {
@@ -312,8 +373,10 @@ fn finish_live(mut pending: PendingCbclPairing, approve: bool) -> Result<CbclPai
     }
 }
 
-#[cfg(feature = "local-pairing-demo")]
-fn send_effects(socket: &mut WebSocket<TcpStream>, effects: Vec<LiveEffect>) -> Result<()> {
+fn send_effects(
+    socket: &mut WebSocket<MaybeTlsStream<TcpStream>>,
+    effects: Vec<LiveEffect>,
+) -> Result<()> {
     for effect in effects {
         match effect {
             LiveEffect::Send(bytes) => socket
@@ -326,8 +389,7 @@ fn send_effects(socket: &mut WebSocket<TcpStream>, effects: Vec<LiveEffect>) -> 
     Ok(())
 }
 
-#[cfg(feature = "local-pairing-demo")]
-fn read_binary(socket: &mut WebSocket<TcpStream>) -> Result<Vec<u8>> {
+fn read_binary(socket: &mut WebSocket<MaybeTlsStream<TcpStream>>) -> Result<Vec<u8>> {
     loop {
         match socket.read() {
             Ok(Message::Binary(bytes)) => return Ok(bytes.to_vec()),
@@ -348,7 +410,6 @@ fn local_websocket_url(origin: &str) -> Result<(String, u16)> {
     Ok((format!("ws://localhost:{port}/relay"), port))
 }
 
-#[cfg(feature = "local-pairing-demo")]
 fn intent_view(intent: selfsame_pairing::live::DisplayIntent) -> CbclIntentView {
     CbclIntentView {
         application: intent.application,
@@ -366,7 +427,17 @@ fn intent_view(intent: selfsame_pairing::live::DisplayIntent) -> CbclIntentView 
     }
 }
 
-#[cfg(feature = "local-pairing-demo")]
+#[cfg(not(feature = "local-pairing-demo"))]
+fn transport_error(error: crate::cbcl_transport::TransportError) -> UiError {
+    use crate::cbcl_transport::TransportError;
+    match error {
+        TransportError::Origin => UiError::from("PairingRelayRefused"),
+        TransportError::Connect => UiError::from("PairingRelayUnavailable"),
+        TransportError::Tls => UiError::from("PairingRelayTlsRefused"),
+        TransportError::Handshake => UiError::from("PairingRelayUnavailable"),
+    }
+}
+
 fn take_pending(session: &State<'_, AppSession>) -> Result<PendingCbclPairing> {
     session
         .0
@@ -377,13 +448,17 @@ fn take_pending(session: &State<'_, AppSession>) -> Result<PendingCbclPairing> {
         .ok_or_else(|| UiError::from("PairingUnavailable"))
 }
 
-fn decode_carrier(input: &str) -> Result<Vec<u8>> {
+fn decode_carrier(input: &str) -> Result<zeroize::Zeroizing<Vec<u8>>> {
     if legacy::reject(LegacySurface::Carrier, input.as_bytes()).class
         == LegacyRejectionClass::PairingVersionUnsupported
     {
         return Err(UiError::from("PairingVersionUnsupported"));
     }
-    Base64UrlUnpadded::decode_vec(input.trim()).map_err(|_| UiError::from("RecognitionFailed"))
+    // The carrier holds the 16-octet invitation secret; the shell's copy
+    // erases on drop (review finding m-6).
+    Base64UrlUnpadded::decode_vec(input.trim())
+        .map(zeroize::Zeroizing::new)
+        .map_err(|_| UiError::from("RecognitionFailed"))
 }
 
 fn map_error(error: IntegrationError) -> UiError {
@@ -393,5 +468,38 @@ fn map_error(error: IntegrationError) -> UiError {
             UiError::from("RecognitionFailed")
         }
         _ => UiError::from("PairingFailed"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // TEST-908 (REQ-905): the carrier is exactly unpadded base64url of the
+    // invitation — a URL wrapper, base64 padding, or a legacy prefix each
+    // refuses at recognition, before any state change.
+    #[test]
+    fn wrapped_padded_and_legacy_carriers_refuse() {
+        let refused = |input: &str| serde_json::to_string(&decode_carrier(input).unwrap_err()).expect("token");
+        assert_eq!(
+            refused("https://pair.example/#AAAA"),
+            "\"RecognitionFailed\"",
+            "a URL-wrapped carrier is never navigated or unwrapped"
+        );
+        assert_eq!(refused("AAAA=="), "\"RecognitionFailed\"");
+        assert_eq!(refused("AA AA"), "\"RecognitionFailed\"");
+        assert_eq!(
+            refused("alpha-bravo-carrot-delta-echo-fox-golf-hotel-india-jam-kilo-lima"),
+            "\"PairingVersionUnsupported\"",
+            "a retired human-word carrier is recognised as retired, not decoded"
+        );
+    }
+
+    // TEST-908 (positive shape): a bare unpadded base64url string decodes;
+    // trimming surrounding whitespace is transport hygiene, not repair.
+    #[test]
+    fn bare_unpadded_base64url_decodes() {
+        assert_eq!(*decode_carrier("AAAA").expect("decodes"), vec![0, 0, 0]);
+        assert_eq!(*decode_carrier("  AAAA\n").expect("decodes"), vec![0, 0, 0]);
     }
 }

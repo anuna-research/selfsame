@@ -40,7 +40,13 @@ rand = "0.8"
 zeroize = { version = "1", features = ["alloc"] }
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
 tokio = { workspace = true }
-tungstenite = { version = "=0.30.0", default-features = false, features = ["handshake"] }
+# SPEC-008 ADR-901/ADR-911: the claimant speaks wss:// through rustls with
+# bundled webpki roots — identical certificate behaviour on Android and
+# desktop, and no plaintext or invalid-certificate fallback (NFR-901).
+tungstenite = { version = "=0.30.0", default-features = false, features = ["handshake", "rustls-tls-webpki-roots"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+rustls-pki-types = "1"
+webpki-roots = "1"
 
 # ── mobile ──────────────────────────────────────────────────────────────────
 #
@@ -61,6 +67,12 @@ tauri-plugin-biometric = "2"
 tauri-plugin-selfsame-store = { path = "../crates/tauri-plugin-selfsame-store" }
 
 [dev-dependencies]
+# TEST-901/TEST-902's loopback TLS relay: a self-signed root minted per test
+# run, injected only through the test-only connector constructor.
+rcgen = "0.13"
+# The SPEC-004 fixture module (shared by #[path] like local_demo's) mints
+# mnemonics; only tests compile it.
+bip39 = { version = "2", default-features = false, features = ["std"] }
 axum = "0.7"
 base64ct = { workspace = true }
 tempfile = "3"

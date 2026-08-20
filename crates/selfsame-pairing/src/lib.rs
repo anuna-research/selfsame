@@ -70,7 +70,7 @@ use selfsame_app_identity::{
     alias::{AcctUri, Jrd},
     ceremony,
     profile::ApplicationProfile,
-    proof::Challenge,
+    proof::{self, Challenge},
 };
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
@@ -359,6 +359,24 @@ impl SelfsameEndpoint {
         frame: &ChannelFrame,
         verification: Option<&SelfsameVerificationContext>,
     ) -> Result<Vec<SelfsameEndpointEffect>, IntegrationError> {
+        self.receive_frame_with_proof(frame, verification, None)
+    }
+
+    /// [`Self::receive_frame`], completing a grant-bound `CON-207` proof at
+    /// delivery when the context carries none (SPEC-008 `CON-902`).
+    ///
+    /// A fresh device proof binds the SHA-256 of the exact grant octets, so a
+    /// shell whose context is assembled before the ceremony cannot hold one.
+    /// The deferred signer keeps the completion inside this adapter: the
+    /// challenge is built from the delivered grant, signed by the shell's
+    /// custody-backed closure, and consumed by the same `accept_grant` call —
+    /// Selfsame acceptance authority does not move (`SPEC-007` `REQ-803`).
+    pub fn receive_frame_with_proof(
+        &mut self,
+        frame: &ChannelFrame,
+        verification: Option<&SelfsameVerificationContext>,
+        mut deferred: Option<&mut DeferredProofSigner>,
+    ) -> Result<Vec<SelfsameEndpointEffect>, IntegrationError> {
         let effects = self
             .reducer
             .receive_frame(frame)
@@ -375,6 +393,39 @@ impl SelfsameEndpoint {
                     let verification = verification.ok_or(IntegrationError::State)?;
                     let transfer = recognise_credential_grant_body(&grant)?;
                     recognise_transfer_claims(&transfer, verification)?;
+                    // A context without a proof completes one here, bound to
+                    // the exact delivered grant octets; without a deferred
+                    // signer it stays absent and step 13 refuses, closed.
+                    let completed: SelfsameVerificationContext;
+                    let verification = match (&verification.proof, deferred.as_deref_mut()) {
+                        (None, Some(source)) => {
+                            let bundle = ceremony::recognise_bundle(&transfer.bundle)
+                                .map_err(|_| IntegrationError::Recognition)?;
+                            let challenge = Challenge {
+                                nonce: source.nonce,
+                                application_id: verification
+                                    .profile
+                                    .application_id
+                                    .as_str()
+                                    .to_owned(),
+                                account: verification.account.as_str().to_owned(),
+                                grant_hash: proof::grant_hash(bundle.grant.as_bytes()),
+                                session: source.verifier_session.clone(),
+                                issued_at: verification.now,
+                            };
+                            let signature = (source.signer)(&proof::proof_input(&challenge));
+                            completed = SelfsameVerificationContext {
+                                proof: Some(SelfsameProof {
+                                    challenge,
+                                    signature,
+                                    verifier_session: source.verifier_session.clone(),
+                                }),
+                                ..verification.clone()
+                            };
+                            &completed
+                        }
+                        _ => verification,
+                    };
                     self.selfsame_verifier_calls += 1;
                     let acceptance = accept_transferred_credential(
                         verification,
@@ -614,6 +665,27 @@ impl From<AcceptError> for VerificationFailure {
         Self::Selfsame(value.step as u8)
     }
 }
+
+/// A shell-supplied source for one deferred, grant-bound `CON-207` proof
+/// (SPEC-008 `CON-902`).
+///
+/// A fresh device proof's challenge binds the SHA-256 of the exact grant
+/// octets, so it cannot exist before delivery. The shell draws the nonce and
+/// supplies a custody-backed signer over `proof_input`; the adapter builds
+/// the challenge from the delivered grant and verifies through the same
+/// `accept_grant` call. The signer signs with the device key the context
+/// names — nothing else — and is invoked at most once per delivered grant.
+pub struct DeferredProofSigner {
+    /// Verifier-chosen nonce octets, drawn fresh by the shell per ceremony.
+    pub nonce: [u8; 32],
+    /// The verifier session label for this one ceremony.
+    pub verifier_session: String,
+    /// Signs `CON-207` `proof_input` with the context's device key.
+    pub signer: ProofInputSigner,
+}
+
+/// A custody-backed closure signing `CON-207` `proof_input` octets.
+pub type ProofInputSigner = Box<dyn FnMut(&[u8]) -> [u8; 64] + Send>;
 
 /// An owned proof resolved by the Selfsame shell for one verifier session.
 #[derive(Clone, Debug, Eq, PartialEq)]

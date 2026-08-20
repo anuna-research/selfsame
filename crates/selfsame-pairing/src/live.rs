@@ -367,6 +367,7 @@ enum ClaimantPhase {
 pub struct ClaimantRelaySession {
     locator: Locator,
     verification: SelfsameVerificationContext,
+    deferred_proof: Option<crate::DeferredProofSigner>,
     phase: ClaimantPhase,
     next_seq: u8,
     next_peer_seq: u8,
@@ -389,12 +390,33 @@ impl ClaimantRelaySession {
         Ok(Self {
             locator,
             verification,
+            deferred_proof: None,
             phase: ClaimantPhase::AwaitWelcome(Some(bootstrap)),
             next_seq: 0,
             next_peer_seq: 0,
             accepted: false,
             declined: false,
         })
+    }
+
+    /// Attach a deferred, grant-bound `CON-207` proof source (SPEC-008
+    /// `CON-902`). Used when the shell's context is assembled before the
+    /// ceremony and therefore carries `proof: None`; the adapter completes
+    /// the proof from the delivered grant octets.
+    #[must_use]
+    pub fn with_deferred_proof(mut self, source: crate::DeferredProofSigner) -> Self {
+        self.deferred_proof = Some(source);
+        self
+    }
+
+    /// Re-stamp the verification clock from the shell (review finding m-3).
+    ///
+    /// `now` anchors the grant's validity window and the deferred challenge's
+    /// `issued_at`. A consent screen is a human pause of unbounded length, so
+    /// the shell supplies a fresh reading when the person decides; the core
+    /// stays sans-io — it never reads a clock itself.
+    pub fn refresh_now(&mut self, now: i64) {
+        self.verification.now = now;
     }
 
     /// First canonical relay message for a newly opened connection.
@@ -467,6 +489,9 @@ impl ClaimantRelaySession {
 
     /// Cancel locally and close the selected mailbox.
     pub fn cancel(&mut self) -> Result<Vec<LiveEffect>, IntegrationError> {
+        // The custody-derived signer has no further use (review finding M-2);
+        // dropping it zeroizes the key.
+        self.deferred_proof = None;
         let phase = std::mem::replace(&mut self.phase, ClaimantPhase::Terminal);
         let mut effects = match phase {
             ClaimantPhase::Endpoint(mut endpoint) => self.raw_effects(endpoint.cancel()?)?,
@@ -507,7 +532,11 @@ impl ClaimantRelaySession {
                     ClaimantPhase::Endpoint(endpoint) => endpoint,
                     _ => unreachable!(),
                 };
-                let raw = match endpoint.receive_frame(&frame, Some(&self.verification)) {
+                let raw = match endpoint.receive_frame_with_proof(
+                    &frame,
+                    Some(&self.verification),
+                    self.deferred_proof.as_mut(),
+                ) {
                     Ok(raw) => raw,
                     Err(_) => {
                         // This one-use invitation cannot safely continue after
@@ -530,6 +559,9 @@ impl ClaimantRelaySession {
                         }
                         SelfsameEndpointEffect::Accepted(value) => {
                             drop(value);
+                            // The signer served its one delivery; dropping it
+                            // zeroizes the device key (review finding M-2).
+                            self.deferred_proof = None;
                             self.accepted = true;
                             effects.push(LiveEffect::Accepted);
                             effects.push(send(ClientMessage::Close)?);
@@ -576,6 +608,7 @@ impl ClaimantRelaySession {
     }
 
     fn relay_closed(&mut self, reason: CloseReason) -> Result<Vec<LiveEffect>, IntegrationError> {
+        self.deferred_proof = None;
         let phase = std::mem::replace(&mut self.phase, ClaimantPhase::Terminal);
         match phase {
             ClaimantPhase::Endpoint(mut endpoint) => {

@@ -106,6 +106,13 @@ pub struct PendingIssuance {
     ceremony_id: String,
     request_id: String,
     valid_until: i64,
+    /// SPEC-008 ADR-912 inputs, recorded as the pairing-trust entry on
+    /// release: the CON-201-authenticated profile octets (verified inside
+    /// `authorise` before any key was touched), the canonical application
+    /// id, and the account scope this grant's account derives from.
+    trust_application_id: String,
+    trust_profile_octets: Vec<u8>,
+    trust_account_scope: String,
     /// The offer's own expiry. A preparation started shortly before it, or a
     /// prompt left open, must not still release a long-lived grant afterwards —
     /// so the deadline travels with the pending state and is compared at
@@ -371,6 +378,9 @@ pub async fn app_grant_prepare(
         request_id: decided.offer.request_id,
         valid_until: decided.valid_until,
         expires_at: decided.offer.expires_at,
+        trust_application_id: decided.profile.application_id.as_str().to_owned(),
+        trust_profile_octets: profile,
+        trust_account_scope: decided.scope.as_str().to_owned(),
     });
 
     Ok(request)
@@ -437,6 +447,17 @@ pub async fn app_grant_confirm(
         Some(&closure),
     )
     .map_err(|_| UiError::from("GrantIssuanceFailed"))?;
+
+    // SPEC-008 ADR-912: a released grant is the wallet's evidence of a real
+    // relationship with this application — record its authenticated profile
+    // and account scope as the pairing-trust entry. Failure to record does
+    // not un-release the grant; the person can re-link to repair it.
+    let _ = crate::cbcl_context::record_pairing_trust(
+        &pending.trust_application_id,
+        &pending.trust_profile_octets,
+        &pending.trust_account_scope,
+        now() as i64,
+    );
 
     Ok(AuthorisedGrant {
         bundle,

@@ -36,7 +36,10 @@
 
 pub mod app_grant;
 mod app_identity;
+pub mod cbcl_context;
 pub mod cbcl_pairing;
+pub mod cbcl_registry;
+pub mod cbcl_transport;
 mod commands;
 pub mod custody;
 pub mod net;
@@ -85,6 +88,7 @@ pub fn run() {
             app_identity::alias_preview,
             app_identity::home_fingerprint,
             app_identity::app_identity_derive,
+            cbcl_pairing::cbcl_pairing_capability,
             cbcl_pairing::cbcl_pairing_start,
             cbcl_pairing::cbcl_pairing_approve,
             cbcl_pairing::cbcl_pairing_decline,
