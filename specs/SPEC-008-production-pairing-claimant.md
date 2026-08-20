@@ -2,7 +2,7 @@
 id: SPEC-008
 title: Production Pairing Claimant — Transport, Real Credential, and Origin Trust
 status: draft
-version: 0.2.0
+version: 0.2.1
 tier: 1
 review-gate: not-approved
 depends-on: "[[SPEC-007-cbcl-pairing-cutover]]; [[SPEC-004-application-scoped-identity]]; [[SPEC-003-android-apk-distribution]]; cbcl-pairing SPEC-001"
@@ -61,8 +61,10 @@ Controls:     [[#REQ-902]] a non-demo build SHALL NOT construct the verification
                 acceptance authority), [[SPEC-007-cbcl-pairing-cutover#REQ-804]] (consent
                 precedes payload), [[SPEC-007-cbcl-pairing-cutover#REQ-813]] (person never
                 enters a relay origin)
-Open:         who publishes and signs relay conformance evidence, and how its digest
-                reaches the compiled registry → [[#CON-903]] (owner: repository owner)
+Open:         a second independent relay operator for
+                [[SPEC-007-cbcl-pairing-cutover#CON-806]]'s production preference —
+                `anuna-1` stands alone under the availability exception
+                (owner: repository owner)
               [[IMPL-008-production-pairing-claimant#ADR-912]] fixes the trusted-profile
                 set as the wallet's linked applications (recorded at grant issuance);
                 ratification, and any widening, is the owner's (owner: repository owner)
@@ -390,6 +392,10 @@ certificate → [[#TEST-902]] must fail; reintroduce the fixture context in non-
 
 ## Changelog
 
+- **0.2.1** — [[#CON-903]] first registry entry ratified (owner-directed,
+  2026-08-20): `anuna-1`, the SHA-256 of cbcl-bus
+  `docs/relay-conformance-anuna-1.md` (cbcl-bus PR #97). The publication
+  Open item closes; the second-operator item remains.
 - **0.2.0** — implementation findings folded back (branch
   `feature/spec-008-production-claimant`, [[IMPL-008-production-pairing-claimant]]):
   the CON-207 proof is grant-bound and therefore deferred to delivery; the

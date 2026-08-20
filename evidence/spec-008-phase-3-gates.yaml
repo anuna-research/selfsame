@@ -69,7 +69,9 @@ gates:
     status: pass
     evidence: >
       unregistered_digest_refuses + empty_registry_refuses_every_origin
-      (the shipped registry is asserted empty).
+      (empty-policy behaviour) + shipped_registry_is_exactly_the_ratified_anuna_entry
+      (the shipped registry holds exactly the anuna-1 digest, never the demo
+      constant — a registry change is a test change).
   TEST-911:
     status: pass
     evidence: >
@@ -87,7 +89,11 @@ mutation_gate:
   origin_check_disabled: "3 cbcl_context tests red (killed)"
   invalid_certificate_accepted: "TLS-downgrade mutant: TEST-902 + plaintext test red (killed)"
   fixture_reintroduced: "[19;32] registry mutant: TEST-904 script red (killed)"
+registry_first_entry:
+  status: done (owner-directed 2026-08-20)
+  digest: 7029f2229f08c548b252309405bad9e5bddf973a8c33c73e4bfb5408f742c142
+  evidence: cbcl-bus docs/relay-conformance-anuna-1.md (cbcl-bus PR #97)
 depth_deferred:
-  - TEST-913 (owner: repository owner) — live chat.anuna.io ceremony, gated on the first registry entry
+  - TEST-913 (owner: repository owner) — live chat.anuna.io ceremony; registry entry now exists, still gated on a real application profile carrying the anuna-1 digest, an account authority, and a linked-application trust record
   - TEST-914 (owner: repository owner) — on-device Android scan → wss
   - TEST-915 (owner: cbcl security owner) — two-operator selection

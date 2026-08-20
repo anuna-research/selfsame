@@ -436,23 +436,44 @@ mod tests {
         );
     }
 
-    // TEST-910: the shipped registry is empty, so the production policy
-    // refuses every non-loopback origin — the valid fail-closed birth state.
+    // TEST-910: an empty registry refuses every non-loopback origin — the
+    // valid fail-closed state CON-903 names for evidence-less builds.
     #[test]
     fn empty_registry_refuses_every_origin() {
-        assert!(cbcl_registry::APPROVED_CONFORMANCE.is_empty());
         let held = vec![
             profile_with_relay("op-a", ORIGIN, 3),
             profile_with_relay("op-b", "https://chat.anuna.io:9443", 19),
         ];
-        let policy = cbcl_registry::production_relay_policy();
+        let empty = RelayPolicy {
+            forbidden_operator_ids: &[],
+            approved_conformance: &[],
+            allow_loopback: false,
+        };
         for origin in [ORIGIN, "https://chat.anuna.io:9443"] {
             assert_eq!(
-                gate_invitation_origin(&held, &policy, origin).unwrap_err(),
+                gate_invitation_origin(&held, &empty, origin).unwrap_err(),
                 OriginRefusal::NoEligibleMatch,
                 "{origin} must refuse against an empty registry"
             );
         }
+    }
+
+    // CON-903: the shipped registry holds exactly the owner-ratified anuna-1
+    // digest — the SHA-256 of cbcl-bus docs/relay-conformance-anuna-1.md —
+    // and nothing else. A drifted or extra entry fails here, which makes a
+    // registry change a test change, which is the reviewed-release property.
+    #[test]
+    fn shipped_registry_is_exactly_the_ratified_anuna_entry() {
+        let expected: [u8; 32] = [
+            0x70, 0x29, 0xf2, 0x22, 0x9f, 0x08, 0xc5, 0x48, 0xb2, 0x52, 0x30, 0x94, 0x05, 0xba,
+            0xd9, 0xe5, 0xbd, 0xdf, 0x97, 0x3a, 0x8c, 0x33, 0xc7, 0x3e, 0x4b, 0xfb, 0x54, 0x08,
+            0xf7, 0x42, 0xc1, 0x42,
+        ];
+        assert_eq!(cbcl_registry::APPROVED_CONFORMANCE, &[expected]);
+        assert_ne!(
+            expected, [19; 32],
+            "the ratified digest is never the demo constant"
+        );
     }
 
     // CON-902: only a single-permission profile names an unambiguous
