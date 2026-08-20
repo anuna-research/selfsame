@@ -1,10 +1,10 @@
 ---
 id: SPEC-008
 title: Production Pairing Claimant — Transport, Real Credential, and Origin Trust
-status: draft
-version: 0.2.1
+status: implemented
+version: 0.2.2
 tier: 1
-review-gate: not-approved
+review-gate: approved
 depends-on: "[[SPEC-007-cbcl-pairing-cutover]]; [[SPEC-004-application-scoped-identity]]; [[SPEC-003-android-apk-distribution]]; cbcl-pairing SPEC-001"
 last-updated: 2026-08-20
 ---
@@ -392,6 +392,12 @@ certificate → [[#TEST-902]] must fail; reintroduce the fixture context in non-
 
 ## Changelog
 
+- **0.2.2** — status `implemented`, review gate `approved`: the repository
+  owner reviewed and merged PR #43 (2026-08-20) after the fresh-context
+  adversarial review closed with zero blocking findings
+  (`evidence/spec-008-phase-3-gates.yaml`). Depth tests TEST-913/914/915
+  stay open with their named owners; they gate live production claims,
+  not this document's lifecycle.
 - **0.2.1** — [[#CON-903]] first registry entry ratified (owner-directed,
   2026-08-20): `anuna-1`, the SHA-256 of cbcl-bus
   `docs/relay-conformance-anuna-1.md` (cbcl-bus PR #97). The publication
