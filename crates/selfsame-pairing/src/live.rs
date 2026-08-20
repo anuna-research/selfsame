@@ -367,6 +367,7 @@ enum ClaimantPhase {
 pub struct ClaimantRelaySession {
     locator: Locator,
     verification: SelfsameVerificationContext,
+    deferred_proof: Option<crate::DeferredProofSigner>,
     phase: ClaimantPhase,
     next_seq: u8,
     next_peer_seq: u8,
@@ -389,12 +390,23 @@ impl ClaimantRelaySession {
         Ok(Self {
             locator,
             verification,
+            deferred_proof: None,
             phase: ClaimantPhase::AwaitWelcome(Some(bootstrap)),
             next_seq: 0,
             next_peer_seq: 0,
             accepted: false,
             declined: false,
         })
+    }
+
+    /// Attach a deferred, grant-bound `CON-207` proof source (SPEC-008
+    /// `CON-902`). Used when the shell's context is assembled before the
+    /// ceremony and therefore carries `proof: None`; the adapter completes
+    /// the proof from the delivered grant octets.
+    #[must_use]
+    pub fn with_deferred_proof(mut self, source: crate::DeferredProofSigner) -> Self {
+        self.deferred_proof = Some(source);
+        self
     }
 
     /// First canonical relay message for a newly opened connection.
@@ -507,7 +519,11 @@ impl ClaimantRelaySession {
                     ClaimantPhase::Endpoint(endpoint) => endpoint,
                     _ => unreachable!(),
                 };
-                let raw = match endpoint.receive_frame(&frame, Some(&self.verification)) {
+                let raw = match endpoint.receive_frame_with_proof(
+                    &frame,
+                    Some(&self.verification),
+                    self.deferred_proof.as_mut(),
+                ) {
                     Ok(raw) => raw,
                     Err(_) => {
                         // This one-use invitation cannot safely continue after
