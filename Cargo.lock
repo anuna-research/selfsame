@@ -4186,6 +4186,7 @@ dependencies = [
  "argon2",
  "axum",
  "base64ct",
+ "bip39",
  "blake3",
  "did-crdt",
  "ed25519-dalek",

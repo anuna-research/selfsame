@@ -70,6 +70,9 @@ tauri-plugin-selfsame-store = { path = "../crates/tauri-plugin-selfsame-store" }
 # TEST-901/TEST-902's loopback TLS relay: a self-signed root minted per test
 # run, injected only through the test-only connector constructor.
 rcgen = "0.13"
+# The SPEC-004 fixture module (shared by #[path] like local_demo's) mints
+# mnemonics; only tests compile it.
+bip39 = { version = "2", default-features = false, features = ["std"] }
 axum = "0.7"
 base64ct = { workspace = true }
 tempfile = "3"
