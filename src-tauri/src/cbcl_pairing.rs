@@ -82,6 +82,26 @@ pub struct PendingCbclPairing {
     socket: WebSocket<MaybeTlsStream<TcpStream>>,
 }
 
+/// What this build's pairing path actually is (`REQ-908`): the screens
+/// derive their copy from this instead of hardcoding either build's prose.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CbclPairingCapabilityView {
+    /// The compile-gated loopback demo relay path.
+    demo_relay: bool,
+    /// The SPEC-008 production claimant path (wss + custody presence).
+    production_claimant: bool,
+}
+
+/// Report the build's pairing capability, derived from the compiled feature.
+#[tauri::command]
+pub async fn cbcl_pairing_capability() -> Result<CbclPairingCapabilityView> {
+    Ok(CbclPairingCapabilityView {
+        demo_relay: cfg!(feature = "local-pairing-demo"),
+        production_claimant: !cfg!(feature = "local-pairing-demo"),
+    })
+}
+
 /// Begin Selfsame's claimant endpoint with no protocol choice or legacy path.
 ///
 /// Ordinary builds take the person's passcode here: the origin gate needs no

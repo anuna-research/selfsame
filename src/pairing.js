@@ -9,6 +9,18 @@
 export function initPairing(d) {
   const { $, show, invoke, fail, message, actions, busy, idle } = d;
 
+  // REQ-908: capability comes from the build, never from hardcoded prose.
+  // Until the answer arrives the surface assumes the production shape, which
+  // shows no demo copy — the fail-safe direction.
+  let capability = { demoRelay: false, productionClaimant: true };
+  invoke("cbcl_pairing_capability")
+    .then((view) => {
+      capability = view;
+      const passcode = $("[data-pairing-passcode-field]");
+      if (passcode) passcode.hidden = !capability.productionClaimant;
+    })
+    .catch(() => {});
+
   function onInput() {
     const value = $("#pairing-input")?.value.trim() ?? "";
     $("[data-pairing-state]").textContent = value ? "Invitation ready" : "Paste one invitation";
@@ -24,7 +36,10 @@ export function initPairing(d) {
     show("pairing-wait");
     $("[data-screen='pairing-wait']").focus();
     try {
-      const view = await invoke("cbcl_pairing_start", { invitation });
+      const passcode = capability.productionClaimant
+        ? ($("#pairing-passcode")?.value ?? "")
+        : null;
+      const view = await invoke("cbcl_pairing_start", { invitation, passcode });
       input.value = "";
       onInput();
       $("[data-cbcl-relay]").textContent = view.relayOrigin;
@@ -33,19 +48,39 @@ export function initPairing(d) {
     } catch (error) {
       const token = message(error);
       show("pairing-enter");
-      fail(
-        "pairing",
-        token === "PairingVersionUnsupported"
-          ? "That invitation came from an obsolete development build. Ask the application for a new one."
-          : token === "PairingRelayUnavailable"
-            ? "The local relay could not be reached. Check the demo server and adb reverse, then create a fresh invitation."
-            : token === "PairingRelayRefused"
-              ? "That invitation does not name the approved local demo relay. Nothing was shared."
-              : "That invitation could not be recognised. Nothing was shared.",
-      );
+      fail("pairing", startFailureText(token));
     } finally {
       idle();
     }
+  }
+
+  // One message per closed error token (REQ-906/CON-901 error model), and
+  // demo-only wording exists only when the build carries the demo relay
+  // (REQ-908 / TEST-912).
+  function startFailureText(token) {
+    if (token === "PairingVersionUnsupported")
+      return "That invitation came from an obsolete development build. Ask the application for a new one.";
+    if (token === "PairingRelayUnavailable")
+      return capability.demoRelay
+        ? "The local relay could not be reached. Check the demo server and adb reverse, then create a fresh invitation."
+        : "The relay could not be reached. Ask the application for a fresh invitation and try again.";
+    if (token === "PairingRelayRefused")
+      return capability.demoRelay
+        ? "That invitation does not name the approved local demo relay. Nothing was shared."
+        : "That invitation names a relay none of your connected applications vouches for. Nothing was shared.";
+    if (token === "PairingRelayAmbiguous")
+      return "More than one of your applications names that relay, so Selfsame refused rather than guessed. Nothing was shared.";
+    if (token === "PairingRelayTlsRefused")
+      return "The relay's identity could not be verified, so nothing was sent to it.";
+    if (token === "PresenceRequired" || token === "BadPasscode")
+      return "Enter your Selfsame passcode to start pairing.";
+    if (token === "PairingScopeAmbiguous")
+      return "That application asks for more than one kind of access, which pairing cannot carry yet. Nothing was shared.";
+    if (token === "PairingProfileUnavailable")
+      return "The application's profile could not be re-verified. Check your connection and try again.";
+    if (token === "AuthorityUnreachable" || token === "PairingIssuerUnavailable" || token === "PairingIdentityUnavailable")
+      return "Your account's authority could not be reached to verify this pairing. Nothing was shared.";
+    return "That invitation could not be recognised. Nothing was shared.";
   }
 
   function showIntent(intent) {
@@ -73,6 +108,14 @@ export function initPairing(d) {
       const result = await invoke(approve ? "cbcl_pairing_approve" : "cbcl_pairing_decline");
       $("[data-cbcl-result-title]").textContent = result.title;
       $("[data-cbcl-result-message]").textContent = result.message;
+      // REQ-908: the boundary line states what THIS build did, derived from
+      // its capability — never a hardcoded claim about a different build.
+      const boundary = $("[data-cbcl-result-boundary]");
+      if (boundary) {
+        boundary.textContent = capability.demoRelay
+          ? "This local conformance ceremony does not enable production pairing."
+          : "This ceremony ran against a relay your application's own profile vouches for.";
+      }
       const mark = $("[data-cbcl-result-mark]");
       mark.classList.toggle("mark--ok", result.outcome === "accepted");
       mark.classList.toggle("mark--broken", result.outcome !== "accepted");

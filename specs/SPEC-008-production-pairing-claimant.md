@@ -2,11 +2,11 @@
 id: SPEC-008
 title: Production Pairing Claimant — Transport, Real Credential, and Origin Trust
 status: draft
-version: 0.1.0
+version: 0.2.0
 tier: 1
 review-gate: not-approved
 depends-on: "[[SPEC-007-cbcl-pairing-cutover]]; [[SPEC-004-application-scoped-identity]]; [[SPEC-003-android-apk-distribution]]; cbcl-pairing SPEC-001"
-last-updated: 2026-08-18
+last-updated: 2026-08-20
 ---
 
 # SPEC-008 — Production Pairing Claimant: Transport, Real Credential, and Origin Trust
@@ -63,6 +63,11 @@ Controls:     [[#REQ-902]] a non-demo build SHALL NOT construct the verification
                 enters a relay origin)
 Open:         who publishes and signs relay conformance evidence, and how its digest
                 reaches the compiled registry → [[#CON-903]] (owner: repository owner)
+              [[IMPL-008-production-pairing-claimant#ADR-912]] fixes the trusted-profile
+                set as the wallet's linked applications (recorded at grant issuance);
+                ratification, and any widening, is the owner's (owner: repository owner)
+              multi-permission profiles refuse pairing ([[#CON-902]]) until the ceremony
+                wire carries a scope commitment (owner: repository owner)
               whether the profile's `relayOrigin` may carry a path — the [[CON-201 vs CON-401 pairingUrl]]
                 disagreement blocks naming `wss://chat.anuna.io:9443/relay` canonically
                 (owner: repository owner, coordinated with the cbcl-bus vault)
@@ -256,7 +261,8 @@ Tauri shell. Every field maps to its authoritative source, mirroring the
 | `profile` | authenticated profile bytes, verified under [[SPEC-004-application-scoped-identity#CON-201]] |
 | `account` | the wallet's active account context |
 | `device_public_key` | custody-held device key (`Custody::use_hierarchy_root` path) |
-| `proof` | fresh [[SPEC-004-application-scoped-identity#CON-207]] device proof |
+| `proof` | deferred [[SPEC-004-application-scoped-identity#CON-207]] device proof — its challenge binds the SHA-256 of the exact grant octets, so the adapter completes and verifies it at delivery from shell entropy plus a custody-backed signer (`DeferredProofSigner`); a context whose proof is absent with no signer refuses closed |
+| `operation_permissions` | the matched profile's single `allowedPermissions` entry; a profile declaring more than one refuses (`PairingScopeAmbiguous`) until the ceremony wire carries a scope commitment |
 | `issuer` / `jrd` | verified webfinger resolution (existing `fetch_and_verify` path) |
 | `now` / `clock_skew_seconds` | shell clock; skew per SPEC-004's accepted bound |
 | `freshness` | `SessionEstablishment` |
@@ -384,6 +390,12 @@ certificate → [[#TEST-902]] must fail; reintroduce the fixture context in non-
 
 ## Changelog
 
+- **0.2.0** — implementation findings folded back (branch
+  `feature/spec-008-production-claimant`, [[IMPL-008-production-pairing-claimant]]):
+  the CON-207 proof is grant-bound and therefore deferred to delivery; the
+  ceremony scope is the profile's single allowed permission; the trusted-profile
+  set is ADR-912's linked applications. Review gate unchanged: `not-approved`,
+  Tier 1 review outstanding.
 - **0.1.0** — first draft, authored from the 2026-08-18 gap analysis of the vault and
   the code (four named failure modes; camera scanning found already built and moved to
   specification debt rather than missing work).

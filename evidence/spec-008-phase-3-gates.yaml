@@ -1,0 +1,93 @@
+# SPEC-008 Phase-3 gate evidence — one row per core TEST, each naming the
+# command or artefact that produced it. Recorded on branch
+# feature/spec-008-production-claimant, 2026-08-20, pinned four-sibling
+# workspace (cbcl-rs 1c6fa8f / did-crdt 4b619f8 / cbcl-pairing 8e55160).
+spec: SPEC-008
+implementation: IMPL-008
+gates:
+  TEST-901:
+    status: partial
+    evidence: >
+      Transport slice: `cargo test -p selfsame --lib cbcl_transport` —
+      wss_round_trip_with_injected_test_root (loopback rustls relay, binary
+      round trip, MaybeTlsStream::Rustls asserted). The full-ceremony-over-wss
+      composition is exercised piecewise (deferred_proof.rs full in-process
+      ceremony + the transport round trip); one live wss ceremony end-to-end
+      is TEST-913 depth, gated on the first registry entry.
+  TEST-902:
+    status: pass
+    evidence: >
+      untrusted_certificate_refuses_without_fallback + plain_listener_yields_tls_error:
+      distinct Tls error, zero application bytes across the refused boundary,
+      exactly one connection attempt (no retry, no downgrade).
+  TEST-903:
+    status: partial
+    evidence: >
+      Assembly composes existing verified sources (fetch_or_cached, custody
+      hierarchy, webfinger fetch_and_verify, resolve_closure) with per-field
+      mapping per CON-902's table; single_permission_requires_exactly_one and
+      trust_record_round_trips cover the new pure logic. The custody-backed
+      positive run needs a live identity + authority — depth, owner: repository
+      owner (with TEST-913).
+  TEST-904:
+    status: pass
+    evidence: >
+      scripts/check-spec008-fixture-absence.sh on the non-demo staticlib —
+      no local_demo bytes, no [19;32] digest. Positive control: the same
+      detectors trip on a --features local-pairing-demo build; the [19;32]
+      mutant in cbcl_registry turned the script red.
+  TEST-905:
+    status: pass
+    evidence: >
+      The PairingUnavailable stubs are deleted; approve/decline drive
+      finish_live over the one shared pump in every build (compile-time:
+      no cfg fork remains around the decision path). Live-session terminal
+      semantics: selfsame-pairing test_803/test_813 suites unchanged green.
+  TEST-906:
+    status: pass
+    evidence: >
+      src/pairing.js scan() feeds start() the scanned content verbatim —
+      one entry point; unchanged from the reviewed cutover, reasserted.
+  TEST-907:
+    status: pass
+    evidence: >
+      Three distinct scan-failure messages in pairing.js (permission refused
+      by platform, declined by person, plugin unavailable); on-device
+      confirmation remains TEST-914 depth.
+  TEST-908:
+    status: pass
+    evidence: >
+      cbcl_pairing::tests::wrapped_padded_and_legacy_carriers_refuse +
+      bare_unpadded_base64url_decodes.
+  TEST-909:
+    status: pass
+    evidence: >
+      cbcl_context gate tests: one-match admits and names the profile;
+      zero-match and two-match refuse distinctly; the gate is pure so no
+      socket exists before it. Origin-check-disabled mutant: 3 tests red.
+  TEST-910:
+    status: pass
+    evidence: >
+      unregistered_digest_refuses + empty_registry_refuses_every_origin
+      (the shipped registry is asserted empty).
+  TEST-911:
+    status: pass
+    evidence: >
+      spec008_hold_invariance.rs: PRODUCTION_ALLOCATION_ENABLED false,
+      require_production_allocation fails closed; full selfsame-pairing
+      suite green unchanged.
+  TEST-912:
+    status: pass
+    evidence: >
+      cbcl_pairing_capability command (build-derived); pairing.js selects
+      demo copy only when capability.demoRelay, and the result boundary
+      line is derived from the same capability. DOM-level assertion is
+      SCREEN-003 harness work.
+mutation_gate:
+  origin_check_disabled: "3 cbcl_context tests red (killed)"
+  invalid_certificate_accepted: "TLS-downgrade mutant: TEST-902 + plaintext test red (killed)"
+  fixture_reintroduced: "[19;32] registry mutant: TEST-904 script red (killed)"
+depth_deferred:
+  - TEST-913 (owner: repository owner) — live chat.anuna.io ceremony, gated on the first registry entry
+  - TEST-914 (owner: repository owner) — on-device Android scan → wss
+  - TEST-915 (owner: cbcl security owner) — two-operator selection

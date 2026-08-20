@@ -511,6 +511,13 @@
                     autocapitalize="none" inputmode="text"></textarea>
         </label>
         <p class="code-state" data-pairing-state aria-live="polite">Paste one invitation</p>
+        <!-- SPEC-008 CON-902: a production claimant derives the wallet's
+             per-application identity inside custody before any socket opens,
+             so presence is asked for here. The demo build hides this field. -->
+        <label class="field" data-pairing-passcode-field hidden>
+          <span class="field__label">Your Selfsame passcode</span>
+          <input type="password" id="pairing-passcode" autocomplete="current-password" />
+        </label>
         <p class="error" data-error="pairing" hidden></p>
         <div class="spacer"></div>
         <button class="btn btn--primary" data-action="start-cbcl-pairing" disabled>Start secure pairing</button>
@@ -563,9 +570,7 @@
         <div class="mark mark--lg mark--ok" data-cbcl-result-mark aria-hidden="true"></div>
         <h1 data-cbcl-result-title></h1>
         <p class="lede" data-cbcl-result-message aria-live="polite"></p>
-        <p class="caution">
-          This local conformance ceremony does not enable production pairing.
-        </p>
+        <p class="caution" data-cbcl-result-boundary></p>
         <div class="spacer"></div>
         <button class="btn btn--primary" data-action="finish-cbcl-pairing">Back to applications</button>
       </section>
