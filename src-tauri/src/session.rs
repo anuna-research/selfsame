@@ -65,13 +65,10 @@ pub struct Session {
     /// rather than two, and dropped on rejection — it was never transmitted, so
     /// having signed it conferred nothing.
     pub pending_issuance: Option<crate::app_grant::PendingIssuance>,
-    /// The live one-sided cbcl claimant. Never persisted or exposed to the page.
-    #[cfg(feature = "local-pairing-demo")]
+    /// The live one-sided cbcl claimant. Never persisted or exposed to the
+    /// page. One type for every build (SPEC-008 `REQ-903`): ordinary builds
+    /// hold a live session over TLS, the demo build over its loopback socket.
     pub pending_cbcl_pairing: Option<crate::cbcl_pairing::PendingCbclPairing>,
-    /// Pending-only bootstrap retained by ordinary builds while production
-    /// relay allocation remains held.
-    #[cfg(not(feature = "local-pairing-demo"))]
-    pub pending_cbcl_pairing: Option<selfsame_pairing::SelfsameEndpointBootstrap>,
 }
 
 /// An offer that has been fetched, recognised, and signature-verified, and is
