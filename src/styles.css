@@ -267,6 +267,15 @@ h2 {
   color: var(--lichen);
 }
 
+/* The build sha beside the brand — legible on purpose, decorative never:
+   it exists to be read aloud over a support conversation. */
+.build {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--dim);
+}
+
 .caution {
   color: var(--dim);
   font-size: 13px;

@@ -232,6 +232,17 @@ jobs:
       - name: Generate the Android project
         run: CI=1 cargo tauri android init --ci
 
+      # The root record is sealed under a non-exportable keystore key that
+      # dies with the install, so a backed-up copy of the store can never
+      # decrypt after a reinstall. Android's default (allowBackup=true)
+      # restores exactly that undecryptable blob, and the app then refuses
+      # to start with "the stored identity could not be decrypted". The
+      # script patches the generated manifest because ADR-204 keeps gen/
+      # uncommitted; the merged-manifest check after the build guards the
+      # patch the same way ADR-203 guards the permissions.
+      - name: Disable state backup (device-bound ciphertext only)
+        run: bash src-tauri/patch-android-backup.sh
+
       - name: Bound Gradle and cargo to the container
         run: |
           set -euo pipefail
@@ -257,7 +268,19 @@ jobs:
           set -uo pipefail
           # --debug is load-bearing (ADR-201): the default is release, which
           # demands a signing config we deliberately do not create.
-          cargo tauri android build --apk --debug -t aarch64 > /tmp/build.log 2>&1
+          #
+          # versionCode is the main-branch commit count, so every published
+          # APK outranks every earlier one and the installer can tell an
+          # update from a reinstall. Left to the default, every dev build is
+          # versionCode 1 and a stale APK installs over a fresh one without
+          # a trace — which is how a phone ran an August 17 build while
+          # everyone debugged the August 20 one. Passed with --config rather
+          # than written to tauri.conf.json because it is a property of this
+          # pipeline's artefact, not of the project: local builds keep the
+          # default and remain sideloadable in any order via adb install -r.
+          code=$(git rev-list --count HEAD)
+          cargo tauri android build --apk --debug -t aarch64 \
+            --config "{\"bundle\":{\"android\":{\"versionCode\":${code}}}}" > /tmp/build.log 2>&1
           rc=$?
           tail -60 /tmp/build.log
           exit $rc
@@ -290,6 +313,24 @@ jobs:
           fi
           echo "shipped permissions are all accounted for:"
           echo "$have" | sed 's/^/    /'
+
+      # The backup patch above edits a generated file; this proves it survived
+      # manifest merging into what actually ships. Reads the merged manifest
+      # for the same reason the permission check does — checking the file we
+      # wrote would pass even if the merge discarded it.
+      - name: Check backup stayed disabled in the shipped manifest
+        run: |
+          set -euo pipefail
+          merged=$(find src-tauri/gen -path '*merged_manifest*' -name 'AndroidManifest.xml' | head -1)
+          [ -n "$merged" ] || { echo "no merged manifest to check" >&2; exit 1; }
+          grep -q 'android:allowBackup="false"' "$merged" || {
+            echo 'the merged manifest lost android:allowBackup="false" — the' >&2
+            echo 'patch in patch-android-backup.sh no longer matches what' >&2
+            echo 'tauri android init generates. A reinstall will restore an' >&2
+            echo 'undecryptable identity record again.' >&2
+            exit 1
+          }
+          echo 'backup is disabled in the shipped manifest'
 
       - name: Name the artefact
         id: apk
