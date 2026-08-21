@@ -6715,11 +6715,14 @@ combination; that is an engineering conclusion, not a legal novelty claim.
   row — *"empty is a statement… a browser cannot claim a platform binding"* —
   mandates the opposite disposition and owes a follow-up amendment, and
   cbcl-bus `scripts/gen-production-profile.mjs` makes the Apple blanks
-  mandatory and owes the web-binding form. New `web-manual` corpus vectors
-  are owed with the implementing change, and **owner approval SHALL NOT be
-  recorded in this entry before the TEST-246 corpus cases and their SHA-256
-  land** — Amendment Channels makes new vectors part of the amendment, not a
-  follow-up. This is a Tier-1 normative amendment (enrollment evidence,
+  mandatory and owes the web-binding form. The TEST-246 corpus cases have
+  landed: `con_227_web_binding` (seven `web-manual` traces in group 3) and
+  three group-2 recognition negatives in `con_201_application_profile`;
+  the corpus SHA-256 is
+  `723f75b9296e55f988f21f9d11451111910eda1c8a6b2082cdc29376befe7853`.
+  Owner approval SHALL NOT be recorded in this entry before the reviews
+  required by the risk tier are — Amendment Channels made the vectors part
+  of the amendment, and they now are. This is a Tier-1 normative amendment (enrollment evidence,
   mobile caller identity): it grants nothing until cross-model adversarial
   review and the human owner's approval are recorded here.
   Fresh-context adversarial review 2026-08-21: APPROVE-WITH-CHANGES, all
