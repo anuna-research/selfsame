@@ -82,6 +82,52 @@ it (for example authority-published application lists). The seam is one
 function returning held `FetchedProfile` values, so widening it later touches
 one site.
 
+### ADR-913 — First contact rides the deployed PROTO-002 rendezvous
+
+**Status:** PROPOSED (2026-08-22).
+
+**Context.** [[IMPL-008-production-pairing-claimant#ADR-912]] sends first
+contact "through the existing LinkCode path first", but the wallet's existing
+LinkCode ceremony issues only the SPEC-001 device link: nothing in it fetches
+a CON-201 profile, carries a CON-219 offer, or reaches
+`app_grant_review`/`prepare`/`confirm` — the complete, tested issuance
+pipeline in `src-tauri/src/app_grant.rs` that alone writes the ADR-912
+pairing-trust record. On the application side, cbcl-bus's
+`path-b-ceremony-adapter.mjs` injects a ceremony transport that is absent by
+design: the Path-B readiness review's G4 (PROTO-003 relay path) and G5
+(rendezvous) were never built for the browser allocator. So the trust record
+that [[SPEC-008-production-pairing-claimant#REQ-906]] consumes has no
+producer, and every pairing against `chat.anuna.io` refuses at the origin
+gate however ratified its profile becomes.
+
+**Decision.** First contact reuses the transport that already works: the
+deployed PROTO-002 rendezvous the legacy LinkCode ceremony runs against
+`chat.anuna.io` today. The hub mints the [[SPEC-004-application-scoped-identity#CON-219]]
+sealed offer — with hub-signed [[SPEC-004-application-scoped-identity#CON-214]]
+evidence naming the profile's CON-227 web binding — into the same mailbox the
+legacy ceremony fills, at link time. The wallet's `read_link_code` recognises
+which offer grammar arrived: a SPEC-001 offer takes the existing device-link
+path unchanged; a CON-219 offer routes to the `app_grant_*` pipeline, whose
+confirm step records pairing trust. No browser-allocator transport, no new
+relay surface, no G4/G5 build.
+
+**Simplicity Ladder:** rung 4 — every component exists (rendezvous deployed,
+`net::fetch_offer` in the wallet, offer recognisers in
+`selfsame-app-identity`, the issuance pipeline complete); the new code is the
+hub's offer construction and the wallet's grammar dispatch. The alternative —
+building the browser-allocator G4/G5 transport the ceremony adapter was
+written for — is rung 6 twice over: a new relay surface and a new browser
+allocator, for a ceremony the deployed rendezvous already carries in its
+older grammar. It remains the right shape for applications that are not also
+the rendezvous operator, and nothing here forecloses it; it is not the
+bootstrap path.
+
+**Open, owner ratification needed:** the hub-side offer minting is cbcl-bus
+work (its enrolment signer and SPEC-053 GATE-00 posture govern when the
+CON-214 signature can exist), and the wallet-side grammar dispatch touches
+SCREEN-001's one linking flow — both are their own reviewed slices, traced
+here so neither repo invents the contract alone.
+
 ## Capability placement
 
 ### WSS claimant transport
