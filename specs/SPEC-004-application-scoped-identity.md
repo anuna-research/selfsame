@@ -2316,9 +2316,9 @@ platform the application is absent from.
 recognised language is closed, so an unamended recogniser refuses a profile
 carrying a `web` binding — fail-closed, never misinterpreted. A version bump
 exists to protect deployed recognisers from deployed documents, and there are
-none of either: this specification is `0.15.0-draft`, its review gate is
-not-approved, and no ratified production profile has ever been published by
-any origin. The recogniser and the first ratified profile ship together from
+none of either: this specification was `0.15.0-draft` at the time of this
+decision, its review gate is not-approved, and no ratified production profile
+has ever been published by any origin. The recogniser and the first ratified profile ship together from
 pinned builds in this repository and [[cbcl-bus]]. Amending version 1 before
 first ratification is therefore a draft correction with zero compatibility
 surface; minting version 2 would carry the conflict forward as permanent
@@ -4661,8 +4661,11 @@ username — and the seven OQ-207 item 5 groups:
 
 1. canonical JWS, positive and the TEST-208 negative corpus;
 2. profile recognition under CON-201 and discovery under CON-220;
-3. same-device handoff traces, labelled per platform for CON-222 and CON-223,
-   and `web-manual` traces for CON-227;
+3. handoff traces, labelled per platform for CON-222 and CON-223, and
+   `web-manual` traces for CON-227 — the web-manual traces are cross-device
+   by construction, filed here for the caller-evidence dimension they share
+   with the platform traces; web profile-recognition negatives belong to
+   group 2, not here;
 4. MITM substitution at each layer of the authorization chain;
 5. replay of every one-time value;
 6. application substitution, including a hostile sibling and a copied public
@@ -4744,8 +4747,19 @@ full: displaying the QR and accepting a paste introduce no new channel, and
 nothing in this contract licenses clipboard, notification, log, or analytics
 carriage of ceremony material.
 
+**`returnUri` under a web binding.** The
+[[SPEC-004-application-scoped-identity#CON-214]] statement's `returnUri`
+member remains required, and this contract fixes its meaning here: it MUST be
+an HTTPS URI on the `applicationId` origin, the wallet MUST NOT dispatch,
+dereference, or navigate to it, and it carries no authority — there is no
+OS return path on a manual ceremony, so the member exists only to keep the
+statement grammar closed and to bind the origin one more time. A web-binding
+statement whose `returnUri` names any other origin is
+`EnrollmentMalformed`.
+
 Implements: [[SPEC-004-application-scoped-identity#REQ-222]],
-[[SPEC-004-application-scoped-identity#REQ-223]].
+[[SPEC-004-application-scoped-identity#REQ-223]],
+[[SPEC-004-application-scoped-identity#REQ-225]].
 
 Verified by: [[SPEC-004-application-scoped-identity#TEST-246]].
 
@@ -5610,9 +5624,11 @@ fail.
 
 ### TEST-246: Web manual binding conformance
 
-**Validates:** [[SPEC-004-application-scoped-identity#REQ-222]],
+**Validates:** [[SPEC-004-application-scoped-identity#REQ-220]],
+[[SPEC-004-application-scoped-identity#REQ-222]],
 [[SPEC-004-application-scoped-identity#REQ-223]],
 [[SPEC-004-application-scoped-identity#CON-214]],
+[[SPEC-004-application-scoped-identity#CON-215]],
 [[SPEC-004-application-scoped-identity#CON-227]].
 
 **Core** (writable in one sitting, no rig):
@@ -5632,9 +5648,22 @@ fail.
   unchanged.
 - *Undeclared binding refused.* A statement naming a web binding the profile
   does not declare returns `PlatformBindingMismatch`.
+- *Foreign `returnUri` refused.* A web-binding statement whose `returnUri`
+  names any origin other than the `applicationId` origin returns
+  `EnrollmentMalformed` ([[SPEC-004-application-scoped-identity#CON-227]]'s
+  `returnUri` rule).
+- *Mixed-profile downgrade refused.* A profile declaring **both** an android
+  binding and a web binding; the statement names the web binding; the caller
+  is attributed as **exactly the declared android package**. The result is
+  `PlatformBindingMismatch` — matching *a* declared binding is not matching
+  *the named* binding, and this is the one row where a lazy implementation
+  silently reopens the route around
+  [[SPEC-004-application-scoped-identity#CON-222]].
 - *Mutation gate.* Make the verifier accept an attributed caller against a
   web binding and require a red test; make the recogniser accept a
-  foreign-origin web binding and require a red test.
+  foreign-origin web binding and require a red test; make the verifier match
+  the caller against any declared binding instead of the named one and
+  require the mixed-profile row to go red.
 
 **Depth** (needs a platform rig; owner: wallet maintainer, before Tier-1
 production sign-off):
@@ -6681,11 +6710,21 @@ combination; that is an engineering conclusion, not a legal novelty claim.
   group-3 corpus obligation. The CON-214 statement grammar is unchanged.
   Amends profile version 1 in place: no ratified profile and no deployed
   recogniser exist outside this repository's pinned builds (rationale in
-  ADR-224). New `web-manual` corpus vectors are owed with the implementing
-  change; this entry records their obligation, not their digest. This is a
-  Tier-1 normative amendment (enrollment evidence, mobile caller identity):
-  it grants nothing until cross-model adversarial review and the human
-  owner's approval are recorded here.
+  ADR-224). **Affected downstream artefacts** (Amendment Channels step 1,
+  beyond this document's own): cbcl-bus `SPEC-053` CON-002's mobileBindings
+  row — *"empty is a statement… a browser cannot claim a platform binding"* —
+  mandates the opposite disposition and owes a follow-up amendment, and
+  cbcl-bus `scripts/gen-production-profile.mjs` makes the Apple blanks
+  mandatory and owes the web-binding form. New `web-manual` corpus vectors
+  are owed with the implementing change, and **owner approval SHALL NOT be
+  recorded in this entry before the TEST-246 corpus cases and their SHA-256
+  land** — Amendment Channels makes new vectors part of the amendment, not a
+  follow-up. This is a Tier-1 normative amendment (enrollment evidence,
+  mobile caller identity): it grants nothing until cross-model adversarial
+  review and the human owner's approval are recorded here.
+  Fresh-context adversarial review 2026-08-21: APPROVE-WITH-CHANGES, all
+  findings folded — record at
+  `specs/trajectory/SPEC-004/adr-224-adversarial-review-2026-08-21.md`.
 
 - **0.15.0-draft — 2026-08-17 — pairing cutover disposition.**
   Records the owner-approved [[SPEC-007-cbcl-pairing-cutover]] development cutover.
