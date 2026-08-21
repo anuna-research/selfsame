@@ -6728,6 +6728,12 @@ combination; that is an engineering conclusion, not a legal novelty claim.
   Fresh-context adversarial review 2026-08-21: APPROVE-WITH-CHANGES, all
   findings folded — record at
   `specs/trajectory/SPEC-004/adr-224-adversarial-review-2026-08-21.md`.
+  **Owner approval recorded 2026-08-22** (interactive session direction:
+  "Approve both, keep driving" — this amendment and
+  [[IMPL-008-production-pairing-claimant#ADR-913]] together), with the
+  review state named honestly: the same-model fresh-context adversarial
+  review above and the corpus vectors are in; a cross-model review remains
+  an open Tier-1 gate box and this approval does not close it.
 
 - **0.15.0-draft — 2026-08-17 — pairing cutover disposition.**
   Records the owner-approved [[SPEC-007-cbcl-pairing-cutover]] development cutover.
