@@ -273,6 +273,14 @@ and reconciling SPEC-001 with this document.
 - Selfsame does not disclose branch existence, derive an existing branch, sign,
   publish, or write a grant until application enrollment evidence, the offer
   transcript, and available platform identity all agree.
+  [[SPEC-004-application-scoped-identity#CON-214]] owns that agreement — its
+  statement's `platformBindingId` must select a binding the authenticated
+  profile declares, and the OS-observed caller must satisfy that binding's own
+  contract ([[SPEC-004-application-scoped-identity#CON-222]] Android,
+  [[SPEC-004-application-scoped-identity#CON-223]] Apple,
+  [[SPEC-004-application-scoped-identity#CON-227]] web manual); any
+  disagreement — including an OS-attributed caller against a web binding — is
+  `PlatformBindingMismatch`.
 - A mobile completion callback is advisory and contains no grant, DID, account
   scope, key, pairing bootstrap/code, provider secret, or verifier acceptance
   decision.
