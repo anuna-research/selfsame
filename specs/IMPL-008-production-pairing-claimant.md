@@ -100,27 +100,39 @@ that [[SPEC-008-production-pairing-claimant#REQ-906]] consumes has no
 producer, and every pairing against `chat.anuna.io` refuses at the origin
 gate however ratified its profile becomes.
 
-**Decision.** First contact reuses the transport that already works: the
-deployed PROTO-002 rendezvous the legacy LinkCode ceremony runs against
-`chat.anuna.io` today. The hub mints the [[SPEC-004-application-scoped-identity#CON-219]]
-sealed offer — with hub-signed [[SPEC-004-application-scoped-identity#CON-214]]
-evidence naming the profile's CON-227 web binding — into the same mailbox the
-legacy ceremony fills, at link time. The wallet's `read_link_code` recognises
-which offer grammar arrived: a SPEC-001 offer takes the existing device-link
-path unchanged; a CON-219 offer routes to the `app_grant_*` pipeline, whose
-confirm step records pairing trust. No browser-allocator transport, no new
-relay surface, no G4/G5 build.
+**What is actually deployed, verified 2026-08-22.** Nothing serves the
+rendezvous anywhere: the wallet's compiled endpoint
+(`https://rendezvous.cbcl.chat`, `src-tauri/src/net.rs`) does not resolve in
+DNS; the `selfsame-rendezvous` crate binds loopback by design ("this is a
+development service"); and the cbcl-bus deployment routes only `/chat/v1`,
+`/pair/v1`, `/mls-ds/v1`, the SPEC-075 relay on `:9443`, and static files.
+The legacy LinkCode ceremony has therefore only ever completed against local
+development servers. Any transport decision claiming to "reuse what is
+deployed" would be reusing nothing.
 
-**Simplicity Ladder:** rung 4 — every component exists (rendezvous deployed,
-`net::fetch_offer` in the wallet, offer recognisers in
-`selfsame-app-identity`, the issuance pipeline complete); the new code is the
-hub's offer construction and the wallet's grammar dispatch. The alternative —
-building the browser-allocator G4/G5 transport the ceremony adapter was
-written for — is rung 6 twice over: a new relay surface and a new browser
-allocator, for a ceremony the deployed rendezvous already carries in its
-older grammar. It remains the right shape for applications that are not also
-the rendezvous operator, and nothing here forecloses it; it is not the
-bootstrap path.
+**Decision.** The cbcl-bus deployment gains the rendezvous surface — the
+settled hosting direction already names cbcl-bus an application *and* a
+declared rendezvous provider — and first contact runs the ordinary ceremony
+over it: the hub mints the [[SPEC-004-application-scoped-identity#CON-219]]
+sealed offer, with hub-signed
+[[SPEC-004-application-scoped-identity#CON-214]] evidence naming the
+profile's CON-227 web binding, into the mailbox; the wallet's
+`read_link_code` recognises which offer grammar arrived — a SPEC-001 offer
+takes the existing device-link path unchanged, a CON-219 offer routes to the
+`app_grant_*` pipeline, whose confirm step records pairing trust. The
+wallet's compiled endpoint table gains the real host, which is a wallet
+release. No browser-allocator G4/G5 build.
+
+**Simplicity Ladder:** rung 4 on every axis but one — `net::fetch_offer`, the
+offer recognisers, and the issuance pipeline exist; the rendezvous
+*implementation* exists (`selfsame-rendezvous` serves the three SPEC-001
+routes) and what is new is deploying it inside cbcl-bus plus the hub's offer
+construction and the wallet's grammar dispatch. The `selfsame-rendezvous`
+crate's own caveat — a network-reachable rendezvous is more than the SPEC-001
+threat model covers — makes the deployment slice a reviewed cbcl-bus SPEC
+with its own hardening pass, not a docker-compose afterthought. The
+alternative browser-allocator transport is rung 6 twice over and remains the
+right non-bootstrap shape; nothing here forecloses it.
 
 **Open, owner ratification needed:** the hub-side offer minting is cbcl-bus
 work (its enrolment signer and SPEC-053 GATE-00 posture govern when the
