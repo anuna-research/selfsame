@@ -489,6 +489,18 @@ fn recognise_platform_binding(id: &str, return_origin: &str) -> Result<(), Enrol
         return Ok(());
     }
 
+    if let Some(web) = id.strip_prefix("web:") {
+        // CON-227: `web:` followed by exactly the `applicationId` origin —
+        // which the statement's `returnUri` is already anchored to above, so
+        // the return origin is the value to equal.
+        if web != return_origin {
+            return Err(EnrollmentError::EnrollmentMalformed);
+        }
+        uri::recognise(web, UriPolicy::ORIGIN)
+            .map_err(|_| EnrollmentError::EnrollmentMalformed)?;
+        return Ok(());
+    }
+
     if let Some(apple) = id.strip_prefix("apple:") {
         let (team_id, rest) = apple
             .split_once(':')
@@ -622,6 +634,13 @@ pub fn verify(
             return Err(EnrollmentError::PlatformBindingMismatch);
         }
         (None, crate::profile::MobileBinding::Android { .. }) => {
+            return Err(EnrollmentError::PlatformBindingMismatch);
+        }
+        // CON-227: a web binding admits exactly the unattributed manual path.
+        // An OS handoff that attributed anything while the statement names the
+        // manual binding is a contradiction, refused even when the attributed
+        // id equals the binding id the arm above would have matched.
+        (Some(_), crate::profile::MobileBinding::Web { .. }) => {
             return Err(EnrollmentError::PlatformBindingMismatch);
         }
         _ => {}
