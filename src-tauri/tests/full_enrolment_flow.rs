@@ -154,7 +154,7 @@ fn the_whole_enrolment_completes_and_clears_the_refusal() {
     let offer = selfsame_app_identity::ceremony::recognise_offer(&plaintext).unwrap();
 
     // 3. The wallet AUTHORISES it (CON-214 acceptance).
-    let observed = selfsame_lib::app_grant::observation_for_enrolment_offer(&offer).unwrap();
+    let observed = selfsame_lib::app_grant::observation_for_enrolment_offer(&offer, &profile).unwrap();
     let decided = selfsame_app_identity::authorise::authorise(
         &plaintext,
         &octets,

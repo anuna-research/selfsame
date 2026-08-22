@@ -190,17 +190,44 @@ impl CeremonyObservation {
 /// `authorise` does not then re-verify against the freshly fetched profile.
 pub fn observation_for_enrolment_offer(
     offer: &ceremony::OfferPayload,
+    profile: &selfsame_app_identity::profile::ApplicationProfile,
 ) -> Result<CeremonyObservation> {
     let hint = selfsame_app_identity::provider_hint::ProviderHint::recognise(&offer.provider_hint)
         .map_err(|_| UiError::from("OfferMalformed"))?;
+
+    // Codex review, finding "undeclared providers pass": the observation is
+    // supposed to be what the shell established INDEPENDENTLY, but for first
+    // contact the provider fields have only the offer's own hint as a source.
+    // `authorise` compares the statement to these copied values without
+    // establishing the provider exists in the profile, so a hostile producer
+    // (or the signing oracle) could name an undeclared provider. Verify the hint
+    // against the freshly fetched profile and the offer's own digest here — the
+    // exact check the honest `build_offer` producer runs — so the values passed
+    // on are profile-anchored, not offer-asserted.
+    hint.verify(profile, &offer.offer_digest)
+        .map_err(|_| UiError::from("ProviderMismatch"))?;
+
+    // Codex review, finding 2: `platform_binding_id: None` is NOT self-evidently
+    // the web path — Apple's CON-223 carve-out also accepts `None`, so an offer
+    // whose CON-214 statement names an `apple:` binding would be admitted over
+    // the manual transport, downgrading a native binding. The manual path
+    // attributes no caller precisely because it IS the web binding, so require
+    // the statement to name one: recognise the evidence and refuse any binding
+    // that is not `web:`. A native binding belongs to its OS adapter, never to a
+    // pasted or scanned code.
+    let (statement, _) = selfsame_app_identity::enrollment::recognise(&offer.enrollment_evidence)
+        .map_err(|_| UiError::from("OfferMalformed"))?;
+    if !statement.platform_binding_id.starts_with("web:") {
+        return Err(UiError::from("PlatformBindingMismatch"));
+    }
+
     Ok(CeremonyObservation {
         ceremony_profile_digest: offer.core.profile_digest.clone(),
         provider_id: hint.provider_id,
         descriptor_digest: hint.descriptor_digest,
-        // The manual cross-device path attributes no caller. A web-binding
-        // statement accepts this; a native-binding statement refuses it, which
-        // is the CON-227 property that keeps first contact from silently
-        // downgrading a native application's stronger binding.
+        // The manual cross-device path attributes no caller. Verified above to
+        // carry a web binding, so `None` is the CON-227 unattributed case a web
+        // binding accepts — and no native binding can reach here.
         platform_binding_id: None,
     })
 }
@@ -596,9 +623,8 @@ pub async fn cbcl_enrol_start(
     let fetched = selfsame_app_identity_net::profile::fetch(&application_id, now() as i64)
         .await
         .map_err(|_| UiError::from("PairingProfileUnavailable"))?;
+    let observed = observation_for_enrolment_offer(&offer, &fetched.profile)?;
     let profile_octets = fetched.octets;
-
-    let observed = observation_for_enrolment_offer(&offer)?;
 
     // Review — the same pure decision the page's `app_grant_review` runs, and
     // the replay pre-check that keeps a consent screen from burning the id.
@@ -730,69 +756,138 @@ async fn authority_state(acct_uri: &str, home_did: &str) -> AuthorityState {
 
 #[cfg(test)]
 mod enrolment_observation_tests {
-    //! IMPL-008 ADR-913 — the enrolment observation is built from the opened
-    //! offer alone, with no OS caller attribution. These pin the field mapping
-    //! and the unattributed-caller property CON-227 depends on; the full
-    //! fetch → app_grant → put_bundle wrapper is depth (needs a live rendezvous,
-    //! covered by tests/live_link.rs's rig).
+    //! IMPL-008 ADR-913 + codex-review fixes 2 & 9. The observation is built
+    //! from the opened offer AND the freshly fetched profile: it verifies the
+    //! provider hint against that profile (no undeclared provider passes) and
+    //! requires the CON-214 statement to name a web binding (no native-binding
+    //! downgrade over the manual path). Offers are built for the real corpus
+    //! profile with its enrolment key, so the checks run against a consistent
+    //! offer/profile pair rather than a fabricated one.
     use super::*;
+    use ed25519_dalek::SigningKey;
     use selfsame_app_identity::ceremony::{OfferCore, OfferPayload};
+    use selfsame_app_identity::enrollment::{self as en, EnrollmentStatement};
+    use selfsame_app_identity::json::{self, Json};
+    use selfsame_app_identity::profile::ApplicationProfile;
     use selfsame_app_identity::provider_hint::ProviderHint;
+    use selfsame_app_identity::{codec, didkey};
 
-    fn offer_payload() -> OfferPayload {
-        let hint = ProviderHint {
-            application_id: "https://chat.anuna.io/selfsame/application".into(),
-            profile_version: 1,
-            provider_id: "anuna-1".into(),
-            descriptor_digest: "cCnyIp8IxUiyUjCUBbrZ5b3flzqMM8c-S_tUCPdCwUI".into(),
-            offer_digest: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".into(),
-        };
+    const KID: &str = "https://photos.example/selfsame/application#enrollment-test";
+    const NOW: i64 = 1_785_412_800;
+
+    fn corpus_profile_octets() -> Vec<u8> {
+        let corpus: serde_json::Value =
+            serde_json::from_str(include_str!("../../test-vectors/spec-004-v1.json")).unwrap();
+        corpus["con_201_application_profile"][0]["input"]["profile"]
+            .as_str()
+            .unwrap()
+            .as_bytes()
+            .to_vec()
+    }
+
+    // Build a real offer for the corpus profile. `binding` and `provider`/`digest`
+    // are overridable so the negative cases can name a native binding or an
+    // undeclared provider.
+    fn offer_for(
+        profile: &ApplicationProfile,
+        binding: &str,
+        provider: &str,
+        descriptor_digest: &str,
+    ) -> OfferPayload {
+        let app = profile.application_id.as_str().to_string();
+        let origin = profile.application_id.origin();
+        let device = SigningKey::from_bytes(&[3u8; 32]).verifying_key().to_bytes();
         let core = OfferCore {
-            ceremony_id: "c".repeat(43),
-            request_id: "r".repeat(43),
-            application_id: "https://chat.anuna.io/selfsame/application".into(),
+            ceremony_id: codec::b64url(&[1u8; 32]),
+            request_id: codec::b64url(&[2u8; 32]),
+            application_id: app.clone(),
             profile_version: 1,
-            profile_digest: "PdigestPdigestPdigestPdigestPdigestPdigestX".into(),
-            account_scope_id: "s".repeat(43),
-            device_did: "did:key:zTEST".into(),
-            device_public_key: [7u8; 32],
-            requested_permissions: vec![
-                "https://chat.anuna.io/selfsame/application#chat-send".into(),
-            ],
-            issued_at: 1_000,
-            expires_at: 1_120,
+            profile_digest: codec::b64url(profile.digest()),
+            account_scope_id: codec::b64url(&[4u8; 32]),
+            device_did: didkey::encode(&device),
+            device_public_key: device,
+            requested_permissions: profile.allowed_permissions.clone(),
+            issued_at: NOW,
+            expires_at: NOW + 120,
         };
+        let hint = ProviderHint {
+            application_id: app.clone(),
+            profile_version: 1,
+            provider_id: provider.to_string(),
+            descriptor_digest: descriptor_digest.to_string(),
+            offer_digest: core.digest(),
+        };
+        let statement = EnrollmentStatement {
+            request_id: core.request_id.clone(),
+            ceremony_id: core.ceremony_id.clone(),
+            application_id: app.clone(),
+            profile_version: 1,
+            profile_digest: core.profile_digest.clone(),
+            account_scope_id: core.account_scope_id.clone(),
+            device_key_digest: en::device_key_digest(&core),
+            requested_permissions: core.requested_permissions.clone(),
+            provider_id: hint.provider_id.clone(),
+            descriptor_digest: hint.descriptor_digest.clone(),
+            offer_digest: core.digest(),
+            platform_binding_id: binding.to_string(),
+            return_uri: format!("{origin}/.well-known/selfsame/return"),
+            issued_at: NOW,
+            expires_at: NOW + 120,
+        };
+        let evidence = en::sign(&statement, KID, &SigningKey::from_bytes(&[6u8; 32]));
         OfferPayload {
             core,
-            enrollment_evidence: "e.e.e".into(),
+            enrollment_evidence: evidence,
             provider_hint: hint.to_json(),
-            offer_digest: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".into(),
+            offer_digest: {
+                let Json::Object(_) = hint.to_json() else { unreachable!() };
+                // The offer_digest field mirrors the core digest.
+                String::new()
+            },
         }
     }
 
-    #[test]
-    fn observation_maps_offer_and_hint_fields() {
-        let offer = offer_payload();
-        let obs = observation_for_enrolment_offer(&offer).expect("well-formed hint");
-        assert_eq!(obs.ceremony_profile_digest, offer.core.profile_digest);
-        assert_eq!(obs.provider_id, "anuna-1");
-        assert_eq!(obs.descriptor_digest, "cCnyIp8IxUiyUjCUBbrZ5b3flzqMM8c-S_tUCPdCwUI");
+    fn declared(profile: &ApplicationProfile) -> (String, String) {
+        let d = &profile.cbcl_pairing_relays[0];
+        (d.operator_id.clone(), codec::b64url(&d.digest))
     }
 
     #[test]
-    fn the_manual_path_attributes_no_caller() {
-        // The property CON-227 rests on: a pasted/scanned first-contact offer
-        // reaches acceptance as `Unattributed`, which a web binding accepts and
-        // a native binding refuses. If this ever became `Some(..)`, a native
-        // application's stronger binding could be silently downgraded.
-        let obs = observation_for_enrolment_offer(&offer_payload()).unwrap();
+    fn a_web_binding_offer_with_a_declared_provider_is_observed() {
+        let octets = corpus_profile_octets();
+        let profile = ApplicationProfile::recognise(&octets).unwrap();
+        let (prov, dig) = declared(&profile);
+        let mut offer = offer_for(&profile, &format!("web:{}", profile.application_id.origin()), &prov, &dig);
+        offer.offer_digest = offer.core.digest();
+        let obs = observation_for_enrolment_offer(&offer, &profile).expect("web + declared provider");
+        assert_eq!(obs.provider_id, prov);
         assert_eq!(obs.platform_binding_id, None);
     }
 
     #[test]
-    fn a_malformed_hint_refuses() {
-        let mut offer = offer_payload();
-        offer.provider_hint = selfsame_app_identity::json::Json::obj([]);
-        assert!(observation_for_enrolment_offer(&offer).is_err());
+    fn a_native_binding_offer_is_refused_on_the_manual_path() {
+        // Finding 2: an apple: binding must not be admitted over the manual path.
+        let octets = corpus_profile_octets();
+        let profile = ApplicationProfile::recognise(&octets).unwrap();
+        let (prov, dig) = declared(&profile);
+        let apple = "apple:TEAM123456:com.example.photos:https://photos.example";
+        let mut offer = offer_for(&profile, apple, &prov, &dig);
+        offer.offer_digest = offer.core.digest();
+        assert!(observation_for_enrolment_offer(&offer, &profile).is_err());
+    }
+
+    #[test]
+    fn an_undeclared_provider_is_refused() {
+        // Finding 9: a provider not in the profile must not pass as an observation.
+        let octets = corpus_profile_octets();
+        let profile = ApplicationProfile::recognise(&octets).unwrap();
+        let mut offer = offer_for(
+            &profile,
+            &format!("web:{}", profile.application_id.origin()),
+            "not-a-real-operator",
+            &codec::b64url(&[9u8; 32]),
+        );
+        offer.offer_digest = offer.core.digest();
+        assert!(observation_for_enrolment_offer(&offer, &profile).is_err());
     }
 }

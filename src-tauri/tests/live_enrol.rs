@@ -48,7 +48,7 @@ async fn the_wallet_authorises_the_live_offer_to_consent() {
         .expect("the live profile is fetched and CON-220-authenticated");
 
     // Build the observation the manual path carries, then run the pure decision.
-    let observed = selfsame_lib::app_grant::observation_for_enrolment_offer(&offer)
+    let observed = selfsame_lib::app_grant::observation_for_enrolment_offer(&offer, &fetched.profile)
         .expect("the observation builds from the offer");
     let decided = selfsame_app_identity::authorise::authorise(
         &plaintext,
