@@ -526,6 +526,25 @@ pub fn recognise_bundle(bundle: &[u8]) -> Result<BundlePayload, IdentityError> {
     identity_ceremony::recognise_bundle(bundle).map_err(|_| IdentityError::Refused)
 }
 
+/// The SPEC-002 fingerprint of an issuer DID, as the application must render it
+/// for the CON-221 cross-screen comparison.
+///
+/// The application derives this *itself* from the issuer DID the phone
+/// announced, so a substituted issuer produces a visibly different fingerprint
+/// — the whole point of the human comparison. `hex` is the normative compared
+/// value (REQ-103); the label and 32×32 LifeHash are recognition aids rendered
+/// beside it, exactly as the wallet renders them.
+#[wasm_bindgen]
+pub fn fingerprint_did_json(did: &str) -> String {
+    let fp = selfsame_core::fingerprint::fingerprint_did(did);
+    format!(
+        r#"{{"hex":{},"label":{},"lifehash":{}}}"#,
+        json_string(&fp.hex()),
+        json_string(&fp.label()),
+        json_string(&fp.lifehash().base64()),
+    )
+}
+
 /// Require a returned bundle to name the exact complete offer the browser sent.
 #[wasm_bindgen]
 pub fn bundle_matches_offer_json(bundle: &[u8], offer: &[u8]) -> Result<(), JsError> {
@@ -1442,6 +1461,32 @@ impl EnrolmentAllocator {
     #[wasm_bindgen(getter)]
     pub fn bundle_slot(&self) -> String {
         seal::slot(seal::Role::Bundle, &self.secret)
+    }
+
+    /// The rendezvous slot the wallet's pre-grant issuer announcement appears
+    /// in (SPEC-004 CON-221). Present only when the wallet requires the
+    /// fingerprint comparison; the client polls it alongside the bundle slot.
+    #[wasm_bindgen(getter)]
+    pub fn announce_slot(&self) -> String {
+        seal::slot(seal::Role::Announce, &self.secret)
+    }
+
+    /// Open the wallet's sealed issuer announcement over the retained offer
+    /// plaintext, returning the announced issuer DID. Bound to this allocator's
+    /// own offer transcript, so an announcement answering a different offer
+    /// cannot open here.
+    pub fn open_announce(&self, sealed_announce: &[u8]) -> Result<String, JsError> {
+        let offer = self
+            .offer_plaintext
+            .as_ref()
+            .ok_or_else(|| JsError::new("no offer sealed yet"))?;
+        let did = seal::open_announce(
+            &seal::derive_key(&self.secret),
+            sealed_announce,
+            &seal::transcript(offer),
+        )
+        .map_err(|_| JsError::new("SPEC-004 announcement refused"))?;
+        String::from_utf8(did).map_err(|_| JsError::new("SPEC-004 announcement refused"))
     }
 
     /// Seal the offer given the hub's compact JWS evidence.

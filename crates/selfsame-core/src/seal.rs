@@ -53,14 +53,22 @@ const AD_OFFER: &[u8] = b"anuna-ssi/v1/offer";
 
 /// Associated-data prefix for the bundle record; the transcript hash follows.
 const AD_BUNDLE: &[u8] = b"anuna-ssi/v1/bundle";
+const AD_ANNOUNCE: &[u8] = b"anuna-ssi/v1/announce";
 
-/// Which of the two single-write slots a call refers to.
+/// Which single-write slot a call refers to.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Role {
     /// Written by the device client, read by the phone.
     Offer,
     /// Written by the phone, read by the device client.
     Bundle,
+    /// The pre-grant issuer announcement (SPEC-004 CON-221): written by the
+    /// phone after it derives the account issuer and before it releases the
+    /// bundle, read by the device client so it can display the same issuer
+    /// fingerprint for the person's cross-screen comparison. A separate slot,
+    /// because it is written a step before the bundle and each rendezvous slot
+    /// is single-write.
+    Announce,
 }
 
 impl Role {
@@ -69,6 +77,7 @@ impl Role {
         match self {
             Role::Offer => "offer",
             Role::Bundle => "bundle",
+            Role::Announce => "announce",
         }
     }
 
@@ -79,6 +88,7 @@ impl Role {
         n[11] = match self {
             Role::Offer => 1,
             Role::Bundle => 2,
+            Role::Announce => 3,
         };
         *Nonce::from_slice(&n)
     }
@@ -170,6 +180,40 @@ pub fn open_bundle(
         .map_err(|_| SealError)
 }
 
+/// Seal the pre-grant issuer announcement, binding it to the offer transcript.
+///
+/// Like the bundle, this is a *reply* to a specific offer — the transcript
+/// commits it to the exact offer bytes — so an announcement minted against a
+/// different offer cannot authenticate at the device client. It carries the
+/// account issuer DID the phone derived; the client displays its fingerprint
+/// for the CON-221 comparison and later checks the delivered grant names the
+/// same issuer.
+pub fn seal_announce(key: &[u8; 32], issuer_plaintext: &[u8], transcript: &[u8; 32]) -> Vec<u8> {
+    cipher(key)
+        .encrypt(
+            &Role::Announce.nonce(),
+            Payload { msg: issuer_plaintext, aad: &announce_ad(transcript) },
+        )
+        .expect("ChaCha20-Poly1305 encryption is infallible for in-memory buffers")
+}
+
+/// Open the pre-grant issuer announcement under the caller's own offer hash.
+pub fn open_announce(
+    key: &[u8; 32],
+    sealed: &[u8],
+    transcript: &[u8; 32],
+) -> Result<Vec<u8>, SealError> {
+    cipher(key)
+        .decrypt(&Role::Announce.nonce(), Payload { msg: sealed, aad: &announce_ad(transcript) })
+        .map_err(|_| SealError)
+}
+
+fn announce_ad(transcript: &[u8; 32]) -> Vec<u8> {
+    let mut ad = AD_ANNOUNCE.to_vec();
+    ad.extend_from_slice(transcript);
+    ad
+}
+
 /// Associated data for at-rest sealing, kept apart from both wire directions.
 const AD_AT_REST: &[u8] = b"anuna-ssi/v1/at-rest";
 
@@ -254,6 +298,33 @@ mod tests {
         let k = derive_key(&S);
         let sealed = seal_offer(&k, b"(offer :v 1 ...)");
         assert_eq!(open_offer(&k, &sealed).unwrap(), b"(offer :v 1 ...)");
+    }
+
+    // SPEC-004 CON-221: the announcement is a reply bound to our offer, exactly
+    // like the bundle — it opens under our transcript and is refused under any
+    // other, and its own slot/AD keep it distinct from the bundle direction.
+    #[test]
+    fn an_announcement_bound_to_our_offer_opens() {
+        let k = derive_key(&S);
+        let t = transcript(b"(offer :v 1 ...)");
+        let sealed = seal_announce(&k, b"did:crdt:issuer", &t);
+        assert_eq!(open_announce(&k, &sealed, &t).unwrap(), b"did:crdt:issuer");
+    }
+
+    #[test]
+    fn an_announcement_from_a_different_offer_is_refused() {
+        let k = derive_key(&S);
+        let ours = transcript(b"(offer :desc \"Chrome on macOS\" ...)");
+        let theirs = transcript(b"(offer :desc \"attacker\" ...)");
+        let sealed = seal_announce(&k, b"did:crdt:issuer", &theirs);
+        assert_eq!(open_announce(&k, &sealed, &ours), Err(SealError));
+    }
+
+    #[test]
+    fn the_three_slots_are_distinct() {
+        assert_ne!(slot(Role::Offer, &S), slot(Role::Bundle, &S));
+        assert_ne!(slot(Role::Offer, &S), slot(Role::Announce, &S));
+        assert_ne!(slot(Role::Bundle, &S), slot(Role::Announce, &S));
     }
 
     // TEST-006 negative-input: tampered ciphertext, wrong AD, wrong K, and a

@@ -753,7 +753,9 @@ pub async fn cbcl_enrol_prepare(
     passcode: String,
     session: tauri::State<'_, crate::commands::AppSession>,
 ) -> Result<ConfirmationRequest> {
-    let (offer_plaintext, profile_octets, observed) = {
+    use selfsame_core::seal;
+
+    let (offer_plaintext, profile_octets, observed, secret, application) = {
         let guard = session.0.lock().unwrap_or_else(|p| p.into_inner());
         let pending = guard
             .pending_enrolment
@@ -768,9 +770,41 @@ pub async fn cbcl_enrol_prepare(
                 descriptor_digest: pending.observed.descriptor_digest.clone(),
                 platform_binding_id: pending.observed.platform_binding_id.clone(),
             },
+            pending.secret,
+            pending.application,
         )
     };
-    prepare_issuance(&offer_plaintext, profile_octets, &observed, &passcode, &session).await
+    let request =
+        prepare_issuance(&offer_plaintext, profile_octets, &observed, &passcode, &session).await?;
+
+    // SPEC-004 CON-221: when the person must compare fingerprints, the
+    // application has nothing to compare against until it is told the issuer.
+    // Publish the just-derived account issuer DID to the announce slot — sealed
+    // under the same secret and offer transcript as the bundle, so only this
+    // ceremony's holder could have written it — so the application derives and
+    // displays the *same* fingerprint before the person answers. Without this,
+    // an honest first enrolment cannot be truthfully confirmed. A `NotRequired`
+    // ceremony (already-bound account) writes no announcement; the application
+    // simply waits for the bundle.
+    if request.fingerprint.is_some() {
+        let issuer_did = {
+            let guard = session.0.lock().unwrap_or_else(|p| p.into_inner());
+            guard.pending_issuance.as_ref().map(|p| p.identity.did.clone())
+        };
+        if let Some(did) = issuer_did {
+            let transcript = seal::transcript(&offer_plaintext);
+            let sealed =
+                seal::seal_announce(&seal::derive_key(&secret), did.as_bytes(), &transcript);
+            // A failed announcement leaves the application unable to show the
+            // fingerprint, so the comparison screen would be unanswerable —
+            // surface it rather than advance to a screen the other side can't
+            // complete.
+            crate::net::put_announce(application, &secret, sealed)
+                .await
+                .map_err(|_| UiError::from("PairingRelayUnavailable"))?;
+        }
+    }
+    Ok(request)
 }
 
 /// Release the confirmed grant and write the sealed bundle back to the mailbox.

@@ -85,6 +85,28 @@ pub async fn put_bundle(
     }
 }
 
+/// Write the sealed pre-grant issuer announcement to the announce slot
+/// (SPEC-004 CON-221). Written after the phone derives the issuer and before it
+/// releases the bundle, so the device client can display the same fingerprint.
+pub async fn put_announce(
+    app: Application,
+    secret: &[u8; 16],
+    sealed: Vec<u8>,
+) -> Result<(), NetError> {
+    let url = format!("{}/rendezvous/{}", endpoint(app), seal::slot(seal::Role::Announce, secret));
+    let response = client()
+        .put(url)
+        .body(sealed)
+        .send()
+        .await
+        .map_err(|_| NetError::Unreachable("rendezvous"))?;
+    match response.status().as_u16() {
+        201 => Ok(()),
+        409 => Err(NetError::Conflict),
+        _ => Err(NetError::Refused),
+    }
+}
+
 // ── CON-006 ─────────────────────────────────────────────────────────────────
 
 /// Publish one signed delta (REQ-020).
