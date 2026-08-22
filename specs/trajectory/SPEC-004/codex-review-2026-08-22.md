@@ -307,3 +307,57 @@ new commands, issue/build/deliver a grant bundle, or perform confirmation; it
 constructs an issuer identity and then calls `record_pairing_trust` directly.
 That is why it cannot detect the UI dispatch, cross-screen confirmation,
 pending-state, key-retention, or commit-order failures above.
+
+## Remediation status (2026-08-22)
+
+Seven of the nine findings are closed in code with tests; two are recorded
+here as the remaining Tier-1 design work, deferred with the rest of the
+release-gate hardening to the pre-release security review.
+
+| # | Finding | Status | Where |
+|---|---------|--------|-------|
+| 2 | Manual observation admits Apple/native binding | **Fixed** | `observation_for_enrolment_offer` requires a `web:` CON-214 binding |
+| 9 | Provider observation copied from the hint | **Fixed** | observation runs `ProviderHint::verify` against the fetched profile |
+| 3 | CON-219 code consumed by the SPEC-001 path | **Fixed** | `read_link_code` opens the slot once and dispatches by grammar to `enrol_from_opened`; the wallet frontend drives `cbcl_enrol_prepare/confirm` |
+| 6 | Trust committed before delivery; error ignored | **Fixed** | `confirm_issuance` returns trust inputs; each caller commits via `commit_pairing_trust` (checked) at its real completion — the enrolment path only after the bundle PUT |
+| 8 | One ceremony's grant delivered into another | **Fixed** | `PendingEnrolment` keyed by ceremony id; replacement of a live context refused; `open_bundle` runs `bundle_matches_offer` |
+| 7 | Rendezvous unbounded, quadratic-cost | **Fixed** | amortised-O(1) expiry queue, `MAX_SLOTS` bound, pre-buffer `DefaultBodyLimit` (`did-crdt`). Residual: edge CORS/rate-limit |
+| 1 | Hub is an unauthenticated signing oracle | **Partially hardened** | drive-by-browser vector closed (json media type required, no wildcard CORS on the sign route). **Open:** server-side ceremony-state authentication of the statement — a server-side caller can still POST a well-formed statement |
+| 4 | CON-221 has no application-side fingerprint value or wire step | **Open (design)** | see below |
+| 5 | Allocator discards the device key and the grant | **Open (feature)** | see below |
+
+### Open — #4: CON-221 needs a pre-grant fingerprint channel
+
+The wallet side of the comparison is now wired (finding 3): on a `required`
+first enrolment it derives the issuer fingerprint in `cbcl_enrol_prepare` and
+shows the `fingerprint-compare` screen with the two honest answers. But the
+application (the chat browser) still has no value to display: it learns the
+issuer only inside the bundle, which arrives after confirmation. So an honest
+first enrolment **fails closed** — the person, comparing against a blank other
+screen, can only answer "they're different" and terminate. That is the safe
+state (never TOFU), but it is not yet a completable honest ceremony.
+
+Closing it needs an authenticated pre-confirmation wallet→application message
+from which the browser can derive/display the same issuer fingerprint before
+the person answers — e.g. the wallet writes a signed fingerprint announcement
+to a distinct rendezvous slot that the allocator reads and renders while the
+"waiting" screen is up. This is a CON-221 wire addition (spec amendment + both
+sides + adversarial review), not a local code change. The UI must keep driving
+the returned `applicability` (it now does) rather than treating the prompt as
+generic approval.
+
+### Open — #5: the browser must retain the device key and install the grant
+
+The allocator draws a fresh `device_seed` inline, uses it only to derive the
+offer's public key, and retains neither the seed nor a signer; on reply the
+shell parses the bundle and prints "Linked" without installing the compact
+grant or closure into any application credential store. So even a fully
+successful ceremony leaves the "connected application" unable to make the
+CON-207 possession proof for the grant's `cnf` key, and a reload loses it.
+
+Closing it needs the browser application to generate and retain the device key
+in device-owned persistent storage (preferably a non-exportable WebCrypto
+signing handle in IndexedDB) and to install the validated matching
+grant/closure atomically with it before reporting success. This is an
+application-credential-store feature in `cbcl-bus`'s web client, coupled to the
+key generation, not a wallet change.
