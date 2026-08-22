@@ -31,12 +31,16 @@ pub enum NetError {
 }
 
 /// The compiled endpoint table (REQ-026).
+///
+/// `IMPL-008` `ADR-913`: the SPEC-001 routes live on the deployed `did-crdt`
+/// service — `rendezvous.cbcl.chat` never resolved, and the reference crate's
+/// own header always named the did-crdt service as these routes' home.
 pub fn endpoint(app: Application) -> String {
     if let Ok(base) = std::env::var("SELFSAME_ENDPOINT") {
         return base;
     }
     match app {
-        Application::CbclChat => "https://rendezvous.cbcl.chat".to_owned(),
+        Application::CbclChat => "https://did.anuna.io".to_owned(),
     }
 }
 
