@@ -309,14 +309,38 @@ pub struct OfferView {
     pub expires_in: u64,
 }
 
+/// What a recognised code turned out to be.
+///
+/// One link code carries one of two offer grammars — a SPEC-001 device-link
+/// offer or a SPEC-004 CON-219 application-enrolment offer — and they are told
+/// apart only by opening the sealed slot, which is **read-once**. So the wallet
+/// must decide *from the single opened plaintext* which flow this is; it cannot
+/// fetch, guess wrong, and fetch again. This is that decision, returned to the
+/// frontend so it can show the matching screen.
+#[derive(Serialize)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+pub enum LinkOutcome {
+    /// A SPEC-001 device-link offer — the SCREEN-001 consent flow.
+    Device(OfferView),
+    /// A SPEC-004 CON-219 enrolment offer — the application-consent flow.
+    Enrolment(crate::app_grant::GrantRequestView),
+}
+
 /// Read a typed or scanned code, fetch the offer, and **verify it** — REQ-018.
 ///
 /// Nothing is shown unless this returns `Ok`. SCREEN-001's "Never reached" rows
 /// are the `Err` arms: an absent, wrong-key, or wrong-domain signature, an
 /// application outside the compiled table, and an expired offer each stop here.
 /// Parsing the offer is not authorising it.
+///
+/// The sealed slot is fetched and opened **once** (CON-002 read-once), then the
+/// opened plaintext is matched against both offer grammars: a SPEC-001 device
+/// offer takes the [`LinkOutcome::Device`] path here, and a CON-219 enrolment
+/// offer is dispatched — on that same plaintext, before any device-offer state
+/// is committed — to [`crate::app_grant::enrol_from_opened`]. Neither grammar
+/// gets a second read the read-once contract would refuse.
 #[tauri::command]
-pub async fn read_link_code(code: String, session: State<'_, AppSession>) -> Result<OfferView> {
+pub async fn read_link_code(code: String, session: State<'_, AppSession>) -> Result<LinkOutcome> {
     // REQ-002: refuse before doing any work, so the UI can route to the backup
     // flow rather than discovering the block after the user has scanned.
     Custody::require_backup_confirmed()?;
@@ -334,9 +358,18 @@ pub async fn read_link_code(code: String, session: State<'_, AppSession>) -> Res
     let plaintext = seal::open_offer(&seal::derive_key(&secret), &sealed)
         .map_err(|_| UiError("That code isn't valid.".into()))?;
 
-    // Recognise fully, and verify the signature, before any field exists.
-    let offer =
-        Offer::parse(&plaintext).map_err(|_| UiError("That code isn't valid.".into()))?;
+    // Recognise fully, and verify the signature, before any field exists. A
+    // CON-219 enrolment offer fails this SPEC-001 grammar and is dispatched to
+    // the enrolment ceremony below, on the same already-opened plaintext.
+    let offer = match Offer::parse(&plaintext) {
+        Ok(offer) => offer,
+        Err(_) => {
+            let view =
+                crate::app_grant::enrol_from_opened(plaintext, secret, application, &session)
+                    .await?;
+            return Ok(LinkOutcome::Enrolment(view));
+        }
+    };
     if offer.application != application {
         return Err(UiError("That code isn't valid.".into()));
     }
@@ -356,7 +389,7 @@ pub async fn read_link_code(code: String, session: State<'_, AppSession>) -> Res
 
     let mut s = session.0.lock().unwrap_or_else(|p| p.into_inner());
     s.pending_offer = Some(PendingOffer { expires_at: offer.expiry, offer, secret });
-    Ok(view)
+    Ok(LinkOutcome::Device(view))
 }
 
 /// *This isn't me — reject.* Nothing is signed, written, or published.

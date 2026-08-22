@@ -607,6 +607,23 @@ pub async fn cbcl_enrol_start(
     let offer_plaintext = seal::open_offer(&seal::derive_key(&secret), &sealed)
         .map_err(|_| UiError::from("RecognitionFailed"))?;
 
+    enrol_from_opened(offer_plaintext, secret, application, &session).await
+}
+
+/// Drive the CON-219 enrolment review from an already-opened offer plaintext.
+///
+/// Split out of [`cbcl_enrol_start`] because the read-once rendezvous slot is
+/// consumed by exactly one fetch/open. The wallet's single code entry
+/// ([`crate::commands::read_link_code`]) opens the slot once, then dispatches
+/// here when the plaintext is a CON-219 offer rather than a SPEC-001 device
+/// offer — so the enrolment path is reachable without a second read that the
+/// read-once contract would refuse.
+pub(crate) async fn enrol_from_opened(
+    offer_plaintext: Vec<u8>,
+    secret: [u8; 16],
+    application: selfsame_core::record::Application,
+    session: &crate::commands::AppSession,
+) -> Result<GrantRequestView> {
     // Recognise it as a CON-219 offer (not a SPEC-001 device-link offer). A
     // SPEC-001 offer refuses here and takes the other command's path.
     let offer =
