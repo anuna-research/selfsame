@@ -148,6 +148,66 @@ CON-214 signature can exist), and the wallet-side grammar dispatch touches
 SCREEN-001's one linking flow — both are their own reviewed slices, traced
 here so neither repo invents the contract alone.
 
+### ADR-914 — First contact is the pairing itself
+
+**Status:** PROPOSED (2026-08-22, owner-directed).
+
+**Context.** [[IMPL-008-production-pairing-claimant#ADR-913]] planned first
+contact through the enrolment ceremony, and building its producer surfaced
+the real shape of the deployed product: cbcl-bus's live flow already makes
+**pairing** the first contact — the production invite affordance is staged
+(`/static/local-pairing-fixture.json` answers 200), the SPEC-075 relay is
+live on `:9443`, and SPEC-076 records the durable hub account grant *after*
+a delivered ceremony. Meanwhile
+[[IMPL-008-production-pairing-claimant#ADR-912]]'s trusted-profile
+interpretation requires a prior linked grant whose producer (browser
+`begin()` wire, hub CON-214 signing endpoint, wallet CON-219 dispatch) was
+never built anywhere. Two repositories shipped opposite halves of a
+chicken-and-egg. ADR-912 anticipated this: *"a future amendment MAY widen
+it"*, and named the seam — one function returning held profiles.
+
+**Decision.** Implement [[SPEC-008-production-pairing-claimant#REQ-909]]:
+on zero held matches, the wallet fetches the profile live from the
+invitation's `application` member (a canonical `applicationId` the
+cbcl-pairing invitation grammar already carries), authenticates it under
+CON-220, and runs the unchanged eligibility gate over it. First contact
+then proceeds as **account creation**:
+
+1. mint a fresh CSPRNG account scope (never derived from anything);
+2. derive the per-application home inside custody, `issuer::create`, and
+   publish the closure deltas to the profile's declared resolvers — live at
+   `https://did.anuna.io` (`POST /dids/:did/deltas`);
+3. provision the reciprocal `acct` binding at the profile's
+   `accountAuthority` (a small authenticated write the authority exposes —
+   the cbcl-bus slice this ADR traces), so `webfinger::fetch_and_verify`
+   returns a real JRD and acceptance check 9 passes **unweakened**;
+4. assemble the ordinary `CON-902` context and run the ceremony;
+5. at `Accepted`, write the ADR-912 pairing-trust record from the
+   live-fetched octets and the minted scope — subsequent pairings take the
+   held path.
+
+**Rationale.** The alternative — completing ADR-913's enrolment wire first —
+builds three new surfaces to manufacture a prior relationship whose only
+consumer is this gate, while the deployed product's own ceremony order
+(pair, then grant the account) already provides an authenticated first
+contact: the profile is CON-201-authenticated from its own origin, the
+relay is admitted by the compiled registry exactly as for held profiles,
+and the person consents to a surface that names the authenticated origin
+and the first-contact fact. What the held record proved — a prior
+relationship — is replaced for first contact by what it always rested on
+underneath: the registry digest (owner-ratified evidence) plus the person's
+explicit consent to a named, authenticated origin. ADR-913's enrolment wire
+remains the stronger later path and nothing here forecloses it.
+
+**Consequences.** The wallet's first-contact path touches custody (scope
+mint + derive + publish) before any socket opens; a declined or failed
+ceremony leaves only a published, unlinked home document — no trust record,
+no account claim. The authority-side provisioning endpoint is a cbcl-bus
+Tier-1 slice (SPEC-053 REQ-030 territory) and is traced there rather than
+invented here. TEST-916/917 carry the rows and mutations, including the
+fetch-target prohibition (profile from the `applicationId`, never the
+invitation origin).
+
 ## Capability placement
 
 ### WSS claimant transport

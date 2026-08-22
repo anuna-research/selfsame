@@ -2,9 +2,9 @@
 id: SPEC-008
 title: Production Pairing Claimant — Transport, Real Credential, and Origin Trust
 status: implemented
-version: 0.2.2
+version: 0.3.0-draft
 tier: 1
-review-gate: approved
+review-gate: 0.2.2 approved; the 0.3.0 first-contact amendment (REQ-909, TEST-916/917) is under Tier-1 review — owner directed authoring 2026-08-22, adversarial review and implementation evidence pending
 depends-on: "[[SPEC-007-cbcl-pairing-cutover]]; [[SPEC-004-application-scoped-identity]]; [[SPEC-003-android-apk-distribution]]; cbcl-pairing SPEC-001"
 last-updated: 2026-08-20
 ---
@@ -53,7 +53,10 @@ Controls:     [[#REQ-902]] a non-demo build SHALL NOT construct the verification
                 from `local_demo` or any compiled test fixture
               [[#REQ-905]] the carrier SHALL NOT be treated as an OS-navigable URL
               [[#REQ-906]] no socket SHALL open toward an origin the authenticated
-                profile does not list with an approved conformance digest
+                profile does not list with an approved conformance digest —
+                under [[#REQ-909]] first contact, "authenticated" means fetched
+                live from the invitation's `applicationId` under CON-220, and
+                the compiled registry still decides eligibility
               [[#REQ-907]] this spec SHALL NOT alter [[SPEC-007-cbcl-pairing-cutover#REQ-809]] —
                 the production-allocation hold and its gate remain in full force
               [[#REQ-908]] loopback origin mapping stays compile-gated, dev-only
@@ -190,13 +193,51 @@ The claimant SHALL open a socket only toward an invitation origin that matches e
 one eligible `cbclPairingRelays` descriptor in the person's authenticated application
 profile, where eligible means: operator not forbidden, conformance evidence digest
 present in the compiled approved registry ([[#CON-903]]), and non-loopback in ordinary
-builds. Zero matches and multiple matches SHALL both refuse before any network I/O. A refusal
-SHALL surface as one distinct, secret-free message and end the attempt: the wallet
-SHALL NOT substitute another descriptor, retry a different origin, or offer any repair
-path — the person SHALL NOT be offered any way to enter, choose, or repair a relay
-origin (inherited: [[SPEC-007-cbcl-pairing-cutover#REQ-813]]).
+builds. Zero matches among held profiles SHALL proceed only through [[#REQ-909]]'s
+first-contact admission or refuse; multiple matches SHALL refuse. Every refusal happens
+before any network I/O toward a relay, SHALL surface as one distinct, secret-free
+message, and ends the attempt: the wallet SHALL NOT substitute another descriptor,
+retry a different origin, or offer any repair path — the person SHALL NOT be offered
+any way to enter, choose, or repair a relay origin (inherited:
+[[SPEC-007-cbcl-pairing-cutover#REQ-813]]).
 
 Trace: [[#TEST-909]] [[#TEST-910]] [[#CON-903]] [[#OBS-903]]
+
+### REQ-909 — First-contact admission by live authenticated profile
+
+WHEN no held pairing-trust record's profile pre-declares the invitation origin, the
+claimant MAY admit the ceremony as FIRST CONTACT, and SHALL do so only under all of
+the following, in order, each failing closed:
+
+1. the recognised invitation's `application` member parses as a canonical
+   `applicationId` ([[SPEC-004-application-scoped-identity#CON-201]] grammar), and the
+   profile is fetched and authenticated live from that identifier under
+   [[SPEC-004-application-scoped-identity#CON-220]] — never taken from the
+   invitation, a cache the person never linked, or any caller-supplied bytes;
+2. that live profile passes the unchanged [[#REQ-906]] eligibility for the
+   invitation origin — the compiled registry ([[#CON-903]]) remains the
+   admission control that no unheld profile can vote around;
+3. the consent surface names the ceremony as first contact with the
+   authenticated `applicationId` origin, rendered under the verified treatment
+   ([[SPEC-004-application-scoped-identity#REQ-222]]'s display discipline), before
+   any approval control is offered;
+4. the person's account scope for the application is freshly minted from the
+   wallet's CSPRNG — first contact is account creation, never the re-derivation
+   of an account the person did not know they had — and the per-application home
+   is derived, its `did:crdt` closure published to the profile's declared
+   resolvers, and its `acct` alias reciprocally provisioned at the profile's
+   `accountAuthority` so that credential-acceptance check 9 (the
+   [[SPEC-004-application-scoped-identity#CON-206]] reciprocal-binding gate)
+   verifies against a real authority answer — the acceptance predicate itself is
+   not weakened, reordered, or special-cased for first contact; and
+5. the pairing-trust record is written only at ceremony acceptance — a declined,
+   failed, or abandoned first contact records nothing and leaves no account
+   state at the wallet beyond the published, unlinked home document.
+
+A repeat invitation from an origin a held record already vouches for SHALL take the
+[[#REQ-906]] held path unchanged; first contact is the zero-match branch only.
+
+Trace: [[#TEST-916]] [[#TEST-917]] [[#CON-903]]
 
 ### REQ-907 — The production-allocation hold is out of scope
 
@@ -353,6 +394,18 @@ Core (writable in one sitting, no new rig):
   live-relay assertion suite passes unchanged.
 - **TEST-912** (positive, [[#REQ-908]]): non-demo build renders no demo-specific error
   copy; the capability boundary line reflects the build.
+- **TEST-916** (positive + negative, [[#REQ-909]]): with zero held matches, a live
+  CON-201-authenticated profile whose descriptor passes [[#REQ-906]] eligibility
+  reaches first-contact consent naming the authenticated origin; the same invitation
+  with the registry digest absent refuses; an invitation whose `application` member
+  is not a canonical `applicationId` refuses at recognition; a profile fetched from
+  the invitation origin (or any origin other than the `applicationId`) is never
+  consulted (prohibited-action assertion on the fetch target).
+- **TEST-917** (negative + scope-invariant, [[#REQ-909]]): a declined or failed first
+  contact writes no pairing-trust record and no wallet account state beyond the
+  published home document; acceptance writes exactly one record whose profile octets
+  are the live-fetched octets; a second invitation from the same origin then takes
+  the held path (no fresh scope minted — the prohibited action is re-minting).
 
 Depth (needs a rig or a second party; deferrable with owner):
 
@@ -365,7 +418,9 @@ Depth (needs a rig or a second party; deferrable with owner):
 
 Mutation gate: disable the origin check → [[#TEST-909]] must fail; accept an invalid
 certificate → [[#TEST-902]] must fail; reintroduce the fixture context in non-demo →
-[[#TEST-904]] must fail.
+[[#TEST-904]] must fail; fetch the first-contact profile from the invitation origin
+instead of the `applicationId` → [[#TEST-916]] must fail; record trust before
+acceptance → [[#TEST-917]] must fail.
 
 ## Observability
 
@@ -387,11 +442,27 @@ certificate → [[#TEST-902]] must fail; reintroduce the fixture context in non-
 | REQ-906 | CON-903 | TEST-909, TEST-910 |
 | REQ-907 | — | TEST-911 |
 | REQ-908 | — | TEST-912 |
+| REQ-909 | CON-903 | TEST-916, TEST-917 |
 | NFR-901 | CON-901 | TEST-902 |
 | NFR-902 | CON-901 | TEST-901 |
 
 ## Changelog
 
+- **0.3.0-draft — 2026-08-22 — first-contact admission (REQ-909).**
+  Resolves the cross-repository conflict that made the deployed product
+  impossible: cbcl-bus's live flow (SPEC-076, the production invite surface)
+  makes pairing the first contact and grants the hub account afterwards,
+  while [[IMPL-008-production-pairing-claimant#ADR-912]]'s trusted-profile
+  interpretation required a prior linked grant whose producer was never
+  built. ADR-912's own Open note invited this widening. [[#REQ-909]] admits
+  first contact through a live CON-220 fetch of the invitation's
+  `applicationId` profile under unchanged [[#REQ-906]] eligibility — the
+  compiled registry stays the control — with fresh-scope account creation,
+  closure publication, reciprocal alias provisioning (credential-acceptance
+  check 9 verifies against a real authority answer; the acceptance predicate
+  is untouched), and trust recorded only at acceptance. Mechanism in
+  [[IMPL-008-production-pairing-claimant#ADR-914]]. Tier-1: effective only
+  when adversarial review and implementation evidence land here.
 - **0.2.2** — status `implemented`, review gate `approved`: the repository
   owner reviewed and merged PR #43 (2026-08-20) after the fresh-context
   adversarial review closed with zero blocking findings
