@@ -164,7 +164,7 @@ pub struct CeremonyObservation {
 }
 
 impl CeremonyObservation {
-    fn as_observation(&self, now: i64) -> Observation<'_> {
+    pub fn as_observation(&self, now: i64) -> Observation<'_> {
         Observation {
             ceremony_profile_digest: &self.ceremony_profile_digest,
             provider_id: &self.provider_id,
