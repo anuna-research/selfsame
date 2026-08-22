@@ -323,41 +323,44 @@ release-gate hardening to the pre-release security review.
 | 8 | One ceremony's grant delivered into another | **Fixed** | `PendingEnrolment` keyed by ceremony id; replacement of a live context refused; `open_bundle` runs `bundle_matches_offer` |
 | 7 | Rendezvous unbounded, quadratic-cost | **Fixed** | amortised-O(1) expiry queue, `MAX_SLOTS` bound, pre-buffer `DefaultBodyLimit` (`did-crdt`). Residual: edge CORS/rate-limit |
 | 1 | Hub is an unauthenticated signing oracle | **Partially hardened** | drive-by-browser vector closed (json media type required, no wildcard CORS on the sign route). **Open:** server-side ceremony-state authentication of the statement — a server-side caller can still POST a well-formed statement |
-| 4 | CON-221 has no application-side fingerprint value or wire step | **Open (design)** | see below |
-| 5 | Allocator discards the device key and the grant | **Open (feature)** | see below |
+| 4 | CON-221 has no application-side fingerprint value or wire step | **Fixed in source** | `Role::Announce` slot; wallet publishes the issuer in `cbcl_enrol_prepare`; `fingerprint_did_json` + the browser announce-poll display the same fingerprint. **Release step:** vendor the rebuilt WASM + deploy |
+| 5 | Allocator discards the device key and the grant | **Fixed in source** | device seed retained through the ceremony; `installEnrolledConnection` persists seed + grant + closure under one strict IndexedDB record. **Release step:** vendor the rebuilt WASM + deploy |
 
-### Open — #4: CON-221 needs a pre-grant fingerprint channel
+### Fixed in source — #4: the pre-grant fingerprint channel
 
-The wallet side of the comparison is now wired (finding 3): on a `required`
-first enrolment it derives the issuer fingerprint in `cbcl_enrol_prepare` and
-shows the `fingerprint-compare` screen with the two honest answers. But the
-application (the chat browser) still has no value to display: it learns the
-issuer only inside the bundle, which arrives after confirmation. So an honest
-first enrolment **fails closed** — the person, comparing against a blank other
-screen, can only answer "they're different" and terminate. That is the safe
-state (never TOFU), but it is not yet a completable honest ceremony.
+Implemented as a third single-write rendezvous slot, `Role::Announce`
+(`selfsame-core/src/seal.rs`), sealed under the same secret and offer
+transcript as the bundle so only this ceremony's holder can write it. When the
+comparison is required, `cbcl_enrol_prepare` publishes the just-derived account
+issuer DID to that slot before the person confirms. The browser allocator polls
+the announce slot alongside the bundle slot; on the announcement it derives the
+fingerprint itself via `fingerprint_did_json` (a substituted issuer therefore
+shows a visibly different fingerprint) and renders it beside the wallet's, so
+the person can compare the two screens and approve truthfully. Honest
+first-contact now completes instead of failing closed. A `NotRequired` ceremony
+writes no announcement and the browser simply waits for the bundle.
 
-Closing it needs an authenticated pre-confirmation wallet→application message
-from which the browser can derive/display the same issuer fingerprint before
-the person answers — e.g. the wallet writes a signed fingerprint announcement
-to a distinct rendezvous slot that the allocator reads and renders while the
-"waiting" screen is up. This is a CON-221 wire addition (spec amendment + both
-sides + adversarial review), not a local code change. The UI must keep driving
-the returned `applicability` (it now does) rather than treating the prompt as
-generic approval.
+**Remaining release step:** the vendored WASM must be rebuilt from a clean,
+pinned dependency tree (`scripts/check-selfsame-wasm-rebuild.sh --vendor`) so
+the deployed browser exposes `announce_slot` / `open_announce` /
+`fingerprint_did_json`, then `cbcl-bus` redeployed. This session's dep tree is
+not in a clean pinned state (cbcl-rs alone carries thousands of uncommitted
+files), so the reproducible signed-credential WASM rebuild was deliberately not
+forced here.
 
-### Open — #5: the browser must retain the device key and install the grant
+### Fixed in source — #5: retain the device key and install the grant
 
-The allocator draws a fresh `device_seed` inline, uses it only to derive the
-offer's public key, and retains neither the seed nor a signer; on reply the
-shell parses the bundle and prints "Linked" without installing the compact
-grant or closure into any application credential store. So even a fully
-successful ceremony leaves the "connected application" unable to make the
-CON-207 possession proof for the grant's `cnf` key, and a reload loses it.
+The allocator now keeps the `device_seed` it generates through the whole
+ceremony (rather than deriving a public key and discarding it), and on a
+successful reply `installEnrolledConnection` persists the seed together with the
+compact grant and the issuer closure under one strict IndexedDB record. The
+connected application therefore keeps the private half of the key its grant's
+`cnf` binds — it can make the CON-207 possession proof — and the connection
+survives a reload.
 
-Closing it needs the browser application to generate and retain the device key
-in device-owned persistent storage (preferably a non-exportable WebCrypto
-signing handle in IndexedDB) and to install the validated matching
-grant/closure atomically with it before reporting success. This is an
-application-credential-store feature in `cbcl-bus`'s web client, coupled to the
-key generation, not a wallet change.
+Two hardening follow-ups remain for the security review, neither blocking honest
+completion: the retained seed is stored as base64 in IndexedDB rather than a
+non-exportable WebCrypto signing handle, and the install is durable but not yet
+transactionally fused with a "reported success" marker for crash-consistency.
+
+**Remaining release step:** same WASM vendor + `cbcl-bus` redeploy as #4.
