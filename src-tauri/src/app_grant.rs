@@ -154,6 +154,36 @@ impl CeremonyObservation {
     }
 }
 
+/// Build the ceremony observation for a first-contact enrolment offer opened
+/// from the rendezvous (`IMPL-008` `ADR-913`).
+///
+/// The observation the held-path tests thread in from an OS adapter has, on
+/// the cross-device enrolment path, exactly one honest source: the opened
+/// offer itself, plus the fact that no OS attributed a caller. The offer
+/// carries a **real** `applicationId` and the profile digest it committed to;
+/// the provider fields come from its authenticated `provider_hint`; and
+/// `platform_binding_id` is `None` because a pasted or scanned code is the
+/// unattributed manual path — which is exactly the caller evidence a
+/// [[SPEC-004-application-scoped-identity#CON-227]] web binding accepts and any
+/// native binding refuses. Nothing here is taken on trust that the pure
+/// `authorise` does not then re-verify against the freshly fetched profile.
+pub fn observation_for_enrolment_offer(
+    offer: &ceremony::OfferPayload,
+) -> Result<CeremonyObservation> {
+    let hint = selfsame_app_identity::provider_hint::ProviderHint::recognise(&offer.provider_hint)
+        .map_err(|_| UiError::from("OfferMalformed"))?;
+    Ok(CeremonyObservation {
+        ceremony_profile_digest: offer.core.profile_digest.clone(),
+        provider_id: hint.provider_id,
+        descriptor_digest: hint.descriptor_digest,
+        // The manual cross-device path attributes no caller. A web-binding
+        // statement accepts this; a native-binding statement refuses it, which
+        // is the CON-227 property that keeps first contact from silently
+        // downgrading a native application's stronger binding.
+        platform_binding_id: None,
+    })
+}
+
 /// What a person is being asked to approve, before they approve it.
 ///
 /// `CON-221` and the consent screens need this *before* any signature exists,
@@ -499,5 +529,74 @@ async fn authority_state(acct_uri: &str, home_did: &str) -> AuthorityState {
         // fail closed rather than be read as first use, and a semantic mismatch
         // is precisely the substitution the comparison exists to catch.
         Err(_) => AuthorityState::Unknown,
+    }
+}
+
+#[cfg(test)]
+mod enrolment_observation_tests {
+    //! IMPL-008 ADR-913 — the enrolment observation is built from the opened
+    //! offer alone, with no OS caller attribution. These pin the field mapping
+    //! and the unattributed-caller property CON-227 depends on; the full
+    //! fetch → app_grant → put_bundle wrapper is depth (needs a live rendezvous,
+    //! covered by tests/live_link.rs's rig).
+    use super::*;
+    use selfsame_app_identity::ceremony::{OfferCore, OfferPayload};
+    use selfsame_app_identity::provider_hint::ProviderHint;
+
+    fn offer_payload() -> OfferPayload {
+        let hint = ProviderHint {
+            application_id: "https://chat.anuna.io/selfsame/application".into(),
+            profile_version: 1,
+            provider_id: "anuna-1".into(),
+            descriptor_digest: "cCnyIp8IxUiyUjCUBbrZ5b3flzqMM8c-S_tUCPdCwUI".into(),
+            offer_digest: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".into(),
+        };
+        let core = OfferCore {
+            ceremony_id: "c".repeat(43),
+            request_id: "r".repeat(43),
+            application_id: "https://chat.anuna.io/selfsame/application".into(),
+            profile_version: 1,
+            profile_digest: "PdigestPdigestPdigestPdigestPdigestPdigestX".into(),
+            account_scope_id: "s".repeat(43),
+            device_did: "did:key:zTEST".into(),
+            device_public_key: [7u8; 32],
+            requested_permissions: vec![
+                "https://chat.anuna.io/selfsame/application#chat-send".into(),
+            ],
+            issued_at: 1_000,
+            expires_at: 1_120,
+        };
+        OfferPayload {
+            core,
+            enrollment_evidence: "e.e.e".into(),
+            provider_hint: hint.to_json(),
+            offer_digest: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".into(),
+        }
+    }
+
+    #[test]
+    fn observation_maps_offer_and_hint_fields() {
+        let offer = offer_payload();
+        let obs = observation_for_enrolment_offer(&offer).expect("well-formed hint");
+        assert_eq!(obs.ceremony_profile_digest, offer.core.profile_digest);
+        assert_eq!(obs.provider_id, "anuna-1");
+        assert_eq!(obs.descriptor_digest, "cCnyIp8IxUiyUjCUBbrZ5b3flzqMM8c-S_tUCPdCwUI");
+    }
+
+    #[test]
+    fn the_manual_path_attributes_no_caller() {
+        // The property CON-227 rests on: a pasted/scanned first-contact offer
+        // reaches acceptance as `Unattributed`, which a web binding accepts and
+        // a native binding refuses. If this ever became `Some(..)`, a native
+        // application's stronger binding could be silently downgraded.
+        let obs = observation_for_enrolment_offer(&offer_payload()).unwrap();
+        assert_eq!(obs.platform_binding_id, None);
+    }
+
+    #[test]
+    fn a_malformed_hint_refuses() {
+        let mut offer = offer_payload();
+        offer.provider_hint = selfsame_app_identity::json::Json::obj([]);
+        assert!(observation_for_enrolment_offer(&offer).is_err());
     }
 }
