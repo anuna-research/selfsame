@@ -69,6 +69,12 @@ pub struct Session {
     /// page. One type for every build (SPEC-008 `REQ-903`): ordinary builds
     /// hold a live session over TLS, the demo build over its loopback socket.
     pub pending_cbcl_pairing: Option<crate::cbcl_pairing::PendingCbclPairing>,
+    /// A first-contact CON-219 enrolment fetched from the rendezvous and
+    /// reviewed, held between the consent screen and the person's decision
+    /// (`IMPL-008` `ADR-913`). Never exposed to the page: the offer plaintext
+    /// carries the private account scope. Dropped on cancel, on confirm, and
+    /// when a fresh enrolment displaces it.
+    pub pending_enrolment: Option<crate::app_grant::PendingEnrolment>,
 }
 
 /// An offer that has been fetched, recognised, and signature-verified, and is
@@ -94,6 +100,7 @@ impl Session {
             pending_offer: None,
             pending_issuance: None,
             pending_cbcl_pairing: None,
+            pending_enrolment: None,
         }
     }
 

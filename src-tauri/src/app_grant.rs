@@ -121,6 +121,27 @@ pub struct PendingIssuance {
     expires_at: i64,
 }
 
+/// A first-contact CON-219 enrolment fetched from the rendezvous and reviewed,
+/// held between the consent screen and the person's decision (`IMPL-008`
+/// `ADR-913`).
+///
+/// Never exposed to the page: `offer_plaintext` carries the private account
+/// scope, and `secret` addresses the mailbox slots. The whole point of holding
+/// it server-side is that the JS drives the enrolment by ceremony id alone and
+/// never sees either.
+pub struct PendingEnrolment {
+    /// The 16-octet link secret, for the bundle slot and its sealing.
+    secret: [u8; 16],
+    /// The opened CON-219 offer plaintext.
+    offer_plaintext: Vec<u8>,
+    /// The live-fetched, CON-201-authenticated profile octets.
+    profile_octets: Vec<u8>,
+    /// The observation built from the offer (`platform_binding_id: None`).
+    observed: CeremonyObservation,
+    /// The application whose compiled endpoint carries the mailbox.
+    application: selfsame_core::record::Application,
+}
+
 /// What the shell observed for itself, as against what the offer asserts.
 ///
 /// Mirrors [`authorise::Observation`] and exists for the same reason: every
@@ -291,11 +312,29 @@ pub async fn app_grant_prepare(
     passcode: String,
     session: tauri::State<'_, crate::commands::AppSession>,
 ) -> Result<ConfirmationRequest> {
+    prepare_issuance(&offer, profile, &observed, &passcode, &session).await
+}
+
+/// Sign the grant and stash it pending `CON-221`, from offer/profile/observation
+/// the caller has already assembled.
+///
+/// Factored out of [`app_grant_prepare`] so the first-contact enrolment path
+/// (`IMPL-008` `ADR-913`) drives the identical signing, replay, and authority
+/// logic from a rendezvous-fetched offer rather than one handed in by the page —
+/// the two must not diverge, because a second copy of this is a second place the
+/// `CON-221` gate could be forgotten.
+async fn prepare_issuance(
+    offer: &[u8],
+    profile: Vec<u8>,
+    observed: &CeremonyObservation,
+    passcode: &str,
+    session: &tauri::State<'_, crate::commands::AppSession>,
+) -> Result<ConfirmationRequest> {
     Custody::require_backup_confirmed()?;
 
     // Every recognition, verification, binding and freshness check is the pure
     // core's, and it has already run by the time a key is touched.
-    let decided = authorise::authorise(&offer, &profile, &observed.as_observation(now() as i64))
+    let decided = authorise::authorise(offer, &profile, &observed.as_observation(now() as i64))
         .map_err(token)?;
 
     // `CON-214` step 5, and it happens **before** the key is touched. A ledger
@@ -316,7 +355,7 @@ pub async fn app_grant_prepare(
     rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut grant_token);
 
     // Presence, then the key — which exists only inside this closure.
-    let (compact, identity) = Custody::use_hierarchy_root(&passcode, |root| {
+    let (compact, identity) = Custody::use_hierarchy_root(passcode, |root| {
         let home = hierarchy::derive(root, &decided.profile.application_id, &decided.scope);
 
         // `CON-203`, both stages. Until this existed the wallet signed with a
@@ -427,6 +466,17 @@ pub async fn app_grant_confirm(
     confirmed: bool,
     session: tauri::State<'_, crate::commands::AppSession>,
 ) -> Result<AuthorisedGrant> {
+    confirm_issuance(&ceremony_id, confirmed, &session)
+}
+
+/// Release the bundle for a confirmed ceremony. Shared by
+/// [`app_grant_confirm`] and the first-contact enrolment path, which then also
+/// writes the bundle back to the rendezvous.
+fn confirm_issuance(
+    ceremony_id: &str,
+    confirmed: bool,
+    session: &tauri::State<'_, crate::commands::AppSession>,
+) -> Result<AuthorisedGrant> {
     let pending = {
         let mut guard = session.0.lock().unwrap_or_else(|p| p.into_inner());
         // Taken, not borrowed: one preparation yields at most one bundle, and a
@@ -438,7 +488,7 @@ pub async fn app_grant_confirm(
         // And it must be the ceremony the person was shown. Without this the
         // caller is confirming "whatever is pending", which is a different
         // question from the one on the screen.
-        if pending.ceremony_id != ceremony_id {
+        if pending.ceremony_id != *ceremony_id {
             return Err(UiError::from("NothingToConfirm"));
         }
         pending
@@ -496,6 +546,152 @@ pub async fn app_grant_confirm(
         valid_until: pending.valid_until,
         published: false,
     })
+}
+
+// ── First-contact CON-219 enrolment over the rendezvous (IMPL-008 ADR-913) ──
+//
+// The three commands below are the wallet half of the enrolment wire: they
+// fetch a sealed CON-219 offer from the rendezvous the shared addressing points
+// at, open it, authenticate the application's profile live from the offer's own
+// `applicationId` (CON-220), and drive the *same* review/prepare/confirm the
+// held path uses — then write the released bundle back to the mailbox. The
+// pairing-trust record `SPEC-008` `REQ-906` consumes is written by
+// `confirm_issuance`'s call to `record_pairing_trust`, only after the person
+// confirms. Nothing here is a fixture or a second copy of the decision.
+
+/// Recognise a link code, fetch and open its sealed CON-219 offer, authenticate
+/// the application profile live, review, and hold it pending consent.
+#[tauri::command]
+pub async fn cbcl_enrol_start(
+    code: String,
+    session: tauri::State<'_, crate::commands::AppSession>,
+) -> Result<GrantRequestView> {
+    use selfsame_core::{code::LinkCode, seal};
+
+    let link = LinkCode::parse(&code).map_err(|_| UiError::from("RecognitionFailed"))?;
+    let application = link.application;
+    let secret = *link.secret.as_bytes();
+
+    // The rendezvous carries the sealed offer at H(offer-slot). One fetch; the
+    // slot is read-once, so a retry needs a fresh code — the CON-002 contract.
+    let sealed = crate::net::fetch_offer(application, &secret)
+        .await
+        .map_err(|_| UiError::from("PairingRelayUnavailable"))?;
+    let offer_plaintext = seal::open_offer(&seal::derive_key(&secret), &sealed)
+        .map_err(|_| UiError::from("RecognitionFailed"))?;
+
+    // Recognise it as a CON-219 offer (not a SPEC-001 device-link offer). A
+    // SPEC-001 offer refuses here and takes the other command's path.
+    let offer =
+        ceremony::recognise_offer(&offer_plaintext).map_err(|_| UiError::from("OfferMalformed"))?;
+
+    // CON-220: the profile is fetched live from the offer's own `applicationId`,
+    // never from the offer, the invitation, or a cache the person never linked.
+    // `authorise` below re-verifies the offer's `profileDigest` against exactly
+    // these octets, so a substituted profile fails closed.
+    let application_id = selfsame_app_identity::profile::ApplicationId::parse(
+        &offer.core.application_id,
+    )
+    .map_err(|_| UiError::from("UnverifiedApplication"))?;
+    let fetched = selfsame_app_identity_net::profile::fetch(&application_id, now() as i64)
+        .await
+        .map_err(|_| UiError::from("PairingProfileUnavailable"))?;
+    let profile_octets = fetched.octets;
+
+    let observed = observation_for_enrolment_offer(&offer)?;
+
+    // Review — the same pure decision the page's `app_grant_review` runs, and
+    // the replay pre-check that keeps a consent screen from burning the id.
+    let decided = authorise::authorise(
+        &offer_plaintext,
+        &profile_octets,
+        &observed.as_observation(now() as i64),
+    )
+    .map_err(token)?;
+    if crate::replay::is_consumed(&decided.offer.request_id, decided.valid_from)
+        .map_err(|_| UiError::from("GrantIssuanceFailed"))?
+    {
+        return Err(UiError::from("EnrollmentReplay"));
+    }
+    let view = GrantRequestView {
+        application_id: decided.profile.application_id.as_str().to_owned(),
+        permissions: decided.offer.requested_permissions.clone(),
+        device_did: decided.offer.device_did.clone(),
+        expires_in: decided.offer.expires_at - decided.valid_from,
+    };
+
+    session
+        .0
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .pending_enrolment = Some(PendingEnrolment {
+        secret,
+        offer_plaintext,
+        profile_octets,
+        observed,
+        application,
+    });
+    Ok(view)
+}
+
+/// Sign the grant for the held enrolment and stash it pending `CON-221`.
+#[tauri::command]
+pub async fn cbcl_enrol_prepare(
+    passcode: String,
+    session: tauri::State<'_, crate::commands::AppSession>,
+) -> Result<ConfirmationRequest> {
+    let (offer_plaintext, profile_octets, observed) = {
+        let guard = session.0.lock().unwrap_or_else(|p| p.into_inner());
+        let pending = guard
+            .pending_enrolment
+            .as_ref()
+            .ok_or_else(|| UiError::from("NothingToConfirm"))?;
+        (
+            pending.offer_plaintext.clone(),
+            pending.profile_octets.clone(),
+            CeremonyObservation {
+                ceremony_profile_digest: pending.observed.ceremony_profile_digest.clone(),
+                provider_id: pending.observed.provider_id.clone(),
+                descriptor_digest: pending.observed.descriptor_digest.clone(),
+                platform_binding_id: pending.observed.platform_binding_id.clone(),
+            },
+        )
+    };
+    prepare_issuance(&offer_plaintext, profile_octets, &observed, &passcode, &session).await
+}
+
+/// Release the confirmed grant and write the sealed bundle back to the mailbox.
+#[tauri::command]
+pub async fn cbcl_enrol_confirm(
+    ceremony_id: String,
+    confirmed: bool,
+    session: tauri::State<'_, crate::commands::AppSession>,
+) -> Result<AuthorisedGrant> {
+    use selfsame_core::seal;
+
+    let grant = confirm_issuance(&ceremony_id, confirmed, &session)?;
+
+    // The enrolment context is taken here, so a decline (which returns an error
+    // from `confirm_issuance` above and never reaches this line) leaves nothing,
+    // and a second confirm finds nothing.
+    let pending = session
+        .0
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .pending_enrolment
+        .take()
+        .ok_or_else(|| UiError::from("NothingToConfirm"))?;
+
+    // Seal the bundle under the offer transcript and PUT it to the bundle slot,
+    // where the browser allocator opens it with `open_bundle_bytes` over the
+    // same offer plaintext — the shared `selfsame-core` sealing contract.
+    let transcript = seal::transcript(&pending.offer_plaintext);
+    let sealed = seal::seal_bundle(&seal::derive_key(&pending.secret), &grant.bundle, &transcript);
+    crate::net::put_bundle(pending.application, &pending.secret, sealed)
+        .await
+        .map_err(|_| UiError::from("PairingRelayUnavailable"))?;
+
+    Ok(grant)
 }
 
 /// Ask the account authority whether it already holds a binding (`CON-204`).
