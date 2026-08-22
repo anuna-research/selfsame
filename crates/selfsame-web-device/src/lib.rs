@@ -1450,14 +1450,26 @@ impl EnrolmentAllocator {
             .map_err(|_| JsError::new("SPEC-004 offer refused"))
     }
 
-    /// Open the wallet's sealed bundle over the retained offer plaintext.
+    /// Open the wallet's sealed bundle over the retained offer plaintext, and
+    /// require it to name *this* allocator's offer.
+    ///
+    /// Codex review, "one ceremony's grant delivered into another": AEAD alone
+    /// authenticates the bundle to whatever secret and transcript opened it, so
+    /// a grant sealed under this allocator's secret decrypts here even when its
+    /// ceremony/request IDs name a different offer. `bundle_matches_offer` binds
+    /// the opened bundle to this allocator's own `OfferCore` before any field is
+    /// used, so a cross-ceremony grant is refused rather than accepted.
     pub fn open_bundle(&self, sealed_bundle: &[u8]) -> Result<Vec<u8>, JsError> {
         let offer = self
             .offer_plaintext
             .as_ref()
             .ok_or_else(|| JsError::new("no offer sealed yet"))?;
-        open_bundle_for(&self.secret, sealed_bundle, offer)
-            .map_err(|_| JsError::new("SPEC-004 bundle refused"))
+        let opened = open_bundle_for(&self.secret, sealed_bundle, offer)
+            .map_err(|_| JsError::new("SPEC-004 bundle refused"))?;
+        let bundle = recognise_bundle(&opened).map_err(|_| JsError::new("SPEC-004 bundle refused"))?;
+        bundle_matches_offer(&bundle, &self.core)
+            .map_err(|_| JsError::new("SPEC-004 bundle refused"))?;
+        Ok(opened)
     }
 }
 

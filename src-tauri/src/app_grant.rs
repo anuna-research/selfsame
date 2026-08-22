@@ -140,6 +140,18 @@ pub struct PendingEnrolment {
     observed: CeremonyObservation,
     /// The application whose compiled endpoint carries the mailbox.
     application: selfsame_core::record::Application,
+    /// The ceremony this enrolment context belongs to.
+    ///
+    /// Codex review, "one ceremony's grant delivered into another": the
+    /// transport context (secret, slot, transcript) must be the *same* ceremony
+    /// as the grant released at confirmation. Without this key, starting a
+    /// second enrolment replaced this context, and the first ceremony's signed
+    /// bundle was then sealed under the second's secret and slot. The ceremony
+    /// id travels with the context and is compared at delivery.
+    ceremony_id: String,
+    /// The offer's own expiry, so a live in-flight context refuses replacement
+    /// until it lapses (mirrors [`PendingIssuance::expires_at`]).
+    expires_at: i64,
 }
 
 /// What the shell observed for itself, as against what the offer asserts.
@@ -493,17 +505,59 @@ pub async fn app_grant_confirm(
     confirmed: bool,
     session: tauri::State<'_, crate::commands::AppSession>,
 ) -> Result<AuthorisedGrant> {
-    confirm_issuance(&ceremony_id, confirmed, &session)
+    // The same-device held path completes here: the caller took the grant
+    // in-process, so this confirmation *is* delivery. Commit trust now, with
+    // its error surfaced.
+    let (grant, trust) = confirm_issuance(&ceremony_id, confirmed, &session)?;
+    commit_pairing_trust(&trust)?;
+    Ok(grant)
+}
+
+/// The SPEC-008 ADR-912 pairing-trust entry a released grant earns, carried out
+/// of [`confirm_issuance`] so the caller commits it at its own real completion.
+///
+/// Codex review, "trust committed before delivery": `confirm_issuance` used to
+/// write this itself, before its enrolment caller had delivered the bundle — so
+/// a dropped final PUT left durable REQ-906 trust for a ceremony the
+/// application never completed. Trust is now the caller's last step, taken only
+/// once delivery has actually happened, with its error checked.
+pub struct PairingTrustInputs {
+    application_id: String,
+    profile_octets: Vec<u8>,
+    account_scope: String,
+    /// Bound to the ceremony so a mismatched enrolment context cannot commit
+    /// trust for a grant it did not carry.
+    ceremony_id: String,
+}
+
+/// Commit a pairing-trust entry, propagating the store's error.
+///
+/// `record_pairing_trust` is a two-write record/index update; discarding its
+/// error could report a delivered bundle while the origin gate stayed closed
+/// (codex review), so the error is surfaced to the caller.
+fn commit_pairing_trust(trust: &PairingTrustInputs) -> Result<()> {
+    crate::cbcl_context::record_pairing_trust(
+        &trust.application_id,
+        &trust.profile_octets,
+        &trust.account_scope,
+        now() as i64,
+    )
+    .map_err(|_| UiError::from("PairingTrustUnavailable"))
 }
 
 /// Release the bundle for a confirmed ceremony. Shared by
 /// [`app_grant_confirm`] and the first-contact enrolment path, which then also
 /// writes the bundle back to the rendezvous.
+///
+/// Returns the released grant and the pairing-trust inputs it earns; the caller
+/// commits the trust ([`commit_pairing_trust`]) at its own completion point,
+/// because that point differs (the same-device path completes here; the
+/// enrolment path completes only after the bundle reaches the rendezvous).
 fn confirm_issuance(
     ceremony_id: &str,
     confirmed: bool,
     session: &tauri::State<'_, crate::commands::AppSession>,
-) -> Result<AuthorisedGrant> {
+) -> Result<(AuthorisedGrant, PairingTrustInputs)> {
     let pending = {
         let mut guard = session.0.lock().unwrap_or_else(|p| p.into_inner());
         // Taken, not borrowed: one preparation yields at most one bundle, and a
@@ -556,23 +610,26 @@ fn confirm_issuance(
     .map_err(|_| UiError::from("GrantIssuanceFailed"))?;
 
     // SPEC-008 ADR-912: a released grant is the wallet's evidence of a real
-    // relationship with this application — record its authenticated profile
-    // and account scope as the pairing-trust entry. Failure to record does
-    // not un-release the grant; the person can re-link to repair it.
-    let _ = crate::cbcl_context::record_pairing_trust(
-        &pending.trust_application_id,
-        &pending.trust_profile_octets,
-        &pending.trust_account_scope,
-        now() as i64,
-    );
+    // relationship with this application. The trust inputs travel back to the
+    // caller, which commits them once delivery has actually happened — never
+    // here, ahead of the bundle reaching the other side.
+    let trust = PairingTrustInputs {
+        application_id: pending.trust_application_id,
+        profile_octets: pending.trust_profile_octets,
+        account_scope: pending.trust_account_scope,
+        ceremony_id: pending.ceremony_id,
+    };
 
-    Ok(AuthorisedGrant {
-        bundle,
-        account: pending.identity.acct_uri,
-        issuer: pending.identity.did,
-        valid_until: pending.valid_until,
-        published: false,
-    })
+    Ok((
+        AuthorisedGrant {
+            bundle,
+            account: pending.identity.acct_uri,
+            issuer: pending.identity.did,
+            valid_until: pending.valid_until,
+            published: false,
+        },
+        trust,
+    ))
 }
 
 // ── First-contact CON-219 enrolment over the rendezvous (IMPL-008 ADR-913) ──
@@ -663,16 +720,29 @@ pub(crate) async fn enrol_from_opened(
         expires_in: decided.offer.expires_at - decided.valid_from,
     };
 
-    session
-        .0
-        .lock()
-        .unwrap_or_else(|p| p.into_inner())
-        .pending_enrolment = Some(PendingEnrolment {
+    let mut guard = session.0.lock().unwrap_or_else(|p| p.into_inner());
+
+    // A second enrolment must not silently displace a context whose grant may
+    // still be confirmed: the displaced ceremony's bundle would then be sealed
+    // under this one's secret and slot. A live, differing context is refused
+    // and left to expire on its own — the same discipline `prepare_issuance`
+    // applies to `pending_issuance`.
+    if let Some(existing) = &guard.pending_enrolment {
+        if existing.expires_at > decided.valid_from
+            && existing.ceremony_id != decided.offer.ceremony_id
+        {
+            return Err(UiError::from("CeremonyInProgress"));
+        }
+    }
+
+    guard.pending_enrolment = Some(PendingEnrolment {
         secret,
         offer_plaintext,
         profile_octets,
         observed,
         application,
+        ceremony_id: decided.offer.ceremony_id.clone(),
+        expires_at: decided.offer.expires_at,
     });
     Ok(view)
 }
@@ -712,7 +782,7 @@ pub async fn cbcl_enrol_confirm(
 ) -> Result<AuthorisedGrant> {
     use selfsame_core::seal;
 
-    let grant = confirm_issuance(&ceremony_id, confirmed, &session)?;
+    let (grant, trust) = confirm_issuance(&ceremony_id, confirmed, &session)?;
 
     // The enrolment context is taken here, so a decline (which returns an error
     // from `confirm_issuance` above and never reaches this line) leaves nothing,
@@ -725,6 +795,14 @@ pub async fn cbcl_enrol_confirm(
         .take()
         .ok_or_else(|| UiError::from("NothingToConfirm"))?;
 
+    // The context taken must be the *same ceremony* as the grant just released.
+    // Codex review, "one ceremony's grant delivered into another": without this
+    // check, a context replaced by a later `cbcl_enrol_start` would seal this
+    // grant under the wrong secret and slot. A mismatch delivers nothing.
+    if pending.ceremony_id != ceremony_id || trust.ceremony_id != ceremony_id {
+        return Err(UiError::from("CeremonyMismatch"));
+    }
+
     // Seal the bundle under the offer transcript and PUT it to the bundle slot,
     // where the browser allocator opens it with `open_bundle_bytes` over the
     // same offer plaintext — the shared `selfsame-core` sealing contract.
@@ -733,6 +811,11 @@ pub async fn cbcl_enrol_confirm(
     crate::net::put_bundle(pending.application, &pending.secret, sealed)
         .await
         .map_err(|_| UiError::from("PairingRelayUnavailable"))?;
+
+    // Delivery has happened: only now is the pairing-trust entry earned. Its
+    // error is surfaced rather than swallowed, so a failed record cannot be
+    // reported as a completed enrolment.
+    commit_pairing_trust(&trust)?;
 
     Ok(grant)
 }
