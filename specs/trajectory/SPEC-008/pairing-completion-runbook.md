@@ -1,8 +1,36 @@
 # Pairing completion runbook — chat.anuna.io
 
-State as of 2026-08-22. Everything software is built, verified, and deployed or
-branch-ready. What remains are three owner actions: one Tier-1 gate decision,
-one deploy, one physical install. This is the exact sequence.
+**Status 2026-08-22: the enrolment ceremony is LIVE and verified in production
+up to the wallet accept.** The browser allocator, the deployed hub CON-214
+signing endpoint (real enrolment key), and the live rendezvous were exercised
+end to end — a valid link code was produced and the hub-signed sealed offer
+landed readable in `did.anuna.io`. The ONLY remaining step is a wallet with a
+provisioned identity accepting a code (custody-gated, so it needs a running
+wallet — desktop or phone).
+
+## The one remaining step
+
+Run a wallet with a provisioned identity, open `https://chat.anuna.io`, click
+**"link my Selfsame wallet"**, and enter the code it shows:
+
+- **Desktop:** `cd ~/Code/selfsame && cargo tauri dev` (branch
+  `spec/spec-004-web-manual-binding`), create/restore an identity, then enter
+  the code. The wallet's `cbcl_enrol_start` fetches the offer, authenticates
+  the profile live (CON-220), shows consent; on confirm it issues the grant,
+  writes the ADR-912 pairing-trust record, and returns the sealed bundle to the
+  rendezvous.
+- **Phone:** install the signed APK at `outputs/selfsame-wallet-debugsigned.apk`
+  (rebuild after the latest wallet commits with `cargo tauri android build`),
+  then the same flow.
+
+Once the trust record is written, `cbcl_pairing_start` against a
+`chat.anuna.io:9443` invitation finds it, REQ-906 admits the relay, and the
+original "names a relay none of your connected applications vouches for"
+refusal is gone.
+
+---
+
+## History / full sequence (all done unless noted)
 
 ## Already live (no action needed)
 
