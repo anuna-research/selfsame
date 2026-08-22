@@ -1267,6 +1267,200 @@ fn json_string(s: &str) -> String {
     out
 }
 
+// ── CON-219 first-contact enrolment allocator (IMPL-008 ADR-913) ────────────
+//
+// The chat web app is the developer allocator: it builds a CON-219 offer,
+// gets its CON-214 evidence signed by the hub, seals the offer to the
+// rendezvous, and shows the person a link code. Every intricate field —
+// `did:key`, the device-key digest, the offer digest, the web binding, the
+// link code — is computed here in Rust where the recogniser and the digests
+// are unit-tested, not hand-rolled in JS across the wasm boundary. The four
+// CSPRNG values are the caller's to draw (this module generates nothing), the
+// same discipline `Device`/`LinkSession` follow.
+/// One first-contact CON-219 enrolment allocator attempt (`IMPL-008` `ADR-913`).
+///
+/// Holds the offer, provider hint, and unsigned statement between building the
+/// statement (sent to the hub to sign) and sealing the offer (with the returned
+/// evidence), plus the offer plaintext needed to open the wallet's bundle.
+#[wasm_bindgen(js_name = EnrolmentAllocator)]
+pub struct EnrolmentAllocator {
+    secret: [u8; 16],
+    profile_octets: Vec<u8>,
+    core: OfferCore,
+    hint: ProviderHint,
+    statement: EnrollmentStatement,
+    offer_plaintext: Option<Vec<u8>>,
+}
+
+impl EnrolmentAllocator {
+    /// Build one allocator attempt from a recognised profile and caller
+    /// randomness. `now` is the absolute Unix second the offer is issued at;
+    /// the offer expires `OFFER_TTL_SECONDS` later.
+    pub fn new_native(
+        profile_octets: &[u8],
+        secret: &[u8],
+        device_seed: &[u8],
+        account_scope: &[u8],
+        ceremony_id: &[u8],
+        request_id: &[u8],
+        now: i64,
+    ) -> Result<Self, IdentityError> {
+        use selfsame_app_identity::{codec, didkey};
+        let secret: [u8; 16] = secret.try_into().map_err(|_| IdentityError::Refused)?;
+        let seed: [u8; 32] = device_seed.try_into().map_err(|_| IdentityError::Refused)?;
+        if account_scope.len() != 32 || ceremony_id.len() != 32 || request_id.len() != 32 {
+            return Err(IdentityError::Refused);
+        }
+        let profile =
+            ApplicationProfile::recognise(profile_octets).map_err(|_| IdentityError::Refused)?;
+        let descriptor = profile
+            .cbcl_pairing_relays
+            .first()
+            .ok_or(IdentityError::Refused)?;
+        let origin = profile.application_id.origin().to_string();
+        let device_public_key = SigningKey::from_bytes(&seed).verifying_key().to_bytes();
+
+        let core = OfferCore {
+            ceremony_id: codec::b64url(ceremony_id),
+            request_id: codec::b64url(request_id),
+            application_id: profile.application_id.as_str().to_string(),
+            profile_version: 1,
+            profile_digest: codec::b64url(profile.digest()),
+            account_scope_id: codec::b64url(account_scope),
+            device_did: didkey::encode(&device_public_key),
+            device_public_key,
+            requested_permissions: profile.allowed_permissions.clone(),
+            issued_at: now,
+            // The offer and the CON-214 statement share this expiry, so it is
+            // bounded by CON-214's 120-second evidence window, not the longer
+            // SPEC-001 device-link offer TTL.
+            expires_at: now + identity_enrollment::MAX_EVIDENCE_WINDOW_SECONDS,
+        };
+        let hint = ProviderHint {
+            application_id: core.application_id.clone(),
+            profile_version: 1,
+            provider_id: descriptor.operator_id.clone(),
+            descriptor_digest: codec::b64url(&descriptor.digest),
+            offer_digest: core.digest(),
+        };
+        let statement = EnrollmentStatement {
+            request_id: core.request_id.clone(),
+            ceremony_id: core.ceremony_id.clone(),
+            application_id: core.application_id.clone(),
+            profile_version: core.profile_version,
+            profile_digest: core.profile_digest.clone(),
+            account_scope_id: core.account_scope_id.clone(),
+            device_key_digest: identity_enrollment::device_key_digest(&core),
+            requested_permissions: core.requested_permissions.clone(),
+            provider_id: hint.provider_id.clone(),
+            descriptor_digest: hint.descriptor_digest.clone(),
+            offer_digest: core.digest(),
+            // First contact is the manual cross-device path: the CON-227 web
+            // binding, which the wallet accepts against unattributed evidence.
+            platform_binding_id: format!("web:{origin}"),
+            return_uri: format!("{origin}/.well-known/selfsame/return"),
+            issued_at: core.issued_at,
+            expires_at: core.expires_at,
+        };
+        Ok(Self {
+            secret,
+            profile_octets: profile_octets.to_vec(),
+            core,
+            hint,
+            statement,
+            offer_plaintext: None,
+        })
+    }
+
+    /// The canonical CON-214 statement octets to send to the hub for signing.
+    pub fn statement_bytes_native(&self) -> Vec<u8> {
+        identity_json::canonicalise(&identity_enrollment::build(&self.statement))
+    }
+
+    /// Seal the offer once the hub has returned its compact JWS evidence, and
+    /// retain the plaintext for opening the bundle later.
+    pub fn seal_offer_native(&mut self, evidence: &str) -> Result<Vec<u8>, IdentityError> {
+        let offer = build_offer(&self.core, evidence, &self.hint, &self.profile_octets)?;
+        let sealed = seal::seal_offer(&seal::derive_key(&self.secret), &offer);
+        self.offer_plaintext = Some(offer);
+        Ok(sealed)
+    }
+
+    fn link_code_native(&self) -> String {
+        LinkCode {
+            application: APPLICATION,
+            secret: LinkSecret::from_bytes(self.secret),
+        }
+        .render()
+    }
+}
+
+#[wasm_bindgen(js_class = EnrolmentAllocator)]
+impl EnrolmentAllocator {
+    /// Begin. See [`EnrolmentAllocator::new_native`]; the four random values are
+    /// drawn by the browser with `crypto.getRandomValues`.
+    #[wasm_bindgen(constructor)]
+    pub fn new(
+        profile: &[u8],
+        secret: &[u8],
+        device_seed: &[u8],
+        account_scope: &[u8],
+        ceremony_id: &[u8],
+        request_id: &[u8],
+        now: f64,
+    ) -> Result<EnrolmentAllocator, JsError> {
+        Self::new_native(
+            profile,
+            secret,
+            device_seed,
+            account_scope,
+            ceremony_id,
+            request_id,
+            now as i64,
+        )
+        .map_err(|_| JsError::new("SPEC-004 enrolment refused"))
+    }
+
+    /// The canonical CON-214 statement octets to POST to `/selfsame/enrolment/sign`.
+    pub fn statement_bytes(&self) -> Vec<u8> {
+        self.statement_bytes_native()
+    }
+
+    /// The link code the person enters into the wallet.
+    #[wasm_bindgen(getter)]
+    pub fn link_code(&self) -> String {
+        self.link_code_native()
+    }
+
+    /// The rendezvous slot the sealed offer is written to.
+    #[wasm_bindgen(getter)]
+    pub fn offer_slot(&self) -> String {
+        seal::slot(seal::Role::Offer, &self.secret)
+    }
+
+    /// The rendezvous slot the wallet's sealed bundle appears in.
+    #[wasm_bindgen(getter)]
+    pub fn bundle_slot(&self) -> String {
+        seal::slot(seal::Role::Bundle, &self.secret)
+    }
+
+    /// Seal the offer given the hub's compact JWS evidence.
+    pub fn seal_offer(&mut self, evidence: &str) -> Result<Vec<u8>, JsError> {
+        self.seal_offer_native(evidence)
+            .map_err(|_| JsError::new("SPEC-004 offer refused"))
+    }
+
+    /// Open the wallet's sealed bundle over the retained offer plaintext.
+    pub fn open_bundle(&self, sealed_bundle: &[u8]) -> Result<Vec<u8>, JsError> {
+        let offer = self
+            .offer_plaintext
+            .as_ref()
+            .ok_or_else(|| JsError::new("no offer sealed yet"))?;
+        open_bundle_for(&self.secret, sealed_bundle, offer)
+            .map_err(|_| JsError::new("SPEC-004 bundle refused"))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2284,5 +2478,85 @@ mod tests {
     fn facts_are_refused_for_a_profile_the_recogniser_rejects() {
         assert!(profile_facts(b"{}").is_err());
         assert!(profile_facts(b"not json").is_err());
+    }
+}
+
+#[cfg(test)]
+mod enrolment_allocator_tests {
+    //! IMPL-008 ADR-913 — the browser CON-219 allocator builds a web-binding
+    //! offer the wallet recogniser accepts, a link code the wallet parses, and
+    //! well-formed rendezvous slots. The full ceremony (rendezvous I/O + the
+    //! wallet accept) is the e2e harness's; this pins the construction.
+    use super::*;
+    use selfsame_app_identity::enrollment as en;
+    use ed25519_dalek::SigningKey;
+
+    const KID: &str = "https://photos.example/selfsame/application#enrollment-test";
+    const NOW: i64 = 1_785_412_800;
+
+    fn profile_octets() -> Vec<u8> {
+        let corpus: serde_json::Value =
+            serde_json::from_str(include_str!("../../../test-vectors/spec-004-v1.json")).unwrap();
+        corpus["con_201_application_profile"][0]["input"]["profile"]
+            .as_str()
+            .unwrap()
+            .as_bytes()
+            .to_vec()
+    }
+
+    fn allocator() -> EnrolmentAllocator {
+        EnrolmentAllocator::new_native(
+            &profile_octets(),
+            &[9u8; 16],
+            &[3u8; 32],
+            &[4u8; 32],
+            &[1u8; 32],
+            &[2u8; 32],
+            NOW,
+        )
+        .expect("a recognised profile and 16/32-octet randomness build an allocator")
+    }
+
+    #[test]
+    fn the_statement_names_the_web_binding_and_the_application_origin() {
+        let alloc = allocator();
+        let statement = en::recognise_unsigned_payload(&alloc.statement_bytes_native())
+            .expect("the built statement is a recognised CON-214 payload");
+        assert_eq!(statement.platform_binding_id, "web:https://photos.example");
+        assert_eq!(
+            statement.return_uri,
+            "https://photos.example/.well-known/selfsame/return"
+        );
+        assert_eq!(statement.application_id, "https://photos.example/selfsame/application");
+    }
+
+    #[test]
+    fn the_link_code_round_trips_and_the_slots_are_well_formed() {
+        let alloc = allocator();
+        let code = alloc.link_code_native();
+        let parsed = selfsame_core::code::LinkCode::parse(&code).expect("wallet parses the code");
+        assert_eq!(parsed.secret.as_bytes(), &[9u8; 16]);
+        assert_eq!(alloc.offer_slot().len(), 26);
+        assert_eq!(alloc.bundle_slot().len(), 26);
+        assert_ne!(alloc.offer_slot(), alloc.bundle_slot());
+    }
+
+    #[test]
+    fn the_sealed_offer_opens_and_recognises_as_a_con_219_offer() {
+        let mut alloc = allocator();
+        // The hub would sign the statement; here a test key stands in for the
+        // enrolment key, exercising the seal + recognise path.
+        let statement =
+            en::recognise_unsigned_payload(&alloc.statement_bytes_native()).unwrap();
+        let evidence = en::sign(&statement, KID, &SigningKey::from_bytes(&[6u8; 32]));
+        let sealed = alloc.seal_offer_native(&evidence).expect("the offer seals");
+
+        let opened =
+            seal::open_offer(&seal::derive_key(&[9u8; 16]), &sealed).expect("the offer opens");
+        let offer = selfsame_app_identity::ceremony::recognise_offer(&opened)
+            .expect("the sealed offer recognises as CON-219");
+        assert_eq!(offer.core.application_id, "https://photos.example/selfsame/application");
+        // The offer digest the statement bound equals the offer's own.
+        assert_eq!(statement.offer_digest, offer.core.digest());
     }
 }
