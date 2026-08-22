@@ -150,7 +150,17 @@ here so neither repo invents the contract alone.
 
 ### ADR-914 — First contact is the pairing itself
 
-**Status:** PROPOSED (2026-08-22, owner-directed).
+**Status:** REJECTED (2026-08-22, same-day adversarial review — record:
+`specs/trajectory/SPEC-008/req-909-adversarial-review-2026-08-22.md`).
+Two blocking findings: the invitation's `application` member is the
+protocol constant `anuna.io/credential/v1`, never an `applicationId`, so
+the live-fetch mechanism had no wire source; and the pre-consent
+publication/provisioning ordering violated
+[[SPEC-007-cbcl-pairing-cutover#REQ-812]], an inherited unwaivable hard
+stop. First contact goes through
+[[IMPL-008-production-pairing-claimant#ADR-913]]'s enrolment wire. The
+text below is retained as the decision record of what was considered and
+why it fell.
 
 **Context.** [[IMPL-008-production-pairing-claimant#ADR-913]] planned first
 contact through the enrolment ceremony, and building its producer surfaced
