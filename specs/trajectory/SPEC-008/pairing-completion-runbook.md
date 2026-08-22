@@ -50,13 +50,25 @@ cd ~/Code/cbcl-bus && fly deploy --remote-only
 # did-crdt already deployed from its branch; redeploy after merge if desired
 ```
 
-### 3 — Rebuild and install the wallet, then link (PHYSICAL — OWNER ONLY)
+### 3 — Install the wallet and link (PHYSICAL — OWNER ONLY)
+
+The APK is **already built** (2026-08-22), carrying the CON-227 web-binding
+recognition and the `cbcl_enrol_*` wire:
 
 ```
+src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release-unsigned.apk
+```
+
+It is unsigned. To install:
+```
+# sign it (or build a signed variant with your release keystore), then:
+adb install -r <signed.apk>
+```
+Rebuild after any wallet change with:
+```
 cd ~/Code/selfsame
-# toolchain confirmed present: tauri-cli 2.11.4, Android NDK 27, aarch64-linux-android
-npx tauri android build            # or: cargo tauri android build
-# install the produced APK on the phone (adb install / manual)
+NDK_HOME=~/Library/Android/sdk/ndk/27.1.12297006 ANDROID_HOME=~/Library/Android/sdk \
+  cargo tauri android build --apk --target aarch64
 ```
 
 Then on the phone: open the wallet, and from chat.anuna.io start a link — the
