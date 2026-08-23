@@ -5,6 +5,7 @@
 //! established CBCL parser NIF; keeping the dependency graphs separate avoids
 //! turning an identity-verifier addition into a parser availability risk.
 
+pub mod credential_v2;
 pub mod enrollment;
 pub mod path_b;
 

@@ -4256,6 +4256,7 @@ dependencies = [
 name = "selfsame-beam"
 version = "0.1.0"
 dependencies = [
+ "bip39",
  "ed25519-dalek",
  "rustler",
  "selfsame-app-identity",

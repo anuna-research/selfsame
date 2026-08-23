@@ -15,3 +15,6 @@ crate-type = ["cdylib", "rlib"]
 selfsame-app-identity.workspace = true
 ed25519-dalek = { workspace = true, features = ["std", "zeroize"] }
 rustler = { version = "0.36", default-features = false, features = ["nif_version_2_15"] }
+
+[dev-dependencies]
+bip39 = { version = "2", default-features = false, features = ["std"] }
