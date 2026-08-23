@@ -5,7 +5,7 @@ status: implemented
 version: 0.2.2
 tier: 1
 review-gate: approved
-candidate-amendment: "[[spec-008-0.4.24-explicit-background-and-http-busy-terminals#CON-983]] — standalone first-contact TOFU candidate; no implementation or production authority before coordinated Tier-1 PASS"
+candidate-amendment: "[[spec-008-0.4.25-fail-closed-room-start-and-singular-authority#CON-984]] — standalone first-contact TOFU candidate; no implementation or production authority before coordinated Tier-1 PASS"
 candidate-review-gate: not-approved; implementation-prohibited-pending-coordinated-fresh-cross-model-review
 depends-on: "[[SPEC-007-cbcl-pairing-cutover]]; [[SPEC-004-application-scoped-identity]]; [[SPEC-003-android-apk-distribution]]; cbcl-pairing SPEC-001"
 last-updated: 2026-08-23
@@ -14,7 +14,7 @@ last-updated: 2026-08-23
 # SPEC-008 — Production Pairing Claimant: Transport, Real Credential, and Origin Trust
 
 > **Open candidate increment.**
-> [[spec-008-0.4.24-explicit-background-and-http-busy-terminals#CON-983]] specifies
+> [[spec-008-0.4.25-fail-closed-room-start-and-singular-authority#CON-984]] specifies
 > standalone first-contact TOFU. Its coordinated Tier-1 review gate is open.
 > The implemented 0.2.2 baseline remains approved, but the candidate authorizes
 > no implementation, allocation, release, or deployment.
