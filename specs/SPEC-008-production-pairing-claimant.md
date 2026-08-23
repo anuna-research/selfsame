@@ -2,7 +2,7 @@
 id: SPEC-008
 title: Production Pairing Claimant — Transport, Real Credential, and Origin Trust
 status: draft
-version: 0.5.3-draft
+version: 0.5.4-draft
 tier: 1
 review-gate: not-approved; implementation-prohibited-pending-one-coordinated-fresh-cross-model-review
 authority-form: consolidated-direct-current-authority
@@ -10,14 +10,14 @@ implementation-baseline: 0220cec2dec44cd95d4f411ea4814d790b6716d2
 generation-model-family: OpenAI GPT-5
 generation-model-version: gpt-5.6-sol
 generation-session: 01a029aa-9127-7c42-ad28-81512b91ded6
-generation-synthesis-trajectory: "owner-authorized standalone architecture -> F-A through F-E code traces -> rejected reviews through 0.5.2 -> self-contained wire, profile binding, and durable recovery reissue"
+generation-synthesis-trajectory: "owner-authorized standalone architecture -> F-A through F-E code traces -> rejected reviews through 0.5.3 -> exact response, expiry, and recovery closure"
 depends-on: "[[SPEC-007-cbcl-pairing-cutover]]; [[SPEC-004-application-scoped-identity]]; [[SPEC-003-android-apk-distribution]]; cbcl-pairing SPEC-001"
 last-updated: 2026-08-24
 ---
 
 # SPEC-008 — Production Pairing Claimant: Transport, Real Credential, and Origin Trust
 
-> **Consolidated current-law reissue.** Version 0.5.3 states the standalone
+> **Consolidated current-law reissue.** Version 0.5.4 states the standalone
 > first-contact authority directly. Trajectory documents and review reports
 > supply evidence only. They supply no current values.
 > This draft authorizes no implementation, allocation, release, or deployment
@@ -99,7 +99,7 @@ baseline regressions, and the final two remain design inputs:
   application profile lists a production relay descriptor.
 
 The camera scan is deliberately NOT in this list: it is built and wired
-(`src/pairing.js:104-148`, `src-tauri/capabilities/mobile-scanner.json`). Its gap is
+(`src/pairing.js:159`, `src-tauri/capabilities/mobile-scanner.json`). Its gap is
 specification debt, covered by [[SPEC-008-production-pairing-claimant#REQ-904]] and [[SCREEN-003-wallet-pairing]].
 
 ## Requirements
@@ -586,7 +586,7 @@ terminal boundaries.
 This parent specification is the sole current Selfsame authority for this
 increment. Trajectory documents provide evidence and no normative precedence.
 
-Credential/v2 SHALL conform to cbcl-pairing SPEC-001 0.5.2-draft. The
+Credential/v2 SHALL conform to cbcl-pairing SPEC-001 0.5.3-draft. The
 cbcl-pairing parent records this document as its consumer.
 
 The wallet and browser use separate typed machine-carrier and PAIR1
@@ -692,7 +692,7 @@ The public machine carrier and human presence input SHALL remain separate typed
 values. The carrier SHALL contain no `PAIR1-` text, CPace secret, or claim
 bearer. The presence input SHALL contain exactly one recognised `PAIR1-` value
 that yields independent raw sixteen-octet CPace and claim tokens under
-cbcl-pairing SPEC-001 0.5.2-draft.
+cbcl-pairing SPEC-001 0.5.3-draft.
 
 The scan and paste carrier paths SHALL never populate the presence input. The
 type-only presence component SHALL have no paste, autofill, password-manager,
@@ -733,11 +733,14 @@ permissions, installation binding, exact-pair TOFU state, and the complete
 authenticated transition. The final screen SHALL add only the locally derived
 DID, fingerprint, and final-effect statement.
 
-The wallet SHALL store relay policy only under the exact
-`(applicationId, relayOrigin)` pair. It SHALL contain no compiled relay
-allowlist, conformance-digest registry, relay wildcard, or relay-only trust
-fallback in an ordinary build. A profile that names a previously accepted
-relay under another application SHALL still require the new exact-pair prompt.
+The wallet SHALL store credential/v2 relay policy only under the exact
+`(applicationId, relayOrigin)` pair. The credential/v2 path SHALL use no
+compiled relay allowlist, conformance-digest registry, relay wildcard, or
+relay-only trust fallback in an ordinary build. A profile that names a
+previously accepted relay under another application SHALL still require the
+new exact-pair prompt. The standing credential/v1 registry and selection
+control remain compiled and unchanged. Their implementation comment SHALL cite
+[[SPEC-007-cbcl-pairing-cutover#CON-806]], not CON-903.
 
 After the hub's immutable final acknowledgement, the wallet SHALL atomically
 install one record. It SHALL contain the root generation, grant bytes, grant
@@ -1082,15 +1085,18 @@ This parent states every current Selfsame obligation for the coordinated
 increment directly. Trajectory documents and review reports supply evidence
 only.
 
-The current Selfsame test set is TEST-901 through TEST-915 and TEST-1156
-through TEST-1161. Every test is stated in this parent.
+The current SPEC-008 test set is TEST-901 through TEST-915 and TEST-1156
+through TEST-1161. Every member of that set is stated in this parent.
+[[SPEC-007-cbcl-pairing-cutover]] TEST-801 through TEST-821 remain the other
+current Selfsame test set and are stated in that parent. No plan or review can
+omit either set.
 
 The exact coordinated hub test set is TEST-115 through TEST-119. The hub's
 base-parent tests remain current outside this coordinated increment set.
 
 The coordinated review set contains this parent,
-[[SPEC-007-cbcl-pairing-cutover]] 0.3.1-draft, cbcl-pairing SPEC-001
-0.5.2-draft, and cbcl-bus SPEC-053 0.17.3-draft.
+[[SPEC-007-cbcl-pairing-cutover]] 0.3.2-draft, cbcl-pairing SPEC-001
+0.5.3-draft, and cbcl-bus SPEC-053 0.17.4-draft.
 
 The `anuna-ssi` namespace reference is outside that set. It is pinned at
 `c7d462029841ea1884bb6f089732058d8838728d` only to resolve
@@ -1154,7 +1160,16 @@ The final screen SHALL contain the same immutable typed display plus the local
 preview DID and fingerprint. Final approval produces one single-use effect
 capability. It binds the intent, offer-core, and transition digests. It also
 binds the preview DID, application, account, scope, installation key,
-permissions, relay, and expiry.
+permissions, relay, and the exact signed `OfferCoreV2.expiresAt`.
+
+The offer deadline is exclusive and equals the hub's `pendingExpiresAt`. The
+wallet SHALL refresh its whole-UTC-seconds clock after each human pause and
+immediately before final approval, the first final identity effect, and payload
+send. It SHALL require `now < expiresAt` at every check. No clock-skew allowance
+applies to this offer deadline. Expiry before payload erases the capability,
+performs only ceremony-owned compensation, and requires a fresh ceremony.
+Expiry after durable payload send preserves the pending slot for signed status
+recovery; it never authorizes another effect or payload send.
 
 Before the first final identity effect, `complete_claimant` SHALL write one
 sealed `PendingCredentialV2Completion` into the application's secure-store
@@ -1165,10 +1180,21 @@ cbcl-pairing `EndpointCheckpointV2`. It contains no hierarchy root, derived
 key, issuer key, grant key, signature, publication result, or application
 capability.
 
-Its checkpoint wrapping key is a distinct HKDF-SHA512 child of the hierarchy
-root. The salt is the raw carrier ceremony ID. Its info contains the label
-`selfsame credential/v2 claimant checkpoint wrapping v1` and application ID.
-The raw wrapping key never leaves the custody closure.
+Its checkpoint wrapping key is a distinct HKDF-SHA512 child of the 64-octet
+hierarchy root. Let `labelBytes` be the UTF-8 bytes of
+`selfsame credential/v2 claimant checkpoint wrapping v1`, and let
+`applicationBytes` be the canonical UTF-8 application ID. The construction is:
+
+```text
+checkpointInfo =
+  U32BE(len(labelBytes)) || labelBytes ||
+  U32BE(len(applicationBytes)) || applicationBytes
+checkpointPrk = HKDF-Extract-SHA512(carrierCeremonyId, hierarchyRoot)
+checkpointWrappingKey = HKDF-Expand-SHA512(checkpointPrk, checkpointInfo, 32)
+```
+
+Both lengths count octets. `carrierCeremonyId` is the raw 32-octet salt. The
+raw wrapping key never leaves the custody closure.
 
 The final executor SHALL invoke custody again and re-derive the key. It SHALL
 require byte-for-byte preview DID and fingerprint equality before its first
@@ -1219,6 +1245,8 @@ atomically replaces the tagged pending value with the installed record.
 Decline, terminal refusal before payload, authenticated signed `not-finalized`,
 explicit unlink, or root purge removes the pending value. Relay, offer, or
 mailbox expiry after a payload was durably sent SHALL NOT erase it.
+Cbcl-pairing refuses a post-payload refusal object and retains the exact
+`payload -> receipt` checkpoint for CON-989 recovery.
 
 Every credential/v2 offer, decision, preparation, and payload crosses only the
 cbcl-pairing relay. The ordinary receipt crosses that relay. After the relay
@@ -1246,12 +1274,12 @@ Verified by: [[SPEC-008-production-pairing-claimant#TEST-1158]], [[SPEC-008-prod
 Every logical body below is exact deterministic CBOR. The map is closed: an
 unknown, missing, duplicate, reordered, non-canonical, or trailing member
 refuses before display, decision, or effect. Every `predecessorDigest` is the
-raw `objectContentHash` from cbcl-pairing SPEC-001 0.5.2-draft CON-031. The
+raw `objectContentHash` from cbcl-pairing SPEC-001 0.5.3-draft CON-031. The
 envelope field 2 carries the one retained `intentDigest`; no body can replace it.
 
-The offer body is exactly cbcl-bus SPEC-053 0.17.3-draft CON-012's
+The offer body is exactly cbcl-bus SPEC-053 0.17.4-draft CON-012's
 `signed-offer-v2`. The receipt body is exactly cbcl-pairing SPEC-001
-0.5.2-draft CON-028's `credential-v2-receipt-body`. The remaining nine bodies
+0.5.3-draft CON-028's `credential-v2-receipt-body`. The remaining nine bodies
 are:
 
 ```cddl
@@ -1282,7 +1310,9 @@ credential-v2-comparison-confirmed-body = {
   "predecessorDigest": bstr .size 32,
   "result": "no-binding-person-compared",
   "previewIssuerDid": tstr .size (1..512),
-  "previewFingerprintDigest": bstr .size 32
+  "previewFingerprintDigest": bstr .size 32,
+  "authorityStatusResponse": bstr .size (1..768),
+  "authorityStatusDigest": bstr .size 32
 }
 
 credential-v2-binding-confirmed-body = {
@@ -1291,6 +1321,7 @@ credential-v2-binding-confirmed-body = {
   "result": "bound-same-did",
   "previewIssuerDid": tstr .size (1..512),
   "previewFingerprintDigest": bstr .size 32,
+  "authorityStatusResponse": bstr .size (1..768),
   "authorityStatusDigest": bstr .size 32
 }
 
@@ -1298,8 +1329,8 @@ credential-v2-refusal-body = {
   "carrierCeremonyId": bstr .size 32,
   "predecessorDigest": bstr .size 32,
   "reason": "authority-unknown" / "binding-mismatch" /
-            "payload-refused" / "hub-unavailable" /
-            "expired" / "cancelled" / "protocol-error"
+            "hub-unavailable" / "expired" /
+            "cancelled" / "protocol-error"
 }
 
 credential-v2-final-approve-body = {
@@ -1334,19 +1365,31 @@ credential-v2-payload-body = {
 }
 ```
 
+At grammar maxima, comparison-confirmed contains at most 1,583 octets and
+binding-confirmed contains at most 1,570 octets. Both remain within the shared
+2,048-octet control-body limit.
+
 `previewIssuerDid` is one canonical `did:crdt` identifier and contains only
 ASCII. `previewFingerprintDigest` is
 `SHA-256(UTF8(previewIssuerDid))`; both peers render the human fingerprint from
 those exact bytes. Every later occurrence is byte-identical to preparation.
 
-`authorityStatusDigest` is SHA-256 over the exact authenticated hub authority
-response that proved `BoundSameDid`. Comparison-confirmed requires the
-application to have received `NoBinding` and recorded the person's explicit
-comparison action. `Unknown` and a different bound DID can produce only
-refusal.
+`authorityStatusResponse` is the exact deterministic-CBOR
+`authority-status-response-v2` from cbcl-bus SPEC-053 0.17.4-draft CON-012.
+`authorityStatusDigest` is SHA-256 over those exact response bytes. The wallet
+SHALL recompute that digest and verify the response signature under the same
+profile `kid` and key that signed the offer. It SHALL require exact carrier
+ceremony and offer-core-digest equality.
+
+Comparison-confirmed requires response status `no-binding`, a null bound DID,
+and the person's explicit comparison action. Binding-confirmed requires status
+`bound` and a bound DID byte-identical to `previewIssuerDid`. Unknown status, a
+different bound DID, invalid signature, wrong offer, or wrong ceremony can
+produce only refusal. The browser cannot replace the signed response with an
+outcome token or digest.
 
 `migrationConfirmationDigest` is the exact raw digest defined by cbcl-bus
-SPEC-053 0.17.3-draft CON-012. The wallet recomputes it from the authenticated
+SPEC-053 0.17.4-draft CON-012. The wallet recomputes it from the authenticated
 offer and its local `previewIssuerDid`. It copies no browser-supplied digest.
 
 The payload grant is one verbatim compact JWS in ASCII. It contains exactly
@@ -1392,8 +1435,18 @@ to CON-903 durable policy and supply profile keys or authenticated display
 authority. Existing exact-pair policy skips only the prompt; it never skips the
 live fetch, CPace digest binding, or Finished checks.
 
-This seven-step construction replaces CON-220 step 6 for credential/v2. It
-does not amend CON-220 or any credential/v1 caller. No CON-409 record,
+The exact substitute for CON-220 step 6 has these seven ordered steps:
+
+1. obtain `OriginRecognisedProfileCandidate` and its digest;
+2. obtain or reuse exact-pair relay consent and one socket capability;
+3. place that digest and the carrier digest in both endpoint contexts;
+4. complete CPace and verify both Finished values;
+5. require peer-bound and candidate profile bytes and digests to be equal;
+6. promote only a newly approved exact pair to durable CON-903 policy; and
+7. expose profile keys and authenticated display authority only from
+   `BoundCredentialV2Profile`.
+
+This construction does not amend CON-220 or any credential/v1 caller. No CON-409 record,
 rendezvous slot, caller-supplied profile digest, TLS-only profile, or durable
 TOFU row can substitute for the CPace binding.
 
@@ -1413,7 +1466,7 @@ receiptRecoveryCommitment = SHA-256(
 )
 ```
 
-`EXPORTER` and `TH` are the raw cbcl-pairing SPEC-001 0.5.2-draft CON-031
+`EXPORTER` and `TH` are the raw cbcl-pairing SPEC-001 0.5.3-draft CON-031
 values. Both results contain 32 octets. The token is secret and zeroizable. It
 is sealed inside the endpoint checkpoint. It never enters an offer, profile,
 log, error, metric, URL, hub record, or JavaScript. The browser sends
@@ -1422,7 +1475,7 @@ only the commitment in the authenticated finalization command.
 The hub includes that exact commitment in its signed immutable final status
 and indexes the status under the carrier ceremony. After ordinary relay
 receipt loss, `recover_claimant_completion` POSTs the token and ceremony. It
-uses cbcl-bus SPEC-053 0.17.3-draft CON-036's closed CBOR request to the
+uses cbcl-bus SPEC-053 0.17.4-draft CON-036's closed CBOR request to the
 exact application origin retained from CON-988. The wallet repeats CON-220
 steps 1 through 5 against that origin and retains both the current candidate
 profile and the previously CPace-bound offer profile.
@@ -1682,7 +1735,7 @@ Require credential/v2 to reach no classified credential-v1 site. Require
 frozen v1 bytes to remain byte-identical.
 
 Require this Selfsame parent and its open review gate. Require cbcl-bus
-SPEC-053 0.17.3-draft to name this coordinated review set.
+SPEC-053 0.17.4-draft to name this coordinated review set.
 
 Require the cbcl-pairing parent consumer pointer here. Require generation
 family, version, session, and synthesis trajectory in this parent,
@@ -1755,6 +1808,12 @@ Mutate the pending tag, root generation, application, carrier ceremony,
 wrapping key, checkpoint, plan, capability, expiry, and cached frame. Require
 refusal before identity work or protocol output.
 
+Set current time to one second before signed `expiresAt` at every declared
+deadline check. Repeat with time exactly at the deadline. Require only the first
+value to proceed. Require no offer clock-skew allowance. After durable payload
+send, cross the deadline. Require the pending slot to survive only for ordinary
+or signed-status receipt recovery.
+
 Require the hub status JWS under the live profile key that signed the offer.
 Mutate its signature, digest, `kid`, field, ceremony binding, profile, and size.
 Require browser activation and wallet installation to refuse every mutation.
@@ -1815,6 +1874,12 @@ receipt grammar. At the payload maximum require exactly 50,221 deterministic-
 CBOR octets. Mutate every member, type, bound, literal, predecessor, padding,
 and kind; require refusal before display or effect.
 
+Generate both exact authority-status outcomes. Require the browser to carry the
+unaltered response bytes into comparison-confirmed or binding-confirmed. Require
+the wallet to recompute the digest, verify the offer-key signature, and match
+ceremony, offer digest, outcome, nullable DID, and local preview. Mutate each
+byte and require refusal before final display.
+
 Run CON-220 steps 1 through 5 against a live origin. Substitute the profile
 after fetch, between CPace frames, before Finished, and before policy commit.
 Require profile-digest mismatch, zero durable pair row, zero intent display,
@@ -1828,7 +1893,7 @@ turns TLS-only bytes into authenticated display authority.
 ### TEST-1161 — Final status recovery survives the relay window
 
 **Validates:** [[SPEC-008-production-pairing-claimant#CON-989]] and
-cbcl-pairing SPEC-001 0.5.2-draft TEST-067.
+cbcl-pairing SPEC-001 0.5.3-draft TEST-067.
 
 Lose the ordinary receipt and delete the expired relay mailbox. Restart the
 wallet, browser, relay, and hub in every order. Retain only their declared
@@ -1850,6 +1915,10 @@ Rotate the current profile key. Require explicit authority-rotation consent
 before either accepted installation or not-finalized removal. Cancellation
 preserves the pending slot.
 
+After durable payload send, deliver a validly framed refusal. Require protocol
+refusal, preservation of the `payload -> receipt` checkpoint and pending slot,
+and later completion through the exact recovered receipt authority.
+
 Scan JavaScript, URLs, logs, errors, metrics, traces, hub rows, and ordinary
 wallet state for `receiptRecoveryToken`. Require absence. Require one bounded
 commitment and immutable status per finalized account and no recovery route to
@@ -1857,6 +1926,11 @@ accept a carrier, grant, or caller-selected status object.
 
 ## Changelog
 
+- **0.5.4-draft — 2026-08-24 — response, expiry, and recovery closure.** This
+  revision authenticates the transferable hub authority response. It fixes the
+  claimant checkpoint KDF and binds all effects to one exclusive pending
+  deadline. It scopes registry removal to credential/v2 and records the complete
+  Selfsame test authority. No implementation or deployment is authorized.
 - **0.5.3-draft — 2026-08-24 — self-contained protocol authority.** This
   revision promotes all credential/v2 logical-body grammars. It replaces the
   inapplicable CON-220 step-6 claim with explicit CPace profile-digest binding.
