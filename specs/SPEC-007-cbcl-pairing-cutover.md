@@ -3,27 +3,27 @@ id: SPEC-007
 title: cbcl-pairing Protocol Cutover
 status: draft
 tier: 1
-version: 0.3.0-draft
+version: 0.3.1-draft
 last-updated: 2026-08-24
 previous-approved-version: 0.2.1
 owner-repo: selfsame
 review-gate: implementation-prohibited-pending-coordinated-fresh-cross-model-pass
 authority-form: direct-current-safety-authority
 implementation-baseline: 0220cec2dec44cd95d4f411ea4814d790b6716d2
-coordinated-claimant-design: selfsame SPEC-008 0.5.2-draft
-coordinated-hub-design: cbcl-bus SPEC-053 0.17.2-draft
-coordinated-pairing-design: cbcl-pairing SPEC-001 0.5.1-draft
+coordinated-claimant-design: selfsame SPEC-008 0.5.3-draft
+coordinated-hub-design: cbcl-bus SPEC-053 0.17.3-draft
+coordinated-pairing-design: cbcl-pairing SPEC-001 0.5.2-draft
 generation-model-family: OpenAI GPT-5
 generation-model-version: gpt-5.6-sol
 generation-session: 01a029aa-9127-7c42-ad28-81512b91ded6
-generation-synthesis-trajectory: "approved 0.2.1 cutover -> standalone credential/v2 ordering conflict -> accepted 0.5.1 REJECT -> direct 0.3.0 safety revision"
+generation-synthesis-trajectory: "approved 0.2.1 cutover -> standalone credential/v2 ordering conflict -> rejected reviews through 0.5.2 -> direct 0.3.1 safety closure"
 candidate-successor-to: SPEC-006
 depends-on: cbcl-pairing SPEC-001; SPEC-004; SCREEN-001
 ---
 
 # SPEC-007 — cbcl-pairing Protocol Cutover
 
-> **Current draft safety revision.** Version 0.3.0 states the credential/v2
+> **Current draft safety revision.** Version 0.3.1 states the credential/v2
 > consent and effect boundary directly. Version 0.2.1 remains the last approved
 > revision. This draft authorizes no implementation, release, or deployment.
 
@@ -715,12 +715,32 @@ pairing engine, carrier, relay client, or command registration.
 
 ### CON-806: Authenticated relay selection
 
-**Profile grammar:** the coordinated SPEC-004 amendment defines
-`cbclPairingRelays` as one to sixteen closed descriptors.
+**Profile grammar:** this contract defines `cbclPairingRelays` as one to
+sixteen closed RFC-8785 JSON descriptors. No SPEC-004 amendment supplies this
+member.
 
 Each descriptor contains only `operatorId`, canonical `relayOrigin`, numeric
 `priority`, numeric `weight`, `privacyPolicyDigest`, and `conformanceEvidenceDigest`.
 Operator IDs and relay origins are unique within one profile.
+
+`operatorId` contains 1 through 63 ASCII octets and matches
+`[a-z0-9][a-z0-9-]{0,62}`. `relayOrigin` contains 1 through 272 ASCII octets
+and is one canonical HTTPS origin with no credentials, path, query, or
+fragment. `priority` and `weight` are JSON integers in `[0, 65535]`; a selected
+descriptor has positive weight. Both digest strings are canonical unpadded
+base64url and decode to exactly 32 octets.
+
+For a completely recognised descriptor object `D`:
+
+```text
+descriptorDigest = SHA-256(RFC8785(D))
+```
+
+The browser-selected descriptor is the unique descriptor whose
+`relayOrigin` equals the allocated carrier relay origin. That complete object,
+and no origin-only projection or another descriptor at the same priority,
+supplies `descriptorDigest` to the hub offer. The wallet recomputes the same
+digest from the unique live-profile descriptor before display.
 
 A production profile contains at least two eligible descriptors unless its
 approved availability exception names one operator and its bounded consequence.
@@ -744,9 +764,16 @@ For credential/v2, complete profile recognition makes a declared descriptor
 eligible. No compiled relay allowlist, digest registry, or global relay policy
 participates in selection or claimant trust.
 
-After the secure channel delivers intent, the claimant authenticates the exact
-profile from the claimed application origin under CON-201. The application ID,
-HTTPS origin, and requested scope come from the recognised credential intent.
+For credential/v1 only, after the secure channel delivers intent, the claimant
+authenticates the exact profile from the claimed application origin under
+CON-201. Its application ID, HTTPS origin, and requested scope come from that
+recognised credential/v1 intent.
+
+For credential/v2, the application ID and HTTPS origin come only from the live
+profile bound by [[SPEC-008-production-pairing-claimant#CON-988]]. The requested
+scope comes only from the signed hub offer after equality with the protected
+peer input. No unchecked or merely channel-authenticated peer string supplies
+any of those values.
 
 Before consent, the claimant requires the invitation relay origin to match one
 eligible descriptor exactly. The descriptor's operator and privacy policy are display-only.
@@ -759,16 +786,25 @@ eligible descriptor exactly. The descriptor's operator and privacy policy are di
 
 ### CON-807: Credential/v2 consent and activation boundary
 
-**Interface:** the standalone credential/v2 claimant uses four ordered stages.
+**Interface:** the standalone credential/v2 claimant uses five ordered owned
+functions followed by activation and terminal recovery.
 
-1. `prepare_claimant` produces an authenticated zero-effect plan after relay
+1. `recognise_claimant_invitation` produces an origin-recognised zero-effect
+   relay-consent plan without a socket.
+2. `authorise_claimant_relay` produces only a single-use socket capability
+   after an existing exact-pair lookup or explicit person approval.
+3. `prepare_claimant` produces an authenticated zero-effect plan after relay
    consent and cbcl-pairing authentication.
-2. `preview_claimant_identity` consumes preliminary approval and returns only
+4. `preview_claimant_identity` consumes preliminary approval and returns only
    zeroizable public preview material.
-3. `complete_claimant` consumes final approval and performs the causal
+5. `complete_claimant` consumes final approval and performs the causal
    construction allowed by [[SPEC-007-cbcl-pairing-cutover#REQ-812]]. It first
    persists the sealed non-authorizing completion checkpoint.
-4. Browser and wallet activation consume the immutable hub final status.
+
+Browser and wallet activation then consume the immutable hub final status.
+`recover_claimant_completion` is not a sixth construction function: it can
+only authenticate that retained status and finish the already-sent payload's
+receipt transition.
 
 **Preconditions:** the exact application-relay pair has person-owned policy.
 The profile, carrier, transcript, hub offer, transition, and display sources
@@ -786,6 +822,10 @@ hub status JWS against the live profile key that signed the offer.
 The cbcl-pairing receipt carries that exact JWS and its digest. The wallet
 atomically replaces its pending completion checkpoint only after verifying
 both against the live profile and retained ceremony state.
+
+After relay expiry, the signed-status recovery in
+[[SPEC-008-production-pairing-claimant#CON-989]] has the same activation
+postcondition and no construction capability.
 
 **Error model:** mismatch, cancellation, relay closure, expiry, unavailable
 authority, and failed causal work return closed outcomes. Compensation touches
@@ -1175,7 +1215,7 @@ Without such a release, rollback disables pairing and preserves unrelated identi
 The Selfsame security owner and affected application owners receive notice before
 the first release that permits production invitation allocation.
 
-## Gate Evidence Record — 0.3.0-draft
+## Gate Evidence Record — 0.3.1-draft
 
 ```yaml
 phase: 2
@@ -1183,8 +1223,8 @@ gates:
   - gate: "Accepted rejection imported before repair"
     mechanism: "Circus Claude subscription review record"
     result: pass
-    evidence: "[[spec-008-0.5.1-claude-adversarial-review-2026-08-24]] records REJECT and H-6"
-  - gate: "Coordinated 0.3.0 and 0.5.2 Tier-1 review returns PASS"
+    evidence: "[[spec-008-0.5.2-claude-adversarial-review-2026-08-24]] records REJECT and the C-1 through L-4 findings"
+  - gate: "Coordinated 0.3.1 and 0.5.3 Tier-1 review returns PASS"
     mechanism: "fresh-context cross-model adversarial review"
     result: unverified
     owner: "Selfsame security owner"
@@ -1208,8 +1248,8 @@ Production invitation allocation remains prohibited until all items have durable
 - the repository owner approves the recorded no-users finding and no-migration disposition;
 - coordinated SPEC-004, SPEC-006, and PROTO-002 through PROTO-004 amendments pass their own channels;
 - the upstream credential-profile disposition passes the `cbcl-pairing` amendment channel;
-- Selfsame SPEC-008 0.5.2-draft, cbcl-bus SPEC-053 0.17.2-draft,
-  and cbcl-pairing SPEC-001 0.5.1-draft pass one coordinated Tier-1 review;
+- Selfsame SPEC-008 0.5.3-draft, cbcl-bus SPEC-053 0.17.3-draft,
+  and cbcl-pairing SPEC-001 0.5.2-draft pass one coordinated Tier-1 review;
 - every SPEC-004 Tier-1 row has the exact disposition in the inherited gate ledger;
 - every retained or replaced SPEC-004 ledger row reaches pass through its exact disposition;
 - the exact upstream `cbcl-pairing` production gates pass without local reinterpretation;
@@ -1265,6 +1305,10 @@ No channel can waive a hard stop without a new specification version and require
 <details>
 <summary>Revision history</summary>
 
+- 0.3.1-draft — defines the relay descriptor and digest directly, scopes the
+  peer-sourced identifier rule to credential/v1, and reconciles the five
+  claimant functions plus terminal recovery. The coordinated Tier-1 review
+  remains open, so this revision authorizes no implementation.
 - 0.3.0-draft — directly states the standalone credential/v2 consent and effect
   boundary. It adds ADR-805, CON-807, and TEST-821. The coordinated Tier-1
   review remains open, so this revision authorizes no implementation.
