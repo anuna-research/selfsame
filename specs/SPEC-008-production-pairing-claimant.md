@@ -2,7 +2,7 @@
 id: SPEC-008
 title: Production Pairing Claimant — Transport, Real Credential, and Origin Trust
 status: draft
-version: 0.5.1-draft
+version: 0.5.2-draft
 tier: 1
 review-gate: not-approved; implementation-prohibited-pending-one-coordinated-fresh-cross-model-review
 authority-form: consolidated-direct-current-authority
@@ -10,15 +10,14 @@ implementation-baseline: 0220cec2dec44cd95d4f411ea4814d790b6716d2
 generation-model-family: OpenAI GPT-5
 generation-model-version: gpt-5.6-sol
 generation-session: 01a029aa-9127-7c42-ad28-81512b91ded6
-generation-synthesis-trajectory: "owner-authorized standalone architecture -> F-A through F-E code traces -> rejected 0.4.0 through 0.4.26 reviews -> N11 stopping rule -> consolidated parent reissue"
+generation-synthesis-trajectory: "owner-authorized standalone architecture -> F-A through F-E code traces -> rejected 0.4.0 through 0.5.1 reviews -> consolidated executable reissue"
 depends-on: "[[SPEC-007-cbcl-pairing-cutover]]; [[SPEC-004-application-scoped-identity]]; [[SPEC-003-android-apk-distribution]]; cbcl-pairing SPEC-001"
-amends: "[[SPEC-007-cbcl-pairing-cutover#REQ-812]] for credential/v2 reverse issuance only"
 last-updated: 2026-08-24
 ---
 
 # SPEC-008 — Production Pairing Claimant: Transport, Real Credential, and Origin Trust
 
-> **Consolidated current-law reissue.** Version 0.5.1 states the standalone
+> **Consolidated current-law reissue.** Version 0.5.2 states the standalone
 > first-contact authority directly. Trajectory documents and review reports
 > supply evidence only. They supply no current values.
 > This draft authorizes no implementation, allocation, release, or deployment
@@ -83,16 +82,14 @@ Hard stops:     [[SPEC-008-production-pairing-claimant#REQ-902]], [[SPEC-008-pro
 
 ## Named failure modes
 
-This spec exists because of four mechanical failures, observed in the code on
-2026-08-18, not because "production pairing" was requested in the abstract:
+This spec exists because of four mechanical failures. The first two are repaired
+baseline regressions, and the final two remain design inputs:
 
-- **FM-1 — the stranded claimant.** A non-demo build's `cbcl_pairing_start` derives one
-  CPace frame, stores the bootstrap, and opens no socket; `approve`/`decline` return
-  `PairingUnavailable` (`src-tauri/src/cbcl_pairing.rs:106-153`). The person scans a
-  valid QR and waits on the waiting screen forever.
-- **FM-2 — no TLS transport exists.** `tungstenite` is compiled with
-  `default-features = false, features = ["handshake"]` — it cannot speak `wss://` at
-  all. Every socket in the pairing path is a raw loopback `TcpStream`.
+- **FM-1 — historical stranded claimant.** The original non-demo path stopped
+  before a socket. The current baseline opens WSS. TEST-901 and TEST-905 prevent
+  that regression.
+- **FM-2 — historical missing TLS.** The original dependency omitted TLS.
+  The current baseline enables rustls for WSS. TEST-902 prevents downgrade.
 - **FM-3 — the fixture is the only credential.** Every construction site of
   `SelfsameVerificationContext` is `local_demo` or a test; the real issuance machinery
   in `app_grant.rs` is registered but unreachable from the UI. A production wallet has
@@ -160,8 +157,7 @@ Trace: [[SPEC-008-production-pairing-claimant#TEST-903]] [[SPEC-008-production-p
 WHEN a verified session has displayed the recognised intent, the live decision
 commands SHALL commit the person's decision. Those commands are
 `cbcl_pairing_approve` and `cbcl_pairing_decline`. They use [[SPEC-008-production-pairing-claimant#REQ-901]] in non-demo
-builds and retain SPEC-007 REQ-804 ordering. The `PairingUnavailable` stubs SHALL be
-absent from the non-demo build.
+builds and retain [[SPEC-007-cbcl-pairing-cutover#REQ-804]] ordering.
 
 Trace: [[SPEC-008-production-pairing-claimant#TEST-905]] [[SPEC-008-production-pairing-claimant#CON-901]]
 
@@ -198,7 +194,8 @@ authorize a new application.
 WHEN the tuple is absent, the wallet SHALL show one new-relay decision. The surface
 SHALL name the authenticated application and canonical relay origin. Approval SHALL
 seal the tuple into the person's policy before socket creation. Rejection SHALL create
-no policy entry, socket, scope, key, alias, DID, grant, or publication.
+no policy entry, socket, wallet scope, key, alias, DID, grant, or publication.
+The browser's bounded candidate scope remains ceremony-only and expires or aborts.
 
 WHEN the tuple is present and valid, the wallet MAY proceed without another TOFU
 prompt. A changed application or changed relay origin is a new tuple and SHALL prompt.
@@ -256,7 +253,8 @@ Input grammar: each binary WebSocket message contains one canonical CBOR
 shell SHALL NOT parse relay bytes itself.
 Pre-conditions: [[SPEC-008-production-pairing-claimant#REQ-906]] passed; context assembled per [[SPEC-008-production-pairing-claimant#CON-902]].
 Post-conditions: exactly one terminal outcome; socket closed; no identity side effect
-on any non-accepted outcome ([[SPEC-007-cbcl-pairing-cutover#REQ-812]]).
+or accepted application capability survives a non-accepted outcome. Post-final
+failure follows [[SPEC-007-cbcl-pairing-cutover#REQ-812]] compensation.
 Error model: TLS failure, connect failure, timeout, and close-before-terminal each map
 to distinct, secret-free `UiError` values; none is retried silently.
 Implements: [[SPEC-008-production-pairing-claimant#REQ-901]] [[SPEC-008-production-pairing-claimant#REQ-903]] [[SPEC-008-production-pairing-claimant#REQ-905]] [[SPEC-008-production-pairing-claimant#NFR-901]]
@@ -264,10 +262,26 @@ Verified by: [[SPEC-008-production-pairing-claimant#TEST-901]] [[SPEC-008-produc
 
 ### CON-902 — Split authenticated plan, preview, and effect assembly
 
-Endpoint/Interface: `prepare_claimant` returns a zero-effect authenticated plan.
-`preview_claimant_identity` consumes preliminary approval. It returns only zeroizable
-preview DID and fingerprint material. `complete_claimant` consumes one final-approval
-capability and re-derives the approved identity for effects.
+Endpoint/Interface: `recognise_claimant_invitation` fully recognises the machine
+carrier and PAIR1 value. It authenticates the live CON-220 profile and returns
+one zero-effect `RelayConsentPlan` before any relay socket opens.
+
+`authorise_claimant_relay` owns the exact-pair decision. The Tauri commands
+`cbcl_pairing_relay_approve` and `cbcl_pairing_relay_decline` are its only UI
+entry points from `pairing.js`.
+
+Approval atomically writes the exact CON-903 row before returning one
+`RelayPolicyCapability`. Decline returns a terminal without a policy write,
+socket, CPace operation, or identity effect. Existing exact policy returns the
+same capability without another write.
+
+`prepare_claimant` consumes that capability before opening the relay socket.
+It completes CPace, both Finished values, signed-offer verification, and every
+authority cross-check. It returns a zero-effect authenticated identity plan.
+
+`preview_claimant_identity` consumes preliminary approval. It returns only
+zeroizable preview DID and fingerprint material. `complete_claimant` consumes
+one final-approval capability and re-derives the approved identity for effects.
 
 The authenticated plan contains these authoritative sources:
 
@@ -290,10 +304,14 @@ expiry, or pre-commit failure deletes the pending values. The wallet SHALL NOT i
 the raw account ID or persist the scope before final status.
 
 The browser accepts an allocation acknowledgement only for one live
-`(socketGeneration, requestId)` entry and consumes that entry before displaying the
-carrier. An exact active retry returns the byte-identical acknowledgement and pending
-values. A concurrent different request for the same authenticated application,
-handle, and enrolled key refuses. It never creates two candidate accounts.
+`(socketGeneration, requestId, carrierCeremonyId)` entry. It consumes that entry
+before displaying the carrier. An exact active retry returns the byte-identical
+acknowledgement and pending values.
+
+After socket loss, the browser reconnects and requests status with the original
+request, carrier ceremony, and persisted installation key. It starts a fresh
+allocation only after authenticated status proves that no pending or finalized
+record exists. A concurrent different allocation refuses while pending state exists.
 
 A fresh attempt after decline, expiry, or pre-commit failure receives fresh account
 and scope randomness. If the resulting preview DID differs, the wallet SHALL display
@@ -310,16 +328,18 @@ retains no hierarchy root or private key. The final capability contains no deriv
 key. After final approval, it permits a separate custody call and preview equality
 check. It then permits the declared issuance effects.
 
-The executor re-derives the wallet application home key and checks the preview. It
-then creates and signs the issuer state and publishes the DID. It obtains and verifies
-the live WebFinger JRD against the authenticated profile and new issuer. It constructs
-the grant last. It performs no issuer or JRD lookup that depends on the derived DID
-before final approval. A failure compensates only effects created by this ceremony
-and never operator withdrawal state.
+The executor re-derives the wallet application home key and checks the preview.
+It then creates and signs the issuer state and publishes the DID. It resolves
+and verifies the closure. It obtains and verifies the live WebFinger JRD against
+the authenticated profile and new issuer. It constructs the grant last.
 
-Pre-conditions: an unlocked custody session, authenticated profile and signed offer,
-exact-pair policy, authenticated preliminary intent, successful comparison or binding
-result, and final approved release.
+It performs no issuer, closure, or JRD operation that depends on the derived DID
+before final approval. A failure compensates only effects created by this
+ceremony and never operator withdrawal state.
+
+Pre-conditions: an unlocked custody session, authenticated profile and signed
+offer, exact-pair policy capability, authenticated preliminary intent,
+successful comparison or binding result, and final approved release.
 
 Post-conditions: one real verification context contains no fixture bytes. Every
 derived or published effect traces to the approved authenticated plan.
@@ -414,8 +434,7 @@ socket opens.
 ### TEST-905 — Live approve and decline terminate
 
 Positive for [[SPEC-008-production-pairing-claimant#REQ-903]]. Non-demo
-approve and decline drive the live session to matching terminal states. The
-`PairingUnavailable` stub is absent.
+approve and decline drive the live session to matching terminal states.
 
 ### TEST-906 — Scan and paste carriers converge
 
@@ -539,7 +558,7 @@ terminal boundaries.
 This parent specification is the sole current Selfsame authority for this
 increment. Trajectory documents provide evidence and no normative precedence.
 
-Credential/v2 SHALL conform to cbcl-pairing SPEC-001 0.5.0-draft. The
+Credential/v2 SHALL conform to cbcl-pairing SPEC-001 0.5.1-draft. The
 cbcl-pairing parent records this document as its consumer.
 
 The wallet and browser use separate typed machine-carrier and PAIR1
@@ -615,7 +634,8 @@ scan.
 [[SPEC-004-application-scoped-identity#REQ-231]] and
 [[SPEC-004-application-scoped-identity#CON-225]].
 
-`WIRE_VERSION` belongs to the link-offer wire namespace. Its governing source
+`WIRE_VERSION` belongs to the complete link-record wire namespace. It governs
+both link-offer and link-grant records. Its governing source
 is `anuna-ssi` SPEC-001 CON-001 at commit
 `c7d462029841ea1884bb6f089732058d8838728d`.
 
@@ -638,7 +658,7 @@ The public machine carrier and human presence input SHALL remain separate typed
 values. The carrier SHALL contain no `PAIR1-` text, CPace secret, or claim
 bearer. The presence input SHALL contain exactly one recognised `PAIR1-` value
 that yields independent raw sixteen-octet CPace and claim tokens under
-cbcl-pairing SPEC-001 0.5.0-draft.
+cbcl-pairing SPEC-001 0.5.1-draft.
 
 The scan and paste carrier paths SHALL never populate the presence input. The
 type-only presence component SHALL have no paste, autofill, password-manager,
@@ -689,7 +709,8 @@ After the hub's immutable final acknowledgement, the wallet SHALL atomically
 install one record. It SHALL contain the root generation, grant bytes, grant
 digest, application ID, account-principal digest, and account scope ID. It SHALL
 also contain the installation device key, profile digest, account authority,
-issuer DID, offer-core digest, and hub status identifier.
+issuer DID, offer-core digest, and carrier ceremony ID. It SHALL retain the
+exact immutable hub status JWS and digest.
 
 Reload SHALL verify the installed grant, current profile, authority, issuer,
 and hub status before granting application capability. Hub or resolver
@@ -784,6 +805,8 @@ then ceremony migration, then WebFinger.
 The named `legacy-rows/0` site does not overlap those runtime lanes.
 `cbcl-chat-roommember:migrate-since/0` is a second schema migration. It uses
 `mnesia:transform_table/4` and lies outside the transaction-call inventory.
+`cbcl-chat-roomcfg:transform-room/1` is the third schema migration. It also
+lies outside that inventory.
 
 The nonce allocator's outer collision loop is a semantic uniqueness retry. It
 is not a Mnesia contention retry. Each transaction invocation remains
@@ -956,8 +979,10 @@ At every WebSocket boundary, busy closes with code 1013 and reason
 `try-again-later`, unless this requirement names a narrower existing refusal.
 It emits no allocation acknowledgement, invite, grant, or enrollment frame.
 
-The browser treats 1013 as non-terminal. It cancels the old socket generation,
-reconnects, and starts a fresh correlated attempt.
+The browser treats 1013 as non-terminal. It cancels the old socket generation
+and reconnects. For credential/v2 allocation, it first recovers status under
+the original request and carrier ceremony. It starts a fresh allocation only
+after authenticated status returns absent.
 
 At startup, busy prevents the listener from opening. It never becomes a
 successful default-room claim.
@@ -1026,24 +1051,24 @@ only.
 The current Selfsame test set is TEST-901 through TEST-915 and TEST-1156
 through TEST-1159. Every test is stated in this parent.
 
-The exact current hub test set is TEST-043 through TEST-065, TEST-068,
-TEST-070, TEST-093, TEST-094, TEST-098, and TEST-115 through TEST-117.
+The exact coordinated hub test set is TEST-115 through TEST-117. The hub's
+base-parent tests remain current outside this coordinated increment set.
 
-The coordinated review set contains this parent, cbcl-pairing SPEC-001
-0.5.0-draft, cbcl-bus SPEC-053 0.17.1-draft, and did-crdt SPEC-037
-0.1.0-draft.
+The coordinated review set contains this parent,
+[[SPEC-007-cbcl-pairing-cutover]] 0.3.0-draft, cbcl-pairing SPEC-001
+0.5.1-draft, and cbcl-bus SPEC-053 0.17.2-draft.
 
 The `anuna-ssi` namespace reference is outside that set. It is pinned at
 `c7d462029841ea1884bb6f089732058d8838728d` only to resolve
 [[SPEC-008-production-pairing-claimant#REQ-1005]]'s two namespace exclusions.
 It is an explicit cross-vault deferral, not a coordinated design input.
 
-The cbcl-pairing, cbcl-bus, did-crdt, and anuna-ssi parent identifiers are
-explicit cross-vault pointers. Their vaults are outside this repository, so
-these identifiers are deliberately not local wikilinks.
+The cbcl-pairing, cbcl-bus, and anuna-ssi parent identifiers are explicit
+cross-vault pointers. Their vaults are outside this repository, so these
+identifiers are deliberately not local wikilinks.
 
 The cbcl-pairing SPEC-001 parent records this parent as its credential/v2
-consumer. The hub and did-crdt parents record the same coordinated review set.
+consumer. The hub parent records the same coordinated review set.
 
 Every F-A through F-E correction remains a hard stop.
 [[SPEC-007-cbcl-pairing-cutover#REQ-812]] also remains a hard stop.
@@ -1051,19 +1076,28 @@ Every F-A through F-E correction remains a hard stop.
 A fresh PASS authorizes only the Elephant SPL and test-first plan. It
 authorizes no production allocation, release, or deployment.
 
-### CON-986 — Standalone claimant plan, decisions, effects, and rendezvous
+### CON-986 — Standalone claimant decisions, effects, and recovery
 
-`prepare_claimant` SHALL perform pure recognition and authenticated public
-network reads only. It SHALL recognise the machine carrier and verify the live
-[[SPEC-004-application-scoped-identity#CON-220]] profile and signed hub offer. It SHALL compare the exact
-application-relay pair and recognise the PAIR1 input. It SHALL complete CPace
-and both Finished values and produce a bounded authenticated plan.
+`recognise_claimant_invitation` SHALL recognise the machine carrier and PAIR1
+input. It SHALL verify the live
+[[SPEC-004-application-scoped-identity#CON-220]] profile and exact declared
+relay before returning `RelayConsentPlan`. It opens no relay socket.
+
+`authorise_claimant_relay` SHALL own the exact-pair prompt and CON-903 write.
+`cbcl_pairing_relay_approve` atomically writes a new pair row before returning
+the policy capability. `cbcl_pairing_relay_decline` creates no row or socket.
+
+`prepare_claimant` SHALL consume the policy capability before socket creation.
+It SHALL complete CPace, both Finished values, signed hub-offer verification,
+and every overlapping authority comparison. It then returns a bounded
+authenticated plan.
 
 The plan SHALL contain no custody handle, hierarchy root, or derived
 application key. It SHALL contain no home DID, issuer state, WebFinger JRD,
 resolver closure, signature, grant, alias, publication, scope mint, or durable
-identity record. The hub-signed account-principal digest and scope are public
-inputs to later derivation. The raw application account ID remains hub-private.
+identity record. The hub-signed account-principal digest and scope are
+authenticated non-secret KDF inputs inside the protected channel. The raw
+application account ID remains hub-private.
 The wallet SHALL neither allocate nor persist the scope before final status.
 
 The first decision capability authorizes exactly one zeroizing custody call.
@@ -1085,6 +1119,20 @@ capability. It binds the intent, offer-core, and transition digests. It also
 binds the preview DID, application, account, scope, installation key,
 permissions, relay, and expiry.
 
+Before the first final identity effect, `complete_claimant` SHALL write one
+sealed `PendingCredentialV2Completion` into the application's secure-store
+slot. The slot is a tagged pending-or-installed union, never two records.
+
+The pending value contains the final capability, authenticated plan, and
+cbcl-pairing `EndpointCheckpointV2`. It contains no hierarchy root, derived
+key, issuer key, grant key, signature, publication result, or application
+capability.
+
+Its checkpoint wrapping key is a distinct HKDF-SHA512 child of the hierarchy
+root. The salt is the raw carrier ceremony ID. Its info contains the label
+`selfsame credential/v2 claimant checkpoint wrapping v1` and application ID.
+The raw wrapping key never leaves the custody closure.
+
 The final executor SHALL invoke custody again and re-derive the key. It SHALL
 require byte-for-byte preview DID and fingerprint equality before its first
 signature. It SHALL then create and sign the issuer and publish the DID. It
@@ -1098,40 +1146,49 @@ created by this ceremony and follows
 [[SPEC-004-application-scoped-identity#CON-204]]. It never changes an
 operator withdrawal or a pre-existing identity.
 
-For credential/v2 reverse issuance only, this paragraph amends
-[[SPEC-007-cbcl-pairing-cutover#REQ-812]]. After final approval, the wallet MAY
-perform only causal work required to construct the approved reverse payload.
-That work is signing, publication, resolution, issuance write, and bundle
-construction. Before final approval, no such effect is permitted. Post-final
-failure authorizes no application capability and enters the exact compensation
-path. No other protocol profile or failure rule is weakened.
+These effects conform directly to
+[[SPEC-007-cbcl-pairing-cutover#REQ-812]] and
+[[SPEC-007-cbcl-pairing-cutover#CON-807]]. Before final approval, no causal
+identity effect is permitted. Post-final failure authorizes no application
+capability and enters the exact compensation path.
 
 The browser SHALL verify the reverse payload, resolver closure, WebFinger
 binding, grant chain, installation key, account, scope, issuer, profile,
-permissions, transition, and device proof. It SHALL commit its strict local
-installation before requesting hub finalization.
+permissions, transition, and device proof. It SHALL write one crash-safe
+inactive staging record before requesting hub finalization. That record grants
+no application capability.
 
-The wallet SHALL accept no receipt until the hub reports its immutable final
-status and acknowledgement under the new installation key. It SHALL then
-atomically install the record required by [[SPEC-008-production-pairing-claimant#REQ-1006]]. Crash or loss before
-that wallet commit recovers from hub status and the retained bounded ceremony
-state. It does not invent a local grant or repeat a hub migration.
+The browser SHALL activate the staging record only after it authenticates the
+hub's immutable `finalStatusJws` and acknowledgement. It SHALL verify the JWS
+under the live profile request-signing key whose `kid` signed the offer. It
+then sends that exact JWS and digest through the receipt's large body.
 
-The Selfsame rendezvous implementation is
-`crates/selfsame-rendezvous/src/lib.rs`. It SHALL accept opaque bodies of 1
-through 69,632 octets. It SHALL return HTTP 413 for 69,633 octets or more with
-no storage effect. It SHALL preserve its current slot grammar, first-write,
-read-once, lifetime, capacity, CORS, and blind-content behavior.
+The wallet SHALL accept no receipt without that immutable JWS and digest. It
+SHALL verify the signature against the live authenticated profile. It SHALL
+also match every status field to its retained ceremony and accepted payload.
 
-The did-crdt service owns its matching implementation under did-crdt SPEC-037
-0.1.0-draft. Each server SHALL independently transit the 57,016-octet sealed
-offer witness, the 62,016-octet sealed reverse-payload witness, and the
-69,632-octet maximum. Neither server's test result proves the other.
+The wallet SHALL then atomically install the record required by
+[[SPEC-008-production-pairing-claimant#REQ-1006]]. Crash or loss before that
+wallet commit recovers from the authenticated receipt and retained bounded
+ceremony state. It does not invent a local grant or repeat a hub migration.
+
+Recovery SHALL unlock custody, reauthenticate the live profile, open the exact
+pending slot, and resume only its cached protocol frame. Verified receipt
+atomically replaces the tagged pending value with the installed record.
+Decline, terminal refusal, expiry, or root purge removes the pending value.
+
+Every credential/v2 offer, decision, payload, and receipt crosses only the
+cbcl-pairing relay. The credential/v2 call graph SHALL contain no Selfsame or
+did-crdt rendezvous read, write, route, or client edge.
 
 The wallet ordinary build SHALL contain no compiled conformance registry,
-relay allowlist, held-enrolment precondition, `record_pairing_trust` call edge,
-or fallback to `assemble_claimant`. The new split functions SHALL be the only
-credential/v2 construction path.
+relay allowlist, held-enrolment precondition, or fallback to
+`assemble_claimant` on the credential/v2 path. That path SHALL contain no
+`record_pairing_trust` call edge. The standing SPEC-004 caller remains unchanged.
+
+The five split functions SHALL be the only credential/v2 construction path.
+They are `recognise_claimant_invitation`, `authorise_claimant_relay`,
+`prepare_claimant`, `preview_claimant_identity`, and `complete_claimant`.
 
 Implements: [[SPEC-008-production-pairing-claimant#REQ-902]], [[SPEC-008-production-pairing-claimant#REQ-906]], [[SPEC-008-production-pairing-claimant#REQ-1006]].
 Verified by: [[SPEC-008-production-pairing-claimant#TEST-1158]], [[SPEC-008-production-pairing-claimant#TEST-1159]].
@@ -1164,8 +1221,8 @@ The idempotent absent-account branch remains non-mutating.
 The production source scan is authoritative over version sites. A witness list
 cannot weaken it. One direct cbcl-pairing parent governs credential/v2.
 
-Authenticated display, post-consent effects, shared grammar, cap arithmetic,
-and the sealed-grant graph remain unchanged.
+Authenticated display, post-consent effects, shared grammar, cbcl-pairing
+bounds, and the sealed-grant graph remain unchanged.
 
 ## Test specification
 
@@ -1228,8 +1285,10 @@ admission map, wire encoder, policy default, or refusal wildcard.
 At each WebSocket 1013 boundary, require `try-again-later`. Require no
 acknowledgement, invite, grant, or enrollment frame.
 
-Retry after reconnect with a new socket generation and request identifier.
-Require one correlated success and no duplicate durable effect.
+After credential/v2 allocation socket loss, reconnect with a new socket
+generation. Recover the original request and carrier ceremony under the
+persisted installation key. Require one correlated result and no duplicate
+durable effect. Permit a new request only after authenticated absent status.
 
 Force `cbcl-chat-rooms:get-or-start/1` to refuse the hello at
 `cbcl-chat-session-ws.lfe:1788`. Require WebSocket 1013, zero join, and zero
@@ -1295,6 +1354,8 @@ Force transaction-based schema exhaustion. Require
 
 Record `cbcl-chat-roommember:migrate-since/0` as a separate
 `transform_table/4` schema migration outside the transaction inventory.
+Record `cbcl-chat-roomcfg:transform-room/1` as the third schema migration
+outside that inventory.
 
 Provision reciprocal account and alias rows. Withdraw and require both live
 rows deleted under alias-before-account ordering.
@@ -1352,10 +1413,11 @@ Require credential/v2 to reach no classified credential-v1 site. Require
 frozen v1 bytes to remain byte-identical.
 
 Require this Selfsame parent and its open review gate. Require cbcl-bus
-SPEC-053 0.17.1-draft to name this coordinated review set.
+SPEC-053 0.17.2-draft to name this coordinated review set.
 
 Require the cbcl-pairing parent consumer pointer here. Require generation
-family, version, session, and synthesis trajectory in all four parents.
+family, version, session, and synthesis trajectory in this parent,
+[[SPEC-007-cbcl-pairing-cutover]], cbcl-bus, and cbcl-pairing.
 
 Require another reviewer family and a fresh reviewer session. Require the
 review to record its subscription or API authentication path.
@@ -1366,8 +1428,8 @@ Require the transaction inventory to cover every production call under
 Require the consumer inventory to cover every direct and transitive carrier
 of `authority-busy`. Require both WebSocket `get-or-start/1` consumers.
 
-Require all 42 cbcl-bus GATE-04 boxes. Require both non-conforming rendezvous
-baselines, both owning parent clauses, and sealed cap arithmetic.
+Require all 42 cbcl-bus GATE-04 boxes. Require credential/v2 transport to use
+only the cbcl-pairing relay and no did-crdt rendezvous call edge.
 
 Require every installed-state clause in [[SPEC-008-production-pairing-claimant#REQ-1006]]. Require the four inline
 regression groups in [[SPEC-008-production-pairing-claimant#TEST-1156]].
@@ -1378,8 +1440,8 @@ N8, and N7 disposition and every F-A through F-E hard stop.
 Extract each consolidated current-law section by its exact heading boundaries.
 Run `/Users/anuna-01/.agents/skills/anuna-dev/tools/usdd-lint.sh --type
 descriptive --strict -` against each extraction. Run the same command against
-the complete cbcl-pairing and did-crdt parents. Any error or warning fails this
-test.
+the complete cbcl-pairing and [[SPEC-007-cbcl-pairing-cutover]] parents. Any
+error or warning fails this test.
 
 Removing any current obligation fails.
 
@@ -1408,16 +1470,32 @@ Fail each post-final operation independently. Require no accepted application
 capability, exact ceremony-only compensation, and no changed pre-existing or
 operator withdrawal state.
 
-Require browser verification and strict local installation before hub final
-commit. Require hub immutable status before wallet installation. Lose every
+Require browser verification and inactive crash-safe staging before hub final
+commit. The browser record remains inactive before that commit. Require hub
+immutable status before browser activation and wallet installation. Lose every
 response and restart each component at every boundary. Require exact recovery
 without duplicate migration or a local grant shortcut.
 
-Statically require the production credential/v2 call graph to exclude
-`assemble_claimant`. Require `prepare_claimant` to have no custody, issuer,
-resolver-write, WebFinger, signing, grant, alias, or persistence edge.
+Before final approval, a wallet restart SHALL abandon the ceremony and retain
+no effect capability. After final approval, require the sealed pending slot
+before the first identity effect. Restart from each later boundary and require
+only the cached frame, exact final capability, and one installed replacement.
 
-### TEST-1159 — Presence, display, policy, installed state, and rendezvous are exact
+Mutate the pending tag, root generation, application, carrier ceremony,
+wrapping key, checkpoint, plan, capability, expiry, and cached frame. Require
+refusal before identity work or protocol output.
+
+Require the hub status JWS under the live profile key that signed the offer.
+Mutate its signature, digest, `kid`, field, ceremony binding, profile, and size.
+Require browser activation and wallet installation to refuse every mutation.
+
+Statically require the production credential/v2 call graph to exclude
+`assemble_claimant`. Require `recognise_claimant_invitation` to open no socket.
+Require `authorise_claimant_relay` to own the exact prompt and policy write.
+Require `prepare_claimant` to have no custody, issuer, resolver-write,
+WebFinger, signing, grant, alias, or persistence edge.
+
+### TEST-1159 — Presence, display, policy, installed state, and transport are exact
 
 Generate valid PAIR1 codes for minimum and maximum alphabet branches. Mutate
 every separator, forbidden letter, pad bit, checksum bit, case mode, Unicode
@@ -1446,14 +1524,17 @@ issuer-rotation, unavailable, revoked, handle-change, confirmed-unlink, and
 hub-deleted states. Require every [[SPEC-008-production-pairing-claimant#REQ-1006]] outcome. A hub deletion requires
 a complete fresh ceremony even when the derived key remains available.
 
-For both rendezvous implementations, PUT and retrieve exact opaque bodies of
-1, 57,016, 62,016, and 69,632 octets. Require 69,633 to return 413 and create no
-stored body. Re-run slot grammar, capacity, expiry, first-write, read-once,
-CORS, and blindness tests. This increment SHALL NOT claim the other PROTO-002
-changes.
+Trace every credential/v2 offer, decision, payload, and receipt transport.
+Require only cbcl-pairing relay edges. Any Selfsame rendezvous, did-crdt
+rendezvous, enrolment-signing, or alternate mailbox edge fails.
 
 ## Changelog
 
+- **0.5.2-draft — 2026-08-24 — executable recovery and direct safety
+  authority.** Uses one carrier ceremony identifier, explicit status recovery,
+  inactive browser staging, and five owned claimant functions. Removes the
+  unused did-crdt rendezvous dependency. Revises SPEC-007 directly. No
+  implementation or deployment is authorized.
 - **0.5.1-draft — 2026-08-24 — direct standalone protocol reissue.** Defines
   typed authenticated display, exact PAIR1 separation, and zero-effect planning.
   Defines two consent boundaries, reverse issuance, pending-scope recovery,
