@@ -3,27 +3,27 @@ id: SPEC-007
 title: cbcl-pairing Protocol Cutover
 status: draft
 tier: 1
-version: 0.3.3-draft
+version: 0.3.4-draft
 last-updated: 2026-08-24
 previous-approved-version: 0.2.1
 owner-repo: selfsame
 review-gate: implementation-prohibited-pending-coordinated-fresh-cross-model-pass
 authority-form: direct-current-safety-authority
 implementation-baseline: 0220cec2dec44cd95d4f411ea4814d790b6716d2
-coordinated-claimant-design: selfsame SPEC-008 0.5.5-draft
-coordinated-hub-design: cbcl-bus SPEC-053 0.17.5-draft
-coordinated-pairing-design: cbcl-pairing SPEC-001 0.5.4-draft
+coordinated-claimant-design: selfsame SPEC-008 0.5.6-draft
+coordinated-hub-design: cbcl-bus SPEC-053 0.17.6-draft
+coordinated-pairing-design: cbcl-pairing SPEC-001 0.5.5-draft
 generation-model-family: OpenAI GPT-5
 generation-model-version: gpt-5.6-sol
 generation-session: 01a029aa-9127-7c42-ad28-81512b91ded6
-generation-synthesis-trajectory: "approved 0.2.1 cutover -> standalone credential/v2 ordering conflict -> rejected reviews through 0.5.4 -> direct 0.3.3 safety closure"
+generation-synthesis-trajectory: "approved 0.2.1 cutover -> standalone credential/v2 ordering conflict -> rejected reviews through 0.5.5 -> direct 0.3.4 pointer closure"
 candidate-successor-to: SPEC-006
 depends-on: cbcl-pairing SPEC-001; SPEC-004; SCREEN-001
 ---
 
 # SPEC-007 — cbcl-pairing Protocol Cutover
 
-> **Current draft safety revision.** Version 0.3.3 states the credential/v2
+> **Current draft safety revision.** Version 0.3.4 states the credential/v2
 > consent and effect boundary directly. Version 0.2.1 remains the last approved
 > revision. This draft authorizes no implementation, release, or deployment.
 
@@ -1215,7 +1215,7 @@ Without such a release, rollback disables pairing and preserves unrelated identi
 The Selfsame security owner and affected application owners receive notice before
 the first release that permits production invitation allocation.
 
-## Gate Evidence Record — 0.3.3-draft
+## Gate Evidence Record — 0.3.4-draft
 
 ```yaml
 phase: 2
@@ -1223,8 +1223,8 @@ gates:
   - gate: "Accepted rejection imported before repair"
     mechanism: "Circus Claude subscription review record"
     result: pass
-    evidence: "[[spec-008-0.5.4-claude-adversarial-review-2026-08-24]] records REJECT and the N-1 through N-9 findings"
-  - gate: "Coordinated 0.3.3 and 0.5.5 Tier-1 review returns PASS"
+    evidence: "[[spec-008-0.5.5-claude-adversarial-review-2026-08-24]] records REJECT and the N-1 through N-7 findings"
+  - gate: "Coordinated 0.3.4 and 0.5.6 Tier-1 review returns PASS"
     mechanism: "fresh-context cross-model adversarial review"
     result: unverified
     owner: "Selfsame security owner"
@@ -1248,8 +1248,8 @@ Production invitation allocation remains prohibited until all items have durable
 - the repository owner approves the recorded no-users finding and no-migration disposition;
 - coordinated SPEC-004, SPEC-006, and PROTO-002 through PROTO-004 amendments pass their own channels;
 - the upstream credential-profile disposition passes the `cbcl-pairing` amendment channel;
-- Selfsame SPEC-008 0.5.5-draft, cbcl-bus SPEC-053 0.17.5-draft,
-  and cbcl-pairing SPEC-001 0.5.4-draft pass one coordinated Tier-1 review;
+- Selfsame SPEC-008 0.5.6-draft, cbcl-bus SPEC-053 0.17.6-draft,
+  and cbcl-pairing SPEC-001 0.5.5-draft pass one coordinated Tier-1 review;
 - every SPEC-004 Tier-1 row has the exact disposition in the inherited gate ledger;
 - every retained or replaced SPEC-004 ledger row reaches pass through its exact disposition;
 - the exact upstream `cbcl-pairing` production gates pass without local reinterpretation;
@@ -1305,6 +1305,9 @@ No channel can waive a hard stop without a new specification version and require
 <details>
 <summary>Revision history</summary>
 
+- 0.3.4-draft — coordinates the corrected Selfsame and hub parents. The
+  consent and effect boundary remains unchanged. The coordinated Tier-1 review
+  remains open, so this revision authorizes no implementation.
 - 0.3.3-draft — coordinates the bounded final authority command and the
   remaining attempt-5 observations. The coordinated Tier-1 review remains
   open, so this revision authorizes no implementation.
