@@ -2,26 +2,27 @@
 id: SPEC-008
 title: Production Pairing Claimant — Transport, Real Credential, and Origin Trust
 status: draft
-version: 0.5.7-draft
+version: 0.5.8-draft
 tier: 1
-review-gate: not-approved; implementation-prohibited-pending-one-coordinated-fresh-cross-model-review
+review-gate: test-first-implementation-owner-authorized; release-and-deployment-prohibited-pending-cross-model-pass
 authority-form: consolidated-direct-current-authority
 implementation-baseline: 0220cec2dec44cd95d4f411ea4814d790b6716d2
 generation-model-family: OpenAI GPT-5
 generation-model-version: gpt-5.6-sol
 generation-session: 01a029aa-9127-7c42-ad28-81512b91ded6
-generation-synthesis-trajectory: "owner-authorized standalone architecture -> F-A through F-E code traces -> rejected reviews through 0.5.6 -> possession-proof and lifetime closure"
+generation-synthesis-trajectory: "owner-authorized standalone architecture -> F-A through F-E code traces -> rejected reviews through 0.5.7 -> closed cryptographic inputs"
 depends-on: "[[SPEC-007-cbcl-pairing-cutover]]; [[SPEC-004-application-scoped-identity]]; [[SPEC-003-android-apk-distribution]]; cbcl-pairing SPEC-001"
 last-updated: 2026-08-24
 ---
 
 # SPEC-008 — Production Pairing Claimant: Transport, Real Credential, and Origin Trust
 
-> **Consolidated current-law reissue.** Version 0.5.7 states the standalone
+> **Consolidated current-law reissue.** Version 0.5.8 states the standalone
 > first-contact authority directly. Trajectory documents and review reports
 > supply evidence only. They supply no current values.
-> This draft authorizes no implementation, allocation, release, or deployment
-> before one coordinated fresh-context Tier-1 PASS.
+> The repository owner authorized local test-first implementation on
+> 2026-08-24. This draft authorizes no production allocation, release, or
+> deployment before one coordinated fresh-context Tier-1 PASS.
 
 ## Orientation
 
@@ -58,7 +59,8 @@ Controls:     [[SPEC-008-production-pairing-claimant#REQ-902]] fixture data SHAL
               [[SPEC-008-production-pairing-claimant#CON-903]] policy is exact `(applicationId, relayOrigin)`, never relay-only
               [[SPEC-008-production-pairing-claimant#REQ-907]] production allocation remains closed pending its gate
               [[SPEC-008-production-pairing-claimant#CON-986]] no credential/v2 identity effect precedes final approval
-              A fresh Tier-1 PASS precedes every plan or implementation change
+              Owner-authorized test-first implementation may precede the PASS
+              A fresh Tier-1 PASS precedes release and production allocation
               Production deployment requires separate owner approval
 Open:         the coordinated fresh-context Tier-1 review (owner: repository owner)
               every production gate listed in [[SPEC-008-production-pairing-claimant#CON-985]] (owner: named gate owners)
@@ -304,7 +306,7 @@ An existing exact policy returns the same capability without another prompt.
 `prepare_claimant` consumes that capability before opening the relay socket.
 It completes CPace and both Finished values. It requires the peer-bound profile
 digest to equal the pre-socket candidate digest. It then atomically persists a
-newly approved CON-903 row. Signed-offer verification and every authority
+newly approved [[SPEC-008-production-pairing-claimant#CON-903]] row. Signed-offer verification and every authority
 cross-check precede the zero-effect authenticated identity plan.
 
 `preview_claimant_identity` consumes preliminary approval. It returns only
@@ -315,7 +317,7 @@ The authenticated plan contains these authoritative sources:
 
 | Field | Authoritative source |
 |---|---|
-| `profile` | CON-988 live origin-recognised bytes bound by CPace Finished |
+| `profile` | [[SPEC-008-production-pairing-claimant#CON-988]] live origin-recognised bytes bound by CPace Finished |
 | `application_id` | the authenticated profile, never the wire claim |
 | `relay_origin` | the invitation, cross-checked against the authenticated profile |
 | `account_principal_digest` | the hub-signed digest of the private pending account ID |
@@ -383,7 +385,8 @@ Endpoint/Interface: a sealed wallet-owned set keyed by the exact pair
 `(applicationId, relayOrigin)`. The interface supports recognised lookup, atomic
 insert after explicit approval, explicit removal, and root-lifecycle purge.
 
-Input grammar: `applicationId` uses the CON-988-bound profile's canonical identifier.
+Input grammar: `applicationId` uses the
+[[SPEC-008-production-pairing-claimant#CON-988]]-bound profile identifier.
 `relayOrigin` uses the recognised canonical HTTPS origin from the invitation and
 profile. The recogniser accepts no path, query, fragment, credentials, or non-HTTPS
 production origin.
@@ -576,10 +579,10 @@ The synthesis record begins with the owner-selected standalone architecture.
 It includes the F-A through F-E code traces and every rejected review record.
 
 The immediate correction input is
-[[spec-008-0.5.6-claude-adversarial-review-2026-08-24#Collected corrections and owners]].
-This reissue retains every closed mechanism finding. It defines the missing
-possession proof, corrects the UI witness, and closes the six observations
-identified there.
+[[spec-008-0.5.7-claude-adversarial-review-2026-08-24#Collected corrections and owners]].
+This reissue retains every closed mechanism finding. It closes the nested
+socket-generation and recovery-proof inputs. It also resolves the seven
+non-blocking observations identified there.
 
 A qualifying reviewer SHALL use another model family and a fresh session. The
 report SHALL record its model, authentication path, session, and Circus
@@ -596,7 +599,7 @@ terminal boundaries.
 This parent specification is the sole current Selfsame authority for this
 increment. Trajectory documents provide evidence and no normative precedence.
 
-Credential/v2 SHALL conform to cbcl-pairing SPEC-001 0.5.6-draft. The
+Credential/v2 SHALL conform to cbcl-pairing SPEC-001 0.5.7-draft. The
 cbcl-pairing parent records this document as its consumer.
 
 The wallet and browser use separate typed machine-carrier and PAIR1
@@ -702,7 +705,7 @@ The public machine carrier and human presence input SHALL remain separate typed
 values. The carrier SHALL contain no `PAIR1-` text, CPace secret, or claim
 bearer. The presence input SHALL contain exactly one recognised `PAIR1-` value
 that yields independent raw sixteen-octet CPace and claim tokens under
-cbcl-pairing SPEC-001 0.5.6-draft.
+cbcl-pairing SPEC-001 0.5.7-draft.
 
 The scan and paste carrier paths SHALL never populate the presence input. The
 type-only presence component SHALL have no paste, autofill, password-manager,
@@ -750,7 +753,8 @@ relay-only trust fallback in an ordinary build. A profile that names a
 previously accepted relay under another application SHALL still require the
 new exact-pair prompt. The standing credential/v1 registry and selection
 control remain compiled and unchanged. Their implementation comment SHALL cite
-[[SPEC-007-cbcl-pairing-cutover#CON-806]], not CON-903.
+[[SPEC-007-cbcl-pairing-cutover#CON-806]], not
+[[SPEC-008-production-pairing-claimant#CON-903]].
 
 After the hub's immutable final acknowledgement, the wallet SHALL atomically
 install one record. It SHALL contain the root generation, grant bytes, grant
@@ -1107,8 +1111,8 @@ The exact coordinated hub test set is TEST-115 through TEST-119. The hub's
 base-parent tests remain current outside this coordinated increment set.
 
 The coordinated review set contains this parent,
-[[SPEC-007-cbcl-pairing-cutover]] 0.3.5-draft, cbcl-pairing SPEC-001
-0.5.6-draft, and cbcl-bus SPEC-053 0.17.7-draft.
+[[SPEC-007-cbcl-pairing-cutover]] 0.3.6-draft, cbcl-pairing SPEC-001
+0.5.7-draft, and cbcl-bus SPEC-053 0.17.8-draft.
 
 The `anuna-ssi` namespace reference is outside that set. It is pinned at
 `c7d462029841ea1884bb6f089732058d8838728d` only to resolve
@@ -1125,8 +1129,10 @@ consumer. The hub parent records the same coordinated review set.
 Every F-A through F-E correction remains a hard stop.
 [[SPEC-007-cbcl-pairing-cutover#REQ-812]] also remains a hard stop.
 
-A fresh PASS authorizes only the Elephant SPL and test-first plan. It
-authorizes no production allocation, release, or deployment.
+The repository owner's 2026-08-24 waiver authorizes the Elephant SPL and local
+test-first implementation before PASS. It authorizes no production allocation,
+release, or deployment. Those actions still require the fresh Tier-1 PASS and
+their separate gates.
 
 ### CON-986 — Standalone claimant decisions, effects, and recovery
 
@@ -1138,7 +1144,8 @@ pre-socket origin recognition and exact declared-relay check before returning
 `authorise_claimant_relay` SHALL own the exact-pair prompt and provisional
 socket capability. `cbcl_pairing_relay_approve` returns that single-use
 capability without writing a new pair row. `cbcl_pairing_relay_decline` creates
-no row or socket. `prepare_claimant` atomically writes a newly approved CON-903
+no row or socket. `prepare_claimant` atomically writes a newly approved
+[[SPEC-008-production-pairing-claimant#CON-903]]
 row only after CPace and both Finished values bind the candidate profile digest.
 
 `prepare_claimant` SHALL consume the socket capability before socket creation.
@@ -1287,12 +1294,12 @@ Verified by: [[SPEC-008-production-pairing-claimant#TEST-1158]], [[SPEC-008-prod
 Every logical body below is exact deterministic CBOR. The map is closed: an
 unknown, missing, duplicate, reordered, non-canonical, or trailing member
 refuses before display, decision, or effect. Every `predecessorDigest` is the
-raw `objectContentHash` from cbcl-pairing SPEC-001 0.5.6-draft CON-031. The
+raw `objectContentHash` from cbcl-pairing SPEC-001 0.5.7-draft CON-031. The
 envelope field 2 carries the one retained `intentDigest`; no body can replace it.
 
-The offer body is exactly cbcl-bus SPEC-053 0.17.7-draft CON-012's
+The offer body is exactly cbcl-bus SPEC-053 0.17.8-draft CON-012's
 `signed-offer-v2`. The receipt body is exactly cbcl-pairing SPEC-001
-0.5.6-draft CON-028's `credential-v2-receipt-body`. The remaining nine bodies
+0.5.7-draft CON-028's `credential-v2-receipt-body`. The remaining nine bodies
 are:
 
 ```cddl
@@ -1388,7 +1395,7 @@ ASCII. `previewFingerprintDigest` is
 those exact bytes. Every later occurrence is byte-identical to preparation.
 
 `authorityStatusResponse` is the exact deterministic-CBOR
-`authority-status-response-v2` from cbcl-bus SPEC-053 0.17.7-draft CON-012.
+`authority-status-response-v2` from cbcl-bus SPEC-053 0.17.8-draft CON-012.
 `authorityStatusDigest` is SHA-256 over those exact response bytes. The wallet
 SHALL recompute that digest and verify the response signature under the same
 profile `kid` and key that signed the offer. It SHALL require exact carrier
@@ -1402,7 +1409,7 @@ produce only refusal. The browser cannot replace the signed response with an
 outcome token or digest.
 
 `migrationConfirmationDigest` is the exact raw digest defined by cbcl-bus
-SPEC-053 0.17.7-draft CON-012. The wallet recomputes it from the authenticated
+SPEC-053 0.17.8-draft CON-012. The wallet recomputes it from the authenticated
 offer and its local `previewIssuerDid`. It copies no browser-supplied digest.
 
 The payload grant is one verbatim compact JWS in ASCII. It contains exactly
@@ -1450,7 +1457,7 @@ or ceremony makes Finished or the explicit equality check fail and erases the
 provisional capability.
 
 Only `BoundCredentialV2Profile` can atomically promote a newly approved tuple
-to CON-903 durable policy and supply profile keys or authenticated display
+to [[SPEC-008-production-pairing-claimant#CON-903]] durable policy and supply profile keys or authenticated display
 authority. Existing exact-pair policy skips only the prompt; it never skips the
 live fetch, CPace digest binding, or Finished checks.
 
@@ -1462,7 +1469,8 @@ The exact substitute for
 3. place that digest and the carrier digest in both endpoint contexts;
 4. complete CPace and verify both Finished values;
 5. require peer-bound and candidate profile bytes and digests to be equal;
-6. promote only a newly approved exact pair to durable CON-903 policy; and
+6. promote only a newly approved exact pair to durable
+   [[SPEC-008-production-pairing-claimant#CON-903]] policy; and
 7. expose profile keys and authenticated display authority only from
    `BoundCredentialV2Profile`.
 
@@ -1491,7 +1499,7 @@ receiptRecoveryCommitment = SHA-256(
 )
 ```
 
-`EXPORTER` and `TH` are the raw cbcl-pairing SPEC-001 0.5.6-draft CON-031
+`EXPORTER` and `TH` are the raw cbcl-pairing SPEC-001 0.5.7-draft CON-031
 values. Both results contain 32 octets. The token is secret and zeroizable. It
 is sealed inside the endpoint checkpoint. It never enters an offer, profile,
 log, error, metric, URL, hub record, or JavaScript. The browser sends
@@ -1500,7 +1508,7 @@ only the commitment in the authenticated finalization command.
 The hub includes that exact commitment in its signed immutable final status
 and indexes the status under the carrier ceremony. After ordinary relay
 receipt loss, `recover_claimant_completion` POSTs the token and ceremony. It
-uses cbcl-bus SPEC-053 0.17.7-draft CON-036's closed CBOR request to the
+uses cbcl-bus SPEC-053 0.17.8-draft CON-036's closed CBOR request to the
 exact application origin retained from
 [[SPEC-008-production-pairing-claimant#CON-988]]. The wallet repeats
 [[SPEC-004-application-scoped-identity#CON-220]] steps 1 through 5 against that
@@ -1691,10 +1699,12 @@ Force `store-unavailable` on the webhook route. Require its distinct retryable
 Drive a committed private-channel decision. Require HTTP 409 and prove that
 neither unavailability branch reaches that terminal.
 
-Force `accounts/0` busy during a scheduled Path-B tick. Require OBS-907 phase
+Force `accounts/0` busy during a scheduled Path-B tick. Require
+[[SPEC-008-production-pairing-claimant#OBS-907]] phase
 `account-scan`, no resolver call, no success report, and a live poller.
 
-Force `revoke-observed/2` busy after a verified union. Require OBS-907 phase
+Force `revoke-observed/2` busy after a verified union. Require
+[[SPEC-008-production-pairing-claimant#OBS-907]] phase
 `revocation-apply`, no eviction, and a fresh resolver pass next tick.
 
 Force the WebFinger terminal through `lookup/1`. Require `unavailable`, HTTP
@@ -1772,7 +1782,7 @@ Require credential/v2 to reach no classified credential-v1 site. Require
 frozen v1 bytes to remain byte-identical.
 
 Require this Selfsame parent and its open review gate. Require cbcl-bus
-SPEC-053 0.17.7-draft to name this coordinated review set.
+SPEC-053 0.17.8-draft to name this coordinated review set.
 
 Require the cbcl-pairing parent consumer pointer here. Require generation
 family, version, session, and synthesis trajectory in this parent,
@@ -1930,7 +1940,7 @@ turns TLS-only bytes into authenticated display authority.
 ### TEST-1161 — Final status recovery survives the relay window
 
 **Validates:** [[SPEC-008-production-pairing-claimant#CON-989]] and
-cbcl-pairing SPEC-001 0.5.6-draft TEST-067.
+cbcl-pairing SPEC-001 0.5.7-draft TEST-067.
 
 Lose the ordinary receipt and delete the expired relay mailbox. Restart the
 wallet, browser, relay, and hub in every order. Retain only their declared
@@ -1967,6 +1977,13 @@ accept a carrier, grant, or caller-selected status object.
 
 ## Changelog
 
+- **0.5.8-draft — 2026-08-24 — closed cryptographic inputs.** This revision
+  coordinates exact socket-generation, recovery-proof, and checkpoint-key
+  inputs. It fixes the v2 mailbox lifetime at 900 seconds. It records the
+  global chat-frame narrowing, complete-frame measurement, retry rule, naming
+  partition, and fully qualified local references. The owner authorizes local
+  test-first implementation before PASS. Production allocation, release, and
+  deployment remain prohibited.
 - **0.5.7-draft — 2026-08-24 — possession proof and lifetime closure.**
   This revision coordinates the exact installation-device possession proof and
   the 900-second credential/v2 mailbox. It corrects the UI witness, relay
@@ -2031,9 +2048,11 @@ accept a carrier, grant, or caller-selected status object.
   Open item closes; the second-operator item remains.
 - **0.2.0** — implementation findings folded back on branch
   `feature/spec-008-production-claimant`; see
-  [[IMPL-008-production-pairing-claimant]]. The CON-207 proof is grant-bound and
+  [[IMPL-008-production-pairing-claimant]]. The
+  [[SPEC-004-application-scoped-identity#CON-207]] proof is grant-bound and
   deferred to delivery. The ceremony scope is the profile's single allowed
-  permission. ADR-912's linked applications form the trusted-profile set.
+  permission. [[SPEC-004-application-scoped-identity#ADR-912]]'s linked
+  applications form the trusted-profile set.
 - **0.1.0** — first draft, authored from the 2026-08-18 gap analysis of the vault and
   the code (four named failure modes; camera scanning found already built and moved to
   specification debt rather than missing work).
