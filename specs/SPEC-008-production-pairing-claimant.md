@@ -2,7 +2,7 @@
 id: SPEC-008
 title: Production Pairing Claimant — Transport, Real Credential, and Origin Trust
 status: draft
-version: 0.5.4-draft
+version: 0.5.5-draft
 tier: 1
 review-gate: not-approved; implementation-prohibited-pending-one-coordinated-fresh-cross-model-review
 authority-form: consolidated-direct-current-authority
@@ -10,14 +10,14 @@ implementation-baseline: 0220cec2dec44cd95d4f411ea4814d790b6716d2
 generation-model-family: OpenAI GPT-5
 generation-model-version: gpt-5.6-sol
 generation-session: 01a029aa-9127-7c42-ad28-81512b91ded6
-generation-synthesis-trajectory: "owner-authorized standalone architecture -> F-A through F-E code traces -> rejected reviews through 0.5.3 -> exact response, expiry, and recovery closure"
+generation-synthesis-trajectory: "owner-authorized standalone architecture -> F-A through F-E code traces -> rejected reviews through 0.5.4 -> bounded final-command reissue"
 depends-on: "[[SPEC-007-cbcl-pairing-cutover]]; [[SPEC-004-application-scoped-identity]]; [[SPEC-003-android-apk-distribution]]; cbcl-pairing SPEC-001"
 last-updated: 2026-08-24
 ---
 
 # SPEC-008 — Production Pairing Claimant: Transport, Real Credential, and Origin Trust
 
-> **Consolidated current-law reissue.** Version 0.5.4 states the standalone
+> **Consolidated current-law reissue.** Version 0.5.5 states the standalone
 > first-contact authority directly. Trajectory documents and review reports
 > supply evidence only. They supply no current values.
 > This draft authorizes no implementation, allocation, release, or deployment
@@ -586,7 +586,7 @@ terminal boundaries.
 This parent specification is the sole current Selfsame authority for this
 increment. Trajectory documents provide evidence and no normative precedence.
 
-Credential/v2 SHALL conform to cbcl-pairing SPEC-001 0.5.3-draft. The
+Credential/v2 SHALL conform to cbcl-pairing SPEC-001 0.5.4-draft. The
 cbcl-pairing parent records this document as its consumer.
 
 The wallet and browser use separate typed machine-carrier and PAIR1
@@ -692,7 +692,7 @@ The public machine carrier and human presence input SHALL remain separate typed
 values. The carrier SHALL contain no `PAIR1-` text, CPace secret, or claim
 bearer. The presence input SHALL contain exactly one recognised `PAIR1-` value
 that yields independent raw sixteen-octet CPace and claim tokens under
-cbcl-pairing SPEC-001 0.5.3-draft.
+cbcl-pairing SPEC-001 0.5.4-draft.
 
 The scan and paste carrier paths SHALL never populate the presence input. The
 type-only presence component SHALL have no paste, autofill, password-manager,
@@ -764,6 +764,8 @@ record, exact-pair relay policy selected by the person, and application-owned
 cached material. It SHALL retain the root seed and SHALL NOT claim remote hub
 revocation. Re-grant after hub-side deletion requires a complete fresh pairing
 ceremony. A local shortcut using the retained derived key is prohibited.
+
+Trace: [[SPEC-008-production-pairing-claimant#CON-987]], [[SPEC-008-production-pairing-claimant#TEST-1160]].
 
 ## Non-functional requirement
 
@@ -1095,8 +1097,8 @@ The exact coordinated hub test set is TEST-115 through TEST-119. The hub's
 base-parent tests remain current outside this coordinated increment set.
 
 The coordinated review set contains this parent,
-[[SPEC-007-cbcl-pairing-cutover]] 0.3.2-draft, cbcl-pairing SPEC-001
-0.5.3-draft, and cbcl-bus SPEC-053 0.17.4-draft.
+[[SPEC-007-cbcl-pairing-cutover]] 0.3.3-draft, cbcl-pairing SPEC-001
+0.5.4-draft, and cbcl-bus SPEC-053 0.17.5-draft.
 
 The `anuna-ssi` namespace reference is outside that set. It is pinned at
 `c7d462029841ea1884bb6f089732058d8838728d` only to resolve
@@ -1255,10 +1257,10 @@ authority over direct HTTPS to the authenticated application origin. The
 credential/v2 call graph SHALL contain no Selfsame or did-crdt rendezvous read,
 write, route, or client edge.
 
-The wallet ordinary build SHALL contain no compiled conformance registry,
-relay allowlist, held-enrolment precondition, or fallback to
-`assemble_claimant` on the credential/v2 path. That path SHALL contain no
-`record_pairing_trust` call edge. The standing SPEC-004 caller remains unchanged.
+On the credential/v2 path, the wallet ordinary build SHALL contain no compiled
+conformance registry, relay allowlist, held-enrolment precondition, or fallback
+to `assemble_claimant`. That path SHALL contain no `record_pairing_trust` call
+edge. The standing SPEC-004 caller remains unchanged.
 
 The five split functions SHALL be the only credential/v2 claimant construction path.
 They are `recognise_claimant_invitation`, `authorise_claimant_relay`,
@@ -1274,12 +1276,12 @@ Verified by: [[SPEC-008-production-pairing-claimant#TEST-1158]], [[SPEC-008-prod
 Every logical body below is exact deterministic CBOR. The map is closed: an
 unknown, missing, duplicate, reordered, non-canonical, or trailing member
 refuses before display, decision, or effect. Every `predecessorDigest` is the
-raw `objectContentHash` from cbcl-pairing SPEC-001 0.5.3-draft CON-031. The
+raw `objectContentHash` from cbcl-pairing SPEC-001 0.5.4-draft CON-031. The
 envelope field 2 carries the one retained `intentDigest`; no body can replace it.
 
-The offer body is exactly cbcl-bus SPEC-053 0.17.4-draft CON-012's
+The offer body is exactly cbcl-bus SPEC-053 0.17.5-draft CON-012's
 `signed-offer-v2`. The receipt body is exactly cbcl-pairing SPEC-001
-0.5.3-draft CON-028's `credential-v2-receipt-body`. The remaining nine bodies
+0.5.4-draft CON-028's `credential-v2-receipt-body`. The remaining nine bodies
 are:
 
 ```cddl
@@ -1375,7 +1377,7 @@ ASCII. `previewFingerprintDigest` is
 those exact bytes. Every later occurrence is byte-identical to preparation.
 
 `authorityStatusResponse` is the exact deterministic-CBOR
-`authority-status-response-v2` from cbcl-bus SPEC-053 0.17.4-draft CON-012.
+`authority-status-response-v2` from cbcl-bus SPEC-053 0.17.5-draft CON-012.
 `authorityStatusDigest` is SHA-256 over those exact response bytes. The wallet
 SHALL recompute that digest and verify the response signature under the same
 profile `kid` and key that signed the offer. It SHALL require exact carrier
@@ -1389,7 +1391,7 @@ produce only refusal. The browser cannot replace the signed response with an
 outcome token or digest.
 
 `migrationConfirmationDigest` is the exact raw digest defined by cbcl-bus
-SPEC-053 0.17.4-draft CON-012. The wallet recomputes it from the authenticated
+SPEC-053 0.17.5-draft CON-012. The wallet recomputes it from the authenticated
 offer and its local `previewIssuerDid`. It copies no browser-supplied digest.
 
 The payload grant is one verbatim compact JWS in ASCII. It contains exactly
@@ -1403,6 +1405,9 @@ The browser independently matches every payload field. Its references are the
 signed offer, retained preparation and decision, fetched resolver closure,
 recognised grant, installation key, transition, and hub pending state. The v1 CON-219
 bundle grammar supplies no value, parser, or fallback to this body.
+
+Implements: [[SPEC-008-production-pairing-claimant#REQ-1006]].
+Verified by: [[SPEC-008-production-pairing-claimant#TEST-1160]].
 
 ### CON-988 — Credential/v2 binds the live profile without rendezvous
 
@@ -1466,7 +1471,7 @@ receiptRecoveryCommitment = SHA-256(
 )
 ```
 
-`EXPORTER` and `TH` are the raw cbcl-pairing SPEC-001 0.5.3-draft CON-031
+`EXPORTER` and `TH` are the raw cbcl-pairing SPEC-001 0.5.4-draft CON-031
 values. Both results contain 32 octets. The token is secret and zeroizable. It
 is sealed inside the endpoint checkpoint. It never enters an offer, profile,
 log, error, metric, URL, hub record, or JavaScript. The browser sends
@@ -1475,7 +1480,7 @@ only the commitment in the authenticated finalization command.
 The hub includes that exact commitment in its signed immutable final status
 and indexes the status under the carrier ceremony. After ordinary relay
 receipt loss, `recover_claimant_completion` POSTs the token and ceremony. It
-uses cbcl-bus SPEC-053 0.17.4-draft CON-036's closed CBOR request to the
+uses cbcl-bus SPEC-053 0.17.5-draft CON-036's closed CBOR request to the
 exact application origin retained from CON-988. The wallet repeats CON-220
 steps 1 through 5 against that origin and retains both the current candidate
 profile and the previously CPace-bound offer profile.
@@ -1735,7 +1740,7 @@ Require credential/v2 to reach no classified credential-v1 site. Require
 frozen v1 bytes to remain byte-identical.
 
 Require this Selfsame parent and its open review gate. Require cbcl-bus
-SPEC-053 0.17.4-draft to name this coordinated review set.
+SPEC-053 0.17.5-draft to name this coordinated review set.
 
 Require the cbcl-pairing parent consumer pointer here. Require generation
 family, version, session, and synthesis trajectory in this parent,
@@ -1893,7 +1898,7 @@ turns TLS-only bytes into authenticated display authority.
 ### TEST-1161 — Final status recovery survives the relay window
 
 **Validates:** [[SPEC-008-production-pairing-claimant#CON-989]] and
-cbcl-pairing SPEC-001 0.5.3-draft TEST-067.
+cbcl-pairing SPEC-001 0.5.4-draft TEST-067.
 
 Lose the ordinary receipt and delete the expired relay mailbox. Restart the
 wallet, browser, relay, and hub in every order. Retain only their declared
@@ -1926,6 +1931,11 @@ accept a carrier, grant, or caller-selected status object.
 
 ## Changelog
 
+- **0.5.5-draft — 2026-08-24 — bounded final-command reissue.** This
+  revision gives the logical-body contract direct traceability and removes the
+  credential/v2 registry-scope ambiguity. It coordinates exact final-command
+  capacity and the remaining review observations. No implementation or
+  deployment is authorized.
 - **0.5.4-draft — 2026-08-24 — response, expiry, and recovery closure.** This
   revision authenticates the transferable hub authority response. It fixes the
   claimant checkpoint KDF and binds all effects to one exclusive pending
