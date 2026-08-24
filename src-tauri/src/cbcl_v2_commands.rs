@@ -29,9 +29,7 @@ pub struct PendingCredentialV2Pairing {
     intent_approve: Option<cbcl_pairing::credential_v2::CredentialV2Object>,
     preview_did: Option<String>,
     comparison: Option<cbcl_pairing::credential_v2::CredentialV2Object>,
-    recovered_receipt: Option<
-        cbcl_pairing::credential_v2::CredentialV2ClaimantRecoveredReceipt,
-    >,
+    recovered_receipt: Option<cbcl_pairing::credential_v2::CredentialV2ClaimantRecoveredReceipt>,
 }
 
 /// Authenticated preliminary consent values; no peer string is display authority.
@@ -382,6 +380,7 @@ pub async fn cbcl_v2_final_decide(
             root_generation,
             application_id: &application_id,
             profile_digest,
+            offer_profile_octets: pending.claimant.profile_octets(),
             carrier: &carrier,
             offer: &offer_object,
             intent_approve: &intent_approve,
@@ -582,11 +581,10 @@ pub async fn cbcl_v2_finish(
         .filter(|value| !value.is_empty())
         .ok_or_else(|| UiError::from("PresenceRequired"))?;
     let pending = take_pending(&session)?;
-    let (mut pending, prepared) = tauri::async_runtime::spawn_blocking(move || {
-        prepare_received_receipt(pending, &passcode)
-    })
-    .await
-    .map_err(|_| UiError::from("PairingFailed"))?;
+    let (mut pending, prepared) =
+        tauri::async_runtime::spawn_blocking(move || prepare_received_receipt(pending, &passcode))
+            .await
+            .map_err(|_| UiError::from("PairingFailed"))?;
     let (durable, receipt_recovery_commitment) = match prepared {
         Ok(value) => value,
         Err(error) => {
@@ -598,18 +596,19 @@ pub async fn cbcl_v2_finish(
         .recovered_receipt
         .as_ref()
         .ok_or_else(|| UiError::from("PairingReceiptRefused"))?;
-    let installed = match crate::cbcl_v2_completion::InstalledCredentialV2Link::from_authenticated_receipt(
-        &durable,
-        pending.claimant.profile_octets(),
-        receipt.object(),
-        receipt_recovery_commitment,
-    ) {
-        Ok(value) => value,
-        Err(error) => {
-            put_pending(&session, pending);
-            return Err(error);
-        }
-    };
+    let installed =
+        match crate::cbcl_v2_completion::InstalledCredentialV2Link::from_authenticated_receipt(
+            &durable,
+            pending.claimant.profile_octets(),
+            receipt.object(),
+            receipt_recovery_commitment,
+        ) {
+            Ok(value) => value,
+            Err(error) => {
+                put_pending(&session, pending);
+                return Err(error);
+            }
+        };
     let live_profile = pending.claimant.profile().clone();
     let live_account = match installed.account() {
         Ok(value) => value,
@@ -838,13 +837,9 @@ async fn verify_live_installation(
     {
         return Err(UiError::from("PairingResolverRefused"));
     }
-    selfsame_app_identity_net::webfinger::fetch_and_verify(
-        &account,
-        &issuer_did,
-        &[account_text],
-    )
-    .await
-    .map_err(|_| UiError::from("PairingAuthorityRefused"))
+    selfsame_app_identity_net::webfinger::fetch_and_verify(&account, &issuer_did, &[account_text])
+        .await
+        .map_err(|_| UiError::from("PairingAuthorityRefused"))
 }
 
 fn take_pending(session: &State<'_, AppSession>) -> Result<PendingCredentialV2Pairing> {

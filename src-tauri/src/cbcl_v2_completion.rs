@@ -33,7 +33,7 @@ const SLOT_PREFIX: &str = "credential-v2-link-v1-";
 const SLOT_VERSION: u8 = 1;
 const CHECKPOINT_LABEL: &[u8] = b"selfsame credential/v2 claimant checkpoint wrapping v1";
 const ROOT_GENERATION_LABEL: &[u8] = b"selfsame credential/v2 root generation v1\0";
-const MAX_SLOT_OCTETS: usize = 180_000;
+const MAX_SLOT_OCTETS: usize = 400_000;
 
 // The platform store does not expose compare-and-swap. Selfsame is a
 // single-instance application, so one process-wide lock makes each slot's
@@ -181,6 +181,8 @@ pub struct PendingCredentialV2Input<'a> {
     pub application_id: &'a str,
     /// Exact live authenticated profile digest.
     pub profile_digest: [u8; 32],
+    /// Exact CON-220-authenticated profile bytes retained for restart recovery.
+    pub offer_profile_octets: &'a [u8],
     /// Public carrier retained for exact endpoint restoration.
     pub carrier: &'a CredentialV2Carrier,
     /// Authenticated allocator Offer object.
@@ -210,6 +212,7 @@ pub struct PendingCredentialV2Completion {
     application_id: String,
     relay_origin: String,
     profile_digest: String,
+    offer_profile: String,
     carrier: String,
     offer: String,
     intent_approve: String,
@@ -306,7 +309,13 @@ impl PendingCredentialV2Completion {
     /// Construct a closed pending record from typed ceremony objects.
     pub fn new(input: PendingCredentialV2Input<'_>) -> Result<Self> {
         validate_application_and_relay(input.application_id, input.carrier.relay_origin())?;
-        if input.carrier.application_context() != input.application_id
+        let offer_profile = selfsame_app_identity::profile::ApplicationProfile::recognise(
+            input.offer_profile_octets,
+        )
+        .map_err(|_| UiError::from("PairingCheckpointRefused"))?;
+        if offer_profile.application_id.as_str() != input.application_id
+            || *offer_profile.digest() != input.profile_digest
+            || input.carrier.application_context() != input.application_id
             || input.offer.kind() != CredentialV2Kind::Offer
             || input.intent_approve.kind() != CredentialV2Kind::IntentApprove
             || !matches!(
@@ -333,6 +342,7 @@ impl PendingCredentialV2Completion {
             application_id: input.application_id.into(),
             relay_origin: input.carrier.relay_origin().into(),
             profile_digest: codec::b64url(&input.profile_digest),
+            offer_profile: codec::b64url(input.offer_profile_octets),
             carrier: codec::b64url(&encode_carrier(input.carrier).map_err(checkpoint_error)?),
             offer: codec::b64url(input.offer.as_bytes()),
             intent_approve: codec::b64url(input.intent_approve.as_bytes()),
@@ -356,6 +366,23 @@ impl PendingCredentialV2Completion {
     #[must_use]
     pub const fn checkpoint_generation(&self) -> u64 {
         self.checkpoint_generation
+    }
+
+    /// Decode and re-recognise the exact profile authenticated before the
+    /// claimant opened its relay socket.
+    pub fn offer_profile_octets(&self) -> Result<Vec<u8>> {
+        let octets = decode_bounded(
+            &self.offer_profile,
+            selfsame_app_identity::profile::MAX_PROFILE_OCTETS,
+        )?;
+        let profile = selfsame_app_identity::profile::ApplicationProfile::recognise(&octets)
+            .map_err(|_| UiError::from("PairingCheckpointRefused"))?;
+        let digest = codec::decode_b64url_32(&self.profile_digest)
+            .map_err(|_| UiError::from("PairingCheckpointRefused"))?;
+        if profile.application_id.as_str() != self.application_id || *profile.digest() != digest {
+            return Err(UiError::from("PairingCheckpointRefused"));
+        }
+        Ok(octets)
     }
 
     /// Decode the exact carrier retained by this pending authority.
@@ -504,6 +531,7 @@ impl PendingCredentialV2Completion {
         {
             return Err(UiError::from("PairingCheckpointRefused"));
         }
+        self.offer_profile_octets()?;
         validate_application_and_relay(&self.application_id, &self.relay_origin)?;
         let carrier_bytes = decode_bounded(&self.carrier, 4_096)?;
         let carrier = decode_carrier(&carrier_bytes).map_err(checkpoint_error)?;
@@ -562,11 +590,9 @@ impl InstalledCredentialV2Link {
         }
         let carrier = pending.carrier()?;
         let offer_object = decoded_object(&pending.offer, CredentialV2Kind::Offer)?;
-        let offer = selfsame_pairing::credential_v2::recognise_signed_offer(
-            &profile,
-            offer_object.body(),
-        )
-        .map_err(|_| UiError::from("PairingReceiptRefused"))?;
+        let offer =
+            selfsame_pairing::credential_v2::recognise_signed_offer(&profile, offer_object.body())
+                .map_err(|_| UiError::from("PairingReceiptRefused"))?;
         let facts = pending.payload_facts()?;
         let receipt = selfsame_pairing::credential_v2::recognise_receipt(
             receipt,
@@ -578,10 +604,7 @@ impl InstalledCredentialV2Link {
             application_id: profile.application_id.as_str().into(),
             carrier_ceremony_id: *carrier.carrier_ceremony_id(),
             request_id: offer.request_id,
-            account_principal_digest: *offer
-                .claims
-                .account_provenance()
-                .account_principal_digest(),
+            account_principal_digest: *offer.claims.account_provenance().account_principal_digest(),
             account_scope_id: *offer.claims.account_provenance().account_scope_id(),
             device_did: offer.claims.device_binding().device_did().into(),
             offer_core_digest: *offer.claims.offer_core_digest(),
@@ -604,12 +627,8 @@ impl InstalledCredentialV2Link {
             )
             .map_err(|_| UiError::from("PairingReceiptRefused"))?;
 
-        let compact = selfsame_app_identity::jws::recognise(
-            &facts.grant,
-            grant::GRANT_JWS,
-            &[],
-        )
-        .map_err(|_| UiError::from("PairingReceiptRefused"))?;
+        let compact = selfsame_app_identity::jws::recognise(&facts.grant, grant::GRANT_JWS, &[])
+            .map_err(|_| UiError::from("PairingReceiptRefused"))?;
         let recognised_grant = grant::recognise(&compact.payload)
             .map_err(|_| UiError::from("PairingReceiptRefused"))?;
         let account = selfsame_app_identity::alias::stable_acct_uri(
@@ -637,9 +656,7 @@ impl InstalledCredentialV2Link {
             account_principal_digest: codec::b64url(
                 offer.claims.account_provenance().account_principal_digest(),
             ),
-            account_scope_id: codec::b64url(
-                offer.claims.account_provenance().account_scope_id(),
-            ),
+            account_scope_id: codec::b64url(offer.claims.account_provenance().account_scope_id()),
             account,
             installation_device_did: offer.claims.device_binding().device_did().into(),
             profile_digest: pending.profile_digest.clone(),
@@ -670,8 +687,9 @@ impl InstalledCredentialV2Link {
 
     fn validate(&self) -> Result<()> {
         let profile_octets = decode_bounded(&self.profile, 65_536)?;
-        let profile = selfsame_app_identity::profile::ApplicationProfile::recognise(&profile_octets)
-            .map_err(|_| UiError::from("PairingCheckpointRefused"))?;
+        let profile =
+            selfsame_app_identity::profile::ApplicationProfile::recognise(&profile_octets)
+                .map_err(|_| UiError::from("PairingCheckpointRefused"))?;
         let root_generation = codec::decode_b64url_32(&self.root_generation)
             .map_err(|_| UiError::from("PairingCheckpointRefused"))?;
         let profile_digest = codec::decode_b64url_32(&self.profile_digest)
@@ -714,12 +732,8 @@ impl InstalledCredentialV2Link {
             &self.issuer_did,
             &self.account_authority,
         );
-        let compact = selfsame_app_identity::jws::recognise(
-            &self.grant,
-            grant::GRANT_JWS,
-            &[],
-        )
-        .map_err(|_| UiError::from("PairingCheckpointRefused"))?;
+        let compact = selfsame_app_identity::jws::recognise(&self.grant, grant::GRANT_JWS, &[])
+            .map_err(|_| UiError::from("PairingCheckpointRefused"))?;
         let recognised_grant = grant::recognise(&compact.payload)
             .map_err(|_| UiError::from("PairingCheckpointRefused"))?;
         if account.as_str() != expected_account
@@ -930,6 +944,7 @@ pub fn replace_pending(
     replacement.validate()?;
     if expected.application_id != replacement.application_id
         || expected.root_generation != replacement.root_generation
+        || expected.offer_profile != replacement.offer_profile
         || expected.carrier != replacement.carrier
         || expected.offer != replacement.offer
         || expected.intent_approve != replacement.intent_approve
@@ -1147,7 +1162,10 @@ mod tests {
             finalized_at: 1_800_000_000,
         });
         let encoded = encode_slot(&installed).unwrap();
-        assert_eq!(serde_json::from_str::<CredentialV2LinkSlot>(&encoded).unwrap(), installed);
+        assert_eq!(
+            serde_json::from_str::<CredentialV2LinkSlot>(&encoded).unwrap(),
+            installed
+        );
         assert!(recognise_slot(&encoded).is_err());
         assert!(recognise_slot(&format!(" {encoded}")).is_err());
         assert!(recognise_slot(&encoded.replace(

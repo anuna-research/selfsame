@@ -8,7 +8,16 @@ import axe from "axe-core";
 import puppeteer from "puppeteer";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "src");
+const TAURI_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "src-tauri", "src");
 const MIME = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css" };
+
+test("TEST-1161 pending completion retains the authenticated offer profile for restart recovery", () => {
+  const completion = readFileSync(join(TAURI_ROOT, "cbcl_v2_completion.rs"), "utf8");
+  const commands = readFileSync(join(TAURI_ROOT, "cbcl_v2_commands.rs"), "utf8");
+  assert.match(completion, /offer_profile: String/);
+  assert.match(completion, /pub fn offer_profile_octets\(&self\)/);
+  assert.match(commands, /offer_profile_octets: pending\.claimant\.profile_octets\(\)/);
+});
 
 test("TEST-814 CBCL wallet states are keyboard complete and WCAG-clean", async (t) => {
   const server = createServer((request, response) => {
