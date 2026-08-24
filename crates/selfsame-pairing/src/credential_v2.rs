@@ -20,7 +20,7 @@ use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use selfsame_app_identity::{
     codec, didkey,
     json::{self, Json, Limits},
-    profile::{ApplicationProfile, CbclRelayDescriptor},
+    profile::{ApplicationId, ApplicationProfile, CbclRelayDescriptor},
 };
 use sha2::{Digest, Sha256};
 
@@ -34,8 +34,13 @@ const ACCOUNT_PRINCIPAL_DOMAIN: &str = "selfsame-application-account-principal/v
 const LEGACY_KEY_DOMAIN: &[u8] = b"cbcl-chat credential/v2 legacy key v1\0";
 const ROOM_SET_DOMAIN: &[u8] = b"cbcl-chat credential/v2 room set v1\0";
 const SNAPSHOT_DOMAIN: &[u8] = b"cbcl-chat credential/v2 migration snapshot v1\0";
+const BROWSER_STAGING_DOMAIN: &str =
+    "cbcl-chat credential/v2 browser staging receipt v1";
+const BROWSER_STAGING_SIGNATURE_DOMAIN: &[u8] =
+    b"cbcl-chat credential/v2 browser staging receipt signature v1\0";
 const MAX_OFFER_CORE_BYTES: usize = 56_000;
 const MAX_SIGNED_OFFER_BYTES: usize = 56_640;
+const MAX_BROWSER_STAGING_RECEIPT_BYTES: usize = 4_608;
 
 /// Provenance of one captured Path-A room membership.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -162,6 +167,33 @@ pub struct BuiltCredentialV2AuthorityStatus {
     pub digest: [u8; 32],
     /// Signing key identifier shared with the signed offer.
     pub kid: String,
+}
+
+/// Exact authenticated facts signed by a browser before hub finalisation.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CredentialV2BrowserStagingInput {
+    /// Canonical application identifier.
+    pub application_id: String,
+    /// Sole credential/v2 carrier ceremony identifier.
+    pub carrier_ceremony_id: [u8; 32],
+    /// Stable application-account principal digest.
+    pub account_principal_digest: [u8; 32],
+    /// Application-account scope identifier.
+    pub account_scope_id: [u8; 32],
+    /// Installation device DID bound by the signed offer.
+    pub device_did: String,
+    /// Digest of the exact signed offer core.
+    pub offer_core_digest: [u8; 32],
+    /// Digest of the authenticated reverse payload object.
+    pub payload_digest: [u8; 32],
+    /// Identifier of the delivered account grant.
+    pub grant_id: [u8; 32],
+    /// Canonical account issuer DID verified from resolver closure.
+    pub issuer_did: String,
+    /// Digest of the independently authenticated application profile.
+    pub profile_digest: [u8; 32],
+    /// Public commitment to the Rust-confined recovery token.
+    pub receipt_recovery_commitment: [u8; 32],
 }
 
 /// Closed reciprocal-alias state authenticated by the hub response.
@@ -533,6 +565,133 @@ pub fn device_possession_proof_input(
     ]))
     .map_err(|_| CredentialV2OfferError::Refused)?;
     Ok(labelled_hash(DEVICE_POSSESSION_DOMAIN, &body))
+}
+
+/// Compute the exact 32-octet installation-device signing input for one
+/// browser-local inactive stage.
+pub fn browser_staging_signature_input(
+    input: &CredentialV2BrowserStagingInput,
+) -> Result<[u8; 32], CredentialV2OfferError> {
+    let unsigned = cbor2::to_canonical_vec(&Value::Array(browser_staging_members(input)?))
+        .map_err(|_| CredentialV2OfferError::Refused)?;
+    Ok(labelled_hash(BROWSER_STAGING_SIGNATURE_DOMAIN, &unsigned))
+}
+
+/// Verify the installation-device signature and construct the one canonical
+/// browser staging receipt accepted by the hub.
+pub fn build_browser_staging_receipt(
+    input: &CredentialV2BrowserStagingInput,
+    device_public_key: [u8; 32],
+    signature: [u8; 64],
+) -> Result<Vec<u8>, CredentialV2OfferError> {
+    didkey::matches_jwk(&input.device_did, &device_public_key)
+        .map_err(|_| CredentialV2OfferError::Refused)?;
+    VerifyingKey::from_bytes(&device_public_key)
+        .map_err(|_| CredentialV2OfferError::Refused)?
+        .verify(
+            &browser_staging_signature_input(input)?,
+            &Signature::from_bytes(&signature),
+        )
+        .map_err(|_| CredentialV2OfferError::Refused)?;
+    let mut members = browser_staging_members(input)?;
+    members.push(Value::Bytes(signature.to_vec()));
+    let receipt = cbor2::to_canonical_vec(&Value::Array(members))
+        .map_err(|_| CredentialV2OfferError::Refused)?;
+    if receipt.is_empty() || receipt.len() > MAX_BROWSER_STAGING_RECEIPT_BYTES {
+        return Err(CredentialV2OfferError::Refused);
+    }
+    Ok(receipt)
+}
+
+/// Recognise one complete canonical staging receipt, require every expected
+/// held fact, and verify its installation-device signature.
+pub fn recognise_browser_staging_receipt(
+    receipt: &[u8],
+    expected: &CredentialV2BrowserStagingInput,
+    device_public_key: [u8; 32],
+) -> Result<(), CredentialV2OfferError> {
+    if receipt.is_empty() || receipt.len() > MAX_BROWSER_STAGING_RECEIPT_BYTES {
+        return Err(CredentialV2OfferError::Refused);
+    }
+    let mut cursor = std::io::Cursor::new(receipt);
+    let value: Value =
+        ciborium::de::from_reader(&mut cursor).map_err(|_| CredentialV2OfferError::Refused)?;
+    if cursor.position() != receipt.len() as u64
+        || cbor2::to_canonical_vec(&value).map_err(|_| CredentialV2OfferError::Refused)? != receipt
+    {
+        return Err(CredentialV2OfferError::Refused);
+    }
+    let members = value.as_array().ok_or(CredentialV2OfferError::Refused)?;
+    let [domain, application_id, ceremony, principal, scope, device_did, offer, payload, grant, issuer, profile, commitment, signature] =
+        members.as_slice()
+    else {
+        return Err(CredentialV2OfferError::Refused);
+    };
+    if domain.as_text() != Some(BROWSER_STAGING_DOMAIN) {
+        return Err(CredentialV2OfferError::Refused);
+    }
+    let parsed = CredentialV2BrowserStagingInput {
+        application_id: cbor_text(application_id)?.into(),
+        carrier_ceremony_id: cbor_fixed(ceremony)?,
+        account_principal_digest: cbor_fixed(principal)?,
+        account_scope_id: cbor_fixed(scope)?,
+        device_did: cbor_text(device_did)?.into(),
+        offer_core_digest: cbor_fixed(offer)?,
+        payload_digest: cbor_fixed(payload)?,
+        grant_id: cbor_fixed(grant)?,
+        issuer_did: cbor_text(issuer)?.into(),
+        profile_digest: cbor_fixed(profile)?,
+        receipt_recovery_commitment: cbor_fixed(commitment)?,
+    };
+    let signature: [u8; 64] = cbor_fixed(signature)?;
+    if &parsed != expected
+        || build_browser_staging_receipt(&parsed, device_public_key, signature)? != receipt
+    {
+        return Err(CredentialV2OfferError::Refused);
+    }
+    Ok(())
+}
+
+fn browser_staging_members(
+    input: &CredentialV2BrowserStagingInput,
+) -> Result<Vec<Value>, CredentialV2OfferError> {
+    let application_id = ApplicationId::parse(&input.application_id)
+        .map_err(|_| CredentialV2OfferError::Refused)?;
+    if application_id.as_str() != input.application_id
+        || input.application_id.len() > 2_048
+        || input.device_did.len() != 56
+        || didkey::decode(&input.device_did).is_err()
+        || !valid_bound_did(&input.issuer_did)
+    {
+        return Err(CredentialV2OfferError::Refused);
+    }
+    Ok(vec![
+        Value::Text(BROWSER_STAGING_DOMAIN.into()),
+        Value::Text(input.application_id.clone()),
+        Value::Bytes(input.carrier_ceremony_id.to_vec()),
+        Value::Bytes(input.account_principal_digest.to_vec()),
+        Value::Bytes(input.account_scope_id.to_vec()),
+        Value::Text(input.device_did.clone()),
+        Value::Bytes(input.offer_core_digest.to_vec()),
+        Value::Bytes(input.payload_digest.to_vec()),
+        Value::Bytes(input.grant_id.to_vec()),
+        Value::Text(input.issuer_did.clone()),
+        Value::Bytes(input.profile_digest.to_vec()),
+        Value::Bytes(input.receipt_recovery_commitment.to_vec()),
+    ])
+}
+
+fn cbor_text(value: &Value) -> Result<&str, CredentialV2OfferError> {
+    value.as_text().ok_or(CredentialV2OfferError::Refused)
+}
+
+fn cbor_fixed<const N: usize>(value: &Value) -> Result<[u8; N], CredentialV2OfferError> {
+    value
+        .as_bytes()
+        .ok_or(CredentialV2OfferError::Refused)?
+        .as_slice()
+        .try_into()
+        .map_err(|_| CredentialV2OfferError::Refused)
 }
 
 /// Build and sign one exact reciprocal-alias authority response.

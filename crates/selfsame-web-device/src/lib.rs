@@ -774,6 +774,28 @@ impl CredentialV2BrowserAllocatorSession {
         .to_string())
     }
 
+    /// Return the exact digest the browser installation key signs after the
+    /// authenticated payload has been durably staged.
+    pub fn staging_receipt_signature_input(&self) -> Result<Vec<u8>, JsError> {
+        selfsame_pairing::credential_v2::browser_staging_signature_input(
+            &self.browser_staging_input()?,
+        )
+        .map(|value| value.to_vec())
+        .map_err(|_| JsError::new("the credential/v2 staging receipt input was refused"))
+    }
+
+    /// Verify the browser installation signature and return the one canonical
+    /// staging receipt accepted by the hub.
+    pub fn build_staging_receipt(&self, signature: &[u8]) -> Result<Vec<u8>, JsError> {
+        let signature: [u8; 64] = fixed_browser_bytes(signature, "staging receipt signature")?;
+        selfsame_pairing::credential_v2::build_browser_staging_receipt(
+            &self.browser_staging_input()?,
+            self.expected_allocator_key,
+            signature,
+        )
+        .map_err(|_| JsError::new("the credential/v2 staging receipt was refused"))
+    }
+
     /// Burn the local attempt without releasing another protocol frame.
     pub fn cancel(&mut self) -> String {
         self.session = None;
@@ -804,6 +826,45 @@ impl CredentialV2BrowserAllocatorSession {
             }
         }
         Ok(())
+    }
+
+    fn browser_staging_input(
+        &self,
+    ) -> Result<selfsame_pairing::credential_v2::CredentialV2BrowserStagingInput, JsError> {
+        let object = self
+            .last_received_object
+            .as_ref()
+            .filter(|object| {
+                object.kind() == cbcl_pairing::credential_v2::CredentialV2Kind::Payload
+            })
+            .ok_or_else(|| JsError::new("the credential/v2 payload is unavailable"))?;
+        let payload = self
+            .body_authority
+            .retained_payload()
+            .map_err(|_| JsError::new("the credential/v2 payload is unavailable"))?;
+        let receipt_recovery_commitment = self
+            .session
+            .as_ref()
+            .ok_or_else(|| JsError::new("the credential/v2 attempt was cancelled"))?
+            .receipt_recovery_commitment()
+            .map_err(|_| {
+                JsError::new("the credential/v2 receipt-recovery commitment is unavailable")
+            })?;
+        Ok(
+            selfsame_pairing::credential_v2::CredentialV2BrowserStagingInput {
+                application_id: self.profile.application_id.as_str().into(),
+                carrier_ceremony_id: self.carrier_ceremony_id,
+                account_principal_digest: *payload.account_principal_digest(),
+                account_scope_id: *payload.account_scope_id(),
+                device_did: payload.device_did().into(),
+                offer_core_digest: *payload.offer_core_digest(),
+                payload_digest: object.content_hash(),
+                grant_id: *payload.grant_id(),
+                issuer_did: payload.preview_issuer_did().into(),
+                profile_digest: *self.profile.digest(),
+                receipt_recovery_commitment,
+            },
+        )
     }
 }
 
