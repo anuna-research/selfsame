@@ -347,6 +347,7 @@ pub struct CredentialV2BrowserAllocatorSession {
     authority_status: Option<selfsame_pairing::credential_v2::CredentialV2AuthorityStatus>,
     authority_response: Option<Vec<u8>>,
     body_authority: selfsame_pairing::credential_v2::CredentialV2BodyAuthority,
+    last_received_object: Option<cbcl_pairing::credential_v2::CredentialV2Object>,
     presence_code: Option<Zeroizing<String>>,
 }
 
@@ -431,6 +432,7 @@ impl CredentialV2BrowserAllocatorSession {
             authority_status: None,
             authority_response: None,
             body_authority,
+            last_received_object: None,
             presence_code: Some(Zeroizing::new(presence_code)),
         })
     }
@@ -642,6 +644,51 @@ impl CredentialV2BrowserAllocatorSession {
         ))
     }
 
+    /// After an authenticated claimant preparation and the person's browser
+    /// comparison action, seal the signed comparison result behind the
+    /// allocator checkpoint barrier.
+    pub fn prepare_comparison(
+        &mut self,
+        now: u64,
+        checkpoint_nonce: &[u8],
+    ) -> Result<String, JsError> {
+        let preparation = self
+            .last_received_object
+            .as_ref()
+            .filter(|object| {
+                object.kind() == cbcl_pairing::credential_v2::CredentialV2Kind::Preparation
+            })
+            .ok_or_else(|| JsError::new("the credential/v2 preparation is unavailable"))?;
+        let authority_response = self
+            .authority_response
+            .as_deref()
+            .ok_or_else(|| JsError::new("the credential/v2 authority response is unavailable"))?;
+        let object = self
+            .body_authority
+            .comparison(preparation, authority_response)
+            .map_err(|_| JsError::new("the credential/v2 comparison was refused"))?;
+        let checkpoint_nonce: [u8; 12] = fixed_browser_bytes(checkpoint_nonce, "checkpoint nonce")?;
+        let effects = self
+            .session
+            .as_mut()
+            .ok_or_else(|| JsError::new("the credential/v2 attempt was cancelled"))?
+            .prepare_application_object(
+                &object,
+                now,
+                cbcl_pairing::credential_v2::CredentialV2CheckpointNonce::from_csprng(
+                    checkpoint_nonce,
+                ),
+            )
+            .map_err(|_| JsError::new("the credential/v2 comparison release was refused"))?;
+        Ok(v2_allocator_effects_json(
+            &effects,
+            &self.request_id,
+            &self.intent_nonce,
+            &self.carrier_ceremony_id,
+            self.presence_code.as_ref().map(|value| value.as_str()),
+        ))
+    }
+
     /// Burn the local attempt without releasing another protocol frame.
     pub fn cancel(&mut self) -> String {
         self.session = None;
@@ -654,16 +701,21 @@ impl CredentialV2BrowserAllocatorSession {
         effects: &[cbcl_pairing::credential_v2::CredentialV2AllocatorEffect],
     ) -> Result<(), JsError> {
         for effect in effects {
-            if let cbcl_pairing::credential_v2::CredentialV2AllocatorEffect::Established {
-                transcript_hash,
-            } = effect
-            {
-                if self.transcript_hash.replace(*transcript_hash).is_some() {
-                    return Err(JsError::new(
-                        "the credential/v2 transcript was established twice",
-                    ));
+            match effect {
+                cbcl_pairing::credential_v2::CredentialV2AllocatorEffect::Established {
+                    transcript_hash,
+                } => {
+                    if self.transcript_hash.replace(*transcript_hash).is_some() {
+                        return Err(JsError::new(
+                            "the credential/v2 transcript was established twice",
+                        ));
+                    }
+                    self.presence_code = None;
                 }
-                self.presence_code = None;
+                cbcl_pairing::credential_v2::CredentialV2AllocatorEffect::ReceivedObject {
+                    object,
+                } => self.last_received_object = Some(object.clone()),
+                _ => {}
             }
         }
         Ok(())
