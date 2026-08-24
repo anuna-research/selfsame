@@ -1440,7 +1440,7 @@ produce only refusal. The browser cannot replace the signed response with an
 outcome token or digest.
 
 `migrationConfirmationDigest` is the exact raw digest defined by cbcl-bus
-SPEC-053 0.17.9-draft CON-012. The wallet recomputes it from the authenticated
+SPEC-053 0.17.13-draft CON-012. The wallet recomputes it from the authenticated
 offer and its local `previewIssuerDid`. It copies no browser-supplied digest.
 
 The payload grant is one verbatim compact JWS in ASCII. It contains exactly
@@ -1851,7 +1851,7 @@ Require credential/v2 to reach no classified credential-v1 site. Require
 frozen v1 bytes to remain byte-identical.
 
 Require this Selfsame parent and its open review gate. Require cbcl-bus
-SPEC-053 0.17.9-draft to name this coordinated review set.
+SPEC-053 0.17.13-draft to name this coordinated review set.
 
 Require the cbcl-pairing parent consumer pointer here. Require generation
 family, version, session, and synthesis trajectory in this parent,
