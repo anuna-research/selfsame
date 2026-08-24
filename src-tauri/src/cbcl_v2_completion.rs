@@ -1537,13 +1537,14 @@ pub(crate) fn unlink_local(expected: &LocalCredentialV2Link) -> Result<()> {
     if recognise_slot(&encoded)? != expected_slot {
         return Err(UiError::from("PairingApplicationNotLinked"));
     }
-    let policy_was_present = crate::cbcl_v2_policy::state(application_id, relay_origin)?
-        == crate::cbcl_v2_policy::ExactPairState::TrustedPair;
+    if crate::cbcl_v2_policy::state(application_id, relay_origin)?
+        != crate::cbcl_v2_policy::ExactPairState::TrustedPair
+    {
+        return Err(UiError::from("PairingCheckpointRefused"));
+    }
     crate::cbcl_v2_policy::remove(application_id, relay_origin)?;
     if store::delete(&entry).is_err() {
-        if policy_was_present {
-            let _ = crate::cbcl_v2_policy::insert(application_id, relay_origin);
-        }
+        let _ = crate::cbcl_v2_policy::insert(application_id, relay_origin);
         return Err(UiError::from("PairingCheckpointUnavailable"));
     }
     let mut index = load_index_locked()?;
@@ -2330,6 +2331,19 @@ mod tests {
         );
         remove_pending(&other_attempt).unwrap();
 
+        // Root replacement is an attempt-identity change in its own right;
+        // compensation for the old root must retain the new root's slot.
+        let mut other_root = pending.clone();
+        other_root.root_generation = codec::b64url(&root_generation(&[0x89; 32]));
+        other_root.validate().unwrap();
+        persist_pending(&pending).unwrap();
+        {
+            let _failure_cleanup = PrePayloadPendingCleanup::new(pending.clone());
+            overwrite_test_slot(&CredentialV2LinkSlot::Pending(other_root.clone()));
+        }
+        assert_eq!(load_pending(pending.application_id()).unwrap(), other_root);
+        remove_pending(&other_root).unwrap();
+
         // A stale pre-payload guard must never delete a subsequently installed
         // capability for the application.
         let installed = installed_reload_fixture();
@@ -2343,6 +2357,7 @@ mod tests {
         unlink_local(&installed_local).unwrap();
 
         // A failed attempt no longer blocks a fresh ceremony for the same app.
+        crate::cbcl_v2_policy::insert(pending.application_id(), &pending.relay_origin).unwrap();
         persist_pending(&pending).unwrap();
         let summaries = pending_links().unwrap();
         assert_eq!(summaries.len(), 1);
@@ -2365,6 +2380,7 @@ mod tests {
         // Presence can be granted for one exact slot and race with a later
         // replacement. Confirmed unlink must compare-and-delete, refuse the
         // stale selection, and retain the replacement.
+        crate::cbcl_v2_policy::insert(pending.application_id(), &pending.relay_origin).unwrap();
         persist_pending(&pending).unwrap();
         let stale_selection = load_local_link(pending.application_id()).unwrap();
         overwrite_test_slot(&CredentialV2LinkSlot::Pending(other_attempt.clone()));
@@ -2377,6 +2393,21 @@ mod tests {
             other_attempt
         );
         remove_pending(&other_attempt).unwrap();
+
+        // A slot selected while its exact-pair policy was trusted cannot be
+        // deleted after that policy changes under the selection.
+        crate::cbcl_v2_policy::insert(pending.application_id(), &pending.relay_origin).unwrap();
+        persist_pending(&pending).unwrap();
+        let stale_policy_selection = load_local_link(pending.application_id()).unwrap();
+        crate::cbcl_v2_policy::remove(pending.application_id(), &pending.relay_origin).unwrap();
+        assert_eq!(
+            unlink_local(&stale_policy_selection)
+                .unwrap_err()
+                .to_string(),
+            "PairingCheckpointRefused"
+        );
+        assert_eq!(load_pending(pending.application_id()).unwrap(), pending);
+        remove_pending(&pending).unwrap();
 
         // The confirmed escape also releases the exact app slot for retry.
         persist_pending(&pending).unwrap();
