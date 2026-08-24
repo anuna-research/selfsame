@@ -264,19 +264,29 @@ enum PendingCredentialV2Stage {
 pub struct InstalledCredentialV2Link {
     version: u8,
     root_generation: String,
+    profile: String,
     grant: String,
     grant_digest: String,
+    grant_id: String,
+    credential_id: String,
     application_id: String,
     account_principal_digest: String,
     account_scope_id: String,
+    account: String,
     installation_device_did: String,
     profile_digest: String,
     account_authority: String,
     issuer_did: String,
+    resolver_closure: String,
     offer_core_digest: String,
+    offer_kid: String,
     carrier_ceremony_id: String,
+    request_id: String,
+    payload_digest: String,
+    receipt_recovery_commitment: String,
     final_status_jws: String,
     final_status_digest: String,
+    finalized_at: u64,
 }
 
 /// Exactly one durable state occupies an application's credential/v2 slot.
@@ -346,6 +356,40 @@ impl PendingCredentialV2Completion {
     #[must_use]
     pub const fn checkpoint_generation(&self) -> u64 {
         self.checkpoint_generation
+    }
+
+    /// Decode the exact carrier retained by this pending authority.
+    pub fn carrier(&self) -> Result<CredentialV2Carrier> {
+        self.validate()?;
+        decode_carrier(&decode_bounded(&self.carrier, 4_096)?).map_err(checkpoint_error)
+    }
+
+    /// Return the exact payload-stage grant and closure facts.
+    pub(crate) fn payload_facts(&self) -> Result<CredentialV2PayloadFacts> {
+        self.validate()?;
+        let PendingCredentialV2Stage::PayloadPrepared {
+            grant_id,
+            issuer_did,
+            grant,
+            resolver_closure,
+            payload_content_hash,
+            ..
+        } = &self.stage
+        else {
+            return Err(UiError::from("PairingCheckpointRefused"));
+        };
+        Ok(CredentialV2PayloadFacts {
+            grant_id: codec::decode_b64url_32(grant_id)
+                .map_err(|_| UiError::from("PairingCheckpointRefused"))?,
+            issuer_did: issuer_did.clone(),
+            grant: grant.clone(),
+            resolver_closure: decode_bounded(
+                resolver_closure,
+                selfsame_app_identity_net::state::MAX_CLOSURE_OCTETS,
+            )?,
+            payload_content_hash: codec::decode_b64url_32(payload_content_hash)
+                .map_err(|_| UiError::from("PairingCheckpointRefused"))?,
+        })
     }
 
     pub fn planned(&self, effect_time: i64, grant_id: [u8; 32]) -> Result<Self> {
@@ -485,6 +529,231 @@ impl PendingCredentialV2Completion {
         }
         self.stage.validate(&self.preview_issuer_did)?;
         Ok(())
+    }
+}
+
+/// Exact locally durable payload facts needed for hub-receipt verification.
+pub(crate) struct CredentialV2PayloadFacts {
+    pub grant_id: [u8; 32],
+    pub issuer_did: String,
+    pub grant: String,
+    pub resolver_closure: Vec<u8>,
+    pub payload_content_hash: [u8; 32],
+}
+
+impl InstalledCredentialV2Link {
+    /// Build an installed candidate only from the pending payload and the
+    /// endpoint-authenticated allocator Receipt.
+    pub(crate) fn from_authenticated_receipt(
+        pending: &PendingCredentialV2Completion,
+        profile_octets: &[u8],
+        receipt: &CredentialV2Object,
+        receipt_recovery_commitment: [u8; 32],
+    ) -> Result<Self> {
+        pending.validate()?;
+        let profile = selfsame_app_identity::profile::ApplicationProfile::recognise(profile_octets)
+            .map_err(|_| UiError::from("PairingReceiptRefused"))?;
+        if profile.application_id.as_str() != pending.application_id
+            || *profile.digest()
+                != codec::decode_b64url_32(&pending.profile_digest)
+                    .map_err(|_| UiError::from("PairingReceiptRefused"))?
+        {
+            return Err(UiError::from("PairingReceiptRefused"));
+        }
+        let carrier = pending.carrier()?;
+        let offer_object = decoded_object(&pending.offer, CredentialV2Kind::Offer)?;
+        let offer = selfsame_pairing::credential_v2::recognise_signed_offer(
+            &profile,
+            offer_object.body(),
+        )
+        .map_err(|_| UiError::from("PairingReceiptRefused"))?;
+        let facts = pending.payload_facts()?;
+        let receipt = selfsame_pairing::credential_v2::recognise_receipt(
+            receipt,
+            *carrier.carrier_ceremony_id(),
+            facts.payload_content_hash,
+        )
+        .map_err(|_| UiError::from("PairingReceiptRefused"))?;
+        let final_status = || selfsame_pairing::credential_v2::CredentialV2FinalStatusInput {
+            application_id: profile.application_id.as_str().into(),
+            carrier_ceremony_id: *carrier.carrier_ceremony_id(),
+            request_id: offer.request_id,
+            account_principal_digest: *offer
+                .claims
+                .account_provenance()
+                .account_principal_digest(),
+            account_scope_id: *offer.claims.account_provenance().account_scope_id(),
+            device_did: offer.claims.device_binding().device_did().into(),
+            offer_core_digest: *offer.claims.offer_core_digest(),
+            payload_digest: facts.payload_content_hash,
+            grant_id: facts.grant_id,
+            issuer_did: facts.issuer_did.clone(),
+            receipt_recovery_commitment,
+            finalized_at: 0,
+        };
+        let finalized_at =
+            selfsame_pairing::credential_v2::recognise_final_status_with_embedded_time(
+                &profile,
+                &receipt.final_status_jws,
+                receipt.final_status_digest,
+                |finalized_at| selfsame_pairing::credential_v2::CredentialV2FinalStatusInput {
+                    finalized_at,
+                    ..final_status()
+                },
+                &offer.kid,
+            )
+            .map_err(|_| UiError::from("PairingReceiptRefused"))?;
+
+        let compact = selfsame_app_identity::jws::recognise(
+            &facts.grant,
+            grant::GRANT_JWS,
+            &[],
+        )
+        .map_err(|_| UiError::from("PairingReceiptRefused"))?;
+        let recognised_grant = grant::recognise(&compact.payload)
+            .map_err(|_| UiError::from("PairingReceiptRefused"))?;
+        let account = selfsame_app_identity::alias::stable_acct_uri(
+            &facts.issuer_did,
+            &profile.account_authority,
+        );
+        if recognised_grant.issuer != facts.issuer_did
+            || recognised_grant.token != codec::b64url(&facts.grant_id)
+            || recognised_grant.application != profile.application_id.as_str()
+            || recognised_grant.account.as_str() != account
+            || recognised_grant.device_did != offer.claims.device_binding().device_did()
+            || recognised_grant.permissions != offer.claims.permissions()
+        {
+            return Err(UiError::from("PairingReceiptRefused"));
+        }
+        let installed = Self {
+            version: SLOT_VERSION,
+            root_generation: pending.root_generation.clone(),
+            profile: codec::b64url(profile_octets),
+            grant_digest: codec::b64url(&Sha256::digest(facts.grant.as_bytes())),
+            grant: facts.grant,
+            grant_id: codec::b64url(&facts.grant_id),
+            credential_id: recognised_grant.id,
+            application_id: pending.application_id.clone(),
+            account_principal_digest: codec::b64url(
+                offer.claims.account_provenance().account_principal_digest(),
+            ),
+            account_scope_id: codec::b64url(
+                offer.claims.account_provenance().account_scope_id(),
+            ),
+            account,
+            installation_device_did: offer.claims.device_binding().device_did().into(),
+            profile_digest: pending.profile_digest.clone(),
+            account_authority: profile.account_authority,
+            issuer_did: facts.issuer_did,
+            resolver_closure: codec::b64url(&facts.resolver_closure),
+            offer_core_digest: codec::b64url(offer.claims.offer_core_digest()),
+            offer_kid: offer.kid,
+            carrier_ceremony_id: codec::b64url(carrier.carrier_ceremony_id()),
+            request_id: codec::b64url(&offer.request_id),
+            payload_digest: codec::b64url(&facts.payload_content_hash),
+            receipt_recovery_commitment: codec::b64url(&receipt_recovery_commitment),
+            final_status_jws: receipt.final_status_jws,
+            final_status_digest: codec::b64url(&receipt.final_status_digest),
+            finalized_at,
+        };
+        installed.validate()?;
+        Ok(installed)
+    }
+
+    pub(crate) fn account(&self) -> Result<AcctUri> {
+        AcctUri::parse(&self.account).map_err(|_| UiError::from("PairingReceiptRefused"))
+    }
+
+    pub(crate) fn issuer_did(&self) -> &str {
+        &self.issuer_did
+    }
+
+    fn validate(&self) -> Result<()> {
+        let profile_octets = decode_bounded(&self.profile, 65_536)?;
+        let profile = selfsame_app_identity::profile::ApplicationProfile::recognise(&profile_octets)
+            .map_err(|_| UiError::from("PairingCheckpointRefused"))?;
+        let root_generation = codec::decode_b64url_32(&self.root_generation)
+            .map_err(|_| UiError::from("PairingCheckpointRefused"))?;
+        let profile_digest = codec::decode_b64url_32(&self.profile_digest)
+            .map_err(|_| UiError::from("PairingCheckpointRefused"))?;
+        let grant_id = codec::decode_b64url_32(&self.grant_id)
+            .map_err(|_| UiError::from("PairingCheckpointRefused"))?;
+        let account_principal_digest = codec::decode_b64url_32(&self.account_principal_digest)
+            .map_err(|_| UiError::from("PairingCheckpointRefused"))?;
+        let account_scope_id = codec::decode_b64url_32(&self.account_scope_id)
+            .map_err(|_| UiError::from("PairingCheckpointRefused"))?;
+        let offer_core_digest = codec::decode_b64url_32(&self.offer_core_digest)
+            .map_err(|_| UiError::from("PairingCheckpointRefused"))?;
+        let carrier_ceremony_id = codec::decode_b64url_32(&self.carrier_ceremony_id)
+            .map_err(|_| UiError::from("PairingCheckpointRefused"))?;
+        let request_id = codec::decode_b64url_32(&self.request_id)
+            .map_err(|_| UiError::from("PairingCheckpointRefused"))?;
+        let payload_digest = codec::decode_b64url_32(&self.payload_digest)
+            .map_err(|_| UiError::from("PairingCheckpointRefused"))?;
+        let receipt_recovery_commitment =
+            codec::decode_b64url_32(&self.receipt_recovery_commitment)
+                .map_err(|_| UiError::from("PairingCheckpointRefused"))?;
+        let final_status_digest = codec::decode_b64url_32(&self.final_status_digest)
+            .map_err(|_| UiError::from("PairingCheckpointRefused"))?;
+        if self.version != SLOT_VERSION
+            || root_generation == [0; 32]
+            || profile.application_id.as_str() != self.application_id
+            || *profile.digest() != profile_digest
+            || profile.account_authority != self.account_authority
+            || self.finalized_at == 0
+            || self.final_status_jws.is_empty()
+            || self.final_status_jws.len() > 8_192
+            || Sha256::digest(self.grant.as_bytes()).as_slice()
+                != codec::decode_b64url_32(&self.grant_digest)
+                    .map_err(|_| UiError::from("PairingCheckpointRefused"))?
+        {
+            return Err(UiError::from("PairingCheckpointRefused"));
+        }
+        let account = self.account()?;
+        let expected_account = selfsame_app_identity::alias::stable_acct_uri(
+            &self.issuer_did,
+            &self.account_authority,
+        );
+        let compact = selfsame_app_identity::jws::recognise(
+            &self.grant,
+            grant::GRANT_JWS,
+            &[],
+        )
+        .map_err(|_| UiError::from("PairingCheckpointRefused"))?;
+        let recognised_grant = grant::recognise(&compact.payload)
+            .map_err(|_| UiError::from("PairingCheckpointRefused"))?;
+        if account.as_str() != expected_account
+            || recognised_grant.id != self.credential_id
+            || recognised_grant.issuer != self.issuer_did
+            || recognised_grant.token != codec::b64url(&grant_id)
+            || recognised_grant.application != self.application_id
+            || recognised_grant.account != account
+            || recognised_grant.device_did != self.installation_device_did
+        {
+            return Err(UiError::from("PairingCheckpointRefused"));
+        }
+        validate_resolver_closure(&self.resolver_closure, &self.issuer_did)?;
+        selfsame_pairing::credential_v2::recognise_final_status(
+            &profile,
+            &self.final_status_jws,
+            final_status_digest,
+            &selfsame_pairing::credential_v2::CredentialV2FinalStatusInput {
+                application_id: self.application_id.clone(),
+                carrier_ceremony_id,
+                request_id,
+                account_principal_digest,
+                account_scope_id,
+                device_did: self.installation_device_did.clone(),
+                offer_core_digest,
+                payload_digest,
+                grant_id,
+                issuer_did: self.issuer_did.clone(),
+                receipt_recovery_commitment,
+                finalized_at: self.finalized_at,
+            },
+            &self.offer_kid,
+        )
+        .map_err(|_| UiError::from("PairingCheckpointRefused"))
     }
 }
 
@@ -685,6 +954,67 @@ pub fn replace_pending(
     }
 }
 
+/// Load and fully recognise the exact pending application slot.
+pub fn load_pending(application_id: &str) -> Result<PendingCredentialV2Completion> {
+    let _guard = SLOT_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let entry = slot_name(application_id)?;
+    let encoded = store::get(&entry)
+        .map_err(|_| UiError::from("PairingCheckpointUnavailable"))?
+        .ok_or_else(|| UiError::from("PairingCheckpointRefused"))?;
+    match recognise_slot(&encoded)? {
+        CredentialV2LinkSlot::Pending(pending) if pending.application_id == application_id => {
+            Ok(pending)
+        }
+        CredentialV2LinkSlot::Pending(_) | CredentialV2LinkSlot::Installed(_) => {
+            Err(UiError::from("PairingCheckpointRefused"))
+        }
+    }
+}
+
+/// Atomically replace the exact pending record with an installed link after a
+/// freshly fetched reciprocal WebFinger assertion has been verified.
+pub fn install(
+    expected: &PendingCredentialV2Completion,
+    installed: &InstalledCredentialV2Link,
+    jrd: &selfsame_app_identity::alias::Jrd,
+) -> Result<()> {
+    let _guard = SLOT_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    expected.validate()?;
+    installed.validate()?;
+    if expected.application_id != installed.application_id
+        || expected.root_generation != installed.root_generation
+        || expected.profile_digest != installed.profile_digest
+    {
+        return Err(UiError::from("PairingReceiptRefused"));
+    }
+    let account = installed.account()?;
+    selfsame_app_identity::alias::verify_reciprocal_binding(
+        jrd,
+        &account,
+        installed.issuer_did(),
+        &[account.as_str().to_owned()],
+    )
+    .map_err(|_| UiError::from("PairingAuthorityRefused"))?;
+    let entry = slot_name(&expected.application_id)?;
+    let encoded = store::get(&entry)
+        .map_err(|_| UiError::from("PairingCheckpointUnavailable"))?
+        .ok_or_else(|| UiError::from("PairingCheckpointRefused"))?;
+    match recognise_slot(&encoded)? {
+        CredentialV2LinkSlot::Pending(current) if current == *expected => {
+            let encoded = encode_slot(&CredentialV2LinkSlot::Installed(installed.clone()))?;
+            store::set(&entry, &encoded).map_err(|_| UiError::from("PairingCheckpointUnavailable"))
+        }
+        CredentialV2LinkSlot::Installed(current) if current == *installed => Ok(()),
+        CredentialV2LinkSlot::Pending(_) | CredentialV2LinkSlot::Installed(_) => {
+            Err(UiError::from("PairingCheckpointRefused"))
+        }
+    }
+}
+
 fn encode_slot(slot: &CredentialV2LinkSlot) -> Result<String> {
     let encoded =
         serde_json::to_string(slot).map_err(|_| UiError::from("PairingCheckpointRefused"))?;
@@ -705,7 +1035,7 @@ fn recognise_slot(encoded: &str) -> Result<CredentialV2LinkSlot> {
     }
     match &slot {
         CredentialV2LinkSlot::Pending(value) => value.validate()?,
-        CredentialV2LinkSlot::Installed(_) => {}
+        CredentialV2LinkSlot::Installed(value) => value.validate()?,
     }
     Ok(slot)
 }
@@ -792,22 +1122,33 @@ mod tests {
         let installed = CredentialV2LinkSlot::Installed(InstalledCredentialV2Link {
             version: 1,
             root_generation: codec::b64url(&[1; 32]),
+            profile: codec::b64url(b"{}"),
             grant: "a.b.c".into(),
             grant_digest: codec::b64url(&[2; 32]),
+            grant_id: codec::b64url(&[9; 32]),
+            credential_id: "did:crdt:x#grant-test".into(),
             application_id: "https://chat.anuna.io/selfsame/v2".into(),
             account_principal_digest: codec::b64url(&[3; 32]),
             account_scope_id: codec::b64url(&[4; 32]),
+            account: "acct:ss-test@accounts.chat.anuna.io".into(),
             installation_device_did: format!("did:key:z6Mk{}", "1".repeat(44)),
             profile_digest: codec::b64url(&[5; 32]),
             account_authority: "accounts.chat.anuna.io".into(),
             issuer_did: "did:crdt:z6Mk123".into(),
+            resolver_closure: codec::b64url(b"{}"),
             offer_core_digest: codec::b64url(&[6; 32]),
+            offer_kid: "https://chat.anuna.io/selfsame/application#test".into(),
             carrier_ceremony_id: codec::b64url(&[7; 32]),
+            request_id: codec::b64url(&[10; 32]),
+            payload_digest: codec::b64url(&[11; 32]),
+            receipt_recovery_commitment: codec::b64url(&[12; 32]),
             final_status_jws: "a.b.c".into(),
             final_status_digest: codec::b64url(&[8; 32]),
+            finalized_at: 1_800_000_000,
         });
         let encoded = encode_slot(&installed).unwrap();
-        assert_eq!(recognise_slot(&encoded).unwrap(), installed);
+        assert_eq!(serde_json::from_str::<CredentialV2LinkSlot>(&encoded).unwrap(), installed);
+        assert!(recognise_slot(&encoded).is_err());
         assert!(recognise_slot(&format!(" {encoded}")).is_err());
         assert!(recognise_slot(&encoded.replace(
             "\"state\":\"installed\"",

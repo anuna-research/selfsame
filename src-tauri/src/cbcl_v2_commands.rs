@@ -29,6 +29,9 @@ pub struct PendingCredentialV2Pairing {
     intent_approve: Option<cbcl_pairing::credential_v2::CredentialV2Object>,
     preview_did: Option<String>,
     comparison: Option<cbcl_pairing::credential_v2::CredentialV2Object>,
+    recovered_receipt: Option<
+        cbcl_pairing::credential_v2::CredentialV2ClaimantRecoveredReceipt,
+    >,
 }
 
 /// Authenticated preliminary consent values; no peer string is display authority.
@@ -84,6 +87,14 @@ pub struct CredentialV2PreliminaryDecisionView {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CredentialV2FinalDecisionView {
+    outcome: &'static str,
+}
+
+/// Terminal wallet result after the reciprocal binding and installed slot are
+/// both durable.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CredentialV2FinishView {
     outcome: &'static str,
 }
 
@@ -559,6 +570,86 @@ pub async fn cbcl_v2_final_decide(
     })
 }
 
+/// Wait for the allocator's authenticated Receipt, verify the hub's immutable
+/// status and live reciprocal account binding, atomically install the grant,
+/// and only then release the receipt acknowledgement.
+#[tauri::command]
+pub async fn cbcl_v2_finish(
+    passcode: Option<String>,
+    session: State<'_, AppSession>,
+) -> Result<CredentialV2FinishView> {
+    let passcode = passcode
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| UiError::from("PresenceRequired"))?;
+    let pending = take_pending(&session)?;
+    let (mut pending, prepared) = tauri::async_runtime::spawn_blocking(move || {
+        prepare_received_receipt(pending, &passcode)
+    })
+    .await
+    .map_err(|_| UiError::from("PairingFailed"))?;
+    let (durable, receipt_recovery_commitment) = match prepared {
+        Ok(value) => value,
+        Err(error) => {
+            put_pending(&session, pending);
+            return Err(error);
+        }
+    };
+    let receipt = pending
+        .recovered_receipt
+        .as_ref()
+        .ok_or_else(|| UiError::from("PairingReceiptRefused"))?;
+    let installed = match crate::cbcl_v2_completion::InstalledCredentialV2Link::from_authenticated_receipt(
+        &durable,
+        pending.claimant.profile_octets(),
+        receipt.object(),
+        receipt_recovery_commitment,
+    ) {
+        Ok(value) => value,
+        Err(error) => {
+            put_pending(&session, pending);
+            return Err(error);
+        }
+    };
+    let live_profile = pending.claimant.profile().clone();
+    let live_account = match installed.account() {
+        Ok(value) => value,
+        Err(error) => {
+            put_pending(&session, pending);
+            return Err(error);
+        }
+    };
+    let live_issuer_did = installed.issuer_did().to_owned();
+    let jrd = match verify_live_installation(live_profile, live_account, live_issuer_did).await {
+        Ok(value) => value,
+        Err(error) => {
+            put_pending(&session, pending);
+            return Err(error);
+        }
+    };
+    if let Err(error) = crate::cbcl_v2_completion::install(&durable, &installed, &jrd) {
+        put_pending(&session, pending);
+        return Err(error);
+    }
+
+    // Installation is already durable. Failure to deliver the relay ACK must
+    // not roll back or misreport the installed account capability.
+    if let Some(receipt) = pending.recovered_receipt.take() {
+        if let Ok(effects) = pending
+            .claimant
+            .core_mut()
+            .commit_recovered_receipt(receipt)
+        {
+            let _ = tauri::async_runtime::spawn_blocking(move || {
+                let _ = send_effects(&mut pending.socket, effects);
+            })
+            .await;
+        }
+    }
+    Ok(CredentialV2FinishView {
+        outcome: "installed",
+    })
+}
+
 /// Cancel a pre-socket decision or close one live credential/v2 relay session.
 #[tauri::command]
 pub async fn cbcl_v2_cancel(session: State<'_, AppSession>) -> Result<()> {
@@ -625,6 +716,7 @@ fn pump_to_offer(
                             intent_approve: None,
                             preview_did: None,
                             comparison: None,
+                            recovered_receipt: None,
                         },
                         view,
                     ));
@@ -637,6 +729,122 @@ fn pump_to_offer(
             }
         }
     }
+}
+
+fn put_pending(session: &State<'_, AppSession>, pending: PendingCredentialV2Pairing) {
+    session
+        .0
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .pending_cbcl_v2 = Some(pending);
+}
+
+fn prepare_received_receipt(
+    mut pending: PendingCredentialV2Pairing,
+    passcode: &str,
+) -> (
+    PendingCredentialV2Pairing,
+    Result<(
+        crate::cbcl_v2_completion::PendingCredentialV2Completion,
+        [u8; 32],
+    )>,
+) {
+    let result = (|| {
+        let application_id = pending
+            .claimant
+            .profile()
+            .application_id
+            .as_str()
+            .to_owned();
+        let carrier = pending.claimant.carrier().clone();
+        let mut durable = crate::cbcl_v2_completion::load_pending(&application_id)?;
+        while pending.claimant.core_mut().has_cached_outbound_frame() {
+            let acknowledgement = read_binary(&mut pending.socket)?;
+            let mut nonce = [0_u8; 12];
+            rand::rngs::OsRng.fill_bytes(&mut nonce);
+            let effects = crate::custody::Custody::use_hierarchy_root(passcode, |root| {
+                let wrapping_key = crate::cbcl_v2_completion::checkpoint_wrapping_key(
+                    root,
+                    &application_id,
+                    carrier.carrier_ceremony_id(),
+                )?;
+                pending
+                    .claimant
+                    .core_mut()
+                    .receive_durable(
+                        &acknowledgement,
+                        crate::commands::now(),
+                        &wrapping_key,
+                        cbcl_pairing::credential_v2::CredentialV2CheckpointNonce::from_csprng(
+                            nonce,
+                        ),
+                    )
+                    .map_err(|_| UiError::from("PairingFailed"))
+            })??;
+            let (generation, checkpoint) = one_checkpoint(effects)?;
+            let acknowledged = durable.with_checkpoint(generation, &checkpoint)?;
+            crate::cbcl_v2_completion::replace_pending(&durable, &acknowledged)?;
+            let after = pending
+                .claimant
+                .core_mut()
+                .checkpoint_persisted(generation)
+                .map_err(|_| UiError::from("PairingFailed"))?;
+            if !after.is_empty() {
+                return Err(UiError::from("PairingFailed"));
+            }
+            durable = acknowledged;
+        }
+        let receipt_recovery_commitment = pending
+            .claimant
+            .core_mut()
+            .receipt_recovery_commitment()
+            .map_err(|_| UiError::from("PairingFailed"))?;
+        if pending.recovered_receipt.is_none() {
+            let frame = read_binary(&mut pending.socket)?;
+            pending.recovered_receipt = Some(
+                pending
+                    .claimant
+                    .core_mut()
+                    .receive_recovered_receipt(&frame)
+                    .map_err(|_| UiError::from("PairingReceiptRefused"))?,
+            );
+        }
+        Ok((durable, receipt_recovery_commitment))
+    })();
+    (pending, result)
+}
+
+async fn verify_live_installation(
+    profile: selfsame_app_identity::profile::ApplicationProfile,
+    account: selfsame_app_identity::alias::AcctUri,
+    issuer_did: String,
+) -> Result<selfsame_app_identity::alias::Jrd> {
+    let account_text = account.as_str().to_owned();
+    let resolved = selfsame_app_identity_net::state::resolve_closure(
+        &profile,
+        &issuer_did,
+        None,
+        selfsame_app_identity_net::state::Acceptance::Repeat,
+    )
+    .await
+    .map_err(|_| UiError::from("PairingResolverUnavailable"))?;
+    if resolved.document.did.as_str() != issuer_did
+        || resolved.document.is_deactivated()
+        || !resolved
+            .document
+            .also_known_as()
+            .iter()
+            .any(|value| value == &account_text)
+    {
+        return Err(UiError::from("PairingResolverRefused"));
+    }
+    selfsame_app_identity_net::webfinger::fetch_and_verify(
+        &account,
+        &issuer_did,
+        &[account_text],
+    )
+    .await
+    .map_err(|_| UiError::from("PairingAuthorityRefused"))
 }
 
 fn take_pending(session: &State<'_, AppSession>) -> Result<PendingCredentialV2Pairing> {
