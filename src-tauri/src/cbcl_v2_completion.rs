@@ -433,21 +433,22 @@ enum CredentialV2LinkSlot {
     Installed(InstalledCredentialV2Link),
 }
 
-/// One fully recognised local application slot selected for confirmed unlink.
-pub(crate) enum LocalCredentialV2Link {
-    Pending(PendingCredentialV2Completion),
-    Installed(InstalledCredentialV2Link),
+/// One fully recognised local application slot and the exact-pair policy state
+/// sampled with it for confirmed unlink.
+pub(crate) struct LocalCredentialV2Link {
+    slot: CredentialV2LinkSlot,
+    exact_pair_state: crate::cbcl_v2_policy::ExactPairState,
 }
 
 impl LocalCredentialV2Link {
     pub(crate) const fn is_pending(&self) -> bool {
-        matches!(self, Self::Pending(_))
+        matches!(self.slot, CredentialV2LinkSlot::Pending(_))
     }
 
     pub(crate) fn require_root_generation(&self, expected: [u8; 32]) -> Result<()> {
-        match self {
-            Self::Pending(value) => value.require_root_generation(expected),
-            Self::Installed(value) => value.require_root_generation(expected),
+        match &self.slot {
+            CredentialV2LinkSlot::Pending(value) => value.require_root_generation(expected),
+            CredentialV2LinkSlot::Installed(value) => value.require_root_generation(expected),
         }
     }
 }
@@ -766,34 +767,142 @@ impl PendingCredentialV2Completion {
     }
 }
 
-/// Armed immediately after final approval becomes durable. Every early return
-/// before `PayloadPrepared` best-effort removes the exact latest slot without
-/// replacing the protocol error that caused the return. Once the payload
-/// checkpoint is durable, recovery owns the slot and the guard is disarmed.
-pub(crate) struct PrePayloadPendingCleanup {
+/// The executable failure-injection points in the post-final-approval path.
+///
+/// The production command routes each corresponding fallible operation through
+/// [`PrePayloadPendingTransaction`]. TEST-1162 uses the same hooks, so a label
+/// cannot stand in for an unobserved production boundary.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum PrePayloadBoundary {
+    FinalApprovalRelease,
+    AcknowledgementRead,
+    AcknowledgementRecognition,
+    AcknowledgementCheckpointReplacement,
+    AcknowledgementCheckpointCommit,
+    PlanConstruction,
+    PlannedStageReplacement,
+    IssuerCustody,
+    IssuerStageReplacement,
+    IssuerPublication,
+    ResolverVerification,
+    GrantConstruction,
+    ProvisionedStageReplacement,
+    PayloadConstruction,
+    PayloadCheckpointPreparation,
+}
+
+pub(crate) trait PrePayloadFaultSink {
+    fn before(&mut self, boundary: PrePayloadBoundary) -> Result<()>;
+}
+
+pub(crate) struct NoPrePayloadFaults;
+
+impl PrePayloadFaultSink for NoPrePayloadFaults {
+    fn before(&mut self, _boundary: PrePayloadBoundary) -> Result<()> {
+        Ok(())
+    }
+}
+
+/// Armed before final approval is persisted. Every early return before
+/// `PayloadPrepared` best-effort removes the exact latest slot without
+/// replacing the protocol error that caused the return. Arming before the
+/// store call also compensates a backend that commits and then reports failure.
+/// Once the payload checkpoint is durable, recovery owns the slot and the
+/// guard is disarmed.
+struct PrePayloadPendingCleanup {
     current: Option<PendingCredentialV2Completion>,
 }
 
 impl PrePayloadPendingCleanup {
-    pub(crate) fn new(current: PendingCredentialV2Completion) -> Self {
+    fn new(current: PendingCredentialV2Completion) -> Self {
         debug_assert!(!current.is_payload_prepared());
         Self {
             current: Some(current),
         }
     }
 
-    pub(crate) fn advance(&mut self, replacement: PendingCredentialV2Completion) {
+    fn advance(&mut self, replacement: PendingCredentialV2Completion) {
         debug_assert!(!replacement.is_payload_prepared());
         self.current = Some(replacement);
     }
 
-    pub(crate) fn disarm_after_payload(
+    fn disarm_after_payload(
         mut self,
         payload_prepared: PendingCredentialV2Completion,
     ) -> PendingCredentialV2Completion {
         debug_assert!(payload_prepared.is_payload_prepared());
         self.current = None;
         payload_prepared
+    }
+}
+
+/// The only production authority for the durable pre-payload slot.
+///
+/// `begin` couples compensation to the initial persistence, `replace_at`
+/// couples every phase replacement to the injected production boundary, and
+/// `commit_payload` couples the last durable replacement to guard disarm. The
+/// command cannot move disarm ahead of the store write because neither the
+/// guard nor its disarm operation is exposed outside this type.
+pub(crate) struct PrePayloadPendingTransaction {
+    current: PendingCredentialV2Completion,
+    cleanup: PrePayloadPendingCleanup,
+}
+
+impl PrePayloadPendingTransaction {
+    pub(crate) fn begin(initial: PendingCredentialV2Completion) -> Result<Self> {
+        let cleanup = PrePayloadPendingCleanup::new(initial.clone());
+        persist_pending(&initial)?;
+        Ok(Self {
+            current: initial,
+            cleanup,
+        })
+    }
+
+    pub(crate) const fn current(&self) -> &PendingCredentialV2Completion {
+        &self.current
+    }
+
+    pub(crate) fn try_step<T>(
+        &mut self,
+        faults: &mut impl PrePayloadFaultSink,
+        boundary: PrePayloadBoundary,
+        step: impl FnOnce() -> Result<T>,
+    ) -> Result<T> {
+        faults.before(boundary)?;
+        step()
+    }
+
+    pub(crate) fn before_async(
+        &mut self,
+        faults: &mut impl PrePayloadFaultSink,
+        boundary: PrePayloadBoundary,
+    ) -> Result<()> {
+        faults.before(boundary)
+    }
+
+    pub(crate) fn replace_at(
+        &mut self,
+        faults: &mut impl PrePayloadFaultSink,
+        boundary: PrePayloadBoundary,
+        replacement: PendingCredentialV2Completion,
+    ) -> Result<()> {
+        faults.before(boundary)?;
+        replace_pending(&self.current, &replacement)?;
+        self.current = replacement.clone();
+        self.cleanup.advance(replacement);
+        Ok(())
+    }
+
+    pub(crate) fn commit_payload(
+        mut self,
+        payload_prepared: PendingCredentialV2Completion,
+    ) -> Result<PendingCredentialV2Completion> {
+        if !payload_prepared.is_payload_prepared() {
+            return Err(UiError::from("PairingCheckpointRefused"));
+        }
+        replace_pending(&self.current, &payload_prepared)?;
+        self.current = payload_prepared.clone();
+        Ok(self.cleanup.disarm_after_payload(payload_prepared))
     }
 }
 
@@ -1437,17 +1546,19 @@ pub(crate) fn load_local_link(application_id: &str) -> Result<LocalCredentialV2L
     let encoded = store::get(&entry)
         .map_err(|_| UiError::from("PairingCheckpointUnavailable"))?
         .ok_or_else(|| UiError::from("PairingApplicationNotLinked"))?;
-    match recognise_slot(&encoded)? {
-        CredentialV2LinkSlot::Pending(value) if value.application_id == application_id => {
-            Ok(LocalCredentialV2Link::Pending(value))
-        }
-        CredentialV2LinkSlot::Installed(value) if value.application_id == application_id => {
-            Ok(LocalCredentialV2Link::Installed(value))
-        }
-        CredentialV2LinkSlot::Pending(_) | CredentialV2LinkSlot::Installed(_) => {
-            Err(UiError::from("PairingApplicationNotLinked"))
-        }
+    let slot = recognise_slot(&encoded)?;
+    let (slot_application_id, relay_origin) = match &slot {
+        CredentialV2LinkSlot::Pending(value) => (&value.application_id, &value.relay_origin),
+        CredentialV2LinkSlot::Installed(value) => (&value.application_id, &value.relay_origin),
+    };
+    if slot_application_id != application_id {
+        return Err(UiError::from("PairingApplicationNotLinked"));
     }
+    let exact_pair_state = crate::cbcl_v2_policy::state(application_id, relay_origin)?;
+    Ok(LocalCredentialV2Link {
+        slot,
+        exact_pair_state,
+    })
 }
 
 /// Read one fully recognised installed record by its authenticated application
@@ -1512,39 +1623,35 @@ pub(crate) fn unlink_local(expected: &LocalCredentialV2Link) -> Result<()> {
     let _guard = SLOT_LOCK
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let (application_id, relay_origin, expected_slot) = match expected {
-        LocalCredentialV2Link::Pending(value) => {
+    let (application_id, relay_origin) = match &expected.slot {
+        CredentialV2LinkSlot::Pending(value) => {
             value.validate()?;
-            (
-                &value.application_id,
-                &value.relay_origin,
-                CredentialV2LinkSlot::Pending(value.clone()),
-            )
+            (&value.application_id, &value.relay_origin)
         }
-        LocalCredentialV2Link::Installed(value) => {
+        CredentialV2LinkSlot::Installed(value) => {
             value.validate()?;
-            (
-                &value.application_id,
-                &value.relay_origin,
-                CredentialV2LinkSlot::Installed(value.clone()),
-            )
+            (&value.application_id, &value.relay_origin)
         }
     };
     let entry = slot_name(application_id)?;
     let encoded = store::get(&entry)
         .map_err(|_| UiError::from("PairingCheckpointUnavailable"))?
         .ok_or_else(|| UiError::from("PairingApplicationNotLinked"))?;
-    if recognise_slot(&encoded)? != expected_slot {
+    if recognise_slot(&encoded)? != expected.slot {
         return Err(UiError::from("PairingApplicationNotLinked"));
     }
-    if crate::cbcl_v2_policy::state(application_id, relay_origin)?
-        != crate::cbcl_v2_policy::ExactPairState::TrustedPair
-    {
+    let current_pair_state = crate::cbcl_v2_policy::state(application_id, relay_origin)?;
+    if current_pair_state != expected.exact_pair_state {
         return Err(UiError::from("PairingCheckpointRefused"));
     }
-    crate::cbcl_v2_policy::remove(application_id, relay_origin)?;
+    let removed_policy = current_pair_state == crate::cbcl_v2_policy::ExactPairState::TrustedPair;
+    if removed_policy {
+        crate::cbcl_v2_policy::remove(application_id, relay_origin)?;
+    }
     if store::delete(&entry).is_err() {
-        let _ = crate::cbcl_v2_policy::insert(application_id, relay_origin);
+        if removed_policy {
+            let _ = crate::cbcl_v2_policy::insert(application_id, relay_origin);
+        }
         return Err(UiError::from("PairingCheckpointUnavailable"));
     }
     let mut index = load_index_locked()?;
@@ -2190,9 +2297,20 @@ mod tests {
         use std::collections::HashMap;
         use std::sync::{Mutex, OnceLock};
 
+        #[derive(Clone, Copy)]
+        pub enum SetFailure {
+            BeforeCommit,
+            AfterCommit,
+        }
+
         fn values() -> &'static Mutex<HashMap<String, Vec<u8>>> {
             static VALUES: OnceLock<Mutex<HashMap<String, Vec<u8>>>> = OnceLock::new();
             VALUES.get_or_init(|| Mutex::new(HashMap::new()))
+        }
+
+        fn next_set_failure() -> &'static Mutex<Option<(String, SetFailure)>> {
+            static FAILURE: OnceLock<Mutex<Option<(String, SetFailure)>>> = OnceLock::new();
+            FAILURE.get_or_init(|| Mutex::new(None))
         }
 
         #[derive(Debug)]
@@ -2202,10 +2320,31 @@ mod tests {
 
         impl CredentialApi for SharedCredential {
             fn set_secret(&self, secret: &[u8]) -> keyring::Result<()> {
+                let failure = {
+                    let mut configured = next_set_failure().lock().unwrap();
+                    if configured
+                        .as_ref()
+                        .is_some_and(|(user, _)| self.key.ends_with(user))
+                    {
+                        configured.take().map(|(_, mode)| mode)
+                    } else {
+                        None
+                    }
+                };
+                if matches!(failure, Some(SetFailure::BeforeCommit)) {
+                    return Err(keyring::Error::PlatformFailure(Box::new(
+                        std::io::Error::other("injected pre-commit set failure"),
+                    )));
+                }
                 values()
                     .lock()
                     .unwrap()
                     .insert(self.key.clone(), secret.to_vec());
+                if matches!(failure, Some(SetFailure::AfterCommit)) {
+                    return Err(keyring::Error::PlatformFailure(Box::new(
+                        std::io::Error::other("injected post-commit set failure"),
+                    )));
+                }
                 Ok(())
             }
 
@@ -2249,7 +2388,25 @@ mod tests {
         }
 
         pub fn install() {
+            values().lock().unwrap().clear();
+            *next_set_failure().lock().unwrap() = None;
             keyring::set_default_credential_builder(Box::new(Builder));
+        }
+
+        pub fn fail_next_set_for_user(user: &str, mode: SetFailure) {
+            *next_set_failure().lock().unwrap() = Some((user.to_owned(), mode));
+        }
+    }
+
+    struct InjectAt(PrePayloadBoundary);
+
+    impl PrePayloadFaultSink for InjectAt {
+        fn before(&mut self, boundary: PrePayloadBoundary) -> Result<()> {
+            if boundary == self.0 {
+                Err(UiError::from("InjectedPrePayloadFailure"))
+            } else {
+                Ok(())
+            }
         }
     }
 
@@ -2262,38 +2419,85 @@ mod tests {
 
         let (acknowledged, planned, issuer_created, provisioned) = pending_stage_fixtures(&pending);
         let failure_matrix = [
-            ("final approval release", pending.clone()),
-            ("acknowledgement read", pending.clone()),
-            ("acknowledgement recognition", pending.clone()),
+            (PrePayloadBoundary::FinalApprovalRelease, pending.clone()),
+            (PrePayloadBoundary::AcknowledgementRead, pending.clone()),
             (
-                "acknowledgement checkpoint replacement",
+                PrePayloadBoundary::AcknowledgementRecognition,
+                pending.clone(),
+            ),
+            (
+                PrePayloadBoundary::AcknowledgementCheckpointReplacement,
                 acknowledged.clone(),
             ),
-            ("acknowledgement checkpoint commit", acknowledged.clone()),
-            ("plan construction", acknowledged),
-            ("planned-stage replacement", planned.clone()),
-            ("issuer custody", planned),
-            ("issuer-stage replacement", issuer_created.clone()),
-            ("issuer publication", issuer_created.clone()),
-            ("resolver verification", issuer_created.clone()),
-            ("grant construction", issuer_created),
-            ("provisioned-stage replacement", provisioned.clone()),
-            ("payload construction", provisioned.clone()),
-            ("payload checkpoint preparation", provisioned.clone()),
+            (
+                PrePayloadBoundary::AcknowledgementCheckpointCommit,
+                acknowledged.clone(),
+            ),
+            (PrePayloadBoundary::PlanConstruction, acknowledged.clone()),
+            (PrePayloadBoundary::PlannedStageReplacement, planned.clone()),
+            (PrePayloadBoundary::IssuerCustody, planned.clone()),
+            (
+                PrePayloadBoundary::IssuerStageReplacement,
+                issuer_created.clone(),
+            ),
+            (
+                PrePayloadBoundary::IssuerPublication,
+                issuer_created.clone(),
+            ),
+            (
+                PrePayloadBoundary::ResolverVerification,
+                issuer_created.clone(),
+            ),
+            (
+                PrePayloadBoundary::GrantConstruction,
+                issuer_created.clone(),
+            ),
+            (
+                PrePayloadBoundary::ProvisionedStageReplacement,
+                provisioned.clone(),
+            ),
+            (PrePayloadBoundary::PayloadConstruction, provisioned.clone()),
+            (
+                PrePayloadBoundary::PayloadCheckpointPreparation,
+                provisioned.clone(),
+            ),
         ];
+
+        // The exact injectable hooks occur once each, in causal order, inside
+        // the production final-decision function this test targets.
+        let production = include_str!("cbcl_v2_commands.rs");
+        let function = production
+            .split_once("async fn cbcl_v2_final_decide_with_faults")
+            .unwrap()
+            .1
+            .split_once("pub async fn cbcl_v2_finish")
+            .unwrap()
+            .0;
+        let mut remainder = function;
+        for (boundary, _) in &failure_matrix {
+            let marker = format!("PrePayloadBoundary::{boundary:?}");
+            assert_eq!(
+                function.matches(&marker).count(),
+                1,
+                "production boundary hook must occur exactly once: {marker}"
+            );
+            let (_, after) = remainder.split_once(&marker).unwrap_or_else(|| {
+                panic!("production boundary hook is absent or out of order: {marker}")
+            });
+            remainder = after;
+        }
+
         for (boundary, stored) in failure_matrix {
-            persist_pending(&pending).unwrap();
-            {
-                let _failure_cleanup = PrePayloadPendingCleanup::new(pending.clone());
-                overwrite_test_slot(&CredentialV2LinkSlot::Pending(stored));
-                // Dropping here injects the named post-persist failure. The
-                // guard deliberately retains the first durable value, which
-                // also models a backend that commits a replacement immediately
-                // before reporting an error.
-            }
+            let mut transaction = PrePayloadPendingTransaction::begin(pending.clone()).unwrap();
+            overwrite_test_slot(&CredentialV2LinkSlot::Pending(stored));
+            let error = transaction
+                .try_step(&mut InjectAt(boundary), boundary, || Ok(()))
+                .unwrap_err();
+            assert_eq!(error.to_string(), "InjectedPrePayloadFailure");
+            drop(transaction);
             assert!(
                 pending_links().unwrap().is_empty(),
-                "{boundary} stranded the application slot"
+                "{boundary:?} stranded the application slot"
             );
             // Every failure boundary releases the exact application for a new
             // ceremony rather than merely hiding its pending row.
@@ -2301,14 +2505,84 @@ mod tests {
             remove_pending(&pending).unwrap();
         }
 
+        let slot_user = slot_name(pending.application_id()).unwrap();
+
+        // Arming is part of begin, before the first store call. A backend that
+        // commits the initial slot and then reports failure is compensated.
+        shared_memkeyring::fail_next_set_for_user(
+            &slot_user,
+            shared_memkeyring::SetFailure::AfterCommit,
+        );
+        let error = PrePayloadPendingTransaction::begin(pending.clone())
+            .err()
+            .expect("post-commit failure must escape begin");
+        assert_eq!(error.to_string(), "PairingCheckpointUnavailable");
+        assert!(pending_links().unwrap().is_empty());
+
+        let start_provisioned_transaction = || {
+            let mut transaction = PrePayloadPendingTransaction::begin(pending.clone()).unwrap();
+            let mut no_faults = NoPrePayloadFaults;
+            for (boundary, replacement) in [
+                (
+                    PrePayloadBoundary::AcknowledgementCheckpointReplacement,
+                    acknowledged.clone(),
+                ),
+                (PrePayloadBoundary::PlannedStageReplacement, planned.clone()),
+                (
+                    PrePayloadBoundary::IssuerStageReplacement,
+                    issuer_created.clone(),
+                ),
+                (
+                    PrePayloadBoundary::ProvisionedStageReplacement,
+                    provisioned.clone(),
+                ),
+            ] {
+                transaction
+                    .replace_at(&mut no_faults, boundary, replacement)
+                    .unwrap();
+            }
+            transaction
+        };
+
+        // commit_payload owns both the final replacement and disarm. If the
+        // durable write fails before commit, the still-armed transaction
+        // removes Provisioned and preserves the storage error.
+        let payload_prepared = provisioned.payload_prepared([0x3a; 32]).unwrap();
+        let transaction = start_provisioned_transaction();
+        shared_memkeyring::fail_next_set_for_user(
+            &slot_user,
+            shared_memkeyring::SetFailure::BeforeCommit,
+        );
+        let error = transaction
+            .commit_payload(payload_prepared.clone())
+            .unwrap_err();
+        assert_eq!(error.to_string(), "PairingCheckpointUnavailable");
+        assert!(pending_links().unwrap().is_empty());
+
+        // If the backend commits PayloadPrepared and only then reports an
+        // error, cleanup recognises the recovery-owned phase and retains it.
+        let transaction = start_provisioned_transaction();
+        shared_memkeyring::fail_next_set_for_user(
+            &slot_user,
+            shared_memkeyring::SetFailure::AfterCommit,
+        );
+        let error = transaction
+            .commit_payload(payload_prepared.clone())
+            .unwrap_err();
+        assert_eq!(error.to_string(), "PairingCheckpointUnavailable");
+        assert_eq!(
+            load_pending(pending.application_id()).unwrap(),
+            payload_prepared
+        );
+        remove_pending(&payload_prepared).unwrap();
+
         // A committed PayloadPrepared value belongs to signed final-status
         // recovery and must survive any later guard cleanup.
-        let payload_prepared = provisioned.payload_prepared([0x3a; 32]).unwrap();
-        persist_pending(&pending).unwrap();
+        let transaction = PrePayloadPendingTransaction::begin(pending.clone()).unwrap();
         {
-            let _failure_cleanup = PrePayloadPendingCleanup::new(pending.clone());
             overwrite_test_slot(&CredentialV2LinkSlot::Pending(payload_prepared.clone()));
         }
+        drop(transaction);
         assert_eq!(
             load_pending(pending.application_id()).unwrap(),
             payload_prepared
@@ -2320,11 +2594,11 @@ mod tests {
         let mut other_attempt = pending.clone();
         other_attempt.offer_expires_at += 1;
         other_attempt.validate().unwrap();
-        persist_pending(&pending).unwrap();
+        let transaction = PrePayloadPendingTransaction::begin(pending.clone()).unwrap();
         {
-            let _failure_cleanup = PrePayloadPendingCleanup::new(pending.clone());
             overwrite_test_slot(&CredentialV2LinkSlot::Pending(other_attempt.clone()));
         }
+        drop(transaction);
         assert_eq!(
             load_pending(pending.application_id()).unwrap(),
             other_attempt
@@ -2336,22 +2610,22 @@ mod tests {
         let mut other_root = pending.clone();
         other_root.root_generation = codec::b64url(&root_generation(&[0x89; 32]));
         other_root.validate().unwrap();
-        persist_pending(&pending).unwrap();
+        let transaction = PrePayloadPendingTransaction::begin(pending.clone()).unwrap();
         {
-            let _failure_cleanup = PrePayloadPendingCleanup::new(pending.clone());
             overwrite_test_slot(&CredentialV2LinkSlot::Pending(other_root.clone()));
         }
+        drop(transaction);
         assert_eq!(load_pending(pending.application_id()).unwrap(), other_root);
         remove_pending(&other_root).unwrap();
 
         // A stale pre-payload guard must never delete a subsequently installed
         // capability for the application.
         let installed = installed_reload_fixture();
-        persist_pending(&pending).unwrap();
+        let transaction = PrePayloadPendingTransaction::begin(pending.clone()).unwrap();
         {
-            let _failure_cleanup = PrePayloadPendingCleanup::new(pending.clone());
             overwrite_test_slot(&CredentialV2LinkSlot::Installed(installed.clone()));
         }
+        drop(transaction);
         assert_eq!(load_installed(pending.application_id()).unwrap(), installed);
         let installed_local = load_local_link(pending.application_id()).unwrap();
         unlink_local(&installed_local).unwrap();
@@ -2407,7 +2681,9 @@ mod tests {
             "PairingCheckpointRefused"
         );
         assert_eq!(load_pending(pending.application_id()).unwrap(), pending);
-        remove_pending(&pending).unwrap();
+        let absent_policy_selection = load_local_link(pending.application_id()).unwrap();
+        unlink_local(&absent_policy_selection).unwrap();
+        assert!(pending_links().unwrap().is_empty());
 
         // The confirmed escape also releases the exact app slot for retry.
         persist_pending(&pending).unwrap();
