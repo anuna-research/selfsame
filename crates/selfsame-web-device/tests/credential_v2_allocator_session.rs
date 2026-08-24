@@ -85,7 +85,6 @@ fn wasm_surface_carries_recovery_bindings_and_hub_correlators_only_after_checkpo
         &[0x1a; 32],
     )
     .unwrap();
-
     let start = effects(allocator.start().unwrap());
     assert_eq!(
         decode_client_message(&body(&start[0])).unwrap(),
@@ -285,4 +284,8 @@ fn wasm_surface_completes_cpace_only_through_persisted_relay_transitions() {
         decode_b64u(established[1]["transcriptHashB64u"].as_str().unwrap()).len(),
         64,
     );
+    let commitment = allocator.receipt_recovery_commitment().unwrap();
+    assert_eq!(commitment.len(), 32);
+    assert_ne!(commitment, vec![0_u8; 32]);
+    assert_eq!(allocator.receipt_recovery_commitment().unwrap(), commitment);
 }

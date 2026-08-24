@@ -505,6 +505,19 @@ impl CredentialV2BrowserAllocatorSession {
         ))
     }
 
+    /// Return the public receipt-recovery commitment after the protected
+    /// channel is established. The HMAC token and exporter remain in Rust.
+    pub fn receipt_recovery_commitment(&self) -> Result<Vec<u8>, JsError> {
+        self.session
+            .as_ref()
+            .ok_or_else(|| JsError::new("the credential/v2 attempt was cancelled"))?
+            .receipt_recovery_commitment()
+            .map(|commitment| commitment.to_vec())
+            .map_err(|_| {
+                JsError::new("the credential/v2 receipt-recovery commitment is unavailable")
+            })
+    }
+
     /// Recognise the unsigned hub core against this attempt and return the exact
     /// 32-octet installation-device possession signing input.
     #[allow(clippy::too_many_arguments)]
