@@ -24,6 +24,7 @@ const REFUSED: &str = "rejected";
 
 rustler::atoms! {
     rejected,
+    verified,
     application_id,
     account_authority,
     profile_bytes,
@@ -48,6 +49,43 @@ rustler::atoms! {
     standing,
     invite,
     undefined,
+}
+
+/// `cbcl_selfsame_erl:verify_credential_v2_offer_proof/6`.
+///
+/// This is the recovery/retry verifier: it exposes no signing operation and
+/// returns no offer metadata that the caller could confuse with authority.
+#[allow(clippy::too_many_arguments)]
+#[rustler::nif(name = "verify_credential_v2_offer_proof", schedule = "DirtyCpu")]
+pub fn verify_credential_v2_offer_proof_nif<'a>(
+    env: Env<'a>,
+    profile_bytes: Binary<'a>,
+    offer_core: Binary<'a>,
+    socket_generation_digest: Binary<'a>,
+    carrier_ceremony_id: Binary<'a>,
+    device_public_key: Binary<'a>,
+    device_possession_proof: Binary<'a>,
+) -> Term<'a> {
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let profile = ApplicationProfile::recognise(profile_bytes.as_slice())
+            .map_err(|_| String::from(REFUSED))?;
+        let prepared = recognise_prepared_offer(&profile, offer_core.as_slice())
+            .map_err(|_| String::from(REFUSED))?;
+        verify_prepared_offer_device_proof(
+            &profile,
+            &prepared,
+            exact(socket_generation_digest.as_slice())?,
+            exact(carrier_ceremony_id.as_slice())?,
+            exact(device_public_key.as_slice())?,
+            exact(device_possession_proof.as_slice())?,
+        )
+        .map_err(|_| String::from(REFUSED))?;
+        Ok::<Atom, String>(verified())
+    }));
+    match result {
+        Ok(Ok(value)) => (atom::ok(), value).encode(env),
+        Ok(Err(_)) | Err(_) => (atom::error(), rejected()).encode(env),
+    }
 }
 
 /// Complete typed facts accepted for one credential/v2 pending allocation.

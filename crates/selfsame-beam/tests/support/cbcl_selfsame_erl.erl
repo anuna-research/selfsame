@@ -13,6 +13,7 @@
     recognise_credential_v2_profile/5,
     prepare_credential_v2_offer/15,
     finalize_credential_v2_offer/8,
+    verify_credential_v2_offer_proof/6,
     rehydrate_path_b/2,
     run/0,
     sign_enrollment/4,
@@ -33,6 +34,8 @@ recognise_credential_v2_profile(_, _, _, _, _) -> nif_not_loaded().
 prepare_credential_v2_offer(_, _, _, _, _, _, _, _, _, _, _, _, _, _, _) ->
     nif_not_loaded().
 finalize_credential_v2_offer(_, _, _, _, _, _, _, _) ->
+    nif_not_loaded().
+verify_credential_v2_offer_proof(_, _, _, _, _, _) ->
     nif_not_loaded().
 sign_enrollment(_, _, _, _) -> nif_not_loaded().
 
