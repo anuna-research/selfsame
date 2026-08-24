@@ -179,6 +179,10 @@ pub struct RecognisedCredentialV2Offer {
     pub profile_digest: [u8; 32],
     /// Selected complete relay-descriptor digest.
     pub descriptor_digest: [u8; 32],
+    /// Digest of the exact protected carrier.
+    pub carrier_digest: [u8; 32],
+    /// One-use intent nonce allocated for this attempt.
+    pub intent_nonce: [u8; 32],
     /// Finished transcript hash.
     pub transcript_hash: [u8; 64],
     /// Exclusive offer expiry.
@@ -581,7 +585,8 @@ pub fn recognise_signed_offer(
     recognise_offer_core_with_envelope(profile, bytes, offer_core, kid, digest)
 }
 
-fn recognise_offer_core(
+/// Recognise one unsigned offer core under the independently authenticated profile.
+pub fn recognise_offer_core(
     profile: &ApplicationProfile,
     offer_core: &[u8],
 ) -> Result<RecognisedCredentialV2Offer, CredentialV2OfferError> {
@@ -707,6 +712,8 @@ fn parse_core(
         request_id: fixed(core, "requestId")?,
         profile_digest: fixed(core, "profileDigest")?,
         descriptor_digest,
+        carrier_digest: fixed(core, "carrierDigest")?,
+        intent_nonce: fixed(core, "intentNonce")?,
         transcript_hash: fixed(core, "transcriptHash")?,
         expires_at,
     })

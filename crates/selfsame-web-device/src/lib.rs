@@ -55,6 +55,7 @@
 
 use ed25519_dalek::SigningKey;
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
 use wasm_bindgen::prelude::*;
 
 use selfsame_app_identity::accept::{ClosureSource, IssuerState};
@@ -349,9 +350,16 @@ impl cbcl_pairing::credential_v2::CredentialV2BodyVerifier for CredentialV2Brows
 #[wasm_bindgen]
 pub struct CredentialV2BrowserAllocatorSession {
     session: Option<cbcl_pairing::credential_v2::CredentialV2AllocatorSession>,
+    profile: ApplicationProfile,
     request_id: [u8; 32],
     intent_nonce: [u8; 32],
     carrier_ceremony_id: [u8; 32],
+    expected_allocator_key: [u8; 32],
+    transcript_hash: Option<[u8; 64]>,
+    prepared_offer_core: Option<Vec<u8>>,
+    prepared_offer_digest: Option<[u8; 32]>,
+    authority_status: Option<selfsame_pairing::credential_v2::CredentialV2AuthorityStatus>,
+    authority_response: Option<Vec<u8>>,
 }
 
 #[wasm_bindgen]
@@ -419,9 +427,16 @@ impl CredentialV2BrowserAllocatorSession {
         .map_err(|_| JsError::new("the credential/v2 allocator attempt was refused"))?;
         Ok(Self {
             session: Some(session),
+            profile,
             request_id,
             intent_nonce,
             carrier_ceremony_id,
+            expected_allocator_key,
+            transcript_hash: None,
+            prepared_offer_core: None,
+            prepared_offer_digest: None,
+            authority_status: None,
+            authority_response: None,
         })
     }
 
@@ -461,6 +476,7 @@ impl CredentialV2BrowserAllocatorSession {
                 ),
             )
             .map_err(|_| JsError::new("the credential/v2 relay message was refused"))?;
+        self.capture_allocator_effects(&effects)?;
         Ok(v2_allocator_effects_json(
             &effects,
             &self.request_id,
@@ -479,6 +495,143 @@ impl CredentialV2BrowserAllocatorSession {
             .map_err(|_| {
                 JsError::new("the credential/v2 checkpoint acknowledgement was refused")
             })?;
+        self.capture_allocator_effects(&effects)?;
+        Ok(v2_allocator_effects_json(
+            &effects,
+            &self.request_id,
+            &self.intent_nonce,
+            &self.carrier_ceremony_id,
+        ))
+    }
+
+    /// Recognise the unsigned hub core against this attempt and return the exact
+    /// 32-octet installation-device possession signing input.
+    #[allow(clippy::too_many_arguments)]
+    pub fn device_possession_input(
+        &mut self,
+        raw_carrier: &[u8],
+        offer_core: &[u8],
+        socket_generation_digest: &[u8],
+        offer_core_digest: &[u8],
+        pending_expires_at: u64,
+        now: u64,
+    ) -> Result<Vec<u8>, JsError> {
+        if self.prepared_offer_core.is_some() || now >= pending_expires_at {
+            return Err(JsError::new("the credential/v2 prepared offer was refused"));
+        }
+        let transcript_hash = self
+            .transcript_hash
+            .ok_or_else(|| JsError::new("the credential/v2 channel is not established"))?;
+        let carrier = cbcl_pairing::credential_v2::decode_carrier(raw_carrier)
+            .map_err(|_| JsError::new("the credential/v2 carrier was refused"))?;
+        let recognised =
+            selfsame_pairing::credential_v2::recognise_offer_core(&self.profile, offer_core)
+                .map_err(|_| JsError::new("the credential/v2 prepared offer was refused"))?;
+        let supplied_digest: [u8; 32] =
+            fixed_browser_bytes(offer_core_digest, "offer-core digest")?;
+        let actual_digest: [u8; 32] = Sha256::digest(offer_core).into();
+        let expected_device_jwk = identity_json::canonicalise(&Json::obj([
+            ("crv", Json::text("Ed25519")),
+            ("kty", Json::text("OKP")),
+            (
+                "x",
+                Json::text(selfsame_app_identity::codec::b64url(
+                    &self.expected_allocator_key,
+                )),
+            ),
+        ]));
+        let claims = &recognised.claims;
+        if supplied_digest != actual_digest
+            || supplied_digest != *claims.offer_core_digest()
+            || carrier.application_context() != self.profile.application_id.as_str()
+            || carrier.relay_origin() != claims.relay_origin()
+            || carrier.carrier_ceremony_id() != &self.carrier_ceremony_id
+            || carrier.expected_allocator_key() != Some(&self.expected_allocator_key)
+            || carrier.digest() != recognised.carrier_digest
+            || claims.carrier_ceremony_id() != &self.carrier_ceremony_id
+            || recognised.request_id != self.request_id
+            || recognised.intent_nonce != self.intent_nonce
+            || recognised.transcript_hash != transcript_hash
+            || recognised.expires_at != pending_expires_at
+            || pending_expires_at > carrier.relay_expires_at()
+            || claims.device_binding().device_key_digest()
+                != &<[u8; 32]>::from(Sha256::digest(&expected_device_jwk))
+        {
+            return Err(JsError::new("the credential/v2 prepared offer was refused"));
+        }
+        let socket_generation_digest =
+            fixed_browser_bytes(socket_generation_digest, "socket-generation digest")?;
+        let input = selfsame_pairing::credential_v2::device_possession_proof_input(
+            socket_generation_digest,
+            self.carrier_ceremony_id,
+            supplied_digest,
+        )
+        .map_err(|_| JsError::new("the credential/v2 possession input was refused"))?;
+        self.prepared_offer_core = Some(offer_core.to_vec());
+        self.prepared_offer_digest = Some(supplied_digest);
+        Ok(input.to_vec())
+    }
+
+    /// Verify the exact signed offer and signed reciprocal authority, then seal
+    /// the allocator's first application object behind the checkpoint barrier.
+    pub fn prepare_offer(
+        &mut self,
+        signed_offer: &[u8],
+        authority_response: &[u8],
+        authority_digest: &[u8],
+        now: u64,
+        checkpoint_nonce: &[u8],
+    ) -> Result<String, JsError> {
+        let prepared_core = self
+            .prepared_offer_core
+            .as_ref()
+            .ok_or_else(|| JsError::new("the credential/v2 offer was not prepared"))?;
+        let prepared_digest = self
+            .prepared_offer_digest
+            .ok_or_else(|| JsError::new("the credential/v2 offer was not prepared"))?;
+        let recognised =
+            selfsame_pairing::credential_v2::recognise_signed_offer(&self.profile, signed_offer)
+                .map_err(|_| JsError::new("the credential/v2 signed offer was refused"))?;
+        let supplied_authority_digest: [u8; 32] =
+            fixed_browser_bytes(authority_digest, "authority-status digest")?;
+        if recognised.offer_core.as_slice() != prepared_core
+            || recognised.claims.offer_core_digest() != &prepared_digest
+            || recognised.expires_at <= now
+            || <[u8; 32]>::from(Sha256::digest(authority_response)) != supplied_authority_digest
+        {
+            return Err(JsError::new(
+                "the credential/v2 signed authority was refused",
+            ));
+        }
+        let status = selfsame_pairing::credential_v2::recognise_authority_status_response(
+            &self.profile,
+            authority_response,
+            &recognised.kid,
+            self.carrier_ceremony_id,
+            prepared_digest,
+        )
+        .map_err(|_| JsError::new("the credential/v2 signed authority was refused"))?;
+        let object = cbcl_pairing::credential_v2::CredentialV2Object::new(
+            cbcl_pairing::credential_v2::CredentialV2Kind::Offer,
+            cbcl_pairing::credential_v2::credential_v2_intent_digest(prepared_digest),
+            signed_offer.to_vec(),
+        )
+        .map_err(|_| JsError::new("the credential/v2 offer object was refused"))?;
+        let checkpoint_nonce: [u8; 12] = fixed_browser_bytes(checkpoint_nonce, "checkpoint nonce")?;
+        let effects = self
+            .session
+            .as_mut()
+            .ok_or_else(|| JsError::new("the credential/v2 attempt was cancelled"))?
+            .prepare_application_object(
+                &object,
+                now,
+                cbcl_pairing::credential_v2::CredentialV2CheckpointNonce::from_csprng(
+                    checkpoint_nonce,
+                ),
+            )
+            .map_err(|_| JsError::new("the credential/v2 offer release was refused"))?;
+        self.authority_status = Some(status);
+        self.authority_response = Some(authority_response.to_vec());
         Ok(v2_allocator_effects_json(
             &effects,
             &self.request_id,
@@ -491,6 +644,25 @@ impl CredentialV2BrowserAllocatorSession {
     pub fn cancel(&mut self) -> String {
         self.session = None;
         r#"[{"outcome":"cancelled","type":"terminal"}]"#.into()
+    }
+
+    fn capture_allocator_effects(
+        &mut self,
+        effects: &[cbcl_pairing::credential_v2::CredentialV2AllocatorEffect],
+    ) -> Result<(), JsError> {
+        for effect in effects {
+            if let cbcl_pairing::credential_v2::CredentialV2AllocatorEffect::Established {
+                transcript_hash,
+            } = effect
+            {
+                if self.transcript_hash.replace(*transcript_hash).is_some() {
+                    return Err(JsError::new(
+                        "the credential/v2 transcript was established twice",
+                    ));
+                }
+            }
+        }
+        Ok(())
     }
 }
 
@@ -540,6 +712,12 @@ fn v2_allocator_effects_json(
             CredentialV2AllocatorEffect::Established { transcript_hash } => serde_json::json!({
                 "type": "established",
                 "transcriptHashB64u": selfsame_app_identity::codec::b64url(transcript_hash),
+            }),
+            CredentialV2AllocatorEffect::ReceivedObject { object } => serde_json::json!({
+                "type": "received-object",
+                "kind": object.kind().number(),
+                "bodyB64u": selfsame_app_identity::codec::b64url(object.body()),
+                "contentHashB64u": selfsame_app_identity::codec::b64url(&object.content_hash()),
             }),
             CredentialV2AllocatorEffect::Terminal => serde_json::json!({
                 "type": "terminal",
@@ -1739,7 +1917,8 @@ impl EnrolmentAllocator {
             .ok_or_else(|| JsError::new("no offer sealed yet"))?;
         let opened = open_bundle_for(&self.secret, sealed_bundle, offer)
             .map_err(|_| JsError::new("SPEC-004 bundle refused"))?;
-        let bundle = recognise_bundle(&opened).map_err(|_| JsError::new("SPEC-004 bundle refused"))?;
+        let bundle =
+            recognise_bundle(&opened).map_err(|_| JsError::new("SPEC-004 bundle refused"))?;
         bundle_matches_offer(&bundle, &self.core)
             .map_err(|_| JsError::new("SPEC-004 bundle refused"))?;
         Ok(opened)
@@ -2773,8 +2952,8 @@ mod enrolment_allocator_tests {
     //! well-formed rendezvous slots. The full ceremony (rendezvous I/O + the
     //! wallet accept) is the e2e harness's; this pins the construction.
     use super::*;
-    use selfsame_app_identity::enrollment as en;
     use ed25519_dalek::SigningKey;
+    use selfsame_app_identity::enrollment as en;
 
     const KID: &str = "https://photos.example/selfsame/application#enrollment-test";
     const NOW: i64 = 1_785_412_800;
@@ -2812,7 +2991,10 @@ mod enrolment_allocator_tests {
             statement.return_uri,
             "https://photos.example/.well-known/selfsame/return"
         );
-        assert_eq!(statement.application_id, "https://photos.example/selfsame/application");
+        assert_eq!(
+            statement.application_id,
+            "https://photos.example/selfsame/application"
+        );
     }
 
     #[test]
@@ -2831,8 +3013,7 @@ mod enrolment_allocator_tests {
         let mut alloc = allocator();
         // The hub would sign the statement; here a test key stands in for the
         // enrolment key, exercising the seal + recognise path.
-        let statement =
-            en::recognise_unsigned_payload(&alloc.statement_bytes_native()).unwrap();
+        let statement = en::recognise_unsigned_payload(&alloc.statement_bytes_native()).unwrap();
         let evidence = en::sign(&statement, KID, &SigningKey::from_bytes(&[6u8; 32]));
         let sealed = alloc.seal_offer_native(&evidence).expect("the offer seals");
 
@@ -2840,7 +3021,10 @@ mod enrolment_allocator_tests {
             seal::open_offer(&seal::derive_key(&[9u8; 16]), &sealed).expect("the offer opens");
         let offer = selfsame_app_identity::ceremony::recognise_offer(&opened)
             .expect("the sealed offer recognises as CON-219");
-        assert_eq!(offer.core.application_id, "https://photos.example/selfsame/application");
+        assert_eq!(
+            offer.core.application_id,
+            "https://photos.example/selfsame/application"
+        );
         // The offer digest the statement bound equals the offer's own.
         assert_eq!(statement.offer_digest, offer.core.digest());
     }

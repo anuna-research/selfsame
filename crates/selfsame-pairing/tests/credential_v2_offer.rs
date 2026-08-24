@@ -152,6 +152,8 @@ fn offer_is_one_canonical_signed_authority_for_hub_browser_and_wallet() {
         built.device_did
     );
     assert_eq!(recognised.request_id, input.request_id);
+    assert_eq!(recognised.carrier_digest, carrier.digest());
+    assert_eq!(recognised.intent_nonce, input.intent_nonce);
     assert_eq!(recognised.transcript_hash, input.transcript_hash);
     assert_eq!(recognised.expires_at, input.expires_at);
 
