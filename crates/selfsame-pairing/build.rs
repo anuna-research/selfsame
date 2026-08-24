@@ -29,21 +29,40 @@ fn main() {
         .parent()
         .and_then(Path::parent)
         .expect("selfsame-pairing must remain inside the Selfsame workspace");
-    let pin_path = workspace.join("cbcl-pairing.sha");
-    let sibling = workspace
+    let parent = workspace
         .parent()
-        .expect("Selfsame must have a parent directory")
-        .join("cbcl-pairing");
+        .expect("Selfsame must have a parent directory");
+    let mut pairing_revision = None;
 
+    for (label, directory, pin_file) in [
+        ("cbcl-pairing", "cbcl-pairing", "cbcl-pairing.sha"),
+        ("cbcl-rs", "cbcl-rs", "cbcl-rs.sha"),
+        ("did-crdt", "did-crdt", "did-crdt.sha"),
+    ] {
+        let pin_path = workspace.join(pin_file);
+        let sibling = parent.join(directory);
+        let expected = verify_dependency(label, &sibling, &pin_path);
+        if label == "cbcl-pairing" {
+            pairing_revision = Some(expected);
+        }
+    }
+
+    println!(
+        "cargo:rustc-env=SELFSAME_CBCL_PAIRING_REVISION={}",
+        pairing_revision.expect("cbcl-pairing is in the dependency set")
+    );
+}
+
+fn verify_dependency(label: &str, sibling: &Path, pin_path: &Path) -> String {
     println!("cargo:rerun-if-changed={}", pin_path.display());
     println!(
         "cargo:rerun-if-changed={}",
         sibling.join(".git/HEAD").display()
     );
 
-    let expected = fs::read_to_string(&pin_path)
+    let expected = fs::read_to_string(pin_path)
         .unwrap_or_else(|error| panic!("cannot read {}: {error}", pin_path.display()));
-    let expected = expected.trim();
+    let expected = expected.trim().to_owned();
     assert!(
         expected.len() == 40
             && expected
@@ -53,13 +72,13 @@ fn main() {
         pin_path.display()
     );
 
-    let actual = git(&sibling, &["rev-parse", "HEAD"])
+    let actual = git(sibling, &["rev-parse", "HEAD"])
         .unwrap_or_else(|error| panic!("cannot identify {}: {error}", sibling.display()));
-    let tracked_changes = git(&sibling, &["status", "--porcelain", "--untracked-files=no"])
+    let tracked_changes = git(sibling, &["status", "--porcelain", "--untracked-files=no"])
         .unwrap_or_else(|error| panic!("cannot inspect {}: {error}", sibling.display()));
 
     if actual == expected && tracked_changes.is_empty() {
-        return;
+        return expected;
     }
 
     let reason = if actual != expected {
@@ -70,14 +89,13 @@ fn main() {
 
     if env::var(DEVELOPMENT_OVERRIDE).as_deref() == Ok("1") {
         println!(
-            "cargo:warning=UNPINNED DEVELOPMENT BUILD: cbcl-pairing {}; release evidence is invalid",
-            reason
+            "cargo:warning=UNPINNED DEVELOPMENT BUILD: {label} {reason}; release evidence is invalid"
         );
-        return;
+        return expected;
     }
 
     panic!(
-        "cbcl-pairing source integrity check failed: {reason}. \
+        "{label} source integrity check failed: {reason}. \
          Check out the revision in {} with no tracked modifications. \
          {DEVELOPMENT_OVERRIDE}=1 is permitted only for explicitly labelled local development builds.",
         pin_path.display()

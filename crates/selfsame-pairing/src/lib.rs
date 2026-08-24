@@ -33,7 +33,7 @@ pub struct DependencyBaseline {
 #[must_use]
 pub const fn dependency_baseline() -> DependencyBaseline {
     DependencyBaseline {
-        revision: "aedbc4ca07068c3cf6356d95333f4c2ec0d374d9",
+        revision: env!("SELFSAME_CBCL_PAIRING_REVISION"),
         bootstrap_source_sha256: cbcl_pairing::BOOTSTRAP_SOURCE_SHA256,
         session_source_sha256: cbcl_pairing::SESSION_SOURCE_SHA256,
     }

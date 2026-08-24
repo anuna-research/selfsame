@@ -45,7 +45,7 @@ use selfsame_app_identity::{
 const CORPUS_PATH: &str = "../../test-vectors/spec-004-v1.json";
 
 /// The `did:crdt` revision SPEC-001 ADR-010 pins.
-const DID_CRDT_REVISION: &str = "fbccfd5885cd0c0136218f809ea0e183bc7e49f3";
+const DID_CRDT_REVISION: &str = include_str!("../../../did-crdt.sha");
 
 // ── the completeness rule ──────────────────────────────────────────────────
 
@@ -246,7 +246,7 @@ fn reject(reason: &str) -> Json {
 fn build_corpus() -> Json {
     Json::obj([
         ("spec", Json::text("SPEC-004")),
-        ("did_crdt_revision", Json::text(DID_CRDT_REVISION)),
+        ("did_crdt_revision", Json::text(DID_CRDT_REVISION.trim())),
         ("con_201_application_profile", con_201()),
         ("con_202_key_hierarchy", con_202()),
         ("con_203_account_alias", con_203()),

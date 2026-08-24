@@ -48,14 +48,10 @@ jobs:
       # `--locked` cannot pin path-dependency *contents*, so the revisions are
       # pinned explicitly here or CI is not building what a release would.
       #
-      # did-crdt's revision is read out of vectors.rs rather than written here a
-      # second time: that file records the revision the test vectors were
-      # generated against, so it is the source of truth, and a copy in this file
-      # would be a second place for it to be wrong.
       - name: Clone and pin the sibling path dependencies
         run: |
           set -euo pipefail
-          did_sha="$(grep -oE '[0-9a-f]{40}' crates/selfsame-core/tests/vectors.rs | head -1)"
+          did_sha="$(tr -d '[:space:]' < did-crdt.sha)"
           cbcl_sha="$(tr -d '[:space:]' < cbcl-rs.sha)"
           pairing_sha="$(tr -d '[:space:]' < cbcl-pairing.sha)"
           echo "did-crdt @ ${did_sha}"
@@ -151,7 +147,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-selfsame-${{ hashFiles('Cargo.lock', 'cbcl-rs.sha', 'cbcl-pairing.sha') }}
+          key: ${{ runner.os }}-cargo-selfsame-${{ hashFiles('Cargo.lock', 'cbcl-rs.sha', 'did-crdt.sha', 'cbcl-pairing.sha') }}
           restore-keys: |
             ${{ runner.os }}-cargo-selfsame-
 
@@ -217,7 +213,7 @@ jobs:
       - name: Clone the pinned sibling path dependencies
         run: |
           set -euo pipefail
-          did_sha="$(grep -oE '[0-9a-f]{40}' crates/selfsame-core/tests/vectors.rs | head -1)"
+          did_sha="$(tr -d '[:space:]' < did-crdt.sha)"
           cbcl_sha="$(tr -d '[:space:]' < cbcl-rs.sha)"
           pairing_sha="$(tr -d '[:space:]' < cbcl-pairing.sha)"
           [ -d ../did-crdt ] || git clone https://git.anuna.io/anuna-research/did-crdt.git ../did-crdt

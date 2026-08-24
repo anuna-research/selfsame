@@ -1,12 +1,12 @@
 use sha2::{Digest, Sha256};
 use std::{path::PathBuf, process::Command};
 
-const REVIEWED_REVISION: &str = "aedbc4ca07068c3cf6356d95333f4c2ec0d374d9";
+const CANDIDATE_REVISION: &str = include_str!("../../../cbcl-pairing.sha");
 
 #[test]
 fn test_701_compiled_dependency_matches_the_reviewed_baseline() {
     let baseline = selfsame_pairing::dependency_baseline();
-    assert_eq!(baseline.revision, REVIEWED_REVISION);
+    assert_eq!(baseline.revision, CANDIDATE_REVISION.trim());
     assert_eq!(
         baseline.bootstrap_source_sha256,
         cbcl_pairing::BOOTSTRAP_SOURCE_SHA256
@@ -32,7 +32,7 @@ fn test_701_compiled_dependency_matches_the_reviewed_baseline() {
     assert!(head.status.success(), "sibling HEAD must be readable");
     assert_eq!(
         String::from_utf8_lossy(&head.stdout).trim(),
-        REVIEWED_REVISION
+        CANDIDATE_REVISION.trim()
     );
     let tracked = git(&sibling, &["status", "--porcelain", "--untracked-files=no"]);
     assert!(

@@ -478,7 +478,7 @@ Selfsame depends on one pinned `cbcl-pairing` revision.
 Selfsame does not copy CPace, Finished, CBCL dialects, channel framing,
 endpoint reduction, mailbox transitions, or relay limiting.
 
-The candidate baseline is revision `aedbc4ca07068c3cf6356d95333f4c2ec0d374d9`.
+The candidate baseline is revision `3d013306cab68c9e258e149387e420058b57e80f`.
 Changing that pin requires updated conformance evidence and owner review.
 
 Selfsame owns only its credential profile adapter, shell effects, consent UI,
@@ -1308,7 +1308,7 @@ No channel can waive a hard stop without a new specification version and require
 
 - 0.3.7-draft — reconciles ADR-802, the root pin, the compiled dependency
   baseline, and the fail-closed build-time source-integrity check to reviewed
-  cbcl-pairing revision `aedbc4ca07068c3cf6356d95333f4c2ec0d374d9`.
+  cbcl-pairing revision `3d013306cab68c9e258e149387e420058b57e80f`.
   Release and deployment remain prohibited pending cross-model review PASS.
 - 0.3.6-draft — coordinates exact socket-generation, recovery-proof, and
   checkpoint-key inputs. It records the fixed v2 lifetime and frame-safety
