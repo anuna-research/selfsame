@@ -15,7 +15,7 @@
  */
 import puppeteer from 'puppeteer';
 import { createServer } from 'node:http';
-import { readFileSync, mkdirSync } from 'node:fs';
+import { readFileSync, mkdirSync, readdirSync } from 'node:fs';
 import { extname, join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -1034,22 +1034,51 @@ for (const [name, outcome] of [['denied', 'denied'], ['granted', 'granted']]) {
 // worth knowing about and is not always a defect (CON-603 is stubbed and has no
 // screen yet).
 //
-// It is a text scan of two files, which is the right weight for what it decides.
-// It reads the generated-handler block rather than a hand-kept list, so a
-// command added without a caller — or a caller added without a command — is
-// visible the same day.
+// It reads the generated-handler block and discovers every JavaScript source
+// module rather than keeping either side as a hand-written file list. The
+// caller-count ratchet makes a broken discovery filter fail closed: silently
+// dropping one current invoke caller cannot make the comparison smaller and
+// green.
 {
   const src = (p) => readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', p), 'utf8');
+  const javascriptModules = [];
+  const discoverJavascriptModules = (directory, relativeDirectory) => {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const relativePath = join(relativeDirectory, entry.name);
+      if (entry.isDirectory()) {
+        discoverJavascriptModules(join(directory, entry.name), relativePath);
+      } else if (entry.isFile() && extname(entry.name) === '.js') {
+        javascriptModules.push(relativePath);
+      }
+    }
+  };
+  discoverJavascriptModules(ROOT, 'src');
+
   const handler = src('src-tauri/src/lib.rs');
   const open = handler.indexOf('generate_handler![');
   const block = handler.slice(open, handler.indexOf('])', open));
   const registered = new Set([...block.matchAll(/\b[A-Za-z_]\w*::([A-Za-z_]\w*)\b/g)].map((m) => m[1]));
 
+  const invokeCallerFiles = javascriptModules
+    .filter((file) => /\binvoke\s*\(/.test(src(file)))
+    .sort();
+  const EXPECTED_INVOKE_CALLER_COUNT = 3;
+  if (invokeCallerFiles.length !== EXPECTED_INVOKE_CALLER_COUNT) {
+    errors.push(`invoke-surface: discovered ${invokeCallerFiles.length} JavaScript invoke callers, expected ${EXPECTED_INVOKE_CALLER_COUNT} (${invokeCallerFiles.join(', ')}) — caller discovery changed and must be reviewed`);
+  }
+
   const called = new Map();
-  for (const file of ['src/app.js', 'src/app-identity.js', 'src/pairing.js']) {
+  const scannedInvokeCallers = new Set();
+  for (const file of invokeCallerFiles) {
+    scannedInvokeCallers.add(file);
     for (const m of src(file).matchAll(/invoke\(\s*["'](\w+)["']/g)) {
       called.set(m[1], (called.get(m[1]) ?? []).concat(file));
     }
+  }
+
+  const skippedInvokeCallers = invokeCallerFiles.filter((file) => !scannedInvokeCallers.has(file));
+  if (skippedInvokeCallers.length) {
+    errors.push(`invoke-surface: discovered but did not scan ${skippedInvokeCallers.join(', ')}`);
   }
 
   if (!registered.size) {
