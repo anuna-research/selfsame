@@ -4360,6 +4360,7 @@ dependencies = [
  "cbcl-pairing",
  "did-crdt",
  "ed25519-dalek",
+ "hkdf 0.12.4",
  "qrcode",
  "reqwest 0.12.28",
  "selfsame-app-identity",
