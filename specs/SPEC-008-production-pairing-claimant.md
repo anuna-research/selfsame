@@ -2,22 +2,22 @@
 id: SPEC-008
 title: Production Pairing Claimant — Transport, Real Credential, and Origin Trust
 status: draft
-version: 0.5.11-draft
+version: 0.5.12-draft
 tier: 1
 review-gate: test-first-implementation-owner-authorized; release-and-deployment-prohibited-pending-cross-model-pass
 authority-form: consolidated-direct-current-authority
-implementation-baseline: 21caf38d5972fc65285c5f6c4b452c2f2572221f
+implementation-baseline: 0dbfb3c4323aec568ac2803d58c0aa71c301edda
 generation-model-family: OpenAI GPT-5
 generation-model-version: gpt-5.6-sol
 generation-session: 01a029aa-9127-7c42-ad28-81512b91ded6
-generation-synthesis-trajectory: "owner-authorized standalone architecture -> F-A through F-E code traces -> rejected reviews through 0.5.10 -> test-first H-1/H-2 remediation"
+generation-synthesis-trajectory: "owner-authorized standalone architecture -> F-A through F-E code traces -> rejected reviews through 0.5.11 -> executable TEST-1162 mutation gate"
 depends-on: "[[SPEC-007-cbcl-pairing-cutover]]; [[SPEC-004-application-scoped-identity]]; [[SPEC-003-android-apk-distribution]]; cbcl-pairing SPEC-001"
 last-updated: 2026-08-24
 ---
 
 # SPEC-008 — Production Pairing Claimant: Transport, Real Credential, and Origin Trust
 
-> **Consolidated current-law reissue.** Version 0.5.11 states the standalone
+> **Consolidated current-law reissue.** Version 0.5.12 states the standalone
 > first-contact authority directly. Trajectory documents and review reports
 > supply evidence only. They supply no current values.
 > The repository owner authorized local test-first implementation on
@@ -2050,6 +2050,12 @@ and receipt handling. Require preservation for
 attempt, an installed value, a changed root generation, or a changed exact-pair
 policy and require compensation or unlink to refuse rather than delete it.
 
+The continuous gate SHALL execute this process-global keyring test in an
+isolated test process, even while it remains ignored by the concurrent default
+library suite. The continuous browser gate SHALL execute the wallet pairing
+lifecycle suite that exposes and abandons interrupted pending rows. Removing
+either explicit invocation SHALL fail review evidence for this test.
+
 ### TEST-1163 — Oversized reload evidence is unavailable, not revoked
 
 **Validates:** [[SPEC-008-production-pairing-claimant#REQ-1006]].
@@ -2076,6 +2082,16 @@ when the build override is set. Restore a clean exact-pin closure and require
 the witness and locked workspace build to pass without the override.
 
 ## Changelog
+
+- **0.5.12-draft — 2026-08-24 — executable interrupted-link gate.** This
+  owner-authorized test-first reissue closes the 0.5.11 review's only blocking
+  finding. It executes [[SPEC-008-production-pairing-claimant#TEST-1162]] in an
+  isolated CI process, executes the wallet lifecycle browser suite, covers all
+  fifteen named pre-payload boundaries, and kills mutations that remove
+  payload retention, attempt identity, installed-slot protection, exact-slot
+  compare-and-delete, and exact-pair-policy stability. Release and deployment
+  remain prohibited until a fresh cross-model Tier-1 PASS and separate owner
+  approval.
 
 - **0.5.11-draft — 2026-08-24 — adversarial implementation remediation.**
   This owner-authorized consolidated reissue closes the 0.5.10 review's two HIGH
