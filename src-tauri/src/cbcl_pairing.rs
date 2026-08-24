@@ -412,16 +412,16 @@ fn local_websocket_url(origin: &str) -> Result<(String, u16)> {
 
 fn intent_view(intent: selfsame_pairing::live::DisplayIntent) -> CbclIntentView {
     CbclIntentView {
-        application: intent.application,
-        action: intent.action,
-        authority_summary: intent.authority_summary,
+        application: intent.application().into(),
+        action: intent.action().into(),
+        authority_summary: intent.authority_summary().into(),
         fields: intent
-            .fields
-            .into_iter()
+            .fields()
+            .iter()
             .map(|field| CbclIntentFieldView {
-                label: field.label.into(),
-                value: field.value,
-                claimed_by_secret_holder: field.claimed_by_secret_holder,
+                label: field.label().into(),
+                value: field.value().into(),
+                claimed_by_secret_holder: field.claimed_by_secret_holder(),
             })
             .collect(),
     }

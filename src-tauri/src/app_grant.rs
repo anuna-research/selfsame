@@ -901,7 +901,7 @@ mod enrolment_observation_tests {
     use ed25519_dalek::SigningKey;
     use selfsame_app_identity::ceremony::{OfferCore, OfferPayload};
     use selfsame_app_identity::enrollment::{self as en, EnrollmentStatement};
-    use selfsame_app_identity::json::{self, Json};
+    use selfsame_app_identity::json::Json;
     use selfsame_app_identity::profile::ApplicationProfile;
     use selfsame_app_identity::provider_hint::ProviderHint;
     use selfsame_app_identity::{codec, didkey};

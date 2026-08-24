@@ -589,6 +589,7 @@ async fn flush(session: &State<'_, AppSession>) -> Result<usize> {
 /// nobody able to change that. The UI says exactly that before calling it.
 #[tauri::command]
 pub async fn forget_identity(session: State<'_, AppSession>) -> Result<()> {
+    crate::cbcl_v2_policy::purge()?;
     Custody::forget()?;
     let mut s = session.0.lock().unwrap_or_else(|p| p.into_inner());
     s.clear();
