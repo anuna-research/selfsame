@@ -510,10 +510,16 @@
           <textarea id="pairing-input" rows="4" autocomplete="off" spellcheck="false"
                     autocapitalize="none" inputmode="text"></textarea>
         </label>
+        <label class="field">
+          <span class="field__label">PAIR1 presence code</span>
+          <input id="pairing-presence-code" autocomplete="off" spellcheck="false"
+                 autocapitalize="characters" inputmode="text"
+                 placeholder="PAIR1-…" />
+        </label>
         <p class="code-state" data-pairing-state aria-live="polite">Paste one invitation</p>
-        <!-- SPEC-008 CON-902: a production claimant derives the wallet's
-             per-application identity inside custody before any socket opens,
-             so presence is asked for here. The demo build hides this field. -->
+        <!-- SPEC-008 credential/v2 sends this value to Rust only after the
+             authenticated intent is approved. No identity is derived before
+             relay consent and exact-intent consent have both completed. -->
         <label class="field" data-pairing-passcode-field hidden>
           <span class="field__label">Your Selfsame passcode</span>
           <input type="password" id="pairing-passcode" autocomplete="current-password" />
@@ -542,7 +548,7 @@
 
       <section class="screen screen--scroll" data-screen="pairing-consent" tabindex="-1" hidden>
         <button class="back" data-action="cancel-cbcl-pairing">Cancel</button>
-        <h1>Review this request</h1>
+        <h1 data-cbcl-consent-title>Review this request</h1>
         <p class="lede" data-cbcl-authority></p>
         <div class="evidence">
           <div class="evidence__row">
@@ -561,6 +567,7 @@
           Approve only if these exact fields match the application in front of you.
           Approval releases one credential; decline releases none.
         </p>
+        <p class="error" data-error="pairing-consent" hidden></p>
         <div class="spacer"></div>
         <button class="btn btn--primary" data-action="approve-cbcl-pairing">Approve request</button>
         <button class="btn btn--quiet" data-action="decline-cbcl-pairing">Decline</button>

@@ -41,24 +41,20 @@ test("TEST-814 CBCL wallet states are keyboard complete and WCAG-clean", async (
     await audit(page, `invitation entry at ${width}px`);
 
     await page.type("#pairing-input", "o2ZyZWxheXgaaHR0cHM6Ly9yZWxheS5leGFtcGxl");
+    await page.type("#pairing-presence-code", "PAIR1-22222-22222-22222-22222-22222-22222-22222-22222-22222-22222-22222");
+    await page.type("#pairing-passcode", "correct horse battery staple");
     assert.equal(await page.$eval('[data-action="start-cbcl-pairing"]', (node) => node.disabled), false);
-    await page.focus("#pairing-input");
-    await page.keyboard.press("Tab");
-    assert.equal(
-      await page.evaluate(() => document.activeElement?.dataset.action),
-      "start-cbcl-pairing",
-    );
-    await page.keyboard.press("Enter");
+    await page.click('[data-action="start-cbcl-pairing"]');
     await visible(page, "pairing-wait");
     assert.equal(await page.evaluate(() => document.activeElement?.dataset.screen), "pairing-wait");
     await audit(page, `pending secure channel at ${width}px`);
 
-    await page.evaluate(() => globalThis.__completeCbclPairingStart());
+    await page.evaluate(() => globalThis.__completeCbclV2Recognise());
     await visible(page, "pairing-consent");
-    assert.match(await page.$eval("[data-cbcl-authority]", (node) => node.textContent), /Selfsame device grant/);
-    assert.match(await page.$eval("[data-cbcl-intent-fields]", (node) => node.textContent), /photos\.example/);
+    assert.match(await page.$eval("[data-cbcl-consent-title]", (node) => node.textContent), /Trust this new relay/);
+    assert.match(await page.$eval("[data-cbcl-intent-fields]", (node) => node.textContent), /relay\.example/);
     assert.equal(await page.evaluate(() => document.activeElement?.dataset.screen), "pairing-consent");
-    await audit(page, `exact intent consent at ${width}px`);
+    await audit(page, `exact application-relay consent at ${width}px`);
 
     await page.keyboard.press("Tab");
     assert.equal(
@@ -71,8 +67,16 @@ test("TEST-814 CBCL wallet states are keyboard complete and WCAG-clean", async (
       "approve-cbcl-pairing",
     );
     await page.keyboard.press("Enter");
+    await page.waitForFunction(() => /exact request/i.test(document.querySelector("[data-cbcl-consent-title]").textContent));
+    assert.match(await page.$eval("[data-cbcl-intent-fields]", (node) => node.textContent), /photos\.example/);
+    await audit(page, `authenticated intent consent at ${width}px`);
+    await page.click('[data-action="approve-cbcl-pairing"]');
+    await page.waitForFunction(() => /account linking/i.test(document.querySelector("[data-cbcl-consent-title]").textContent));
+    assert.match(await page.$eval("[data-cbcl-intent-fields]", (node) => node.textContent), /AA BB CC DD EE FF/);
+    await audit(page, `final identity consent at ${width}px`);
+    await page.click('[data-action="approve-cbcl-pairing"]');
     await visible(page, "pairing-result");
-    assert.match(await page.$eval("[data-cbcl-result-message]", (node) => node.textContent), /13 credential checks/);
+    assert.match(await page.$eval("[data-cbcl-result-message]", (node) => node.textContent), /reciprocal account binding/);
     await audit(page, `accepted terminal result at ${width}px`);
     await page.keyboard.press("Tab");
     await page.keyboard.press("Enter");
@@ -80,11 +84,12 @@ test("TEST-814 CBCL wallet states are keyboard complete and WCAG-clean", async (
 
     await page.click('[data-action="to-pairing"]');
     await page.type("#pairing-input", "selfsame-pairing-v2:obsolete");
+    await page.type("#pairing-presence-code", "PAIR1-22222-22222-22222-22222-22222-22222-22222-22222-22222-22222-22222");
     await page.click('[data-action="start-cbcl-pairing"]');
     await page.waitForFunction(() => !document.querySelector('[data-error="pairing"]').hidden);
     assert.match(
       await page.$eval('[data-error="pairing"]', (node) => node.textContent),
-      /obsolete development build/,
+      /could not be recognised/,
     );
     await audit(page, `retired invitation refusal at ${width}px`);
     await page.close();
@@ -106,42 +111,43 @@ function bridge() {
       invoke: async (command, args) => {
         if (command === "get_state") return state;
         if (command === "flush_publications") return 0;
-        if (command === "cbcl_pairing_cancel") return null;
-        if (command === "cbcl_pairing_approve") {
-          return {
-            outcome: "accepted",
-            title: "Application connected",
-            message: "Selfsame accepted all 13 credential checks.",
-          };
-        }
-        if (command === "cbcl_pairing_decline") {
-          return {
-            outcome: "declined",
-            title: "Request declined",
-            message: "No credential was shared and the invitation is spent.",
-          };
-        }
-        if (command === "cbcl_pairing_start") {
+        if (command === "cbcl_v2_cancel") return null;
+        if (command === "cbcl_v2_recognise") {
           if (args.invitation.startsWith("selfsame-pairing-v2:")) {
-            throw "PairingVersionUnsupported";
+            throw "RecognitionFailed";
           }
           return new Promise((resolve) => {
-            globalThis.__completeCbclPairingStart = () => resolve({
+            globalThis.__completeCbclV2Recognise = () => resolve({
+              applicationId: "https://photos.example/selfsame/application",
               relayOrigin: "https://relay.example",
-              status: "Secure channel ready. Review the exact request.",
-              intent: {
-                application: "anuna.io/credential/v1",
-                action: "issue-credential",
-                authoritySummary: "Transfer one Selfsame device grant",
-                fields: [
-                  { label: "Application", value: "https://photos.example/selfsame/application", claimedBySecretHolder: true },
-                  { label: "Origin", value: "https://photos.example", claimedBySecretHolder: true },
-                  { label: "Scope", value: "device", claimedBySecretHolder: true },
-                ],
-              },
+              requiresApproval: true,
             });
           });
         }
+        if (command === "cbcl_v2_relay_decide") return args.approve ? {
+          outcome: "intent",
+          intent: {
+            applicationId: "https://photos.example/selfsame/application",
+            httpsOrigin: "https://photos.example",
+            relayOrigin: "https://relay.example",
+            permissions: ["https://photos.example/selfsame/application#device"],
+            deviceDid: `did:key:z6Mk${"1".repeat(44)}`,
+            accountPrincipalDigest: "A".repeat(43),
+            tofuState: "new-pair",
+            transition: { kind: "none", legacyHandle: null, migrationRooms: [] },
+          },
+        } : { outcome: "declined", intent: null };
+        if (command === "cbcl_v2_preliminary_decide") return args.approve ? {
+          outcome: "final-review",
+          finalReview: {
+            applicationId: "https://photos.example/selfsame/application",
+            previewIssuerDid: "did:crdt:fixture-account",
+            previewFingerprint: { hex: "AA BB CC DD EE FF", label: "copper-lynx-42", lifehash: "A".repeat(4096) },
+            comparison: "no-binding-person-compared",
+          },
+        } : { outcome: "declined", finalReview: null };
+        if (command === "cbcl_v2_final_decide") return { outcome: args.approve ? "payload-sent" : "declined" };
+        if (command === "cbcl_v2_finish") return { outcome: "installed" };
         return null;
       },
     },
