@@ -103,6 +103,7 @@ pub fn run() {
             cbcl_v2_commands::cbcl_v2_final_decide,
             cbcl_v2_commands::cbcl_v2_finish,
             cbcl_v2_commands::cbcl_v2_pending_recoveries,
+            cbcl_v2_commands::cbcl_v2_pending_links,
             cbcl_v2_commands::cbcl_v2_installed_links,
             cbcl_v2_commands::cbcl_v2_reload_verify,
             cbcl_v2_commands::cbcl_v2_unlink,

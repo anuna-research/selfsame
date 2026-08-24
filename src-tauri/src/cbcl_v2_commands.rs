@@ -441,6 +441,8 @@ pub async fn cbcl_v2_final_decide(
         },
     )?;
     crate::cbcl_v2_completion::persist_pending(&durable)?;
+    let mut pre_payload_cleanup =
+        crate::cbcl_v2_completion::PrePayloadPendingCleanup::new(durable.clone());
     let effects = pending
         .claimant
         .core_mut()
@@ -479,6 +481,8 @@ pub async fn cbcl_v2_final_decide(
     let acknowledged =
         durable.with_checkpoint(acknowledgement_generation, &acknowledgement_checkpoint)?;
     crate::cbcl_v2_completion::replace_pending(&durable, &acknowledged)?;
+    durable = acknowledged;
+    pre_payload_cleanup.advance(durable.clone());
     let after_acknowledgement = pending
         .claimant
         .core_mut()
@@ -487,7 +491,6 @@ pub async fn cbcl_v2_final_decide(
     if !after_acknowledgement.is_empty() {
         return Err(UiError::from("PairingFailed"));
     }
-    durable = acknowledged;
 
     let profile = pending.claimant.profile().clone();
     let plan = crate::cbcl_v2_completion::CredentialV2ProvisioningPlan::from_authenticated_offer(
@@ -505,6 +508,7 @@ pub async fn cbcl_v2_final_decide(
     let planned = durable.planned(effect_time, grant_id)?;
     crate::cbcl_v2_completion::replace_pending(&durable, &planned)?;
     durable = planned;
+    pre_payload_cleanup.advance(durable.clone());
 
     // First final signature: issuer creation only. The deterministic plan was
     // durable before this custody call, and the preview is re-derived before
@@ -515,6 +519,7 @@ pub async fn cbcl_v2_final_decide(
     let issuer_created = durable.issuer_created(&issuer)?;
     crate::cbcl_v2_completion::replace_pending(&durable, &issuer_created)?;
     durable = issuer_created;
+    pre_payload_cleanup.advance(durable.clone());
 
     let publication =
         selfsame_app_identity_net::state::publish_issuer_identity(&profile, &issuer.identity)
@@ -558,6 +563,8 @@ pub async fn cbcl_v2_final_decide(
     })??;
     let provisioned = durable.provisioned(&grant)?;
     crate::cbcl_v2_completion::replace_pending(&durable, &provisioned)?;
+    durable = provisioned;
+    pre_payload_cleanup.advance(durable.clone());
 
     let payload = pending
         .claimant
@@ -597,10 +604,11 @@ pub async fn cbcl_v2_final_decide(
                 .map_err(|_| UiError::from("PairingFailed"))
         })??;
     let (payload_generation, payload_checkpoint) = one_checkpoint(payload_effects)?;
-    let payload_prepared = provisioned
+    let payload_prepared = durable
         .payload_prepared(payload.content_hash())?
         .with_checkpoint(payload_generation, &payload_checkpoint)?;
-    crate::cbcl_v2_completion::replace_pending(&provisioned, &payload_prepared)?;
+    crate::cbcl_v2_completion::replace_pending(&durable, &payload_prepared)?;
+    let _payload_prepared = pre_payload_cleanup.disarm_after_payload(payload_prepared);
     let payload_release = pending
         .claimant
         .core_mut()
@@ -702,6 +710,14 @@ pub async fn cbcl_v2_finish(
 #[tauri::command]
 pub async fn cbcl_v2_pending_recoveries() -> Result<Vec<String>> {
     crate::cbcl_v2_completion::pending_application_ids()
+}
+
+/// List every interrupted local link so pre-payload failures remain visible
+/// and person-removable after restart without exposing checkpoint material.
+#[tauri::command]
+pub async fn cbcl_v2_pending_links(
+) -> Result<Vec<crate::cbcl_v2_completion::PendingCredentialV2LinkSummary>> {
+    crate::cbcl_v2_completion::pending_links()
 }
 
 /// List installed credential/v2 links without returning grants, scopes,
@@ -955,14 +971,15 @@ pub async fn cbcl_v2_unlink(
     if passcode.is_empty() {
         return Err(UiError::from("PresenceRequired"));
     }
-    let installed = crate::cbcl_v2_completion::load_installed(&application_id)?;
-    installed.require_root_generation(crate::cbcl_v2_completion::root_generation(
+    let local = crate::cbcl_v2_completion::load_local_link(&application_id)?;
+    let pending = local.is_pending();
+    local.require_root_generation(crate::cbcl_v2_completion::root_generation(
         &crate::custody::Custody::root_public_key()?,
     ))?;
     crate::custody::Custody::use_hierarchy_root(&passcode, |_| ())?;
-    crate::cbcl_v2_completion::unlink_installed(&installed)?;
+    crate::cbcl_v2_completion::unlink_local(&local)?;
     Ok(CredentialV2UnlinkView {
-        outcome: "unlinked",
+        outcome: if pending { "abandoned" } else { "unlinked" },
         application_id,
         remote_revocation_claimed: false,
     })

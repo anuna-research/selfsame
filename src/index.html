@@ -528,6 +528,32 @@
         <button class="btn btn--danger" data-action="to-cbcl-v2-unlink">Unlink this application</button>
       </section>
 
+      <section class="screen screen--scroll" data-screen="pairing-pending-link" hidden>
+        <button class="back" data-action="to-applications">Applications</button>
+        <h1>Interrupted wallet link</h1>
+        <p class="lede">
+          This attempt stopped before Selfsame installed an application capability.
+          You can remove its local checkpoint and exact relay policy, then start again.
+        </p>
+        <div class="evidence">
+          <div class="evidence__row">
+            <p class="evidence__key">Application</p>
+            <p class="evidence__val evidence__val--mono" data-cbcl-v2-pending-application></p>
+          </div>
+          <div class="evidence__row">
+            <p class="evidence__key">Person-approved relay</p>
+            <p class="evidence__val evidence__val--mono" data-cbcl-v2-pending-relay></p>
+          </div>
+          <div class="evidence__row">
+            <p class="evidence__key">Durable phase</p>
+            <p class="evidence__val evidence__val--mono" data-cbcl-v2-pending-phase></p>
+          </div>
+        </div>
+        <button class="btn btn--danger" data-action="to-cbcl-v2-pending-unlink">
+          Abandon this interrupted link
+        </button>
+      </section>
+
       <section class="screen" data-screen="pairing-link-unlink" hidden>
         <button class="back" data-action="back-to-cbcl-v2-link">Back</button>
         <h1>Unlink this application?</h1>

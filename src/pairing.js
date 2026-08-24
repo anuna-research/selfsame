@@ -12,6 +12,7 @@ export function initPairing(d) {
   let credentialV2Stage = "idle";
   let recoveryApplication = null;
   let installedLink = null;
+  let pendingLink = null;
 
   // REQ-908: capability comes from the build, never from hardcoded prose.
   // Until the answer arrives the surface assumes the production shape, which
@@ -448,12 +449,38 @@ export function initPairing(d) {
   async function refreshInstalledLinks() {
     const list = $("[data-cbcl-v2-links]");
     if (!list) return;
-    const links = await invoke("cbcl_v2_installed_links");
+    const [links, pendingLinks] = await Promise.all([
+      invoke("cbcl_v2_installed_links"),
+      invoke("cbcl_v2_pending_links"),
+    ]);
     list.replaceChildren();
     const rows = Array.isArray(links) ? links : [];
-    $("[data-cbcl-v2-links-empty]").hidden = rows.length > 0;
+    const interrupted = Array.isArray(pendingLinks) ? pendingLinks : [];
+    $("[data-cbcl-v2-links-empty]").hidden = rows.length + interrupted.length > 0;
     $("[data-applications-empty]").hidden =
-      rows.length > 0 || $("[data-applications]").children.length > 0;
+      rows.length + interrupted.length > 0 || $("[data-applications]").children.length > 0;
+    for (const link of interrupted) {
+      const item = document.createElement("li");
+      const button = document.createElement("button");
+      button.className = "application";
+      button.dataset.cbclV2PendingLink = "";
+      const mark = document.createElement("div");
+      mark.className = "mark";
+      mark.setAttribute("aria-hidden", "true");
+      const body = document.createElement("div");
+      body.className = "application__body";
+      const application = document.createElement("span");
+      application.className = "application__name";
+      application.textContent = `Interrupted link — ${link.applicationId}`;
+      const relay = document.createElement("span");
+      relay.className = "application__meta";
+      relay.textContent = link.relayOrigin;
+      body.append(application, relay);
+      button.append(mark, body);
+      button.addEventListener("click", () => openPendingLink(link));
+      item.append(button);
+      list.append(item);
+    }
     for (const link of rows) {
       const item = document.createElement("li");
       const button = document.createElement("button");
@@ -480,6 +507,7 @@ export function initPairing(d) {
 
   function openInstalledLink(link) {
     installedLink = link;
+    pendingLink = null;
     $("[data-cbcl-v2-link-application]").textContent = link.applicationId;
     $("[data-cbcl-v2-link-account]").textContent = link.account;
     $("[data-cbcl-v2-link-relay]").textContent = link.relayOrigin;
@@ -487,6 +515,15 @@ export function initPairing(d) {
       "Verify current standing before using this installed capability.";
     $('[data-action="accept-cbcl-v2-rotation"]').hidden = true;
     show("pairing-link");
+  }
+
+  function openPendingLink(link) {
+    pendingLink = link;
+    installedLink = null;
+    $("[data-cbcl-v2-pending-application]").textContent = link.applicationId;
+    $("[data-cbcl-v2-pending-relay]").textContent = link.relayOrigin;
+    $("[data-cbcl-v2-pending-phase]").textContent = link.phase;
+    show("pairing-pending-link");
   }
 
   async function verifyInstalledLink(approveRotation = false) {
@@ -536,17 +573,27 @@ export function initPairing(d) {
     show("pairing-link-unlink");
   }
 
-  async function unlinkInstalled() {
-    if (!installedLink) return;
+  function beginPendingUnlink() {
+    if (!pendingLink) return;
+    $("[data-cbcl-v2-unlink-application]").textContent = pendingLink.applicationId;
+    const passcode = $("#cbcl-v2-unlink-passcode");
+    if (passcode) passcode.value = "";
+    show("pairing-link-unlink");
+  }
+
+  async function unlinkLocal() {
+    const localLink = installedLink ?? pendingLink;
+    if (!localLink) return;
     const passcode = $("#cbcl-v2-unlink-passcode")?.value ?? "";
     busy("Removing this local application link…");
     try {
       await invoke("cbcl_v2_unlink", {
-        applicationId: installedLink.applicationId,
+        applicationId: localLink.applicationId,
         confirmation: true,
         passcode,
       });
       installedLink = null;
+      pendingLink = null;
       if ($("#cbcl-v2-unlink-passcode")) $("#cbcl-v2-unlink-passcode").value = "";
       await refreshInstalledLinks();
       show("applications");
@@ -575,8 +622,13 @@ export function initPairing(d) {
     "verify-cbcl-v2-link": () => verifyInstalledLink(false),
     "accept-cbcl-v2-rotation": () => verifyInstalledLink(true),
     "to-cbcl-v2-unlink": beginInstalledUnlink,
-    "back-to-cbcl-v2-link": () => (installedLink ? openInstalledLink(installedLink) : show("applications")),
-    "confirm-cbcl-v2-unlink": unlinkInstalled,
+    "to-cbcl-v2-pending-unlink": beginPendingUnlink,
+    "back-to-cbcl-v2-link": () => pendingLink
+      ? openPendingLink(pendingLink)
+      : installedLink
+        ? openInstalledLink(installedLink)
+        : show("applications"),
+    "confirm-cbcl-v2-unlink": unlinkLocal,
   });
 
   const input = $("#pairing-input");

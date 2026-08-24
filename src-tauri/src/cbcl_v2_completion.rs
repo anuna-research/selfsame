@@ -312,6 +312,16 @@ pub struct InstalledCredentialV2LinkSummary {
     pub issuer_did: String,
 }
 
+/// Non-secret row used to make every interrupted local link visible to the
+/// person, including phases that are not eligible for terminal recovery.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PendingCredentialV2LinkSummary {
+    pub application_id: String,
+    pub relay_origin: String,
+    pub phase: &'static str,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct CredentialV2ReloadIdentity {
     pub root_generation: [u8; 32],
@@ -423,6 +433,25 @@ enum CredentialV2LinkSlot {
     Installed(InstalledCredentialV2Link),
 }
 
+/// One fully recognised local application slot selected for confirmed unlink.
+pub(crate) enum LocalCredentialV2Link {
+    Pending(PendingCredentialV2Completion),
+    Installed(InstalledCredentialV2Link),
+}
+
+impl LocalCredentialV2Link {
+    pub(crate) const fn is_pending(&self) -> bool {
+        matches!(self, Self::Pending(_))
+    }
+
+    pub(crate) fn require_root_generation(&self, expected: [u8; 32]) -> Result<()> {
+        match self {
+            Self::Pending(value) => value.require_root_generation(expected),
+            Self::Installed(value) => value.require_root_generation(expected),
+        }
+    }
+}
+
 /// Bounded discovery index for secure stores that deliberately expose no
 /// prefix scan. It contains application identifiers only, never grants,
 /// checkpoint bytes, recovery tokens, or other credential material.
@@ -494,6 +523,31 @@ impl PendingCredentialV2Completion {
     #[must_use]
     pub const fn checkpoint_generation(&self) -> u64 {
         self.checkpoint_generation
+    }
+
+    fn phase(&self) -> &'static str {
+        match &self.stage {
+            PendingCredentialV2Stage::FinalApproval => "final-approval",
+            PendingCredentialV2Stage::Planned { .. } => "planned",
+            PendingCredentialV2Stage::IssuerCreated { .. } => "issuer-created",
+            PendingCredentialV2Stage::Provisioned { .. } => "provisioned",
+            PendingCredentialV2Stage::PayloadPrepared { .. } => "payload-prepared",
+        }
+    }
+
+    fn summary(&self) -> PendingCredentialV2LinkSummary {
+        PendingCredentialV2LinkSummary {
+            application_id: self.application_id.clone(),
+            relay_origin: self.relay_origin.clone(),
+            phase: self.phase(),
+        }
+    }
+
+    fn is_payload_prepared(&self) -> bool {
+        matches!(
+            &self.stage,
+            PendingCredentialV2Stage::PayloadPrepared { .. }
+        )
     }
 
     /// Decode and re-recognise the exact profile authenticated before the
@@ -709,6 +763,45 @@ impl PendingCredentialV2Completion {
         }
         self.stage.validate(&self.preview_issuer_did)?;
         Ok(())
+    }
+}
+
+/// Armed immediately after final approval becomes durable. Every early return
+/// before `PayloadPrepared` best-effort removes the exact latest slot without
+/// replacing the protocol error that caused the return. Once the payload
+/// checkpoint is durable, recovery owns the slot and the guard is disarmed.
+pub(crate) struct PrePayloadPendingCleanup {
+    current: Option<PendingCredentialV2Completion>,
+}
+
+impl PrePayloadPendingCleanup {
+    pub(crate) fn new(current: PendingCredentialV2Completion) -> Self {
+        debug_assert!(!current.is_payload_prepared());
+        Self {
+            current: Some(current),
+        }
+    }
+
+    pub(crate) fn advance(&mut self, replacement: PendingCredentialV2Completion) {
+        debug_assert!(!replacement.is_payload_prepared());
+        self.current = Some(replacement);
+    }
+
+    pub(crate) fn disarm_after_payload(
+        mut self,
+        payload_prepared: PendingCredentialV2Completion,
+    ) -> PendingCredentialV2Completion {
+        debug_assert!(payload_prepared.is_payload_prepared());
+        self.current = None;
+        payload_prepared
+    }
+}
+
+impl Drop for PrePayloadPendingCleanup {
+    fn drop(&mut self) {
+        if let Some(current) = self.current.as_ref() {
+            let _ = remove_pre_payload_attempt(current);
+        }
     }
 }
 
@@ -1295,6 +1388,68 @@ pub fn installed_links() -> Result<Vec<InstalledCredentialV2LinkSummary>> {
     Ok(installed)
 }
 
+/// List every recognised pending slot, regardless of whether its terminal
+/// recovery window has opened. This is intentionally separate from
+/// [`pending_application_ids`]: a pre-payload slot is abandonable but must
+/// never be presented as recoverable.
+pub fn pending_links() -> Result<Vec<PendingCredentialV2LinkSummary>> {
+    let _guard = SLOT_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut index = load_index_locked()?;
+    let mut retained = Vec::with_capacity(index.applications.len());
+    let mut pending = Vec::new();
+    for application_id in &index.applications {
+        let entry = slot_name(application_id)?;
+        match store::get(&entry).map_err(|_| UiError::from("PairingCheckpointUnavailable"))? {
+            None => {}
+            Some(encoded) => match recognise_slot(&encoded)? {
+                CredentialV2LinkSlot::Pending(value) if value.application_id == *application_id => {
+                    retained.push(application_id.clone());
+                    pending.push(value.summary());
+                }
+                CredentialV2LinkSlot::Installed(value)
+                    if value.application_id == *application_id =>
+                {
+                    retained.push(application_id.clone());
+                }
+                CredentialV2LinkSlot::Pending(_) | CredentialV2LinkSlot::Installed(_) => {
+                    return Err(UiError::from("PairingCheckpointRefused"));
+                }
+            },
+        }
+    }
+    if retained != index.applications {
+        index.applications = retained;
+        persist_index_locked(&index)?;
+    }
+    Ok(pending)
+}
+
+/// Read either kind of local slot for a person-confirmed removal. Recognition
+/// occurs before presence is requested; the returned value is then used as the
+/// exact compare-and-delete expectation.
+pub(crate) fn load_local_link(application_id: &str) -> Result<LocalCredentialV2Link> {
+    let _guard = SLOT_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let entry = slot_name(application_id)?;
+    let encoded = store::get(&entry)
+        .map_err(|_| UiError::from("PairingCheckpointUnavailable"))?
+        .ok_or_else(|| UiError::from("PairingApplicationNotLinked"))?;
+    match recognise_slot(&encoded)? {
+        CredentialV2LinkSlot::Pending(value) if value.application_id == application_id => {
+            Ok(LocalCredentialV2Link::Pending(value))
+        }
+        CredentialV2LinkSlot::Installed(value) if value.application_id == application_id => {
+            Ok(LocalCredentialV2Link::Installed(value))
+        }
+        CredentialV2LinkSlot::Pending(_) | CredentialV2LinkSlot::Installed(_) => {
+            Err(UiError::from("PairingApplicationNotLinked"))
+        }
+    }
+}
+
 /// Read one fully recognised installed record by its authenticated application
 /// identifier. Pending, absent, and cross-application values are not aliases
 /// for an installed capability.
@@ -1350,38 +1505,51 @@ pub(crate) fn replace_installed(
     }
 }
 
-/// Remove one exact installed application and its person-selected relay row.
-/// The hierarchy root, other applications, and every remote hub record are out
-/// of scope. A policy removal is rolled back if the slot delete itself fails.
-pub(crate) fn unlink_installed(expected: &InstalledCredentialV2Link) -> Result<()> {
+/// Remove one exact pending or installed local application slot and its exact
+/// person-selected `(applicationId, relayOrigin)` policy row. The hierarchy
+/// root, sibling applications, and all remote hub state remain untouched.
+pub(crate) fn unlink_local(expected: &LocalCredentialV2Link) -> Result<()> {
     let _guard = SLOT_LOCK
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    expected.validate()?;
-    let entry = slot_name(&expected.application_id)?;
+    let (application_id, relay_origin, expected_slot) = match expected {
+        LocalCredentialV2Link::Pending(value) => {
+            value.validate()?;
+            (
+                &value.application_id,
+                &value.relay_origin,
+                CredentialV2LinkSlot::Pending(value.clone()),
+            )
+        }
+        LocalCredentialV2Link::Installed(value) => {
+            value.validate()?;
+            (
+                &value.application_id,
+                &value.relay_origin,
+                CredentialV2LinkSlot::Installed(value.clone()),
+            )
+        }
+    };
+    let entry = slot_name(application_id)?;
     let encoded = store::get(&entry)
         .map_err(|_| UiError::from("PairingCheckpointUnavailable"))?
         .ok_or_else(|| UiError::from("PairingApplicationNotLinked"))?;
-    match recognise_slot(&encoded)? {
-        CredentialV2LinkSlot::Installed(current) if current == *expected => {}
-        CredentialV2LinkSlot::Pending(_) | CredentialV2LinkSlot::Installed(_) => {
-            return Err(UiError::from("PairingApplicationNotLinked"));
-        }
+    if recognise_slot(&encoded)? != expected_slot {
+        return Err(UiError::from("PairingApplicationNotLinked"));
     }
-    let policy_was_present =
-        crate::cbcl_v2_policy::state(&expected.application_id, &expected.relay_origin)?
-            == crate::cbcl_v2_policy::ExactPairState::TrustedPair;
-    crate::cbcl_v2_policy::remove(&expected.application_id, &expected.relay_origin)?;
+    let policy_was_present = crate::cbcl_v2_policy::state(application_id, relay_origin)?
+        == crate::cbcl_v2_policy::ExactPairState::TrustedPair;
+    crate::cbcl_v2_policy::remove(application_id, relay_origin)?;
     if store::delete(&entry).is_err() {
         if policy_was_present {
-            let _ = crate::cbcl_v2_policy::insert(&expected.application_id, &expected.relay_origin);
+            let _ = crate::cbcl_v2_policy::insert(application_id, relay_origin);
         }
         return Err(UiError::from("PairingCheckpointUnavailable"));
     }
     let mut index = load_index_locked()?;
     index
         .applications
-        .retain(|application_id| application_id != &expected.application_id);
+        .retain(|candidate| candidate != application_id);
     persist_index_locked(&index)
 }
 
@@ -1410,6 +1578,52 @@ pub fn remove_pending(expected: &PendingCredentialV2Completion) -> Result<()> {
     index
         .applications
         .retain(|application_id| application_id != &expected.application_id);
+    persist_index_locked(&index)
+}
+
+/// Best-effort compensation for a final-approved attempt that has not reached
+/// the recoverable payload boundary. The stored phase may be newer than the
+/// guard's copy when a backend commits a replacement but reports an error, so
+/// removal compares the immutable ceremony identity and then deletes the exact
+/// current recognised value. A durable `PayloadPrepared` value is retained.
+fn remove_pre_payload_attempt(anchor: &PendingCredentialV2Completion) -> Result<()> {
+    let _guard = SLOT_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    anchor.validate()?;
+    let entry = slot_name(&anchor.application_id)?;
+    let Some(encoded) =
+        store::get(&entry).map_err(|_| UiError::from("PairingCheckpointUnavailable"))?
+    else {
+        return Ok(());
+    };
+    let CredentialV2LinkSlot::Pending(current) = recognise_slot(&encoded)? else {
+        return Err(UiError::from("PairingCheckpointRefused"));
+    };
+    current.validate()?;
+    let same_attempt = current.root_generation == anchor.root_generation
+        && current.application_id == anchor.application_id
+        && current.relay_origin == anchor.relay_origin
+        && current.profile_digest == anchor.profile_digest
+        && current.offer_profile == anchor.offer_profile
+        && current.carrier == anchor.carrier
+        && current.offer == anchor.offer
+        && current.intent_approve == anchor.intent_approve
+        && current.comparison == anchor.comparison
+        && current.final_approve == anchor.final_approve
+        && current.preview_issuer_did == anchor.preview_issuer_did
+        && current.offer_expires_at == anchor.offer_expires_at;
+    if !same_attempt {
+        return Err(UiError::from("PairingCheckpointRefused"));
+    }
+    if current.is_payload_prepared() {
+        return Ok(());
+    }
+    store::delete(&entry).map_err(|_| UiError::from("PairingCheckpointUnavailable"))?;
+    let mut index = load_index_locked()?;
+    index
+        .applications
+        .retain(|application_id| application_id != &anchor.application_id);
     persist_index_locked(&index)
 }
 
@@ -1694,6 +1908,7 @@ fn checkpoint_error(_: cbcl_pairing::credential_v2::CredentialV2Error) -> UiErro
 #[cfg(test)]
 mod tests {
     use super::*;
+    use cbcl_pairing::credential_v2::CredentialV2CarrierInput;
     use ed25519_dalek::SigningKey;
     use selfsame_app_identity::json::{self, Json};
 
@@ -1874,6 +2089,161 @@ mod tests {
         };
         installed.validate().unwrap();
         installed
+    }
+
+    fn pending_abandonment_fixture() -> PendingCredentialV2Completion {
+        let signing_key = SigningKey::from_bytes(&[0x31; 32]);
+        let profile_octets = reload_profile(&signing_key, 1);
+        let profile =
+            selfsame_app_identity::profile::ApplicationProfile::recognise(&profile_octets).unwrap();
+        let carrier = CredentialV2Carrier::new(CredentialV2CarrierInput {
+            application_context: profile.application_id.as_str().into(),
+            relay_origin: "https://photos.example:9443".into(),
+            mailbox_id: [0x81; 32],
+            carrier_ceremony_id: [0x82; 32],
+            carrier_nonce: [0x83; 32],
+            claim_commitment: [0x84; 32],
+            relay_expires_at: 1_900_000_000,
+            expected_allocator_key: Some(
+                SigningKey::from_bytes(&[0x85; 32])
+                    .verifying_key()
+                    .to_bytes(),
+            ),
+        })
+        .unwrap();
+        let intent_digest = [0x86; 32];
+        let object = |kind| CredentialV2Object::new(kind, intent_digest, vec![0xa0]).unwrap();
+        let pending = PendingCredentialV2Completion {
+            version: SLOT_VERSION,
+            root_generation: codec::b64url(&root_generation(&[0x87; 32])),
+            application_id: profile.application_id.as_str().into(),
+            relay_origin: carrier.relay_origin().into(),
+            profile_digest: codec::b64url(profile.digest()),
+            offer_profile: codec::b64url(&profile_octets),
+            carrier: codec::b64url(&encode_carrier(&carrier).unwrap()),
+            offer: codec::b64url(object(CredentialV2Kind::Offer).as_bytes()),
+            intent_approve: codec::b64url(object(CredentialV2Kind::IntentApprove).as_bytes()),
+            comparison: codec::b64url(object(CredentialV2Kind::ComparisonConfirmed).as_bytes()),
+            final_approve: codec::b64url(object(CredentialV2Kind::FinalApprove).as_bytes()),
+            preview_issuer_did: installed_reload_fixture().issuer_did,
+            offer_expires_at: 1_900_000_000,
+            checkpoint_generation: 1,
+            endpoint_checkpoint: codec::b64url(b"sealed-test-checkpoint"),
+            stage: PendingCredentialV2Stage::FinalApproval,
+        };
+        pending.validate().unwrap();
+        pending
+    }
+
+    mod shared_memkeyring {
+        use keyring::credential::{Credential, CredentialApi, CredentialBuilderApi};
+        use std::any::Any;
+        use std::collections::HashMap;
+        use std::sync::{Mutex, OnceLock};
+
+        fn values() -> &'static Mutex<HashMap<String, Vec<u8>>> {
+            static VALUES: OnceLock<Mutex<HashMap<String, Vec<u8>>>> = OnceLock::new();
+            VALUES.get_or_init(|| Mutex::new(HashMap::new()))
+        }
+
+        #[derive(Debug)]
+        struct SharedCredential {
+            key: String,
+        }
+
+        impl CredentialApi for SharedCredential {
+            fn set_secret(&self, secret: &[u8]) -> keyring::Result<()> {
+                values()
+                    .lock()
+                    .unwrap()
+                    .insert(self.key.clone(), secret.to_vec());
+                Ok(())
+            }
+
+            fn get_secret(&self) -> keyring::Result<Vec<u8>> {
+                values()
+                    .lock()
+                    .unwrap()
+                    .get(&self.key)
+                    .cloned()
+                    .ok_or(keyring::Error::NoEntry)
+            }
+
+            fn delete_credential(&self) -> keyring::Result<()> {
+                values().lock().unwrap().remove(&self.key);
+                Ok(())
+            }
+
+            fn as_any(&self) -> &dyn Any {
+                self
+            }
+        }
+
+        #[derive(Debug)]
+        struct Builder;
+
+        impl CredentialBuilderApi for Builder {
+            fn build(
+                &self,
+                _target: Option<&str>,
+                service: &str,
+                user: &str,
+            ) -> keyring::Result<Box<Credential>> {
+                Ok(Box::new(SharedCredential {
+                    key: format!("{service}\u{0000}{user}"),
+                }))
+            }
+
+            fn as_any(&self) -> &dyn Any {
+                self
+            }
+        }
+
+        pub fn install() {
+            keyring::set_default_credential_builder(Box::new(Builder));
+        }
+    }
+
+    #[test]
+    #[ignore = "installs the process-global in-memory keyring; run this test alone"]
+    fn test_1162_pre_payload_failure_and_person_abandonment_release_the_exact_slot() {
+        shared_memkeyring::install();
+        let pending = pending_abandonment_fixture();
+        crate::cbcl_v2_policy::insert(pending.application_id(), &pending.relay_origin).unwrap();
+
+        persist_pending(&pending).unwrap();
+        {
+            let _failure_cleanup = PrePayloadPendingCleanup::new(pending.clone());
+            let advanced = pending.planned(1_800_000_000, [0x88; 32]).unwrap();
+            replace_pending(&pending, &advanced).unwrap();
+            // The guard deliberately still has the prior value. This models a
+            // backend that commits a replacement immediately before an error.
+        }
+        assert!(pending_links().unwrap().is_empty());
+
+        // A failed attempt no longer blocks a fresh ceremony for the same app.
+        persist_pending(&pending).unwrap();
+        let summaries = pending_links().unwrap();
+        assert_eq!(summaries.len(), 1);
+        assert_eq!(summaries[0].application_id, pending.application_id());
+        assert_eq!(summaries[0].relay_origin, pending.relay_origin);
+        assert_eq!(summaries[0].phase, "final-approval");
+
+        let local = load_local_link(pending.application_id()).unwrap();
+        assert!(local.is_pending());
+        local
+            .require_root_generation(root_generation(&[0x87; 32]))
+            .unwrap();
+        unlink_local(&local).unwrap();
+        assert!(pending_links().unwrap().is_empty());
+        assert_eq!(
+            crate::cbcl_v2_policy::state(pending.application_id(), &pending.relay_origin).unwrap(),
+            crate::cbcl_v2_policy::ExactPairState::NewPair
+        );
+
+        // The confirmed escape also releases the exact app slot for retry.
+        persist_pending(&pending).unwrap();
+        remove_pending(&pending).unwrap();
     }
 
     #[test]

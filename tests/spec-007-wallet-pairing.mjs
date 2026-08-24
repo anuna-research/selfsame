@@ -226,6 +226,50 @@ test("TEST-1159 installed links reload, prompt on rotation, and unlink locally",
   );
 });
 
+test("TEST-1162 interrupted pre-payload links are visible and locally abandonable", async (t) => {
+  const server = createServer((request, response) => {
+    const path = request.url === "/" ? "/index.html" : request.url.split("?")[0];
+    try {
+      const body = readFileSync(join(ROOT, path));
+      response.writeHead(200, { "content-type": MIME[extname(path)] ?? "application/octet-stream" });
+      response.end(body);
+    } catch {
+      response.writeHead(404).end();
+    }
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => server.close());
+  const browser = await puppeteer.launch({ headless: true });
+  t.after(() => browser.close());
+  const page = await browser.newPage();
+  await page.evaluateOnNewDocument(pendingLinkBridge);
+  await page.goto(`http://127.0.0.1:${server.address().port}`, { waitUntil: "networkidle0" });
+  await page.click('[data-action="to-applications"]');
+  await page.waitForSelector("[data-cbcl-v2-pending-link]");
+  assert.match(
+    await page.$eval("[data-cbcl-v2-links]", (node) => node.textContent),
+    /Interrupted link.*chat\.anuna\.io.*chat\.anuna\.io:9443/s,
+  );
+
+  await page.click("[data-cbcl-v2-pending-link]");
+  await visible(page, "pairing-pending-link");
+  await audit(page, "interrupted credential/v2 link");
+  await page.click('[data-action="to-cbcl-v2-pending-unlink"]');
+  await visible(page, "pairing-link-unlink");
+  await page.type("#cbcl-v2-unlink-passcode", "correct horse battery staple");
+  await page.click('[data-action="confirm-cbcl-v2-unlink"]');
+  await visible(page, "applications");
+  assert.deepEqual(
+    await page.evaluate(() => globalThis.__v2PendingUnlinkCalls),
+    [{
+      applicationId: "https://chat.anuna.io/selfsame/v2",
+      confirmation: true,
+      passcode: "correct horse battery staple",
+    }],
+  );
+  assert.equal(await page.$("[data-cbcl-v2-pending-link]"), null);
+});
+
 function bridge() {
   const state = {
     has_identity: true,
@@ -373,6 +417,45 @@ function installedBridge() {
           globalThis.__v2UnlinkCalls.push(args);
           linked = false;
           return { outcome: "unlinked", applicationId, remoteRevocationClaimed: false };
+        }
+        return null;
+      },
+    },
+  };
+}
+
+function pendingLinkBridge() {
+  const applicationId = "https://chat.anuna.io/selfsame/v2";
+  const relayOrigin = "https://chat.anuna.io:9443";
+  const state = {
+    has_identity: true,
+    backup_confirmed: true,
+    did: "did:crdt:fixture",
+    fingerprint: { hex: "2E 41 D0 88 6B 15", label: "garnet-plover-31", lifehash: "A".repeat(4096) },
+    pending_publications: 0,
+    devices: [],
+    applications: [],
+  };
+  let pending = true;
+  globalThis.__v2PendingUnlinkCalls = [];
+  globalThis.__TAURI__ = {
+    core: {
+      invoke: async (command, args) => {
+        if (command === "get_state") return state;
+        if (command === "flush_publications") return 0;
+        if (command === "service_endpoint") return "https://did.example";
+        if (command === "cbcl_pairing_capability") return { demoRelay: false, productionClaimant: true };
+        if (command === "cbcl_v2_pending_recoveries") return [];
+        if (command === "cbcl_v2_installed_links") return [];
+        if (command === "cbcl_v2_pending_links") return pending ? [{
+          applicationId,
+          relayOrigin,
+          phase: "issuer-created",
+        }] : [];
+        if (command === "cbcl_v2_unlink") {
+          globalThis.__v2PendingUnlinkCalls.push(args);
+          pending = false;
+          return { outcome: "abandoned", applicationId, remoteRevocationClaimed: false };
         }
         return null;
       },
