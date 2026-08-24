@@ -2,11 +2,11 @@
 id: SPEC-008
 title: Production Pairing Claimant — Transport, Real Credential, and Origin Trust
 status: draft
-version: 0.5.15-draft
+version: 0.5.16-draft
 tier: 1
 review-gate: test-first-implementation-owner-authorized; release-and-deployment-prohibited-pending-cross-model-pass
 authority-form: consolidated-direct-current-authority
-implementation-baseline: 48a0c7499ab83bdf1d77f6cfb8a09562a7c046f7
+implementation-baseline: 60abb8b25e858be8005151e47ea2a8044d130e80
 generation-model-family: OpenAI GPT-5
 generation-model-version: gpt-5.6-sol
 generation-session: 01a029aa-9127-7c42-ad28-81512b91ded6
@@ -17,7 +17,7 @@ last-updated: 2026-08-25
 
 # SPEC-008 — Production Pairing Claimant: Transport, Real Credential, and Origin Trust
 
-> **Consolidated current-law reissue.** Version 0.5.15 states the standalone
+> **Consolidated current-law reissue.** Version 0.5.16 states the standalone
 > first-contact authority directly. Trajectory documents and review reports
 > supply evidence only. They supply no current values.
 > The repository owner authorized local test-first implementation on
@@ -1116,7 +1116,7 @@ increment directly. Trajectory documents and review reports supply evidence
 only.
 
 The current SPEC-008 test set is TEST-901 through TEST-915 and TEST-1156
-through TEST-1168. Every member of that set is stated in this parent.
+through TEST-1169. Every member of that set is stated in this parent.
 [[SPEC-007-cbcl-pairing-cutover]] TEST-801 through TEST-821 remain the other
 current Selfsame test set and are stated in that parent. No plan or review can
 omit either set.
@@ -1125,8 +1125,8 @@ The exact coordinated hub test set is TEST-115 through TEST-121. The hub's
 base-parent tests remain current outside this coordinated increment set.
 
 The coordinated review set contains this parent,
-[[SPEC-007-cbcl-pairing-cutover]] 0.3.6-draft, cbcl-pairing SPEC-001
-0.5.7-draft, and cbcl-bus SPEC-053 0.17.11-draft.
+[[SPEC-007-cbcl-pairing-cutover]] 0.3.7-draft, cbcl-pairing SPEC-001
+0.5.7-draft, and cbcl-bus SPEC-053 0.17.12-draft.
 
 The `anuna-ssi` namespace reference is outside that set. It is pinned at
 `c7d462029841ea1884bb6f089732058d8838728d` only to resolve
@@ -2186,7 +2186,32 @@ default and conformance test suites plus deny-warnings Clippy in both feature
 configurations. No successful browser or NIF test compensates for an
 unauthenticated relay release source.
 
+### TEST-1169 — Invoke caller discovery fails closed
+
+**Validates:** [[SPEC-008-production-pairing-claimant#CON-985]] and
+[[SPEC-008-production-pairing-claimant#TEST-1167]].
+
+The screen gate SHALL recursively enumerate JavaScript source modules and
+derive the invoke-caller set from their source. It SHALL scan every member of
+that derived set. A reviewed caller-count ratchet SHALL make a narrowed or
+broken discovery filter fail before the gate claims that every invoke
+resolves.
+
+From the clean candidate, run `CI=true npm run screens` and require success.
+Then exclude `src/pairing.js` from the derived caller set without changing the
+ratchet. Require exit one and an `invoke-surface` error that reports two
+discovered callers where three are required. Restore the candidate and require
+the gate to pass again.
+
 ## Changelog
+
+- **0.5.16-draft — 2026-08-25 — fail-closed invoke caller discovery.** The
+  screen gate recursively discovers JavaScript invoke callers instead of
+  maintaining a file list. TEST-1169 ratchets the current caller count and
+  kills the previously surviving `src/pairing.js` exclusion mutation. The
+  coordinated safety citation names SPEC-007's actual 0.3.7 draft. Production
+  allocation, release, and deployment remain prohibited pending a fresh
+  cross-model PASS.
 
 - **0.5.15-draft — 2026-08-25 — authenticated relay release source.** The hub
   release builder now authenticates the exact credential/v2 cbcl-pairing

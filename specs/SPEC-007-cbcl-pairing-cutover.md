@@ -4,7 +4,7 @@ title: cbcl-pairing Protocol Cutover
 status: draft
 tier: 1
 version: 0.3.7-draft
-last-updated: 2026-08-24
+last-updated: 2026-08-25
 previous-approved-version: 0.2.1
 owner-repo: selfsame
 review-gate: test-first-implementation-owner-authorized; release-prohibited-pending-cross-model-pass
@@ -16,14 +16,14 @@ coordinated-pairing-design: cbcl-pairing SPEC-001 0.5.7-draft
 generation-model-family: OpenAI GPT-5
 generation-model-version: gpt-5.6-sol
 generation-session: 01a029aa-9127-7c42-ad28-81512b91ded6
-generation-synthesis-trajectory: "approved 0.2.1 cutover -> standalone credential/v2 ordering conflict -> rejected reviews through 0.5.7 -> direct 0.3.6 proof-input closure"
+generation-synthesis-trajectory: "approved 0.2.1 cutover -> standalone credential/v2 ordering conflict -> rejected reviews through 0.5.7 -> direct 0.3.7 proof-input closure"
 candidate-successor-to: SPEC-006
 depends-on: cbcl-pairing SPEC-001; SPEC-004; SCREEN-001
 ---
 
 # SPEC-007 — cbcl-pairing Protocol Cutover
 
-> **Current draft safety revision.** Version 0.3.6 states the credential/v2
+> **Current draft safety revision.** Version 0.3.7 states the credential/v2
 > consent and effect boundary directly. Version 0.2.1 remains the last approved
 > revision. The owner authorizes local test-first implementation. This draft
 > authorizes no production allocation, release, or deployment.
