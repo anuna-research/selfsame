@@ -271,7 +271,12 @@ enum PendingCredentialV2Stage {
 pub struct InstalledCredentialV2Link {
     version: u8,
     root_generation: String,
+    relay_origin: String,
+    /// Immutable profile that authenticated the offer and final hub status.
     profile: String,
+    /// Most recently reverified live profile. This may advance without
+    /// replacing the historical signing evidence above.
+    current_profile: String,
     grant: String,
     grant_digest: String,
     grant_id: String,
@@ -282,6 +287,7 @@ pub struct InstalledCredentialV2Link {
     account: String,
     installation_device_did: String,
     profile_digest: String,
+    current_profile_digest: String,
     account_authority: String,
     issuer_did: String,
     resolver_closure: String,
@@ -294,6 +300,114 @@ pub struct InstalledCredentialV2Link {
     final_status_jws: String,
     final_status_digest: String,
     finalized_at: u64,
+}
+
+/// Non-secret row used by the wallet's installed-link list.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstalledCredentialV2LinkSummary {
+    pub application_id: String,
+    pub account: String,
+    pub relay_origin: String,
+    pub issuer_did: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct CredentialV2ReloadIdentity {
+    pub root_generation: [u8; 32],
+    pub application_id: String,
+    pub account: String,
+    pub account_authority: String,
+    pub issuer_did: String,
+    pub profile_digest: [u8; 32],
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum CredentialV2ReloadObservation {
+    Unavailable,
+    HubDeleted,
+    Verified {
+        root_generation: [u8; 32],
+        application_id: String,
+        observed_account: String,
+        account_authority: String,
+        issuer_did: String,
+        profile_digest: [u8; 32],
+        offer_key_retained: bool,
+        grant_matches: bool,
+        revoked: bool,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum CredentialV2ReloadOutcome {
+    Usable,
+    ProfileRefresh,
+    AuthorityRotation,
+    IssuerRotation,
+    Unavailable,
+    Revoked,
+    HandleChanged,
+    HubDeleted,
+    FreshPairingRequired,
+}
+
+pub(crate) struct CredentialV2ReloadCheck {
+    pub outcome: CredentialV2ReloadOutcome,
+    pub replacement: Option<InstalledCredentialV2Link>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum CredentialV2UnlinkOutcome {
+    ConfirmationRequired,
+    Authorised,
+}
+
+pub(crate) fn authorise_unlink(confirmation: bool) -> CredentialV2UnlinkOutcome {
+    if confirmation {
+        CredentialV2UnlinkOutcome::Authorised
+    } else {
+        CredentialV2UnlinkOutcome::ConfirmationRequired
+    }
+}
+
+pub(crate) fn classify_reload(
+    retained: &CredentialV2ReloadIdentity,
+    observation: CredentialV2ReloadObservation,
+) -> CredentialV2ReloadOutcome {
+    let CredentialV2ReloadObservation::Verified {
+        root_generation,
+        application_id,
+        observed_account,
+        account_authority,
+        issuer_did,
+        profile_digest,
+        offer_key_retained,
+        grant_matches,
+        revoked,
+    } = observation
+    else {
+        return match observation {
+            CredentialV2ReloadObservation::Unavailable => CredentialV2ReloadOutcome::Unavailable,
+            CredentialV2ReloadObservation::HubDeleted => CredentialV2ReloadOutcome::HubDeleted,
+            CredentialV2ReloadObservation::Verified { .. } => unreachable!(),
+        };
+    };
+    if root_generation != retained.root_generation || application_id != retained.application_id {
+        CredentialV2ReloadOutcome::FreshPairingRequired
+    } else if observed_account != retained.account {
+        CredentialV2ReloadOutcome::HandleChanged
+    } else if account_authority != retained.account_authority || !offer_key_retained {
+        CredentialV2ReloadOutcome::AuthorityRotation
+    } else if issuer_did != retained.issuer_did {
+        CredentialV2ReloadOutcome::IssuerRotation
+    } else if revoked || !grant_matches {
+        CredentialV2ReloadOutcome::Revoked
+    } else if profile_digest != retained.profile_digest {
+        CredentialV2ReloadOutcome::ProfileRefresh
+    } else {
+        CredentialV2ReloadOutcome::Usable
+    }
 }
 
 /// Exactly one durable state occupies an application's credential/v2 slot.
@@ -685,7 +799,9 @@ impl InstalledCredentialV2Link {
         let installed = Self {
             version: SLOT_VERSION,
             root_generation: pending.root_generation.clone(),
+            relay_origin: carrier.relay_origin().into(),
             profile: codec::b64url(profile_octets),
+            current_profile: codec::b64url(profile_octets),
             grant_digest: codec::b64url(&Sha256::digest(facts.grant.as_bytes())),
             grant: facts.grant,
             grant_id: codec::b64url(&facts.grant_id),
@@ -698,6 +814,7 @@ impl InstalledCredentialV2Link {
             account,
             installation_device_did: offer.claims.device_binding().device_did().into(),
             profile_digest: pending.profile_digest.clone(),
+            current_profile_digest: pending.profile_digest.clone(),
             account_authority: profile.account_authority,
             issuer_did: facts.issuer_did,
             resolver_closure: codec::b64url(&facts.resolver_closure),
@@ -723,14 +840,136 @@ impl InstalledCredentialV2Link {
         &self.issuer_did
     }
 
+    pub(crate) fn application_id(&self) -> &str {
+        &self.application_id
+    }
+
+    pub(crate) fn account_text(&self) -> &str {
+        &self.account
+    }
+
+    pub(crate) fn credential_id(&self) -> &str {
+        &self.credential_id
+    }
+
+    pub(crate) fn grant_bytes(&self) -> &[u8] {
+        self.grant.as_bytes()
+    }
+
+    pub(crate) fn installation_device_public_key(&self) -> Result<[u8; 32]> {
+        didkey::decode(&self.installation_device_did)
+            .map_err(|_| UiError::from("PairingCheckpointRefused"))
+    }
+
+    pub(crate) fn offer_key_retained_in(
+        &self,
+        current: &selfsame_app_identity::profile::ApplicationProfile,
+    ) -> Result<bool> {
+        let historical_octets = decode_bounded(&self.profile, 65_536)?;
+        let historical =
+            selfsame_app_identity::profile::ApplicationProfile::recognise(&historical_octets)
+                .map_err(|_| UiError::from("PairingCheckpointRefused"))?;
+        let retained = historical
+            .enrollment_keys
+            .iter()
+            .find(|candidate| candidate.kid == self.offer_kid)
+            .ok_or_else(|| UiError::from("PairingCheckpointRefused"))?;
+        Ok(current
+            .enrollment_keys
+            .iter()
+            .any(|candidate| candidate.kid == self.offer_kid && candidate.jwk == retained.jwk))
+    }
+
+    pub(crate) fn account_authority(&self) -> &str {
+        &self.account_authority
+    }
+
+    pub(crate) fn current_profile_digest(&self) -> &str {
+        &self.current_profile_digest
+    }
+
+    pub(crate) fn require_root_generation(&self, expected: [u8; 32]) -> Result<()> {
+        let retained = codec::decode_b64url_32(&self.root_generation)
+            .map_err(|_| UiError::from("PairingCheckpointRefused"))?;
+        if retained != expected {
+            return Err(UiError::from("PairingRootChanged"));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn verify_reload(
+        &self,
+        observation: CredentialV2ReloadObservation,
+        current_profile_octets: Option<&[u8]>,
+    ) -> Result<CredentialV2ReloadCheck> {
+        self.validate()?;
+        let identity = CredentialV2ReloadIdentity {
+            root_generation: codec::decode_b64url_32(&self.root_generation)
+                .map_err(|_| UiError::from("PairingCheckpointRefused"))?,
+            application_id: self.application_id.clone(),
+            account: self.account.clone(),
+            account_authority: self.account_authority.clone(),
+            issuer_did: self.issuer_did.clone(),
+            profile_digest: codec::decode_b64url_32(&self.current_profile_digest)
+                .map_err(|_| UiError::from("PairingCheckpointRefused"))?,
+        };
+        let observed_profile_digest = match &observation {
+            CredentialV2ReloadObservation::Verified { profile_digest, .. } => Some(*profile_digest),
+            CredentialV2ReloadObservation::Unavailable
+            | CredentialV2ReloadObservation::HubDeleted => None,
+        };
+        let outcome = classify_reload(&identity, observation);
+        let replacement = if outcome == CredentialV2ReloadOutcome::ProfileRefresh {
+            let octets =
+                current_profile_octets.ok_or_else(|| UiError::from("PairingProfileUnavailable"))?;
+            let current = selfsame_app_identity::profile::ApplicationProfile::recognise(octets)
+                .map_err(|_| UiError::from("PairingProfileUnavailable"))?;
+            let digest = observed_profile_digest
+                .ok_or_else(|| UiError::from("PairingProfileUnavailable"))?;
+            if current.application_id.as_str() != self.application_id
+                || current.account_authority != self.account_authority
+                || *current.digest() != digest
+                || !self.offer_key_retained_in(&current)?
+            {
+                return Err(UiError::from("PairingProfileUnavailable"));
+            }
+            let mut replacement = self.clone();
+            replacement.current_profile = codec::b64url(octets);
+            replacement.current_profile_digest = codec::b64url(&digest);
+            replacement.validate()?;
+            Some(replacement)
+        } else {
+            None
+        };
+        Ok(CredentialV2ReloadCheck {
+            outcome,
+            replacement,
+        })
+    }
+
+    fn summary(&self) -> InstalledCredentialV2LinkSummary {
+        InstalledCredentialV2LinkSummary {
+            application_id: self.application_id.clone(),
+            account: self.account.clone(),
+            relay_origin: self.relay_origin.clone(),
+            issuer_did: self.issuer_did.clone(),
+        }
+    }
+
     fn validate(&self) -> Result<()> {
         let profile_octets = decode_bounded(&self.profile, 65_536)?;
         let profile =
             selfsame_app_identity::profile::ApplicationProfile::recognise(&profile_octets)
                 .map_err(|_| UiError::from("PairingCheckpointRefused"))?;
+        let current_profile_octets = decode_bounded(&self.current_profile, 65_536)?;
+        let current_profile =
+            selfsame_app_identity::profile::ApplicationProfile::recognise(&current_profile_octets)
+                .map_err(|_| UiError::from("PairingCheckpointRefused"))?;
         let root_generation = codec::decode_b64url_32(&self.root_generation)
             .map_err(|_| UiError::from("PairingCheckpointRefused"))?;
         let profile_digest = codec::decode_b64url_32(&self.profile_digest)
+            .map_err(|_| UiError::from("PairingCheckpointRefused"))?;
+        let current_profile_digest = codec::decode_b64url_32(&self.current_profile_digest)
             .map_err(|_| UiError::from("PairingCheckpointRefused"))?;
         let grant_id = codec::decode_b64url_32(&self.grant_id)
             .map_err(|_| UiError::from("PairingCheckpointRefused"))?;
@@ -753,8 +992,12 @@ impl InstalledCredentialV2Link {
             .map_err(|_| UiError::from("PairingCheckpointRefused"))?;
         if self.version != SLOT_VERSION
             || root_generation == [0; 32]
+            || validate_application_and_relay(&self.application_id, &self.relay_origin).is_err()
             || profile.application_id.as_str() != self.application_id
             || *profile.digest() != profile_digest
+            || current_profile.application_id.as_str() != self.application_id
+            || *current_profile.digest() != current_profile_digest
+            || current_profile.account_authority != self.account_authority
             || profile.account_authority != self.account_authority
             || self.finalized_at == 0
             || self.final_status_jws.is_empty()
@@ -1014,6 +1257,132 @@ pub fn pending_application_ids() -> Result<Vec<String>> {
         persist_index_locked(&index)?;
     }
     Ok(pending)
+}
+
+/// List every installed credential/v2 link without exposing grant bytes,
+/// recovery material, scope identifiers, or immutable receipt evidence.
+pub fn installed_links() -> Result<Vec<InstalledCredentialV2LinkSummary>> {
+    let _guard = SLOT_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut index = load_index_locked()?;
+    let mut retained = Vec::with_capacity(index.applications.len());
+    let mut installed = Vec::new();
+    for application_id in &index.applications {
+        let entry = slot_name(application_id)?;
+        match store::get(&entry).map_err(|_| UiError::from("PairingCheckpointUnavailable"))? {
+            None => {}
+            Some(encoded) => match recognise_slot(&encoded)? {
+                CredentialV2LinkSlot::Installed(value)
+                    if value.application_id == *application_id =>
+                {
+                    retained.push(application_id.clone());
+                    installed.push(value.summary());
+                }
+                CredentialV2LinkSlot::Pending(value) if value.application_id == *application_id => {
+                    retained.push(application_id.clone());
+                }
+                CredentialV2LinkSlot::Pending(_) | CredentialV2LinkSlot::Installed(_) => {
+                    return Err(UiError::from("PairingCheckpointRefused"));
+                }
+            },
+        }
+    }
+    if retained != index.applications {
+        index.applications = retained;
+        persist_index_locked(&index)?;
+    }
+    Ok(installed)
+}
+
+/// Read one fully recognised installed record by its authenticated application
+/// identifier. Pending, absent, and cross-application values are not aliases
+/// for an installed capability.
+pub(crate) fn load_installed(application_id: &str) -> Result<InstalledCredentialV2Link> {
+    let _guard = SLOT_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let entry = slot_name(application_id)?;
+    let encoded = store::get(&entry)
+        .map_err(|_| UiError::from("PairingCheckpointUnavailable"))?
+        .ok_or_else(|| UiError::from("PairingApplicationNotLinked"))?;
+    match recognise_slot(&encoded)? {
+        CredentialV2LinkSlot::Installed(value) if value.application_id == application_id => {
+            Ok(value)
+        }
+        CredentialV2LinkSlot::Pending(_) | CredentialV2LinkSlot::Installed(_) => {
+            Err(UiError::from("PairingApplicationNotLinked"))
+        }
+    }
+}
+
+/// Atomically re-pin one exact installed record after a complete live reload
+/// verification. The immutable offer profile and hub acknowledgement remain
+/// byte-for-byte unchanged in the replacement.
+pub(crate) fn replace_installed(
+    expected: &InstalledCredentialV2Link,
+    replacement: &InstalledCredentialV2Link,
+) -> Result<()> {
+    let _guard = SLOT_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    expected.validate()?;
+    replacement.validate()?;
+    let mut immutable_projection = replacement.clone();
+    immutable_projection.current_profile = expected.current_profile.clone();
+    immutable_projection.current_profile_digest = expected.current_profile_digest.clone();
+    if immutable_projection != *expected {
+        return Err(UiError::from("PairingCheckpointRefused"));
+    }
+    let entry = slot_name(&expected.application_id)?;
+    let encoded = store::get(&entry)
+        .map_err(|_| UiError::from("PairingCheckpointUnavailable"))?
+        .ok_or_else(|| UiError::from("PairingApplicationNotLinked"))?;
+    match recognise_slot(&encoded)? {
+        CredentialV2LinkSlot::Installed(current) if current == *expected => {
+            let encoded = encode_slot(&CredentialV2LinkSlot::Installed(replacement.clone()))?;
+            store::set(&entry, &encoded).map_err(|_| UiError::from("PairingCheckpointUnavailable"))
+        }
+        CredentialV2LinkSlot::Installed(current) if current == *replacement => Ok(()),
+        CredentialV2LinkSlot::Pending(_) | CredentialV2LinkSlot::Installed(_) => {
+            Err(UiError::from("PairingCheckpointRefused"))
+        }
+    }
+}
+
+/// Remove one exact installed application and its person-selected relay row.
+/// The hierarchy root, other applications, and every remote hub record are out
+/// of scope. A policy removal is rolled back if the slot delete itself fails.
+pub(crate) fn unlink_installed(expected: &InstalledCredentialV2Link) -> Result<()> {
+    let _guard = SLOT_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    expected.validate()?;
+    let entry = slot_name(&expected.application_id)?;
+    let encoded = store::get(&entry)
+        .map_err(|_| UiError::from("PairingCheckpointUnavailable"))?
+        .ok_or_else(|| UiError::from("PairingApplicationNotLinked"))?;
+    match recognise_slot(&encoded)? {
+        CredentialV2LinkSlot::Installed(current) if current == *expected => {}
+        CredentialV2LinkSlot::Pending(_) | CredentialV2LinkSlot::Installed(_) => {
+            return Err(UiError::from("PairingApplicationNotLinked"));
+        }
+    }
+    let policy_was_present =
+        crate::cbcl_v2_policy::state(&expected.application_id, &expected.relay_origin)?
+            == crate::cbcl_v2_policy::ExactPairState::TrustedPair;
+    crate::cbcl_v2_policy::remove(&expected.application_id, &expected.relay_origin)?;
+    if store::delete(&entry).is_err() {
+        if policy_was_present {
+            let _ = crate::cbcl_v2_policy::insert(&expected.application_id, &expected.relay_origin);
+        }
+        return Err(UiError::from("PairingCheckpointUnavailable"));
+    }
+    let mut index = load_index_locked()?;
+    index
+        .applications
+        .retain(|application_id| application_id != &expected.application_id);
+    persist_index_locked(&index)
 }
 
 /// Remove one exact verified terminal-negative pending value.
@@ -1325,6 +1694,187 @@ fn checkpoint_error(_: cbcl_pairing::credential_v2::CredentialV2Error) -> UiErro
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ed25519_dalek::SigningKey;
+    use selfsame_app_identity::json::{self, Json};
+
+    const RELOAD_APPLICATION: &str = "https://photos.example/selfsame/application";
+    const RELOAD_PERMISSION: &str = "https://photos.example/selfsame/application#device";
+
+    fn reload_jwk(public_key: [u8; 32]) -> Json {
+        Json::obj([
+            ("kty", Json::text("OKP")),
+            ("crv", Json::text("Ed25519")),
+            ("x", Json::text(codec::b64url(&public_key))),
+        ])
+    }
+
+    fn reload_profile(signing_key: &SigningKey, relay_digest_byte: u8) -> Vec<u8> {
+        json::canonicalise(&Json::obj([
+            ("profileVersion", Json::int(1)),
+            ("applicationId", Json::text(RELOAD_APPLICATION)),
+            ("accountAuthority", Json::text("accounts.photos.example")),
+            ("verifierAudience", Json::text(RELOAD_APPLICATION)),
+            (
+                "allowedPermissions",
+                Json::arr([Json::text(RELOAD_PERMISSION)]),
+            ),
+            (
+                "enrollment",
+                Json::obj([
+                    (
+                        "requestSigningKeys",
+                        Json::arr([Json::obj([
+                            (
+                                "kid",
+                                Json::text(
+                                    "https://photos.example/selfsame/application#installed-test",
+                                ),
+                            ),
+                            (
+                                "publicKeyJwk",
+                                reload_jwk(signing_key.verifying_key().to_bytes()),
+                            ),
+                        ])]),
+                    ),
+                    (
+                        "mobileBindings",
+                        Json::arr([Json::obj([
+                            ("id", Json::text("web:https://photos.example")),
+                            ("platform", Json::text("web")),
+                            ("origin", Json::text("https://photos.example")),
+                        ])]),
+                    ),
+                ]),
+            ),
+            (
+                "cbclPairingRelays",
+                Json::arr([Json::obj([
+                    ("operatorId", Json::text("installed-test")),
+                    ("relayOrigin", Json::text("https://photos.example:9443")),
+                    ("priority", Json::int(1)),
+                    ("weight", Json::int(1)),
+                    (
+                        "privacyPolicyDigest",
+                        Json::text(codec::b64url(&[relay_digest_byte; 32])),
+                    ),
+                    (
+                        "conformanceEvidenceDigest",
+                        Json::text(codec::b64url(&[relay_digest_byte + 16; 32])),
+                    ),
+                ])]),
+            ),
+            (
+                "stateResolvers",
+                Json::arr([Json::obj([
+                    ("id", Json::text("state-1")),
+                    ("url", Json::text("https://state.photos.example")),
+                    ("protocol", Json::text("did-crdt-service-v1")),
+                ])]),
+            ),
+            (
+                "revocation",
+                Json::obj([
+                    ("method", Json::text("did-crdt-revocations-v1")),
+                    ("maxGrantLifetimeSeconds", Json::int(2_592_000)),
+                    ("maxClosureAgeSeconds", Json::int(900)),
+                    ("propagationSlaSeconds", Json::int(60)),
+                ]),
+            ),
+        ]))
+    }
+
+    fn installed_reload_fixture() -> InstalledCredentialV2Link {
+        let signing_key = SigningKey::from_bytes(&[0x31; 32]);
+        let profile_octets = reload_profile(&signing_key, 1);
+        let profile =
+            selfsame_app_identity::profile::ApplicationProfile::recognise(&profile_octets).unwrap();
+        let root = HierarchyRoot::from_octets([0x32; 64]);
+        let scope = AccountScopeId::from_octets([0x33; 32]);
+        let home = selfsame_app_identity::hierarchy::derive(&root, &profile.application_id, &scope);
+        let issuer_did = home.home_did().unwrap();
+        let device_key = SigningKey::from_bytes(&[0x34; 32])
+            .verifying_key()
+            .to_bytes();
+        let plan = CredentialV2ProvisioningPlan {
+            application: profile.application_id.clone(),
+            account_authority: profile.account_authority.clone(),
+            scope,
+            device_did: didkey::encode(&device_key),
+            device_public_key: device_key,
+            permissions: vec![RELOAD_PERMISSION.into()],
+            preview_issuer_did: issuer_did.clone(),
+        };
+        let issuer = build_issuer_artifacts(&root, &plan, 1_800_000_000).unwrap();
+        let grant_id = [0x35; 32];
+        let grant =
+            build_grant_artifacts(&root, &plan, &issuer, grant_id, 1_800_000_000, 86_400).unwrap();
+        let compact =
+            selfsame_app_identity::jws::recognise(&grant.grant, grant::GRANT_JWS, &[]).unwrap();
+        let recognised_grant = grant::recognise(&compact.payload).unwrap();
+        let carrier_ceremony_id = [0x36; 32];
+        let request_id = [0x37; 32];
+        let account_principal_digest = [0x38; 32];
+        let offer_core_digest = [0x39; 32];
+        let payload_digest = [0x3a; 32];
+        let recovery_commitment = [0x3b; 32];
+        let finalized_at = 1_800_000_100;
+        let kid = "https://photos.example/selfsame/application#installed-test";
+        let final_status_input = selfsame_pairing::credential_v2::CredentialV2FinalStatusInput {
+            application_id: profile.application_id.as_str().into(),
+            carrier_ceremony_id,
+            request_id,
+            account_principal_digest,
+            account_scope_id: *plan.scope.octets(),
+            device_did: plan.device_did.clone(),
+            offer_core_digest,
+            payload_digest,
+            grant_id,
+            issuer_did: issuer_did.clone(),
+            receipt_recovery_commitment: recovery_commitment,
+            finalized_at,
+        };
+        let final_status = selfsame_pairing::credential_v2::build_final_status(
+            &profile,
+            &final_status_input,
+            kid,
+            &signing_key,
+        )
+        .unwrap();
+        let account =
+            selfsame_app_identity::alias::stable_acct_uri(&issuer_did, &profile.account_authority);
+        let installed = InstalledCredentialV2Link {
+            version: SLOT_VERSION,
+            root_generation: codec::b64url(&root_generation(&[0x42; 32])),
+            relay_origin: "https://photos.example:9443".into(),
+            profile: codec::b64url(&profile_octets),
+            current_profile: codec::b64url(&profile_octets),
+            grant_digest: codec::b64url(&Sha256::digest(grant.grant.as_bytes())),
+            grant: grant.grant,
+            grant_id: codec::b64url(&grant_id),
+            credential_id: recognised_grant.id,
+            application_id: profile.application_id.as_str().into(),
+            account_principal_digest: codec::b64url(&account_principal_digest),
+            account_scope_id: codec::b64url(plan.scope.octets()),
+            account,
+            installation_device_did: plan.device_did,
+            profile_digest: codec::b64url(profile.digest()),
+            current_profile_digest: codec::b64url(profile.digest()),
+            account_authority: profile.account_authority,
+            issuer_did,
+            resolver_closure: codec::b64url(&issuer.resolver_closure),
+            offer_core_digest: codec::b64url(&offer_core_digest),
+            offer_kid: kid.into(),
+            carrier_ceremony_id: codec::b64url(&carrier_ceremony_id),
+            request_id: codec::b64url(&request_id),
+            payload_digest: codec::b64url(&payload_digest),
+            receipt_recovery_commitment: codec::b64url(&recovery_commitment),
+            final_status_jws: final_status.jws,
+            final_status_digest: codec::b64url(&final_status.digest),
+            finalized_at,
+        };
+        installed.validate().unwrap();
+        installed
+    }
 
     #[test]
     fn checkpoint_info_is_length_prefixed_and_application_separated() {
@@ -1347,7 +1897,9 @@ mod tests {
         let installed = CredentialV2LinkSlot::Installed(InstalledCredentialV2Link {
             version: 1,
             root_generation: codec::b64url(&[1; 32]),
+            relay_origin: "https://chat.anuna.io:9443".into(),
             profile: codec::b64url(b"{}"),
+            current_profile: codec::b64url(b"{}"),
             grant: "a.b.c".into(),
             grant_digest: codec::b64url(&[2; 32]),
             grant_id: codec::b64url(&[9; 32]),
@@ -1358,6 +1910,7 @@ mod tests {
             account: "acct:ss-test@accounts.chat.anuna.io".into(),
             installation_device_did: format!("did:key:z6Mk{}", "1".repeat(44)),
             profile_digest: codec::b64url(&[5; 32]),
+            current_profile_digest: codec::b64url(&[5; 32]),
             account_authority: "accounts.chat.anuna.io".into(),
             issuer_did: "did:crdt:z6Mk123".into(),
             resolver_closure: codec::b64url(b"{}"),
@@ -1572,5 +2125,214 @@ mod tests {
         };
         *payload_content_hash = "not-a-32-byte-digest".into();
         assert!(malformed_payload.validate(&preview).is_err());
+    }
+
+    #[test]
+    fn test_1159_reload_lifecycle_is_closed_over_every_required_state() {
+        let retained = CredentialV2ReloadIdentity {
+            root_generation: [0x11; 32],
+            application_id: "https://chat.anuna.io/selfsame/v2".into(),
+            account: "acct:ss-retained@accounts.chat.anuna.io".into(),
+            account_authority: "accounts.chat.anuna.io".into(),
+            issuer_did: format!("did:crdt:{}", "a".repeat(64)),
+            profile_digest: [0x22; 32],
+        };
+        let verified = |profile_digest| CredentialV2ReloadObservation::Verified {
+            root_generation: [0x11; 32],
+            application_id: retained.application_id.clone(),
+            observed_account: retained.account.clone(),
+            account_authority: retained.account_authority.clone(),
+            issuer_did: retained.issuer_did.clone(),
+            profile_digest,
+            offer_key_retained: true,
+            grant_matches: true,
+            revoked: false,
+        };
+
+        assert_eq!(
+            classify_reload(&retained, verified([0x22; 32])),
+            CredentialV2ReloadOutcome::Usable
+        );
+        assert_eq!(
+            classify_reload(&retained, verified([0x23; 32])),
+            CredentialV2ReloadOutcome::ProfileRefresh
+        );
+
+        let CredentialV2ReloadObservation::Verified {
+            root_generation,
+            application_id,
+            observed_account,
+            issuer_did,
+            profile_digest,
+            offer_key_retained,
+            grant_matches,
+            revoked,
+            ..
+        } = verified([0x22; 32])
+        else {
+            unreachable!()
+        };
+        assert_eq!(
+            classify_reload(
+                &retained,
+                CredentialV2ReloadObservation::Verified {
+                    root_generation,
+                    application_id,
+                    observed_account,
+                    account_authority: "rotated.chat.anuna.io".into(),
+                    issuer_did: issuer_did.clone(),
+                    profile_digest,
+                    offer_key_retained,
+                    grant_matches,
+                    revoked,
+                }
+            ),
+            CredentialV2ReloadOutcome::AuthorityRotation
+        );
+        assert_eq!(
+            classify_reload(
+                &retained,
+                CredentialV2ReloadObservation::Verified {
+                    root_generation,
+                    application_id: retained.application_id.clone(),
+                    observed_account: retained.account.clone(),
+                    account_authority: retained.account_authority.clone(),
+                    issuer_did: format!("did:crdt:{}", "b".repeat(64)),
+                    profile_digest,
+                    offer_key_retained: true,
+                    grant_matches: false,
+                    revoked: false,
+                }
+            ),
+            CredentialV2ReloadOutcome::IssuerRotation
+        );
+        assert_eq!(
+            classify_reload(&retained, CredentialV2ReloadObservation::Unavailable),
+            CredentialV2ReloadOutcome::Unavailable
+        );
+
+        let CredentialV2ReloadObservation::Verified {
+            root_generation,
+            application_id,
+            observed_account,
+            account_authority,
+            issuer_did,
+            profile_digest,
+            offer_key_retained,
+            grant_matches,
+            ..
+        } = verified([0x22; 32])
+        else {
+            unreachable!()
+        };
+        assert_eq!(
+            classify_reload(
+                &retained,
+                CredentialV2ReloadObservation::Verified {
+                    root_generation,
+                    application_id,
+                    observed_account,
+                    account_authority,
+                    issuer_did,
+                    profile_digest,
+                    offer_key_retained,
+                    grant_matches,
+                    revoked: true,
+                }
+            ),
+            CredentialV2ReloadOutcome::Revoked
+        );
+
+        let CredentialV2ReloadObservation::Verified {
+            root_generation,
+            application_id,
+            account_authority,
+            issuer_did,
+            profile_digest,
+            offer_key_retained,
+            grant_matches,
+            revoked,
+            ..
+        } = verified([0x22; 32])
+        else {
+            unreachable!()
+        };
+        assert_eq!(
+            classify_reload(
+                &retained,
+                CredentialV2ReloadObservation::Verified {
+                    root_generation,
+                    application_id,
+                    observed_account: "acct:ss-renamed@accounts.chat.anuna.io".into(),
+                    account_authority,
+                    issuer_did,
+                    profile_digest,
+                    offer_key_retained,
+                    grant_matches,
+                    revoked,
+                }
+            ),
+            CredentialV2ReloadOutcome::HandleChanged
+        );
+        assert_eq!(
+            classify_reload(&retained, CredentialV2ReloadObservation::HubDeleted),
+            CredentialV2ReloadOutcome::HubDeleted
+        );
+        assert_eq!(
+            authorise_unlink(false),
+            CredentialV2UnlinkOutcome::ConfirmationRequired
+        );
+        assert_eq!(
+            authorise_unlink(true),
+            CredentialV2UnlinkOutcome::Authorised
+        );
+    }
+
+    #[test]
+    fn test_1159_verified_profile_refresh_repins_only_live_profile_evidence() {
+        let installed = installed_reload_fixture();
+        let root_generation = codec::decode_b64url_32(&installed.root_generation).unwrap();
+        let current_profile = selfsame_app_identity::profile::ApplicationProfile::recognise(
+            &reload_profile(&SigningKey::from_bytes(&[0x31; 32]), 1),
+        )
+        .unwrap();
+        let observation = |profile_digest| CredentialV2ReloadObservation::Verified {
+            root_generation,
+            application_id: installed.application_id.clone(),
+            observed_account: installed.account.clone(),
+            account_authority: installed.account_authority.clone(),
+            issuer_did: installed.issuer_did.clone(),
+            profile_digest,
+            offer_key_retained: true,
+            grant_matches: true,
+            revoked: false,
+        };
+        let unchanged = installed
+            .verify_reload(observation(*current_profile.digest()), None)
+            .unwrap();
+        assert_eq!(unchanged.outcome, CredentialV2ReloadOutcome::Usable);
+        assert!(unchanged.replacement.is_none());
+
+        let refreshed_octets = reload_profile(&SigningKey::from_bytes(&[0x31; 32]), 2);
+        let refreshed_profile =
+            selfsame_app_identity::profile::ApplicationProfile::recognise(&refreshed_octets)
+                .unwrap();
+        let refreshed = installed
+            .verify_reload(
+                observation(*refreshed_profile.digest()),
+                Some(&refreshed_octets),
+            )
+            .unwrap();
+        assert_eq!(refreshed.outcome, CredentialV2ReloadOutcome::ProfileRefresh);
+        let replacement = refreshed.replacement.unwrap();
+        assert_eq!(replacement.profile, installed.profile);
+        assert_eq!(replacement.profile_digest, installed.profile_digest);
+        assert_eq!(replacement.grant, installed.grant);
+        assert_eq!(replacement.final_status_jws, installed.final_status_jws);
+        assert_eq!(
+            replacement.current_profile_digest,
+            codec::b64url(refreshed_profile.digest())
+        );
+        replacement.validate().unwrap();
     }
 }

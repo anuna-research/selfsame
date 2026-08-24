@@ -163,6 +163,69 @@ test("TEST-1161 restart recovery preserves pending through rotation consent", as
   );
 });
 
+test("TEST-1159 installed links reload, prompt on rotation, and unlink locally", async (t) => {
+  const server = createServer((request, response) => {
+    const path = request.url === "/" ? "/index.html" : request.url.split("?")[0];
+    try {
+      const body = readFileSync(join(ROOT, path));
+      response.writeHead(200, { "content-type": MIME[extname(path)] ?? "application/octet-stream" });
+      response.end(body);
+    } catch {
+      response.writeHead(404).end();
+    }
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => server.close());
+  const browser = await puppeteer.launch({ headless: true });
+  t.after(() => browser.close());
+  const page = await browser.newPage();
+  await page.evaluateOnNewDocument(installedBridge);
+  await page.goto(`http://127.0.0.1:${server.address().port}`, { waitUntil: "networkidle0" });
+  await page.click('[data-action="to-applications"]');
+  await page.waitForSelector("[data-cbcl-v2-link]");
+  assert.match(
+    await page.$eval("[data-cbcl-v2-links]", (node) => node.textContent),
+    /chat\.anuna\.io.*acct:ss-installed/s,
+  );
+
+  await page.click("[data-cbcl-v2-link]");
+  await visible(page, "pairing-link");
+  await audit(page, "installed credential/v2 link");
+  await page.click('[data-action="verify-cbcl-v2-link"]');
+  await page.waitForFunction(() => /authority changed/i.test(
+    document.querySelector("[data-cbcl-v2-link-status]").textContent,
+  ));
+  assert.equal(
+    await page.$eval('[data-action="accept-cbcl-v2-rotation"]', (node) => node.hidden),
+    false,
+  );
+  await page.click('[data-action="accept-cbcl-v2-rotation"]');
+  await page.waitForFunction(() => /fresh pairing/i.test(
+    document.querySelector("[data-cbcl-v2-link-status]").textContent,
+  ));
+
+  await page.click('[data-action="to-cbcl-v2-unlink"]');
+  await visible(page, "pairing-link-unlink");
+  await audit(page, "installed credential/v2 unlink confirmation");
+  await page.type("#cbcl-v2-unlink-passcode", "correct horse battery staple");
+  await page.click('[data-action="confirm-cbcl-v2-unlink"]');
+  await visible(page, "applications");
+  assert.equal(await page.evaluate(() => globalThis.__v2UnlinkCalls.length), 1);
+  assert.deepEqual(
+    await page.evaluate(() => globalThis.__v2UnlinkCalls[0]),
+    {
+      applicationId: "https://chat.anuna.io/selfsame/v2",
+      confirmation: true,
+      passcode: "correct horse battery staple",
+    },
+  );
+  assert.equal(await page.$("[data-cbcl-v2-link]"), null);
+  assert.match(
+    await page.$eval("[data-cbcl-v2-unlink-boundary]", (node) => node.textContent),
+    /does not revoke.*hub/i,
+  );
+});
+
 function bridge() {
   const state = {
     has_identity: true,
@@ -253,6 +316,63 @@ function recoveryBridge() {
             },
           };
           return { outcome: "installed", applicationId, retryAfterSeconds: null, authorityRotation: null };
+        }
+        return null;
+      },
+    },
+  };
+}
+
+function installedBridge() {
+  const applicationId = "https://chat.anuna.io/selfsame/v2";
+  const account = "acct:ss-installed@accounts.chat.anuna.io";
+  const state = {
+    has_identity: true,
+    backup_confirmed: true,
+    did: "did:crdt:fixture",
+    fingerprint: { hex: "2E 41 D0 88 6B 15", label: "garnet-plover-31", lifehash: "A".repeat(4096) },
+    pending_publications: 0,
+    devices: [],
+    applications: [],
+  };
+  let linked = true;
+  let reloadCount = 0;
+  globalThis.__v2UnlinkCalls = [];
+  globalThis.__TAURI__ = {
+    core: {
+      invoke: async (command, args) => {
+        if (command === "get_state") return state;
+        if (command === "flush_publications") return 0;
+        if (command === "service_endpoint") return "https://did.example";
+        if (command === "cbcl_pairing_capability") return { demoRelay: false, productionClaimant: true };
+        if (command === "cbcl_v2_pending_recoveries") return [];
+        if (command === "cbcl_v2_installed_links") return linked ? [{
+          applicationId,
+          account,
+          relayOrigin: "https://chat.anuna.io:9443",
+          issuerDid: `did:crdt:${"a".repeat(64)}`,
+        }] : [];
+        if (command === "cbcl_v2_reload_verify") {
+          reloadCount += 1;
+          if (reloadCount === 1) return {
+            outcome: "authority-rotation",
+            applicationId,
+            capability: false,
+            recordRetained: true,
+            rotation: { kind: "profile-signing-key", retained: "old", current: "new" },
+          };
+          return {
+            outcome: "fresh-pairing-required",
+            applicationId,
+            capability: false,
+            recordRetained: true,
+            rotation: { kind: "profile-signing-key", retained: "old", current: "new" },
+          };
+        }
+        if (command === "cbcl_v2_unlink") {
+          globalThis.__v2UnlinkCalls.push(args);
+          linked = false;
+          return { outcome: "unlinked", applicationId, remoteRevocationClaimed: false };
         }
         return null;
       },

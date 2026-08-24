@@ -11,6 +11,7 @@ export function initPairing(d) {
   const presencePattern = /^PAIR1-(?:[0-9A-HJKMNP-TV-Z]{5}-){10}[0-9A-HJKMNP-TV-Z]{5}$/;
   let credentialV2Stage = "idle";
   let recoveryApplication = null;
+  let installedLink = null;
 
   // REQ-908: capability comes from the build, never from hardcoded prose.
   // Until the answer arrives the surface assumes the production shape, which
@@ -436,9 +437,123 @@ export function initPairing(d) {
 
   async function resumePending() {
     if (credentialV2Stage !== "idle") return;
+    const installedRefresh = refreshInstalledLinks().catch(() => {});
     const applications = await invoke("cbcl_v2_pending_recoveries");
+    await installedRefresh;
     if (Array.isArray(applications) && applications.length > 0) {
       showRecovery(applications[0]);
+    }
+  }
+
+  async function refreshInstalledLinks() {
+    const list = $("[data-cbcl-v2-links]");
+    if (!list) return;
+    const links = await invoke("cbcl_v2_installed_links");
+    list.replaceChildren();
+    const rows = Array.isArray(links) ? links : [];
+    $("[data-cbcl-v2-links-empty]").hidden = rows.length > 0;
+    $("[data-applications-empty]").hidden =
+      rows.length > 0 || $("[data-applications]").children.length > 0;
+    for (const link of rows) {
+      const item = document.createElement("li");
+      const button = document.createElement("button");
+      button.className = "application";
+      button.dataset.cbclV2Link = "";
+      const mark = document.createElement("div");
+      mark.className = "mark";
+      mark.setAttribute("aria-hidden", "true");
+      const body = document.createElement("div");
+      body.className = "application__body";
+      const application = document.createElement("span");
+      application.className = "application__name";
+      application.textContent = link.applicationId;
+      const account = document.createElement("span");
+      account.className = "application__meta";
+      account.textContent = link.account;
+      body.append(application, account);
+      button.append(mark, body);
+      button.addEventListener("click", () => openInstalledLink(link));
+      item.append(button);
+      list.append(item);
+    }
+  }
+
+  function openInstalledLink(link) {
+    installedLink = link;
+    $("[data-cbcl-v2-link-application]").textContent = link.applicationId;
+    $("[data-cbcl-v2-link-account]").textContent = link.account;
+    $("[data-cbcl-v2-link-relay]").textContent = link.relayOrigin;
+    $("[data-cbcl-v2-link-status]").textContent =
+      "Verify current standing before using this installed capability.";
+    $('[data-action="accept-cbcl-v2-rotation"]').hidden = true;
+    show("pairing-link");
+  }
+
+  async function verifyInstalledLink(approveRotation = false) {
+    if (!installedLink) return;
+    busy("Verifying the installed grant and current application standing…");
+    try {
+      const result = await invoke("cbcl_v2_reload_verify", {
+        applicationId: installedLink.applicationId,
+        observedAccount: installedLink.account,
+        approveRotation,
+      });
+      const status = $("[data-cbcl-v2-link-status]");
+      const accept = $('[data-action="accept-cbcl-v2-rotation"]');
+      accept.hidden = true;
+      if (result.outcome === "usable" || result.outcome === "profile-refreshed") {
+        status.textContent = result.outcome === "profile-refreshed"
+          ? "The grant and current profile verified. The profile digest was safely refreshed."
+          : "The grant, current profile, authority, issuer, reciprocal account, revocation state, and hub status verified.";
+      } else if (result.outcome === "authority-rotation" || result.outcome === "issuer-rotation") {
+        status.textContent = result.outcome === "authority-rotation"
+          ? "The application authority changed. Review this unexpected rotation before continuing."
+          : "The account issuer changed. Review this unexpected rotation before continuing.";
+        accept.hidden = false;
+      } else if (result.outcome === "fresh-pairing-required") {
+        status.textContent = "This rotation requires unlinking locally and completing a fresh pairing ceremony.";
+      } else if (result.outcome === "account-device-handle-change-refused") {
+        status.textContent = "The installed account handle changed. Selfsame refused capability and sent no enrollment or pairing frame.";
+      } else if (result.outcome === "hub-deleted") {
+        status.textContent = "The hub deleted this link. Unlink locally, then complete a fresh pairing ceremony.";
+      } else if (result.outcome === "unavailable") {
+        status.textContent = "The application hub or resolver is unavailable. The installed record was retained and no capability was granted.";
+      } else {
+        status.textContent = "The installed grant is revoked or no longer verifies. The record was retained and no capability was granted.";
+      }
+    } catch (error) {
+      fail("cbcl-v2-link", `The installed link could not be verified (${message(error)}).`);
+    } finally {
+      idle();
+    }
+  }
+
+  function beginInstalledUnlink() {
+    if (!installedLink) return;
+    $("[data-cbcl-v2-unlink-application]").textContent = installedLink.applicationId;
+    const passcode = $("#cbcl-v2-unlink-passcode");
+    if (passcode) passcode.value = "";
+    show("pairing-link-unlink");
+  }
+
+  async function unlinkInstalled() {
+    if (!installedLink) return;
+    const passcode = $("#cbcl-v2-unlink-passcode")?.value ?? "";
+    busy("Removing this local application link…");
+    try {
+      await invoke("cbcl_v2_unlink", {
+        applicationId: installedLink.applicationId,
+        confirmation: true,
+        passcode,
+      });
+      installedLink = null;
+      if ($("#cbcl-v2-unlink-passcode")) $("#cbcl-v2-unlink-passcode").value = "";
+      await refreshInstalledLinks();
+      show("applications");
+    } catch (error) {
+      fail("cbcl-v2-unlink", `This local link was not removed (${message(error)}).`);
+    } finally {
+      idle();
     }
   }
 
@@ -453,7 +568,15 @@ export function initPairing(d) {
     "approve-cbcl-pairing": () => decide(true),
     "decline-cbcl-pairing": () => decide(false),
     "cancel-cbcl-pairing": cancel,
-    "finish-cbcl-pairing": () => show("applications"),
+    "finish-cbcl-pairing": async () => {
+      await refreshInstalledLinks();
+      show("applications");
+    },
+    "verify-cbcl-v2-link": () => verifyInstalledLink(false),
+    "accept-cbcl-v2-rotation": () => verifyInstalledLink(true),
+    "to-cbcl-v2-unlink": beginInstalledUnlink,
+    "back-to-cbcl-v2-link": () => (installedLink ? openInstalledLink(installedLink) : show("applications")),
+    "confirm-cbcl-v2-unlink": unlinkInstalled,
   });
 
   const input = $("#pairing-input");
@@ -466,5 +589,5 @@ export function initPairing(d) {
     const scanButton = $('[data-action="scan-cbcl-pairing"]');
     if (scanButton) scanButton.hidden = true;
   }
-  return { forget, resumePending };
+  return { forget, resumePending, refreshInstalledLinks };
 }

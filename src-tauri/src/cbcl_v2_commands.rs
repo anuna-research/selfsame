@@ -107,6 +107,34 @@ pub struct CredentialV2RecoveryView {
     authority_rotation: Option<CredentialV2AuthorityRotationView>,
 }
 
+/// Reload result. Capability is true only after every retained and live
+/// cryptographic predicate has been rechecked in this invocation.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CredentialV2ReloadView {
+    outcome: &'static str,
+    application_id: String,
+    capability: bool,
+    record_retained: bool,
+    rotation: Option<CredentialV2InstalledRotationView>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CredentialV2InstalledRotationView {
+    kind: &'static str,
+    retained: String,
+    current: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CredentialV2UnlinkView {
+    outcome: &'static str,
+    application_id: String,
+    remote_revocation_claimed: bool,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct CredentialV2AuthorityRotationView {
@@ -674,6 +702,372 @@ pub async fn cbcl_v2_finish(
 #[tauri::command]
 pub async fn cbcl_v2_pending_recoveries() -> Result<Vec<String>> {
     crate::cbcl_v2_completion::pending_application_ids()
+}
+
+/// List installed credential/v2 links without returning grants, scopes,
+/// recovery material, or receipt evidence to JavaScript.
+#[tauri::command]
+pub async fn cbcl_v2_installed_links(
+) -> Result<Vec<crate::cbcl_v2_completion::InstalledCredentialV2LinkSummary>> {
+    crate::cbcl_v2_completion::installed_links()
+}
+
+/// Re-establish one installed application capability after restart.
+///
+/// The caller must name the account handle it is attempting to use. A changed
+/// handle is refused before any enrollment or pairing frame can be emitted.
+/// The immutable historical hub status is reverified while the current
+/// profile, resolver closure, reciprocal account binding, revocation set, and
+/// stored grant are fetched and checked afresh.
+#[tauri::command]
+pub async fn cbcl_v2_reload_verify(
+    application_id: String,
+    observed_account: String,
+    approve_rotation: bool,
+) -> Result<CredentialV2ReloadView> {
+    use crate::cbcl_v2_completion::{
+        CredentialV2ReloadObservation as Observation, CredentialV2ReloadOutcome as Outcome,
+    };
+
+    let installed = crate::cbcl_v2_completion::load_installed(&application_id)?;
+    let current_root_generation =
+        crate::cbcl_v2_completion::root_generation(&crate::custody::Custody::root_public_key()?);
+    if installed
+        .require_root_generation(current_root_generation)
+        .is_err()
+    {
+        return reload_view(
+            &installed,
+            Outcome::FreshPairingRequired,
+            approve_rotation,
+            None,
+        );
+    }
+    if observed_account != installed.account_text() {
+        return reload_view(&installed, Outcome::HandleChanged, approve_rotation, None);
+    }
+
+    let application = selfsame_app_identity::profile::ApplicationId::parse(&application_id)
+        .map_err(|_| UiError::from("PairingCheckpointRefused"))?;
+    let now = i64::try_from(crate::commands::now())
+        .map_err(|_| UiError::from("PairingProfileUnavailable"))?;
+    let current = match selfsame_app_identity_net::profile::fetch(&application, now).await {
+        Ok(value) => value,
+        Err(_) => {
+            let check = installed.verify_reload(Observation::Unavailable, None)?;
+            return reload_view(&installed, check.outcome, approve_rotation, None);
+        }
+    };
+    let offer_key_retained = installed.offer_key_retained_in(&current.profile)?;
+    if current.profile.account_authority != installed.account_authority() || !offer_key_retained {
+        let rotation = CredentialV2InstalledRotationView {
+            kind: if current.profile.account_authority != installed.account_authority() {
+                "account-authority"
+            } else {
+                "profile-signing-key"
+            },
+            retained: if current.profile.account_authority != installed.account_authority() {
+                installed.account_authority().into()
+            } else {
+                installed.current_profile_digest().into()
+            },
+            current: if current.profile.account_authority != installed.account_authority() {
+                current.profile.account_authority.clone()
+            } else {
+                selfsame_app_identity::codec::b64url(current.profile.digest())
+            },
+        };
+        return reload_view(
+            &installed,
+            Outcome::AuthorityRotation,
+            approve_rotation,
+            Some(rotation),
+        );
+    }
+
+    let account = installed.account()?;
+    let jrd = match selfsame_app_identity_net::webfinger::fetch(&account).await {
+        Ok(value) => value,
+        Err(selfsame_app_identity_net::NetError::NotFound) => {
+            let check = installed.verify_reload(Observation::HubDeleted, None)?;
+            return reload_view(&installed, check.outcome, approve_rotation, None);
+        }
+        Err(selfsame_app_identity_net::NetError::Timeout)
+        | Err(selfsame_app_identity_net::NetError::Transport(_))
+        | Err(selfsame_app_identity_net::NetError::Refused(_)) => {
+            let check = installed.verify_reload(Observation::Unavailable, None)?;
+            return reload_view(&installed, check.outcome, approve_rotation, None);
+        }
+        Err(_) => {
+            return reload_verified_view(
+                &installed,
+                &current,
+                current_root_generation,
+                &observed_account,
+                installed.issuer_did(),
+                offer_key_retained,
+                false,
+                true,
+                approve_rotation,
+                None,
+            );
+        }
+    };
+    if jrd.subject != observed_account {
+        return reload_verified_view(
+            &installed,
+            &current,
+            current_root_generation,
+            &observed_account,
+            installed.issuer_did(),
+            offer_key_retained,
+            false,
+            true,
+            approve_rotation,
+            None,
+        );
+    }
+    if !jrd
+        .aliases
+        .iter()
+        .any(|value| value == installed.issuer_did())
+    {
+        if let Some(rotated) = jrd.aliases.iter().find(|value| {
+            value.as_str() != installed.issuer_did() && value.parse::<did_crdt::Did>().is_ok()
+        }) {
+            let rotation = CredentialV2InstalledRotationView {
+                kind: "issuer",
+                retained: installed.issuer_did().into(),
+                current: rotated.clone(),
+            };
+            return reload_verified_view(
+                &installed,
+                &current,
+                current_root_generation,
+                &observed_account,
+                rotated,
+                offer_key_retained,
+                false,
+                false,
+                approve_rotation,
+                Some(rotation),
+            );
+        }
+        return reload_verified_view(
+            &installed,
+            &current,
+            current_root_generation,
+            &observed_account,
+            installed.issuer_did(),
+            offer_key_retained,
+            false,
+            true,
+            approve_rotation,
+            None,
+        );
+    }
+
+    let quorum = match selfsame_app_identity_net::state::resolve_path_b_quorum(
+        &current.profile,
+        installed.issuer_did(),
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(_) => {
+            let check = installed.verify_reload(Observation::Unavailable, None)?;
+            return reload_view(&installed, check.outcome, approve_rotation, None);
+        }
+    };
+    let observations = path_b_observations(&quorum, now)?;
+    let agreed = selfsame_app_identity::path_b::agree_closures(&current.profile, &observations)
+        .map_err(|_| UiError::from("PairingResolverRefused"))?;
+    let revoked = agreed
+        .revoked_credential_ids
+        .iter()
+        .any(|value| value == installed.credential_id());
+    let issuer = selfsame_app_identity::path_b::issuer_state_of(&agreed, now);
+    let reciprocal = selfsame_app_identity::alias::verify_reciprocal_binding(
+        &jrd,
+        &account,
+        installed.issuer_did(),
+        &agreed.also_known_as,
+    )
+    .is_ok();
+    let device_key = installed.installation_device_public_key()?;
+    let request = selfsame_app_identity::path_b::GrantRequest::new(
+        &current.profile,
+        &account,
+        &device_key,
+        &[],
+        now,
+        0,
+    );
+    let verified = if reciprocal && !revoked {
+        selfsame_app_identity::path_b::rehydrate_verified_grant(
+            &request,
+            &issuer,
+            &jrd,
+            None,
+            installed.grant_bytes(),
+        )
+        .ok()
+    } else {
+        None
+    };
+    let grant_matches = verified.as_ref().is_some_and(|grant| {
+        grant.account_did == installed.issuer_did()
+            && grant.grant_id == installed.credential_id()
+            && grant.device_public_key == device_key
+    });
+    reload_verified_view(
+        &installed,
+        &current,
+        current_root_generation,
+        &observed_account,
+        installed.issuer_did(),
+        offer_key_retained,
+        grant_matches,
+        revoked || !reciprocal,
+        approve_rotation,
+        None,
+    )
+}
+
+/// Explicitly remove only one local credential/v2 application link. This
+/// authenticates presence but does not use, rotate, or erase the hierarchy
+/// root and never claims to revoke the remote hub record.
+#[tauri::command]
+pub async fn cbcl_v2_unlink(
+    application_id: String,
+    confirmation: bool,
+    passcode: String,
+) -> Result<CredentialV2UnlinkView> {
+    if crate::cbcl_v2_completion::authorise_unlink(confirmation)
+        == crate::cbcl_v2_completion::CredentialV2UnlinkOutcome::ConfirmationRequired
+    {
+        return Ok(CredentialV2UnlinkView {
+            outcome: "confirmation-required",
+            application_id,
+            remote_revocation_claimed: false,
+        });
+    }
+    if passcode.is_empty() {
+        return Err(UiError::from("PresenceRequired"));
+    }
+    let installed = crate::cbcl_v2_completion::load_installed(&application_id)?;
+    installed.require_root_generation(crate::cbcl_v2_completion::root_generation(
+        &crate::custody::Custody::root_public_key()?,
+    ))?;
+    crate::custody::Custody::use_hierarchy_root(&passcode, |_| ())?;
+    crate::cbcl_v2_completion::unlink_installed(&installed)?;
+    Ok(CredentialV2UnlinkView {
+        outcome: "unlinked",
+        application_id,
+        remote_revocation_claimed: false,
+    })
+}
+
+fn reload_verified_view(
+    installed: &crate::cbcl_v2_completion::InstalledCredentialV2Link,
+    current: &selfsame_app_identity_net::profile::FetchedProfile,
+    root_generation: [u8; 32],
+    observed_account: &str,
+    current_issuer_did: &str,
+    offer_key_retained: bool,
+    grant_matches: bool,
+    revoked: bool,
+    approve_rotation: bool,
+    rotation: Option<CredentialV2InstalledRotationView>,
+) -> Result<CredentialV2ReloadView> {
+    let check = installed.verify_reload(
+        crate::cbcl_v2_completion::CredentialV2ReloadObservation::Verified {
+            root_generation,
+            application_id: current.profile.application_id.as_str().into(),
+            observed_account: observed_account.into(),
+            account_authority: current.profile.account_authority.clone(),
+            issuer_did: current_issuer_did.into(),
+            profile_digest: *current.profile.digest(),
+            offer_key_retained,
+            grant_matches,
+            revoked,
+        },
+        Some(&current.octets),
+    )?;
+    if let Some(replacement) = check.replacement.as_ref() {
+        crate::cbcl_v2_completion::replace_installed(installed, replacement)?;
+    }
+    reload_view(installed, check.outcome, approve_rotation, rotation)
+}
+
+fn reload_view(
+    installed: &crate::cbcl_v2_completion::InstalledCredentialV2Link,
+    outcome: crate::cbcl_v2_completion::CredentialV2ReloadOutcome,
+    approve_rotation: bool,
+    rotation: Option<CredentialV2InstalledRotationView>,
+) -> Result<CredentialV2ReloadView> {
+    use crate::cbcl_v2_completion::CredentialV2ReloadOutcome as Outcome;
+    let (outcome, capability) = match outcome {
+        Outcome::Usable => ("usable", true),
+        Outcome::ProfileRefresh => ("profile-refreshed", true),
+        Outcome::AuthorityRotation if approve_rotation => ("fresh-pairing-required", false),
+        Outcome::AuthorityRotation => ("authority-rotation", false),
+        Outcome::IssuerRotation if approve_rotation => ("fresh-pairing-required", false),
+        Outcome::IssuerRotation => ("issuer-rotation", false),
+        Outcome::Unavailable => ("unavailable", false),
+        Outcome::Revoked => ("revoked", false),
+        Outcome::HandleChanged => ("account-device-handle-change-refused", false),
+        Outcome::HubDeleted => ("hub-deleted", false),
+        Outcome::FreshPairingRequired => ("fresh-pairing-required", false),
+    };
+    Ok(CredentialV2ReloadView {
+        outcome,
+        application_id: installed.application_id().into(),
+        capability,
+        record_retained: true,
+        rotation,
+    })
+}
+
+fn path_b_observations(
+    quorum: &selfsame_app_identity_net::state::PathBResolverQuorum,
+    fetched_at: i64,
+) -> Result<Vec<selfsame_app_identity::path_b::ResolverObservation>> {
+    quorum
+        .nif_closures(fetched_at)
+        .map_err(|_| UiError::from("PairingResolverRefused"))?
+        .into_iter()
+        .map(|closure| {
+            let assertion_methods = closure
+                .assertion_methods
+                .into_iter()
+                .map(|method| {
+                    let public_key: [u8; 32] = method
+                        .public_key
+                        .try_into()
+                        .map_err(|_| UiError::from("PairingResolverRefused"))?;
+                    Ok(selfsame_app_identity::path_b::ClosureAssertionMethod {
+                        id: method.id,
+                        kind: method.kind,
+                        public_key,
+                        has_private_component: method.has_private_component,
+                    })
+                })
+                .collect::<Result<Vec<_>>>()?;
+            Ok(selfsame_app_identity::path_b::ResolverObservation {
+                resolver_id: closure.resolver_id,
+                did: closure.did,
+                did_recomputed_ok: closure.did_recomputed_ok,
+                deltas_verified: closure.deltas_verified,
+                locally_closed: closure.locally_closed,
+                deactivated: closure.deactivated,
+                assertion_methods,
+                revoked_credential_ids: closure.revoked_credential_ids,
+                also_known_as: closure.also_known_as,
+                fetched_at_seconds: closure.fetched_at_seconds,
+            })
+        })
+        .collect()
 }
 
 /// Recover the immutable terminal result after the blind relay window closes.
