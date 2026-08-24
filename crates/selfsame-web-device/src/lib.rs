@@ -57,6 +57,7 @@ use ed25519_dalek::SigningKey;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use wasm_bindgen::prelude::*;
+use zeroize::Zeroizing;
 
 use selfsame_app_identity::accept::{ClosureSource, IssuerState};
 use selfsame_app_identity::alias::{AcctUri, Jrd};
@@ -360,6 +361,7 @@ pub struct CredentialV2BrowserAllocatorSession {
     prepared_offer_digest: Option<[u8; 32]>,
     authority_status: Option<selfsame_pairing::credential_v2::CredentialV2AuthorityStatus>,
     authority_response: Option<Vec<u8>>,
+    presence_code: Option<Zeroizing<String>>,
 }
 
 #[wasm_bindgen]
@@ -397,6 +399,9 @@ impl CredentialV2BrowserAllocatorSession {
         let carrier_nonce = fixed_browser_bytes(carrier_nonce, "carrier nonce")?;
         let cpace_secret = fixed_browser_bytes(cpace_secret, "CPace presence secret")?;
         let claim_token = fixed_browser_bytes(claim_token, "relay claim token")?;
+        let presence_code =
+            cbcl_pairing::credential_v2::CredentialV2PresenceCode::new(cpace_secret, claim_token)
+                .to_string();
         let cpace_scalar = fixed_browser_bytes(cpace_scalar, "CPace scalar")?;
         let request_id = fixed_browser_bytes(request_id, "request ID")?;
         let intent_nonce = fixed_browser_bytes(intent_nonce, "intent nonce")?;
@@ -437,6 +442,7 @@ impl CredentialV2BrowserAllocatorSession {
             prepared_offer_digest: None,
             authority_status: None,
             authority_response: None,
+            presence_code: Some(Zeroizing::new(presence_code)),
         })
     }
 
@@ -453,6 +459,7 @@ impl CredentialV2BrowserAllocatorSession {
             &self.request_id,
             &self.intent_nonce,
             &self.carrier_ceremony_id,
+            self.presence_code.as_ref().map(|value| value.as_str()),
         ))
     }
 
@@ -482,6 +489,7 @@ impl CredentialV2BrowserAllocatorSession {
             &self.request_id,
             &self.intent_nonce,
             &self.carrier_ceremony_id,
+            self.presence_code.as_ref().map(|value| value.as_str()),
         ))
     }
 
@@ -501,6 +509,7 @@ impl CredentialV2BrowserAllocatorSession {
             &self.request_id,
             &self.intent_nonce,
             &self.carrier_ceremony_id,
+            self.presence_code.as_ref().map(|value| value.as_str()),
         ))
     }
 
@@ -637,12 +646,14 @@ impl CredentialV2BrowserAllocatorSession {
             &self.request_id,
             &self.intent_nonce,
             &self.carrier_ceremony_id,
+            self.presence_code.as_ref().map(|value| value.as_str()),
         ))
     }
 
     /// Burn the local attempt without releasing another protocol frame.
     pub fn cancel(&mut self) -> String {
         self.session = None;
+        self.presence_code = None;
         r#"[{"outcome":"cancelled","type":"terminal"}]"#.into()
     }
 
@@ -660,6 +671,7 @@ impl CredentialV2BrowserAllocatorSession {
                         "the credential/v2 transcript was established twice",
                     ));
                 }
+                self.presence_code = None;
             }
         }
         Ok(())
@@ -682,6 +694,7 @@ fn v2_allocator_effects_json(
     request_id: &[u8; 32],
     intent_nonce: &[u8; 32],
     carrier_ceremony_id: &[u8; 32],
+    presence_code: Option<&str>,
 ) -> String {
     use cbcl_pairing::credential_v2::CredentialV2AllocatorEffect;
     let values = effects
@@ -708,6 +721,7 @@ fn v2_allocator_effects_json(
                 "requestIdB64u": selfsame_app_identity::codec::b64url(request_id),
                 "carrierCeremonyIdB64u": selfsame_app_identity::codec::b64url(carrier_ceremony_id),
                 "intentNonceB64u": selfsame_app_identity::codec::b64url(intent_nonce),
+                "presenceCode": presence_code,
             }),
             CredentialV2AllocatorEffect::Established { transcript_hash } => serde_json::json!({
                 "type": "established",
