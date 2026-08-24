@@ -14,8 +14,9 @@ use selfsame_app_identity::{json, json::Json, profile::ApplicationProfile};
 use selfsame_pairing::credential_v2::{
     build_authority_status_response, build_final_status, credential_v2_body_authority,
     device_possession_proof_input, finalize_verified_offer, prepare_offer_core,
-    migration_confirmation_digest, recognise_authority_status_response,
-    recognise_final_status, recognise_prepared_offer, recognise_signed_offer,
+    migration_confirmation_digest, recognise_authority_status_response, recognise_final_status,
+    recognise_final_status_with_embedded_time, recognise_prepared_offer, recognise_receipt,
+    recognise_signed_offer,
     verify_prepared_offer_device_proof, CredentialV2AuthorityStatus, CredentialV2FinalDecision,
     CredentialV2FinalStatusInput, CredentialV2IntentDecision, CredentialV2OfferBuildInput,
     CredentialV2PayloadInput, CredentialV2ReceiptInput, CredentialV2WalletOfferVerifier,
@@ -401,7 +402,7 @@ fn offer_is_one_canonical_signed_authority_for_hub_browser_and_wallet() {
         .is_err());
 
     let final_status_jws = String::from("e30.e30.AA");
-    let final_status_digest: [u8; 32] = Sha256::digest(final_status_jws.as_bytes()).into();
+    let final_status_digest: [u8; 32] = Sha256::digest(b"{}").into();
     let receipt = browser_bodies
         .receipt(
             &payload,
@@ -413,6 +414,14 @@ fn offer_is_one_canonical_signed_authority_for_hub_browser_and_wallet() {
         .unwrap();
     exchange(&mut allocator, &mut claimant, &receipt);
     assert_eq!(receipt.kind(), CredentialV2Kind::Receipt);
+    let recognised_receipt = recognise_receipt(
+        &receipt,
+        *carrier.carrier_ceremony_id(),
+        payload.content_hash(),
+    )
+    .unwrap();
+    assert_eq!(recognised_receipt.final_status_digest, final_status_digest);
+    assert_eq!(recognised_receipt.final_status_jws, "e30.e30.AA");
 
     let bound = CredentialV2AuthorityStatus::Bound(format!("did:crdt:{}", "a".repeat(64)));
     let bound_authority = build_authority_status_response(
@@ -466,6 +475,18 @@ fn final_status_is_one_closed_jws_bound_to_every_accepted_fact() {
     assert!(built.core.len() <= 4_096);
     assert!(built.jws.len() <= 8_192);
     recognise_final_status(&profile, &built.jws, built.digest, &input, kid).unwrap();
+    let recognised_time = recognise_final_status_with_embedded_time(
+        &profile,
+        &built.jws,
+        built.digest,
+        |finalized_at| CredentialV2FinalStatusInput {
+            finalized_at,
+            ..input.clone()
+        },
+        kid,
+    )
+    .unwrap();
+    assert_eq!(recognised_time, input.finalized_at);
 
     let mut changed = input.clone();
     changed.payload_digest[0] ^= 1;

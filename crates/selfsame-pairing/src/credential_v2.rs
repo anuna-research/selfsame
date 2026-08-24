@@ -6,7 +6,7 @@ pub use bodies::{
     credential_v2_body_authority, CredentialV2BodyAuthority, CredentialV2FinalDecision,
     CredentialV2IntentDecision, CredentialV2PayloadInput, CredentialV2RefusalReason,
     CredentialV2ReceiptInput, CredentialV2RetainedPayload, CredentialV2RetainedPreview,
-    SelfsameCredentialV2BodyVerifier,
+    RecognisedCredentialV2Receipt, SelfsameCredentialV2BodyVerifier, recognise_receipt,
 };
 
 use cbcl_pairing::credential_v2::{
@@ -832,6 +832,46 @@ pub fn recognise_final_status(
         .map_err(|_| CredentialV2OfferError::Refused)
 }
 
+/// Verify a final status whose signed core is the sole authority for its
+/// finalization time.
+///
+/// The candidate time is kept inside this function: it is supplied to the
+/// caller's expectation builder and returned only after the ordinary closed
+/// core, digest, key, and Ed25519 checks all succeed.
+pub fn recognise_final_status_with_embedded_time<F>(
+    profile: &ApplicationProfile,
+    jws: &str,
+    expected_digest: [u8; 32],
+    expected: F,
+    expected_kid: &str,
+) -> Result<u64, CredentialV2OfferError>
+where
+    F: FnOnce(u64) -> CredentialV2FinalStatusInput,
+{
+    if jws.is_empty() || jws.len() > MAX_FINAL_STATUS_JWS_BYTES || !jws.is_ascii() {
+        return Err(CredentialV2OfferError::Refused);
+    }
+    let mut segments = jws.split('.');
+    let (Some(_), Some(encoded_payload), Some(_), None) =
+        (segments.next(), segments.next(), segments.next(), segments.next())
+    else {
+        return Err(CredentialV2OfferError::Refused);
+    };
+    let core = decode_canonical_b64(encoded_payload)?;
+    let candidate = json::recognise(
+        &core,
+        Limits {
+            max_bytes: MAX_FINAL_STATUS_CORE_BYTES,
+            max_depth: 1,
+        },
+    )
+    .map_err(|_| CredentialV2OfferError::Refused)?;
+    let finalized_at = integer(&candidate, "finalizedAt")?;
+    let expected = expected(finalized_at);
+    recognise_final_status(profile, jws, expected_digest, &expected, expected_kid)?;
+    Ok(finalized_at)
+}
+
 fn final_status_core(
     profile: &ApplicationProfile,
     input: &CredentialV2FinalStatusInput,
@@ -902,6 +942,19 @@ fn decode_canonical_b64(value: &str) -> Result<Vec<u8>, CredentialV2OfferError> 
         return Err(CredentialV2OfferError::Refused);
     }
     Ok(decoded)
+}
+
+pub(super) fn compact_jws_payload_digest(
+    jws: &str,
+) -> Result<[u8; 32], CredentialV2OfferError> {
+    let mut segments = jws.split('.');
+    let (Some(_), Some(encoded_payload), Some(_), None) =
+        (segments.next(), segments.next(), segments.next(), segments.next())
+    else {
+        return Err(CredentialV2OfferError::Refused);
+    };
+    let payload = decode_canonical_b64(encoded_payload)?;
+    Ok(Sha256::digest(payload).into())
 }
 
 /// Build and sign one exact reciprocal-alias authority response.

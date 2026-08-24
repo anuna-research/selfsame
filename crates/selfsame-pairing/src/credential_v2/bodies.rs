@@ -1,7 +1,8 @@
 //! Closed Selfsame logical bodies carried by credential/v2 objects.
 
 use super::{
-    migration_confirmation_digest_parts, recognise_authority_status_response,
+    compact_jws_payload_digest, migration_confirmation_digest_parts,
+    recognise_authority_status_response,
     CredentialV2AuthorityStatus, RecognisedCredentialV2Offer,
 };
 use cbcl_pairing::credential_v2::{
@@ -85,8 +86,36 @@ pub struct CredentialV2PayloadInput {
 pub struct CredentialV2ReceiptInput {
     /// Exact compact final-status JWS.
     pub final_status_jws: String,
-    /// SHA-256 of the exact JWS octets.
+    /// SHA-256 of the exact canonical JWS payload/core octets.
     pub final_status_digest: [u8; 32],
+}
+
+/// Exact immutable hub status carried by an endpoint-authenticated Receipt.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RecognisedCredentialV2Receipt {
+    /// Exact compact final-status JWS.
+    pub final_status_jws: String,
+    /// SHA-256 of the exact canonical JWS payload/core octets.
+    pub final_status_digest: [u8; 32],
+}
+
+/// Recognise the closed Receipt body and bind it to the exact durable payload.
+pub fn recognise_receipt(
+    receipt: &CredentialV2Object,
+    carrier_ceremony_id: [u8; 32],
+    payload_content_hash: [u8; 32],
+) -> Result<RecognisedCredentialV2Receipt, CredentialV2Error> {
+    if receipt.kind() != CredentialV2Kind::Receipt {
+        return Err(CredentialV2Error::Schema);
+    }
+    let entries = body_entries(receipt.body())?;
+    verify_receipt(&entries)?;
+    expect_fixed(&entries, "carrierCeremonyId", &carrier_ceremony_id)?;
+    expect_fixed(&entries, "predecessorDigest", &payload_content_hash)?;
+    Ok(RecognisedCredentialV2Receipt {
+        final_status_jws: text_field(&entries, "finalStatusJws")?.into(),
+        final_status_digest: fixed_field(&entries, "finalStatusDigest")?,
+    })
 }
 
 /// Authenticated preview retained only after the closed preparation body was
@@ -520,7 +549,8 @@ impl CredentialV2BodyAuthority {
     ) -> Result<CredentialV2Object, CredentialV2Error> {
         if !valid_compact_jws(&input.final_status_jws)
             || input.final_status_jws.len() > 8_192
-            || <[u8; 32]>::from(Sha256::digest(input.final_status_jws.as_bytes()))
+            || compact_jws_payload_digest(&input.final_status_jws)
+                .map_err(|_| CredentialV2Error::Schema)?
                 != input.final_status_digest
         {
             return Err(CredentialV2Error::Schema);
@@ -668,11 +698,8 @@ fn verify_receipt(entries: &[(Value, Value)]) -> Result<(), CredentialV2Error> {
     if !valid_compact_jws(jws) || jws.len() > 8_192 {
         return Err(CredentialV2Error::Schema);
     }
-    expect_fixed(
-        entries,
-        "finalStatusDigest",
-        &<[u8; 32]>::from(Sha256::digest(jws.as_bytes())),
-    )
+    let digest = compact_jws_payload_digest(jws).map_err(|_| CredentialV2Error::Schema)?;
+    expect_fixed(entries, "finalStatusDigest", &digest)
 }
 
 fn verify_final(
