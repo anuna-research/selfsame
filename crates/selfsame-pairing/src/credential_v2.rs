@@ -5,7 +5,7 @@ mod bodies;
 pub use bodies::{
     credential_v2_body_authority, CredentialV2BodyAuthority, CredentialV2FinalDecision,
     CredentialV2IntentDecision, CredentialV2PayloadInput, CredentialV2RefusalReason,
-    CredentialV2RetainedPreview, SelfsameCredentialV2BodyVerifier,
+    CredentialV2RetainedPayload, CredentialV2RetainedPreview, SelfsameCredentialV2BodyVerifier,
 };
 
 use cbcl_pairing::credential_v2::{

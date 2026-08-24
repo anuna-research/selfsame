@@ -717,6 +717,49 @@ impl CredentialV2BrowserAllocatorSession {
         .to_string())
     }
 
+    /// Return only the Rust-authenticated reverse-payload projection. The
+    /// browser never parses peer body bytes to obtain grant or account facts.
+    pub fn payload_view_json(&self) -> Result<String, JsError> {
+        let object = self
+            .last_received_object
+            .as_ref()
+            .filter(|object| {
+                object.kind() == cbcl_pairing::credential_v2::CredentialV2Kind::Payload
+            })
+            .ok_or_else(|| JsError::new("the credential/v2 payload is unavailable"))?;
+        let payload = self
+            .body_authority
+            .retained_payload()
+            .map_err(|_| JsError::new("the credential/v2 payload is unavailable"))?;
+        Ok(serde_json::json!({
+            "applicationId": self.profile.application_id.as_str(),
+            "profileDigestB64u": selfsame_app_identity::codec::b64url(self.profile.digest()),
+            "bodyB64u": selfsame_app_identity::codec::b64url(object.body()),
+            "contentHashB64u": selfsame_app_identity::codec::b64url(&object.content_hash()),
+            "offerCoreDigestB64u": selfsame_app_identity::codec::b64url(
+                payload.offer_core_digest()
+            ),
+            "previewIssuerDid": payload.preview_issuer_did(),
+            "previewFingerprintDigestB64u": selfsame_app_identity::codec::b64url(
+                payload.preview_fingerprint_digest()
+            ),
+            "accountPrincipalDigestB64u": selfsame_app_identity::codec::b64url(
+                payload.account_principal_digest()
+            ),
+            "accountScopeIdB64u": selfsame_app_identity::codec::b64url(
+                payload.account_scope_id()
+            ),
+            "deviceDid": payload.device_did(),
+            "grantIdB64u": selfsame_app_identity::codec::b64url(payload.grant_id()),
+            "grantMediaType": selfsame_app_identity::grant::GRANT_MEDIA_TYPE,
+            "grant": payload.grant(),
+            "migrationConfirmationDigestB64u": selfsame_app_identity::codec::b64url(
+                payload.migration_confirmation_digest()
+            ),
+        })
+        .to_string())
+    }
+
     /// Burn the local attempt without releasing another protocol frame.
     pub fn cancel(&mut self) -> String {
         self.session = None;

@@ -104,6 +104,77 @@ impl CredentialV2RetainedPreview {
     }
 }
 
+/// Authenticated reverse-payload values retained only after the closed body
+/// has been built locally or verified by the endpoint.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CredentialV2RetainedPayload {
+    offer_core_digest: [u8; 32],
+    preview_issuer_did: String,
+    preview_fingerprint_digest: [u8; 32],
+    account_principal_digest: [u8; 32],
+    account_scope_id: [u8; 32],
+    device_did: String,
+    grant_id: [u8; 32],
+    grant: String,
+    migration_confirmation_digest: [u8; 32],
+}
+
+impl CredentialV2RetainedPayload {
+    /// Borrow the authenticated offer-core digest.
+    #[must_use]
+    pub const fn offer_core_digest(&self) -> &[u8; 32] {
+        &self.offer_core_digest
+    }
+
+    /// Borrow the authenticated issuer DID compared by the person.
+    #[must_use]
+    pub fn preview_issuer_did(&self) -> &str {
+        &self.preview_issuer_did
+    }
+
+    /// Borrow SHA-256 over the exact preview-DID UTF-8 bytes.
+    #[must_use]
+    pub const fn preview_fingerprint_digest(&self) -> &[u8; 32] {
+        &self.preview_fingerprint_digest
+    }
+
+    /// Borrow the hub-authenticated opaque application-account principal.
+    #[must_use]
+    pub const fn account_principal_digest(&self) -> &[u8; 32] {
+        &self.account_principal_digest
+    }
+
+    /// Borrow the hub-authenticated application-account scope.
+    #[must_use]
+    pub const fn account_scope_id(&self) -> &[u8; 32] {
+        &self.account_scope_id
+    }
+
+    /// Borrow the installation DID bound by the signed offer.
+    #[must_use]
+    pub fn device_did(&self) -> &str {
+        &self.device_did
+    }
+
+    /// Borrow the raw grant identifier carried by the payload.
+    #[must_use]
+    pub const fn grant_id(&self) -> &[u8; 32] {
+        &self.grant_id
+    }
+
+    /// Borrow the exact compact VC-JWT grant.
+    #[must_use]
+    pub fn grant(&self) -> &str {
+        &self.grant
+    }
+
+    /// Borrow the authenticated transition confirmation digest.
+    #[must_use]
+    pub const fn migration_confirmation_digest(&self) -> &[u8; 32] {
+        &self.migration_confirmation_digest
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct Preview {
     did: String,
@@ -125,6 +196,7 @@ struct BoundBodyAuthority {
     migration_snapshot_digest: [u8; 32],
     snapshot_nonce: [u8; 32],
     preview: Option<Preview>,
+    payload: Option<CredentialV2RetainedPayload>,
 }
 
 type SharedAuthority = Arc<Mutex<Option<BoundBodyAuthority>>>;
@@ -199,6 +271,15 @@ impl CredentialV2BodyAuthority {
         })
     }
 
+    /// Return the authenticated reverse payload only after its closed body has
+    /// been built or verified. Raw transport bytes never populate this view.
+    pub fn retained_payload(&self) -> Result<CredentialV2RetainedPayload, CredentialV2Error> {
+        self.bound()?
+            .payload
+            .clone()
+            .ok_or(CredentialV2Error::Phase)
+    }
+
     /// Bind this one-attempt grammar to a completely authenticated signed offer.
     pub fn bind_offer(
         &self,
@@ -238,6 +319,7 @@ impl CredentialV2BodyAuthority {
             migration_snapshot_digest: *transition.migration_snapshot_digest(),
             snapshot_nonce: *transition.snapshot_nonce(),
             preview: None,
+            payload: None,
         });
         Ok(())
     }
@@ -386,11 +468,22 @@ impl CredentialV2BodyAuthority {
         if !valid_compact_jws(&input.grant) || input.grant.len() > 49_152 {
             return Err(CredentialV2Error::Schema);
         }
-        let bound = self.bound()?;
+        let mut bound = self.bound()?;
         require_predecessor(&bound, predecessor, &[CredentialV2Kind::FinalApprove])?;
         let preview = bound.preview.as_ref().ok_or(CredentialV2Error::Phase)?;
         let confirmation = migration_confirmation_digest(&bound, preview)?;
-        object(
+        let retained = CredentialV2RetainedPayload {
+            offer_core_digest: bound.offer_core_digest,
+            preview_issuer_did: preview.did.clone(),
+            preview_fingerprint_digest: preview.fingerprint_digest,
+            account_principal_digest: bound.account_principal_digest,
+            account_scope_id: bound.account_scope_id,
+            device_did: bound.device_did.clone(),
+            grant_id: input.grant_id,
+            grant: input.grant,
+            migration_confirmation_digest: confirmation,
+        };
+        let built = object(
             &bound,
             predecessor,
             CredentialV2Kind::Payload,
@@ -401,12 +494,14 @@ impl CredentialV2BodyAuthority {
                 bytes("accountPrincipalDigest", bound.account_principal_digest),
                 bytes("accountScopeId", bound.account_scope_id),
                 text("deviceDid", &bound.device_did),
-                bytes("grantId", input.grant_id),
+                bytes("grantId", retained.grant_id),
                 text("grantMediaType", "application/vc+jwt"),
-                text("grant", &input.grant),
+                text("grant", &retained.grant),
                 bytes("migrationConfirmationDigest", confirmation),
             ],
-        )
+        )?;
+        retain_payload(&mut bound, retained)?;
+        Ok(built)
     }
 
     fn bound(&self) -> Result<BoundGuard<'_>, CredentialV2Error> {
@@ -545,7 +640,7 @@ fn verify_final(
 
 fn verify_payload(
     entries: &[(Value, Value)],
-    bound: &BoundBodyAuthority,
+    bound: &mut BoundBodyAuthority,
 ) -> Result<(), CredentialV2Error> {
     exact_fields(
         entries,
@@ -573,16 +668,31 @@ fn verify_payload(
     )?;
     expect_fixed(entries, "accountScopeId", &bound.account_scope_id)?;
     expect_text(entries, "deviceDid", &bound.device_did)?;
-    let _: [u8; 32] = fixed_field(entries, "grantId")?;
+    let grant_id: [u8; 32] = fixed_field(entries, "grantId")?;
     expect_text(entries, "grantMediaType", "application/vc+jwt")?;
     let grant = text_field(entries, "grant")?;
     if grant.len() > 49_152 || !valid_compact_jws(grant) {
         return Err(CredentialV2Error::Schema);
     }
+    let migration_confirmation_digest = migration_confirmation_digest(bound, preview)?;
     expect_fixed(
         entries,
         "migrationConfirmationDigest",
-        &migration_confirmation_digest(bound, preview)?,
+        &migration_confirmation_digest,
+    )?;
+    retain_payload(
+        bound,
+        CredentialV2RetainedPayload {
+            offer_core_digest: bound.offer_core_digest,
+            preview_issuer_did: preview.did.clone(),
+            preview_fingerprint_digest: preview.fingerprint_digest,
+            account_principal_digest: bound.account_principal_digest,
+            account_scope_id: bound.account_scope_id,
+            device_did: bound.device_did.clone(),
+            grant_id,
+            grant: grant.into(),
+            migration_confirmation_digest,
+        },
     )
 }
 
@@ -672,6 +782,20 @@ fn retain_preview(
             Ok(())
         }
         Some(retained) if retained == preview => Ok(()),
+        Some(_) => Err(CredentialV2Error::Profile),
+    }
+}
+
+fn retain_payload(
+    bound: &mut BoundBodyAuthority,
+    payload: CredentialV2RetainedPayload,
+) -> Result<(), CredentialV2Error> {
+    match &bound.payload {
+        None => {
+            bound.payload = Some(payload);
+            Ok(())
+        }
+        Some(retained) if retained == &payload => Ok(()),
         Some(_) => Err(CredentialV2Error::Profile),
     }
 }

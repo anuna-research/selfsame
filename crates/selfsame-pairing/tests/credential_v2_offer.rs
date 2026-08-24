@@ -360,6 +360,30 @@ fn offer_is_one_canonical_signed_authority_for_hub_browser_and_wallet() {
         )
         .unwrap();
     exchange(&mut claimant, &mut allocator, &payload);
+    let retained_payload = browser_bodies.retained_payload().unwrap();
+    assert_eq!(
+        retained_payload.offer_core_digest(),
+        &built.offer_core_digest
+    );
+    assert_eq!(retained_payload.preview_issuer_did(), preview_did);
+    assert_eq!(
+        retained_payload.preview_fingerprint_digest(),
+        &<[u8; 32]>::from(Sha256::digest(preview_did.as_bytes()))
+    );
+    assert_eq!(
+        retained_payload.account_principal_digest(),
+        recognised
+            .claims
+            .account_provenance()
+            .account_principal_digest()
+    );
+    assert_eq!(retained_payload.account_scope_id(), &[0x44; 32]);
+    assert_eq!(
+        retained_payload.device_did(),
+        recognised.claims.device_binding().device_did()
+    );
+    assert_eq!(retained_payload.grant_id(), &[0x49; 32]);
+    assert_eq!(retained_payload.grant(), "e30.e30.AA");
     assert!(wallet_bodies
         .payload(
             &final_approve,
