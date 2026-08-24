@@ -66,6 +66,18 @@ impl RelayConsentPlan {
     pub const fn pair_state(&self) -> ExactPairState {
         self.pair_state
     }
+
+    /// Borrow the live-authenticated application identifier.
+    #[must_use]
+    pub fn application_id(&self) -> &str {
+        self.fetched.profile.application_id.as_str()
+    }
+
+    /// Borrow the exact declared relay origin selected by the carrier.
+    #[must_use]
+    pub fn relay_origin(&self) -> &str {
+        self.carrier.relay_origin()
+    }
 }
 
 /// Closed command-owned choice for one pre-socket plan.
@@ -170,7 +182,7 @@ pub fn authorise_claimant_relay(
     let newly_approved = match (plan.pair_state, decision) {
         (ExactPairState::TrustedPair, RelayConsentDecision::ExistingTrust) => false,
         (ExactPairState::NewPair, RelayConsentDecision::Approve) => true,
-        (ExactPairState::NewPair, RelayConsentDecision::Decline) => return Ok(None),
+        (_, RelayConsentDecision::Decline) => return Ok(None),
         _ => return Err(UiError::from("PairingRelayRefused")),
     };
     Ok(Some(RelaySocketCapability {
@@ -218,6 +230,12 @@ impl PreparedClaimant {
         &mut self.core
     }
 
+    /// Borrow the authenticated Offer object after the typed display gate.
+    #[must_use]
+    pub fn authenticated_offer(&self) -> Option<&cbcl_pairing::credential_v2::CredentialV2Object> {
+        self.core.authenticated_offer()
+    }
+
     /// Borrow the live origin-recognised profile retained for offer authority.
     #[must_use]
     pub const fn profile(&self) -> &ApplicationProfile {
@@ -228,6 +246,12 @@ impl PreparedClaimant {
     #[must_use]
     pub fn profile_octets(&self) -> &[u8] {
         &self.profile_octets
+    }
+
+    /// Borrow the exact carrier-selected relay origin.
+    #[must_use]
+    pub fn relay_origin(&self) -> &str {
+        self.carrier.relay_origin()
     }
 
     /// Borrow the sole builder for authenticated Selfsame successor objects.
