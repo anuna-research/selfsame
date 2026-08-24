@@ -2,7 +2,7 @@
 
 use base64ct::{Base64UrlUnpadded, Encoding as _};
 use cbcl_pairing::credential_v2::{
-    decode_carrier, CredentialV2BodyVerifier, CredentialV2Carrier, CredentialV2ClaimantSession,
+    decode_carrier, CredentialV2Carrier, CredentialV2ClaimantSession,
     CredentialV2ClaimantSessionInput, CredentialV2PresenceCode, CredentialV2TofuState,
 };
 use selfsame_app_identity::profile::{ApplicationId, ApplicationProfile};
@@ -100,6 +100,7 @@ pub struct PreparedClaimant {
     profile: ApplicationProfile,
     profile_octets: Vec<u8>,
     newly_approved: bool,
+    body_authority: selfsame_pairing::credential_v2::CredentialV2BodyAuthority,
 }
 
 impl fmt::Debug for PreparedClaimant {
@@ -185,11 +186,12 @@ pub fn authorise_claimant_relay(
 pub fn prepare_claimant(
     capability: RelaySocketCapability,
     cpace_scalar: [u8; 32],
-    body_verifier: Box<dyn CredentialV2BodyVerifier>,
 ) -> Result<PreparedClaimant> {
     let carrier = capability.carrier;
     let profile = capability.fetched.profile;
     let profile_octets = capability.fetched.octets;
+    let (body_authority, body_verifier) =
+        selfsame_pairing::credential_v2::credential_v2_body_authority();
     let core = CredentialV2ClaimantSession::new(
         CredentialV2ClaimantSessionInput {
             carrier: carrier.clone(),
@@ -197,7 +199,7 @@ pub fn prepare_claimant(
             cpace_scalar,
             profile_digest: *profile.digest(),
         },
-        body_verifier,
+        Box::new(body_verifier),
     )
     .map_err(|_| UiError::from("PairingFailed"))?;
     Ok(PreparedClaimant {
@@ -206,6 +208,7 @@ pub fn prepare_claimant(
         profile,
         profile_octets,
         newly_approved: capability.newly_approved,
+        body_authority,
     })
 }
 
@@ -227,6 +230,14 @@ impl PreparedClaimant {
         &self.profile_octets
     }
 
+    /// Borrow the sole builder for authenticated Selfsame successor objects.
+    #[must_use]
+    pub const fn body_authority(
+        &self,
+    ) -> &selfsame_pairing::credential_v2::CredentialV2BodyAuthority {
+        &self.body_authority
+    }
+
     /// After both Finished values, commit or re-check the exact-pair row and
     /// install the only verifier capable of producing the consent display.
     pub fn bind_finished_profile(&mut self, transcript_hash: [u8; 64]) -> Result<()> {
@@ -244,7 +255,8 @@ impl PreparedClaimant {
             transcript_hash,
             tofu_state,
         )
-        .map_err(|_| UiError::from("PairingFailed"))?;
+        .map_err(|_| UiError::from("PairingFailed"))?
+        .with_body_authority(self.body_authority.clone());
         let application_id = self.profile.application_id.as_str();
         let relay_origin = self.carrier.relay_origin();
         if self.newly_approved {
@@ -273,24 +285,12 @@ pub const fn display_tofu_state(state: ExactPairState) -> CredentialV2TofuState 
 mod tests {
     use super::*;
     use cbcl_pairing::{
-        credential_v2::{CredentialV2CarrierInput, CredentialV2Error, CredentialV2LogicalBody},
+        credential_v2::CredentialV2CarrierInput,
         wire::{claim_commitment, decode_client_message, ClaimToken, ClientMessage},
     };
     use ed25519_dalek::SigningKey;
 
     const RELAY: &str = "https://cbcl-au.provider.example";
-
-    #[derive(Debug)]
-    struct RefuseSuccessors;
-
-    impl CredentialV2BodyVerifier for RefuseSuccessors {
-        fn verify(
-            &mut self,
-            _: &CredentialV2LogicalBody<'_>,
-        ) -> std::result::Result<(), CredentialV2Error> {
-            Err(CredentialV2Error::Schema)
-        }
-    }
 
     fn profile() -> ApplicationProfile {
         let corpus: serde_json::Value =
@@ -353,8 +353,7 @@ mod tests {
             authorise_claimant_relay(plan(ExactPairState::NewPair), RelayConsentDecision::Approve)
                 .unwrap()
                 .unwrap();
-        let mut claimant =
-            prepare_claimant(capability, [0x38; 32], Box::new(RefuseSuccessors)).unwrap();
+        let mut claimant = prepare_claimant(capability, [0x38; 32]).unwrap();
         assert_eq!(
             decode_client_message(&claimant.core_mut().start().unwrap()).unwrap(),
             ClientMessage::Bind,

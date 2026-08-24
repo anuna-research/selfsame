@@ -12,10 +12,11 @@ use cbcl_pairing::wire::Side;
 use ed25519_dalek::SigningKey;
 use selfsame_app_identity::{json, json::Json, profile::ApplicationProfile};
 use selfsame_pairing::credential_v2::{
-    build_authority_status_response, device_possession_proof_input, finalize_verified_offer,
-    prepare_offer_core, recognise_authority_status_response, recognise_prepared_offer,
-    recognise_signed_offer, verify_prepared_offer_device_proof, CredentialV2AuthorityStatus,
-    CredentialV2OfferBuildInput, CredentialV2WalletOfferVerifier,
+    build_authority_status_response, credential_v2_body_authority, device_possession_proof_input,
+    finalize_verified_offer, prepare_offer_core, recognise_authority_status_response,
+    recognise_prepared_offer, recognise_signed_offer, verify_prepared_offer_device_proof,
+    CredentialV2AuthorityStatus, CredentialV2FinalDecision, CredentialV2IntentDecision,
+    CredentialV2OfferBuildInput, CredentialV2PayloadInput, CredentialV2WalletOfferVerifier,
 };
 use sha2::{Digest, Sha256};
 
@@ -289,6 +290,80 @@ fn offer_is_one_canonical_signed_authority_for_hub_browser_and_wallet() {
         &offer_signing_key,
     )
     .is_err());
+
+    let (browser_bodies, browser_body_verifier) = credential_v2_body_authority();
+    let (wallet_bodies, wallet_body_verifier) = credential_v2_body_authority();
+    browser_bodies
+        .bind_offer(profile.clone(), &recognised)
+        .unwrap();
+    assert!(wallet_bodies
+        .intent_decision(&object, CredentialV2IntentDecision::Approve)
+        .is_err());
+    let mut allocator = CredentialV2Endpoint::new(
+        Side::Allocator,
+        carrier.clone(),
+        Box::new(browser_body_verifier),
+    );
+    let mut claimant = CredentialV2Endpoint::new(
+        Side::Claimant,
+        carrier.clone(),
+        Box::new(wallet_body_verifier),
+    );
+    allocator.send(&object).unwrap();
+    let mut offer_verifier = CredentialV2WalletOfferVerifier::new(
+        profile.clone(),
+        carrier.clone(),
+        input.transcript_hash,
+        CredentialV2TofuState::NewPair,
+    )
+    .unwrap()
+    .with_body_authority(wallet_bodies.clone());
+    offer_verifier
+        .verify_offer(&mut claimant, &object, input.expires_at - 1)
+        .unwrap();
+    assert!(wallet_bodies
+        .bind_offer(profile.clone(), &recognised)
+        .is_err());
+
+    let approve = wallet_bodies
+        .intent_decision(&object, CredentialV2IntentDecision::Approve)
+        .unwrap();
+    exchange(&mut claimant, &mut allocator, &approve);
+    let preview_did = format!("did:crdt:{}", "a".repeat(64));
+    let preparation = wallet_bodies.preparation(&approve, &preview_did).unwrap();
+    exchange(&mut claimant, &mut allocator, &preparation);
+    assert!(wallet_bodies
+        .preparation(&approve, &format!("did:crdt:{}", "b".repeat(64)))
+        .is_err());
+    let comparison = browser_bodies
+        .comparison(&preparation, &authority.response)
+        .unwrap();
+    assert_eq!(comparison.kind(), CredentialV2Kind::ComparisonConfirmed);
+    exchange(&mut allocator, &mut claimant, &comparison);
+    let final_approve = wallet_bodies
+        .final_decision(&comparison, CredentialV2FinalDecision::Approve)
+        .unwrap();
+    exchange(&mut claimant, &mut allocator, &final_approve);
+    let payload = wallet_bodies
+        .payload(
+            &final_approve,
+            CredentialV2PayloadInput {
+                grant_id: [0x49; 32],
+                grant: "e30.e30.AA".into(),
+            },
+        )
+        .unwrap();
+    exchange(&mut claimant, &mut allocator, &payload);
+    assert!(wallet_bodies
+        .payload(
+            &final_approve,
+            CredentialV2PayloadInput {
+                grant_id: [0x49; 32],
+                grant: "not-a-jws".into(),
+            },
+        )
+        .is_err());
+
     let bound = CredentialV2AuthorityStatus::Bound(format!("did:crdt:{}", "a".repeat(64)));
     let bound_authority = build_authority_status_response(
         &profile,
@@ -310,4 +385,13 @@ fn offer_is_one_canonical_signed_authority_for_hub_browser_and_wallet() {
         .unwrap(),
         bound
     );
+}
+
+fn exchange(
+    sender: &mut CredentialV2Endpoint,
+    receiver: &mut CredentialV2Endpoint,
+    object: &CredentialV2Object,
+) {
+    assert_eq!(sender.send(object), Ok(CredentialV2Advance::Advanced));
+    assert_eq!(receiver.receive(object), Ok(CredentialV2Advance::Advanced));
 }

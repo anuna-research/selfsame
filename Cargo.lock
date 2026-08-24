@@ -4325,6 +4325,7 @@ dependencies = [
  "cbcl-pairing",
  "cbor2",
  "ciborium",
+ "did-crdt",
  "ed25519-dalek",
  "getrandom 0.2.17",
  "selfsame-app-identity",

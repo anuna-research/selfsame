@@ -327,21 +327,6 @@ fn live_effects_json(effects: &[selfsame_pairing::live::LiveEffect]) -> String {
 const V2_ALLOCATOR_CHECKPOINT_INFO: &[u8] =
     b"cbcl-chat credential/v2 allocator checkpoint wrapping v1";
 
-#[derive(Debug)]
-struct CredentialV2BrowserBodyVerifier;
-
-impl cbcl_pairing::credential_v2::CredentialV2BodyVerifier for CredentialV2BrowserBodyVerifier {
-    fn verify(
-        &mut self,
-        _: &cbcl_pairing::credential_v2::CredentialV2LogicalBody<'_>,
-    ) -> Result<(), cbcl_pairing::credential_v2::CredentialV2Error> {
-        // The offer/finalization slice installs the nine Selfsame body
-        // recognisers. Until then a peer successor is always a closed refusal;
-        // CPace establishment itself invokes no body verifier.
-        Err(cbcl_pairing::credential_v2::CredentialV2Error::Schema)
-    }
-}
-
 /// Distinct browser allocator for standalone credential/v2 pairing.
 ///
 /// This surface cannot select credential/v1. It returns a closed JSON effect
@@ -361,6 +346,7 @@ pub struct CredentialV2BrowserAllocatorSession {
     prepared_offer_digest: Option<[u8; 32]>,
     authority_status: Option<selfsame_pairing::credential_v2::CredentialV2AuthorityStatus>,
     authority_response: Option<Vec<u8>>,
+    body_authority: selfsame_pairing::credential_v2::CredentialV2BodyAuthority,
     presence_code: Option<Zeroizing<String>>,
 }
 
@@ -425,9 +411,11 @@ impl CredentialV2BrowserAllocatorSession {
             expected_allocator_key: Some(expected_allocator_key),
             checkpoint_wrapping_key: wrapping_key,
         };
+        let (body_authority, body_verifier) =
+            selfsame_pairing::credential_v2::credential_v2_body_authority();
         let session = cbcl_pairing::credential_v2::CredentialV2AllocatorSession::new(
             input,
-            Box::new(CredentialV2BrowserBodyVerifier),
+            Box::new(body_verifier),
         )
         .map_err(|_| JsError::new("the credential/v2 allocator attempt was refused"))?;
         Ok(Self {
@@ -442,6 +430,7 @@ impl CredentialV2BrowserAllocatorSession {
             prepared_offer_digest: None,
             authority_status: None,
             authority_response: None,
+            body_authority,
             presence_code: Some(Zeroizing::new(presence_code)),
         })
     }
@@ -626,6 +615,9 @@ impl CredentialV2BrowserAllocatorSession {
             signed_offer.to_vec(),
         )
         .map_err(|_| JsError::new("the credential/v2 offer object was refused"))?;
+        self.body_authority
+            .bind_offer(self.profile.clone(), &recognised)
+            .map_err(|_| JsError::new("the credential/v2 body authority was refused"))?;
         let checkpoint_nonce: [u8; 12] = fixed_browser_bytes(checkpoint_nonce, "checkpoint nonce")?;
         let effects = self
             .session

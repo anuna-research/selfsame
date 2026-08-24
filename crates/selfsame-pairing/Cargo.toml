@@ -17,6 +17,7 @@ cbcl-pairing = { workspace = true }
 cbcl-pairing-core = { package = "cbcl-core", version = "=0.1.0", git = "https://codeberg.org/anuna/cbcl-rs", rev = "febc6691e6dd2d5f7116b1a4d84c984b64717564" }
 ciborium = "=0.2.2"
 cbor2 = "=1.1.0"
+did-crdt = { workspace = true }
 selfsame-app-identity = { workspace = true }
 thiserror = { workspace = true }
 zeroize = { version = "1", default-features = false, features = ["alloc"] }

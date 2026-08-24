@@ -1,5 +1,13 @@
 //! Selfsame's closed credential/v2 signed-offer authority.
 
+mod bodies;
+
+pub use bodies::{
+    credential_v2_body_authority, CredentialV2BodyAuthority, CredentialV2FinalDecision,
+    CredentialV2IntentDecision, CredentialV2PayloadInput, CredentialV2RefusalReason,
+    SelfsameCredentialV2BodyVerifier,
+};
+
 use cbcl_pairing::credential_v2::{
     credential_v2_intent_digest, CredentialV2AccountProvenance, CredentialV2Advance,
     CredentialV2Carrier, CredentialV2ClaimantOfferVerifier, CredentialV2DeviceBinding,
@@ -212,6 +220,7 @@ pub struct CredentialV2WalletOfferVerifier {
     carrier: CredentialV2Carrier,
     transcript_hash: [u8; 64],
     tofu_state: CredentialV2TofuState,
+    body_authority: Option<CredentialV2BodyAuthority>,
 }
 
 impl CredentialV2WalletOfferVerifier {
@@ -229,7 +238,16 @@ impl CredentialV2WalletOfferVerifier {
             carrier,
             transcript_hash,
             tofu_state,
+            body_authority: None,
         })
+    }
+
+    /// Bind the closed successor grammar only after this verifier accepts the
+    /// signed offer and every independent carrier/profile comparison.
+    #[must_use]
+    pub fn with_body_authority(mut self, authority: CredentialV2BodyAuthority) -> Self {
+        self.body_authority = Some(authority);
+        self
     }
 }
 
@@ -261,11 +279,15 @@ impl CredentialV2ClaimantOfferVerifier for CredentialV2WalletOfferVerifier {
         let authority =
             CredentialV2IntentAuthority::new(recognised.claims.clone(), self.tofu_state)?;
         let mut parser = AuthenticatedOfferParser {
-            exact_body: recognised.signed_offer,
-            claims: recognised.claims,
+            exact_body: recognised.signed_offer.clone(),
+            claims: recognised.claims.clone(),
         };
         let mut verifier = AuthenticatedOfferVerdict;
-        endpoint.receive_offer(object, &authority, &mut parser, &mut verifier)
+        let advance = endpoint.receive_offer(object, &authority, &mut parser, &mut verifier)?;
+        if let Some(body_authority) = &self.body_authority {
+            body_authority.bind_offer(self.profile.clone(), &recognised)?;
+        }
+        Ok(advance)
     }
 }
 
