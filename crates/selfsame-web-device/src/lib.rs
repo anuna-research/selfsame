@@ -65,7 +65,8 @@ use selfsame_app_identity::ceremony::{self as identity_ceremony, BundlePayload, 
 use selfsame_app_identity::enrollment::{self as identity_enrollment, EnrollmentStatement};
 use selfsame_app_identity::json::{self as identity_json, Json};
 use selfsame_app_identity::path_b::{
-    agree_closures, issuer_state_of, ClosureAssertionMethod, ResolverObservation,
+    agree_closures, issuer_state_of, replay_resolver_closure, verify_inactive_staging,
+    ClosureAssertionMethod, InactiveStagedGrant, ResolverObservation,
 };
 use selfsame_app_identity::path_b::{rehydrate_verified_grant, GrantRequest, VerifiedGrant};
 use selfsame_app_identity::profile::ApplicationProfile;
@@ -1128,8 +1129,15 @@ pub fn profile_facts(profile: &[u8]) -> Result<String, IdentityError> {
             )
         })
         .collect();
+    let resolvers: Vec<String> = profile.state_resolvers.iter().map(|resolver| {
+        format!(
+            r#"{{"id":{},"protocol":{},"url":{}}}"#,
+            json_string(&resolver.id), json_string(&resolver.protocol),
+            json_string(&resolver.url),
+        )
+    }).collect();
     Ok(format!(
-        r#"{{"applicationId":{},"accountAuthority":{},"profileVersion":{},"profileDigest":{},"allowedPermissions":[{}],"cbclPairingRelays":[{}]}}"#,
+        r#"{{"applicationId":{},"accountAuthority":{},"profileVersion":{},"profileDigest":{},"allowedPermissions":[{}],"cbclPairingRelays":[{}],"stateResolvers":[{}]}}"#,
         json_string(profile.application_id.as_str()),
         json_string(profile.account_authority.as_str()),
         selfsame_app_identity::PROFILE_VERSION,
@@ -1140,7 +1148,7 @@ pub fn profile_facts(profile: &[u8]) -> Result<String, IdentityError> {
             .map(|p| json_string(p))
             .collect::<Vec<_>>()
             .join(","),
-        descriptors.join(","),
+        descriptors.join(","), resolvers.join(","),
     ))
 }
 
@@ -1521,6 +1529,150 @@ pub fn verify_path_b_peer_json(
             )
         })
         .map_err(|_| JsError::new("Path-B grant refused"))
+}
+
+const MAX_CREDENTIAL_V2_RESOLVER_CLOSURE_OCTETS: usize = 1_048_576;
+const MAX_CREDENTIAL_V2_RESOLVER_CLOSURE_DEPTH: usize = 64;
+
+#[derive(Clone, Copy)]
+struct ClosedJsonSeed { depth: usize }
+
+impl<'de> serde::de::DeserializeSeed<'de> for ClosedJsonSeed {
+    type Value = ();
+    fn deserialize<D>(self, deserializer: D) -> Result<(), D::Error>
+    where D: serde::Deserializer<'de> {
+        deserializer.deserialize_any(ClosedJsonVisitor { depth: self.depth })
+    }
+}
+
+struct ClosedJsonVisitor { depth: usize }
+
+impl<'de> serde::de::Visitor<'de> for ClosedJsonVisitor {
+    type Value = ();
+    fn expecting(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str("bounded JSON without duplicate members or floating-point numbers")
+    }
+    fn visit_bool<E>(self, _: bool) -> Result<(), E> { Ok(()) }
+    fn visit_i64<E>(self, _: i64) -> Result<(), E> { Ok(()) }
+    fn visit_u64<E>(self, _: u64) -> Result<(), E> { Ok(()) }
+    fn visit_f64<E>(self, _: f64) -> Result<(), E> where E: serde::de::Error {
+        Err(E::custom("floating-point numbers are not admitted"))
+    }
+    fn visit_str<E>(self, _: &str) -> Result<(), E> { Ok(()) }
+    fn visit_string<E>(self, _: String) -> Result<(), E> { Ok(()) }
+    fn visit_none<E>(self) -> Result<(), E> { Ok(()) }
+    fn visit_unit<E>(self) -> Result<(), E> { Ok(()) }
+    fn visit_some<D>(self, deserializer: D) -> Result<(), D::Error>
+    where D: serde::Deserializer<'de> {
+        serde::de::DeserializeSeed::deserialize(ClosedJsonSeed { depth: self.depth }, deserializer)
+    }
+    fn visit_seq<A>(self, mut sequence: A) -> Result<(), A::Error>
+    where A: serde::de::SeqAccess<'de> {
+        if self.depth >= MAX_CREDENTIAL_V2_RESOLVER_CLOSURE_DEPTH {
+            return Err(serde::de::Error::custom("resolver closure JSON is too deep"));
+        }
+        while sequence.next_element_seed(ClosedJsonSeed { depth: self.depth + 1 })?.is_some() {}
+        Ok(())
+    }
+    fn visit_map<A>(self, mut object: A) -> Result<(), A::Error>
+    where A: serde::de::MapAccess<'de> {
+        if self.depth >= MAX_CREDENTIAL_V2_RESOLVER_CLOSURE_DEPTH {
+            return Err(serde::de::Error::custom("resolver closure JSON is too deep"));
+        }
+        let mut names = std::collections::BTreeSet::new();
+        while let Some(name) = object.next_key::<String>()? {
+            if !names.insert(name) {
+                return Err(serde::de::Error::custom("resolver closure JSON has a duplicate member"));
+            }
+            object.next_value_seed(ClosedJsonSeed { depth: self.depth + 1 })?;
+        }
+        Ok(())
+    }
+}
+
+fn recognise_closed_resolver_closure_json(input: &[u8]) -> Result<(), DeviceError> {
+    let mut deserializer = serde_json::Deserializer::from_slice(input);
+    serde::de::DeserializeSeed::deserialize(ClosedJsonSeed { depth: 0 }, &mut deserializer)
+        .map_err(|_| DeviceError::Refused)?;
+    deserializer.end().map_err(|_| DeviceError::Refused)
+}
+
+/// Verify a credential/v2 payload for an inactive browser stage.
+///
+/// `resolver_closure` is raw signed history fetched by this browser from the
+/// named profile resolver. Rust replays it; no JavaScript-provided verification
+/// boolean or materialized DID document can enter this boundary. Success is
+/// explicitly non-authorizing until the hub's atomic finalization.
+#[allow(clippy::too_many_arguments)]
+#[wasm_bindgen]
+pub fn verify_credential_v2_inactive_staging_json(
+    profile: &[u8], preview_issuer_did: &str, device_key: &[u8], permissions_json: &str,
+    now: f64, clock_skew_seconds: i64, resolver_id: &str, grant: &[u8],
+    resolver_closure: &[u8],
+) -> Result<String, JsError> {
+    let result = (|| -> Result<InactiveStagedGrant, DeviceError> {
+        let profile = ApplicationProfile::recognise(profile).map_err(|_| DeviceError::Refused)?;
+        let device_key: [u8; 32] = device_key.try_into().map_err(|_| DeviceError::Refused)?;
+        identity_json::recognise(
+            permissions_json.as_bytes(),
+            selfsame_app_identity::json::Limits { max_bytes: 1_024, max_depth: 2 },
+        ).map_err(|_| DeviceError::Refused)?;
+        let permissions: Vec<String> = serde_json::from_str(permissions_json)
+            .map_err(|_| DeviceError::Refused)?;
+        if permissions.is_empty() || permissions.len() > 4
+            || permissions.windows(2).any(|pair| pair[0] >= pair[1])
+            || serde_json::to_string(&permissions).ok().as_deref() != Some(permissions_json)
+        { return Err(DeviceError::Refused); }
+        let refs: Vec<&str> = permissions.iter().map(String::as_str).collect();
+        verify_credential_v2_inactive_staging(
+            &profile, preview_issuer_did, &device_key, &refs, browser_unix_seconds(now)?,
+            clock_skew_seconds, resolver_id, grant, resolver_closure,
+        )
+    })();
+    result.and_then(|staged| serde_json::to_string(&serde_json::json!({
+        "accountDid": staged.account_did, "account": staged.account,
+        "grantId": staged.grant_id,
+        "grantTokenB64u": selfsame_app_identity::codec::b64url(&staged.grant_token),
+        "deviceDid": staged.device_did,
+        "devicePublicKeyB64u": selfsame_app_identity::codec::b64url(&staged.device_public_key),
+        "permissions": staged.permissions, "validUntil": staged.valid_until,
+    })).map_err(|_| DeviceError::Refused))
+        .map_err(|_| JsError::new("credential/v2 inactive staging refused"))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn verify_credential_v2_inactive_staging(
+    profile: &ApplicationProfile, preview_issuer_did: &str, device_key: &[u8; 32],
+    permissions: &[&str], now: UnixSeconds, clock_skew_seconds: i64, resolver_id: &str,
+    grant: &[u8], resolver_closure: &[u8],
+) -> Result<InactiveStagedGrant, DeviceError> {
+    let now_seconds = i64::try_from(now).map_err(|_| DeviceError::Refused)?;
+    if resolver_closure.is_empty()
+        || resolver_closure.len() > MAX_CREDENTIAL_V2_RESOLVER_CLOSURE_OCTETS
+        || clock_skew_seconds < 0
+        || now_seconds.checked_add(clock_skew_seconds).is_none()
+        || now_seconds.checked_sub(clock_skew_seconds).is_none()
+    { return Err(DeviceError::Refused); }
+    recognise_closed_resolver_closure_json(resolver_closure)?;
+    let bundle: did_crdt::core::recon::ClosureBundle = serde_json::from_slice(resolver_closure)
+        .map_err(|_| DeviceError::Refused)?;
+    if serde_json::to_vec(&bundle).ok().as_deref() != Some(resolver_closure) {
+        return Err(DeviceError::Refused);
+    }
+    let observation = replay_resolver_closure(
+        bundle, preview_issuer_did, resolver_id, now_seconds,
+    ).map_err(|_| DeviceError::Refused)?;
+    let agreed = agree_closures(profile, &[observation]).map_err(|_| DeviceError::Refused)?;
+    let issuer = issuer_state_of(&agreed, now_seconds);
+    let account = AcctUri::parse(&selfsame_app_identity::alias::stable_acct_uri(
+        preview_issuer_did, &profile.account_authority,
+    )).map_err(|_| DeviceError::Refused)?;
+    verify_inactive_staging(
+        &GrantRequest::new(
+            profile, &account, device_key, permissions, now_seconds, clock_skew_seconds,
+        ),
+        &issuer, None, grant,
+    ).map_err(|_| DeviceError::Refused)
 }
 
 /// Verify a distributed Path-B grant for a peer without consulting any hub.
@@ -2085,6 +2237,7 @@ mod tests {
         account: AcctUri,
         device_public_key: [u8; 32],
         grant: Vec<u8>,
+        resolver_closure: Vec<u8>,
         issuer: IssuerState,
         jrd: Jrd,
         jrd_octets: Vec<u8>,
@@ -2113,6 +2266,11 @@ mod tests {
         .expect("test mnemonic");
         let home = hierarchy::derive_from_mnemonic(&mnemonic, &application, &scope);
         let home_did = home.home_did().expect("home DID");
+        let identity = selfsame_app_identity::issuer::create(
+            home.signing_key(), &profile.account_authority, (NOW as u64) * 1_000,
+        ).expect("issuer closure");
+        assert_eq!(identity.did, home_did);
+        let resolver_closure = serde_json::to_vec(&identity.closure).expect("closure JSON");
         let account = AcctUri::parse(&alias::stable_acct_uri(
             &home_did,
             &profile.account_authority,
@@ -2182,7 +2340,7 @@ mod tests {
             profile,
             account,
             device_public_key,
-            grant,
+            grant, resolver_closure,
             issuer,
             jrd,
             jrd_octets,
@@ -2612,6 +2770,42 @@ mod tests {
     }
 
     #[test]
+    fn credential_v2_inactive_staging_replays_raw_signed_closure() {
+        let fixture = grant_fixture();
+        recognise_closed_resolver_closure_json(&fixture.resolver_closure)
+            .expect("strict closure JSON");
+        let staged = verify_credential_v2_inactive_staging(
+            &fixture.profile, &fixture.issuer.did, &fixture.device_public_key,
+            &[PERMISSION], NOW as UnixSeconds, 0, "app-own", &fixture.grant,
+            &fixture.resolver_closure,
+        ).expect("raw resolver history establishes an inactive stage");
+        assert_eq!(staged.account_did, fixture.issuer.did);
+        assert_eq!(staged.account, fixture.account.as_str());
+        assert_eq!(staged.device_public_key, fixture.device_public_key);
+        assert_eq!(staged.grant_token, [12u8; 32]);
+        assert_eq!(staged.permissions, vec![PERMISSION]);
+    }
+
+    #[test]
+    fn credential_v2_inactive_staging_refuses_unclosed_or_substituted_history() {
+        let fixture = grant_fixture();
+        let mut with_extra: serde_json::Value =
+            serde_json::from_slice(&fixture.resolver_closure).expect("closure JSON");
+        with_extra.as_object_mut().expect("closure object")
+            .insert("trusted".to_owned(), serde_json::Value::Bool(true));
+        let with_extra = serde_json::to_vec(&with_extra).expect("mutated JSON");
+        assert!(verify_credential_v2_inactive_staging(
+            &fixture.profile, &fixture.issuer.did, &fixture.device_public_key,
+            &[PERMISSION], NOW as UnixSeconds, 0, "app-own", &fixture.grant, &with_extra,
+        ).is_err());
+        assert!(verify_credential_v2_inactive_staging(
+            &fixture.profile, "did:crdt:not-the-preview", &fixture.device_public_key,
+            &[PERMISSION], NOW as UnixSeconds, 0, "app-own", &fixture.grant,
+            &fixture.resolver_closure,
+        ).is_err());
+    }
+
+    #[test]
     fn peer_verification_refuses_a_negative_closure_age() {
         let fixture = grant_fixture();
         let control = verify_path_b_peer(
@@ -3019,6 +3213,10 @@ mod tests {
         let fixture = grant_fixture();
         let facts: serde_json::Value =
             serde_json::from_str(&profile_facts(&fixture.profile_octets).expect("facts")).unwrap();
+        assert_eq!(facts["stateResolvers"][0]["id"], "app-own");
+        assert_eq!(facts["stateResolvers"][0]["protocol"], "did-crdt-service-v1");
+        assert!(facts["stateResolvers"][0]["url"].as_str()
+            .is_some_and(|url| url.starts_with("https://")));
 
         let descriptor = &facts["cbclPairingRelays"][0];
         let (core, _, _, _) = offer_fixture(&fixture);

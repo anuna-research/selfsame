@@ -36,6 +36,7 @@ zeroize = "1"
 wasm-bindgen = "0.2"
 serde = { workspace = true }
 serde_json = { workspace = true }
+did-crdt = { workspace = true }
 # CON-402's QR, encoded here rather than in JavaScript so the symbol a browser
 # paints and the one `selfsame-cli` prints come from one encoder. Two encoders
 # for one payload is the parser-differential shape this repository refuses, and
@@ -58,7 +59,6 @@ selfsame-rendezvous = { path = "../selfsame-rendezvous" }
 # relay service and the native claimant, both fed by the deterministic local
 # demo credential. The feature reaches test builds only.
 selfsame-pairing = { path = "../selfsame-pairing", features = ["local-pairing-demo"] }
-did-crdt = { workspace = true }
 tokio = { workspace = true }
 reqwest = { version = "0.12", features = ["json", "blocking"] }
 axum = "0.7"
