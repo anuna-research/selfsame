@@ -14,10 +14,11 @@ use selfsame_app_identity::{json, json::Json, profile::ApplicationProfile};
 use selfsame_pairing::credential_v2::{
     build_authority_status_response, build_final_status, credential_v2_body_authority,
     device_possession_proof_input, finalize_verified_offer, prepare_offer_core,
-    recognise_authority_status_response, recognise_final_status, recognise_prepared_offer,
-    recognise_signed_offer, verify_prepared_offer_device_proof, CredentialV2AuthorityStatus,
-    CredentialV2FinalDecision, CredentialV2FinalStatusInput, CredentialV2IntentDecision,
-    CredentialV2OfferBuildInput, CredentialV2PayloadInput, CredentialV2WalletOfferVerifier,
+    migration_confirmation_digest, recognise_authority_status_response,
+    recognise_final_status, recognise_prepared_offer, recognise_signed_offer,
+    verify_prepared_offer_device_proof, CredentialV2AuthorityStatus, CredentialV2FinalDecision,
+    CredentialV2FinalStatusInput, CredentialV2IntentDecision, CredentialV2OfferBuildInput,
+    CredentialV2PayloadInput, CredentialV2WalletOfferVerifier,
 };
 use sha2::{Digest, Sha256};
 
@@ -385,6 +386,10 @@ fn offer_is_one_canonical_signed_authority_for_hub_browser_and_wallet() {
     );
     assert_eq!(retained_payload.grant_id(), &[0x49; 32]);
     assert_eq!(retained_payload.grant(), "e30.e30.AA");
+    assert_eq!(
+        retained_payload.migration_confirmation_digest(),
+        &migration_confirmation_digest(&recognised, &preview_did).unwrap(),
+    );
     assert!(wallet_bodies
         .payload(
             &final_approve,

@@ -1,7 +1,8 @@
 //! Closed Selfsame logical bodies carried by credential/v2 objects.
 
 use super::{
-    recognise_authority_status_response, CredentialV2AuthorityStatus, RecognisedCredentialV2Offer,
+    migration_confirmation_digest_parts, recognise_authority_status_response,
+    CredentialV2AuthorityStatus, RecognisedCredentialV2Offer,
 };
 use cbcl_pairing::credential_v2::{
     CredentialV2BodyVerifier, CredentialV2Error, CredentialV2Kind, CredentialV2LogicalBody,
@@ -11,8 +12,6 @@ use ciborium::Value;
 use selfsame_app_identity::profile::ApplicationProfile;
 use sha2::{Digest, Sha256};
 use std::sync::{Arc, Mutex, MutexGuard};
-
-const MIGRATION_CONFIRMATION_DOMAIN: &[u8] = b"cbcl-chat credential/v2 migration confirmation v2\0";
 
 /// Person's preliminary exact-intent decision.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -740,18 +739,15 @@ fn migration_confirmation_digest(
     bound: &BoundBodyAuthority,
     preview: &Preview,
 ) -> Result<[u8; 32], CredentialV2Error> {
-    let did_len = u32::try_from(preview.did.len()).map_err(|_| CredentialV2Error::Size)?;
-    let mut hash = Sha256::new();
-    hash.update(MIGRATION_CONFIRMATION_DOMAIN);
-    hash.update(bound.offer_core_digest);
-    hash.update(did_len.to_be_bytes());
-    hash.update(preview.did.as_bytes());
-    hash.update(bound.legacy_key_digest);
-    hash.update(bound.room_set_digest);
-    hash.update(bound.migration_snapshot_digest);
-    hash.update(bound.snapshot_nonce);
-    hash.update(bound.device_key_digest);
-    Ok(hash.finalize().into())
+    migration_confirmation_digest_parts(
+        bound.offer_core_digest,
+        &preview.did,
+        bound.legacy_key_digest,
+        bound.room_set_digest,
+        bound.migration_snapshot_digest,
+        bound.snapshot_nonce,
+        bound.device_key_digest,
+    )
 }
 
 fn recognise_preview(

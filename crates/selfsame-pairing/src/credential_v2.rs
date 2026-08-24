@@ -35,6 +35,8 @@ const ACCOUNT_PRINCIPAL_DOMAIN: &str = "selfsame-application-account-principal/v
 const LEGACY_KEY_DOMAIN: &[u8] = b"cbcl-chat credential/v2 legacy key v1\0";
 const ROOM_SET_DOMAIN: &[u8] = b"cbcl-chat credential/v2 room set v1\0";
 const SNAPSHOT_DOMAIN: &[u8] = b"cbcl-chat credential/v2 migration snapshot v1\0";
+const MIGRATION_CONFIRMATION_DOMAIN: &[u8] =
+    b"cbcl-chat credential/v2 migration confirmation v2\0";
 const BROWSER_STAGING_DOMAIN: &str =
     "cbcl-chat credential/v2 browser staging receipt v1";
 const BROWSER_STAGING_SIGNATURE_DOMAIN: &[u8] =
@@ -1090,6 +1092,56 @@ pub fn recognise_offer_core(
 ) -> Result<RecognisedCredentialV2Offer, CredentialV2OfferError> {
     let digest = Sha256::digest(offer_core).into();
     recognise_offer_core_with_envelope(profile, &[], offer_core, "", digest)
+}
+
+/// Recompute the exact first-link migration confirmation from authenticated
+/// offer claims and the verified issuer DID.
+pub fn migration_confirmation_digest(
+    offer: &RecognisedCredentialV2Offer,
+    issuer_did: &str,
+) -> Result<[u8; 32], CredentialV2OfferError> {
+    if !valid_bound_did(issuer_did) || issuer_did.parse::<did_crdt::Did>().is_err() {
+        return Err(CredentialV2OfferError::Refused);
+    }
+    let transition = offer
+        .claims
+        .transition()
+        .as_path_a_to_b()
+        .ok_or(CredentialV2OfferError::Refused)?;
+    migration_confirmation_digest_parts(
+        *offer.claims.offer_core_digest(),
+        issuer_did,
+        *transition.legacy_key_digest(),
+        *transition.room_set_digest(),
+        *transition.migration_snapshot_digest(),
+        *transition.snapshot_nonce(),
+        *offer.claims.device_binding().device_key_digest(),
+    )
+    .map_err(|_| CredentialV2OfferError::Refused)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn migration_confirmation_digest_parts(
+    offer_core_digest: [u8; 32],
+    issuer_did: &str,
+    legacy_key_digest: [u8; 32],
+    room_set_digest: [u8; 32],
+    migration_snapshot_digest: [u8; 32],
+    snapshot_nonce: [u8; 32],
+    device_key_digest: [u8; 32],
+) -> Result<[u8; 32], CredentialV2Error> {
+    let did_len = u32::try_from(issuer_did.len()).map_err(|_| CredentialV2Error::Size)?;
+    let mut hash = Sha256::new();
+    hash.update(MIGRATION_CONFIRMATION_DOMAIN);
+    hash.update(offer_core_digest);
+    hash.update(did_len.to_be_bytes());
+    hash.update(issuer_did.as_bytes());
+    hash.update(legacy_key_digest);
+    hash.update(room_set_digest);
+    hash.update(migration_snapshot_digest);
+    hash.update(snapshot_nonce);
+    hash.update(device_key_digest);
+    Ok(hash.finalize().into())
 }
 
 fn recognise_offer_core_with_envelope(

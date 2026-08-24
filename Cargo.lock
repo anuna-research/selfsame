@@ -4261,10 +4261,12 @@ version = "0.1.0"
 dependencies = [
  "bip39",
  "cbcl-pairing",
+ "did-crdt",
  "ed25519-dalek",
  "rustler",
  "selfsame-app-identity",
  "selfsame-pairing",
+ "serde_json",
 ]
 
 [[package]]

@@ -7,17 +7,19 @@
 //! or device key crosses the NIF boundary.
 
 use rustler::types::atom;
-use rustler::{Atom, Binary, Decoder, Encoder, Env, OwnedBinary, Term};
+use rustler::{Atom, Binary, Decoder, Encoder, Env, OwnedBinary, Resource, ResourceArc, Term};
 use selfsame_app_identity::json::{Json, Limits};
+use selfsame_app_identity::path_b::{replay_resolver_closure, InactiveStagedGrant};
 use selfsame_app_identity::profile::{ApplicationProfile, CbclRelayDescriptor};
-use selfsame_app_identity::{codec, json};
+use selfsame_app_identity::{alias, codec, didkey, grant, json};
 use selfsame_pairing::credential_v2::{
-    build_authority_status_response, finalize_verified_offer, prepare_offer_core,
-    recognise_browser_staging_receipt, recognise_prepared_offer,
-    verify_prepared_offer_device_proof, CredentialV2AuthorityStatus,
-    CredentialV2BrowserStagingInput, CredentialV2OfferBuildInput,
-    CredentialV2RoomProvenance, CredentialV2RoomSnapshot,
+    build_authority_status_response, build_final_status, finalize_verified_offer,
+    migration_confirmation_digest, prepare_offer_core, recognise_browser_staging_receipt,
+    recognise_prepared_offer, recognise_signed_offer, verify_prepared_offer_device_proof,
+    CredentialV2AuthorityStatus, CredentialV2BrowserStagingInput, CredentialV2FinalStatusInput,
+    CredentialV2OfferBuildInput, CredentialV2RoomProvenance, CredentialV2RoomSnapshot,
 };
+use std::sync::Mutex;
 
 const MAX_DEVICE_JWK_OCTETS: usize = 96;
 const MAX_PERMISSION_OCTETS: usize = 128;
@@ -50,6 +52,20 @@ rustler::atoms! {
     migration_snapshot_digest,
     authority_status_response,
     authority_status_digest,
+    request_id,
+    carrier_ceremony_id,
+    account_scope_id,
+    account,
+    payload_digest,
+    grant_id,
+    issuer_did,
+    receipt_recovery_commitment,
+    raw_grant,
+    migration_confirmation_digest_atom = "migration_confirmation_digest",
+    final_status_jws,
+    final_status_digest,
+    valid_until,
+    permissions,
     standing,
     invite,
     undefined,
@@ -225,6 +241,386 @@ pub fn verify_credential_v2_staging_receipt_nif<'a>(
         Ok(Ok(value)) => (atom::ok(), value).encode(env),
         Ok(Err(_)) | Err(_) => (atom::error(), rejected()).encode(env),
     }
+}
+
+/// Browser-authenticated finalization values not already held in the signed offer.
+pub struct CredentialV2AcceptanceInput {
+    pub raw_grant: Vec<u8>,
+    pub payload_digest: [u8; 32],
+    pub migration_confirmation_digest: [u8; 32],
+    pub issuer_did: String,
+    pub grant_id: [u8; 32],
+    pub staging_receipt: Vec<u8>,
+    pub receipt_recovery_commitment: [u8; 32],
+    pub finalized_at: u64,
+    pub signing_kid: String,
+}
+
+/// Exact facts projected only from a verified acceptance witness.
+#[derive(Clone)]
+pub struct CredentialV2AcceptanceProjection {
+    pub application_id: String,
+    pub request_id: [u8; 32],
+    pub carrier_ceremony_id: [u8; 32],
+    pub account_principal_digest: [u8; 32],
+    pub account_scope_id: [u8; 32],
+    pub account: String,
+    pub device_did: String,
+    pub device_public_key: [u8; 32],
+    pub payload_digest: [u8; 32],
+    pub migration_confirmation_digest: [u8; 32],
+    pub grant_id: [u8; 32],
+    pub issuer_did: String,
+    pub raw_grant: Vec<u8>,
+    pub permissions: Vec<String>,
+    pub valid_until: i64,
+    pub receipt_recovery_commitment: [u8; 32],
+    pub final_status_jws: String,
+    pub final_status_digest: [u8; 32],
+}
+
+/// Opaque verifier authority retained across retryable Mnesia transaction attempts.
+pub struct CredentialV2AcceptanceWitness {
+    projection: Mutex<CredentialV2AcceptanceProjection>,
+}
+
+impl Resource for CredentialV2AcceptanceWitness {}
+
+/// Cross-check live grant verification, the signed offer, browser staging
+/// receipt, migration digest, and immutable final status in one pure decision.
+pub fn prepare_credential_v2_acceptance(
+    profile: &ApplicationProfile,
+    signed_offer: &[u8],
+    staged: &InactiveStagedGrant,
+    input: &CredentialV2AcceptanceInput,
+    signing_key: &ed25519_dalek::SigningKey,
+) -> Result<CredentialV2AcceptanceProjection, String> {
+    let (projection, final_input) =
+        validate_credential_v2_acceptance(profile, signed_offer, staged, input)?;
+    sign_credential_v2_acceptance(
+        profile,
+        projection,
+        &final_input,
+        &input.signing_kid,
+        signing_key,
+    )
+}
+
+fn validate_credential_v2_acceptance(
+    profile: &ApplicationProfile,
+    signed_offer: &[u8],
+    staged: &InactiveStagedGrant,
+    input: &CredentialV2AcceptanceInput,
+) -> Result<
+    (
+        CredentialV2AcceptanceProjection,
+        CredentialV2FinalStatusInput,
+    ),
+    String,
+> {
+    let offer = recognise_signed_offer(profile, signed_offer).map_err(|_| String::from(REFUSED))?;
+    let claims = &offer.claims;
+    let device_public_key =
+        didkey::decode(claims.device_binding().device_did()).map_err(|_| String::from(REFUSED))?;
+    let account = alias::stable_acct_uri(&input.issuer_did, &profile.account_authority);
+    let expected_grant_id = grant::identifiers(&input.issuer_did, &input.grant_id).0;
+    if offer.kid != input.signing_kid
+        || offer.profile_digest != *profile.digest()
+        || staged.account_did != input.issuer_did
+        || staged.account != account
+        || staged.grant_id != expected_grant_id
+        || staged.grant_token != input.grant_id
+        || staged.device_did != claims.device_binding().device_did()
+        || staged.device_public_key != device_public_key
+        || staged.permissions != claims.permissions()
+        || migration_confirmation_digest(&offer, &input.issuer_did)
+            .map_err(|_| String::from(REFUSED))?
+            != input.migration_confirmation_digest
+    {
+        return Err(String::from(REFUSED));
+    }
+    let staging = CredentialV2BrowserStagingInput {
+        application_id: profile.application_id.as_str().into(),
+        carrier_ceremony_id: *claims.carrier_ceremony_id(),
+        account_principal_digest: *claims.account_provenance().account_principal_digest(),
+        account_scope_id: *claims.account_provenance().account_scope_id(),
+        device_did: claims.device_binding().device_did().into(),
+        offer_core_digest: *claims.offer_core_digest(),
+        payload_digest: input.payload_digest,
+        grant_id: input.grant_id,
+        issuer_did: input.issuer_did.clone(),
+        profile_digest: *profile.digest(),
+        receipt_recovery_commitment: input.receipt_recovery_commitment,
+    };
+    verify_credential_v2_staging_receipt(&staging, device_public_key, &input.staging_receipt)?;
+    let final_input = CredentialV2FinalStatusInput {
+        application_id: profile.application_id.as_str().into(),
+        carrier_ceremony_id: *claims.carrier_ceremony_id(),
+        request_id: offer.request_id,
+        account_principal_digest: *claims.account_provenance().account_principal_digest(),
+        account_scope_id: *claims.account_provenance().account_scope_id(),
+        device_did: claims.device_binding().device_did().into(),
+        offer_core_digest: *claims.offer_core_digest(),
+        payload_digest: input.payload_digest,
+        grant_id: input.grant_id,
+        issuer_did: input.issuer_did.clone(),
+        receipt_recovery_commitment: input.receipt_recovery_commitment,
+        finalized_at: input.finalized_at,
+    };
+    Ok((
+        CredentialV2AcceptanceProjection {
+            application_id: profile.application_id.as_str().into(),
+            request_id: offer.request_id,
+            carrier_ceremony_id: *claims.carrier_ceremony_id(),
+            account_principal_digest: *claims.account_provenance().account_principal_digest(),
+            account_scope_id: *claims.account_provenance().account_scope_id(),
+            account,
+            device_did: claims.device_binding().device_did().into(),
+            device_public_key,
+            payload_digest: input.payload_digest,
+            migration_confirmation_digest: input.migration_confirmation_digest,
+            grant_id: input.grant_id,
+            issuer_did: input.issuer_did.clone(),
+            raw_grant: input.raw_grant.clone(),
+            permissions: staged.permissions.clone(),
+            valid_until: staged.valid_until,
+            receipt_recovery_commitment: input.receipt_recovery_commitment,
+            final_status_jws: String::new(),
+            final_status_digest: [0_u8; 32],
+        },
+        final_input,
+    ))
+}
+
+fn sign_credential_v2_acceptance(
+    profile: &ApplicationProfile,
+    mut projection: CredentialV2AcceptanceProjection,
+    final_input: &CredentialV2FinalStatusInput,
+    signing_kid: &str,
+    signing_key: &ed25519_dalek::SigningKey,
+) -> Result<CredentialV2AcceptanceProjection, String> {
+    let final_status = build_final_status(profile, final_input, signing_kid, signing_key)
+        .map_err(|_| String::from(REFUSED))?;
+    projection.final_status_jws = final_status.jws;
+    projection.final_status_digest = final_status.digest;
+    Ok(projection)
+}
+
+/// Verify one finalization command into an opaque authority resource. Resolver
+/// evidence is supplied only by the hub sidecar; caller-carried closure bytes
+/// are independently replayed but never promoted to resolver provenance.
+#[allow(clippy::too_many_arguments)]
+#[rustler::nif(name = "verify_credential_v2_acceptance", schedule = "DirtyCpu")]
+pub fn verify_credential_v2_acceptance_nif<'a>(
+    env: Env<'a>,
+    profile_bytes: Binary<'a>,
+    signed_offer: Binary<'a>,
+    raw_grant_value: Binary<'a>,
+    raw_resolver_closure: Binary<'a>,
+    resolver_evidence: Term<'a>,
+    payload_digest_value: Binary<'a>,
+    migration_confirmation_digest_value: Binary<'a>,
+    issuer_did_value: Binary<'a>,
+    grant_id_value: Binary<'a>,
+    staging_receipt: Binary<'a>,
+    receipt_recovery_commitment_value: Binary<'a>,
+    finalized_at: u64,
+    signing_kid: Binary<'a>,
+    signing_seed: Binary<'a>,
+) -> Term<'a> {
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        if raw_grant_value.as_slice().is_empty()
+            || raw_grant_value.as_slice().len() > 49_152
+            || raw_resolver_closure.as_slice().is_empty()
+            || raw_resolver_closure.as_slice().len() > 1_048_576
+            || staging_receipt.as_slice().is_empty()
+            || staging_receipt.as_slice().len() > 4_608
+        {
+            return Err(String::from(REFUSED));
+        }
+        let profile = ApplicationProfile::recognise(profile_bytes.as_slice())
+            .map_err(|_| String::from(REFUSED))?;
+        let issuer_did = utf8(issuer_did_value.as_slice())?;
+        replay_carried_resolver_closure(
+            &profile,
+            &issuer_did,
+            raw_resolver_closure.as_slice(),
+            i64::try_from(finalized_at).map_err(|_| String::from(REFUSED))?,
+        )?;
+        let offer = recognise_signed_offer(&profile, signed_offer.as_slice())
+            .map_err(|_| String::from(REFUSED))?;
+        let device_public_key = didkey::decode(offer.claims.device_binding().device_did())
+            .map_err(|_| String::from(REFUSED))?;
+        let account = alias::stable_acct_uri(&issuer_did, &profile.account_authority);
+        let closures = crate::path_b::decode_closures(env, resolver_evidence)?;
+        let staged = crate::path_b::verify_inactive_grant_pure(
+            profile_bytes.as_slice(),
+            &issuer_did,
+            &account,
+            &device_public_key,
+            offer.claims.permissions(),
+            i64::try_from(finalized_at).map_err(|_| String::from(REFUSED))?,
+            0,
+            raw_grant_value.as_slice(),
+            &closures,
+        )?;
+        let input = CredentialV2AcceptanceInput {
+            raw_grant: raw_grant_value.as_slice().to_vec(),
+            payload_digest: exact(payload_digest_value.as_slice())?,
+            migration_confirmation_digest: exact(migration_confirmation_digest_value.as_slice())?,
+            issuer_did,
+            grant_id: exact(grant_id_value.as_slice())?,
+            staging_receipt: staging_receipt.as_slice().to_vec(),
+            receipt_recovery_commitment: exact(receipt_recovery_commitment_value.as_slice())?,
+            finalized_at,
+            signing_kid: utf8(signing_kid.as_slice())?,
+        };
+        let (projection, final_input) =
+            validate_credential_v2_acceptance(&profile, signed_offer.as_slice(), &staged, &input)?;
+
+        // The private seed is decoded only after grant, live resolver,
+        // carried-closure, offer, migration, and staging-receipt verification.
+        let seed: [u8; 32] = exact(signing_seed.as_slice())?;
+        let projection = sign_credential_v2_acceptance(
+            &profile,
+            projection,
+            &final_input,
+            &input.signing_kid,
+            &ed25519_dalek::SigningKey::from_bytes(&seed),
+        )?;
+        Ok::<ResourceArc<CredentialV2AcceptanceWitness>, String>(ResourceArc::new(
+            CredentialV2AcceptanceWitness {
+                projection: Mutex::new(projection),
+            },
+        ))
+    }));
+    match result {
+        Ok(Ok(witness)) => (atom::ok(), witness).encode(env),
+        Ok(Err(_)) | Err(_) => (atom::error(), rejected()).encode(env),
+    }
+}
+
+/// Project one opaque witness inside each retryable transaction attempt. The
+/// resource is immutable so an automatic Mnesia retry sees identical facts.
+#[rustler::nif(name = "credential_v2_acceptance_facts")]
+pub fn credential_v2_acceptance_facts_nif<'a>(
+    env: Env<'a>,
+    witness: ResourceArc<CredentialV2AcceptanceWitness>,
+) -> Term<'a> {
+    let result = witness
+        .projection
+        .lock()
+        .map_err(|_| String::from(REFUSED))
+        .and_then(|projection| encode_acceptance_projection(env, &projection));
+    match result {
+        Ok(value) => (atom::ok(), value).encode(env),
+        Err(_) => (atom::error(), rejected()).encode(env),
+    }
+}
+
+fn replay_carried_resolver_closure(
+    profile: &ApplicationProfile,
+    expected_did: &str,
+    bytes: &[u8],
+    now: i64,
+) -> Result<(), String> {
+    let bundle: did_crdt::core::recon::ClosureBundle =
+        serde_json::from_slice(bytes).map_err(|_| String::from(REFUSED))?;
+    if serde_json::to_vec(&bundle).ok().as_deref() != Some(bytes) {
+        return Err(String::from(REFUSED));
+    }
+    let resolver_id = profile
+        .state_resolvers
+        .first()
+        .ok_or_else(|| String::from(REFUSED))?
+        .id
+        .as_str();
+    let observation = replay_resolver_closure(bundle, expected_did, resolver_id, now)
+        .map_err(|_| String::from(REFUSED))?;
+    if observation.did != expected_did {
+        return Err(String::from(REFUSED));
+    }
+    Ok(())
+}
+
+fn encode_acceptance_projection<'a>(
+    env: Env<'a>,
+    projection: &CredentialV2AcceptanceProjection,
+) -> Result<Term<'a>, String> {
+    let permission_terms = projection
+        .permissions
+        .iter()
+        .map(|value| binary(env, value.as_bytes()))
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut map = rustler::types::map::map_new(env);
+    for (key, value) in [
+        (
+            application_id().encode(env),
+            binary(env, projection.application_id.as_bytes())?,
+        ),
+        (
+            request_id().encode(env),
+            binary(env, &projection.request_id)?,
+        ),
+        (
+            carrier_ceremony_id().encode(env),
+            binary(env, &projection.carrier_ceremony_id)?,
+        ),
+        (
+            account_principal_digest().encode(env),
+            binary(env, &projection.account_principal_digest)?,
+        ),
+        (
+            account_scope_id().encode(env),
+            binary(env, &projection.account_scope_id)?,
+        ),
+        (
+            account().encode(env),
+            binary(env, projection.account.as_bytes())?,
+        ),
+        (
+            device_did().encode(env),
+            binary(env, projection.device_did.as_bytes())?,
+        ),
+        (
+            device_public_key().encode(env),
+            binary(env, &projection.device_public_key)?,
+        ),
+        (
+            payload_digest().encode(env),
+            binary(env, &projection.payload_digest)?,
+        ),
+        (
+            migration_confirmation_digest_atom().encode(env),
+            binary(env, &projection.migration_confirmation_digest)?,
+        ),
+        (grant_id().encode(env), binary(env, &projection.grant_id)?),
+        (
+            issuer_did().encode(env),
+            binary(env, projection.issuer_did.as_bytes())?,
+        ),
+        (raw_grant().encode(env), binary(env, &projection.raw_grant)?),
+        (permissions().encode(env), permission_terms.encode(env)),
+        (
+            valid_until().encode(env),
+            projection.valid_until.encode(env),
+        ),
+        (
+            receipt_recovery_commitment().encode(env),
+            binary(env, &projection.receipt_recovery_commitment)?,
+        ),
+        (
+            final_status_jws().encode(env),
+            binary(env, projection.final_status_jws.as_bytes())?,
+        ),
+        (
+            final_status_digest().encode(env),
+            binary(env, &projection.final_status_digest)?,
+        ),
+    ] {
+        map = map.map_put(key, value).map_err(|_| String::from(REFUSED))?;
+    }
+    Ok(map)
 }
 
 /// Recognise and bind every profile-owned allocation field in one operation.
