@@ -2,7 +2,7 @@
 id: SPEC-008
 title: Production Pairing Claimant — Transport, Real Credential, and Origin Trust
 status: draft
-version: 0.5.14-draft
+version: 0.5.15-draft
 tier: 1
 review-gate: test-first-implementation-owner-authorized; release-and-deployment-prohibited-pending-cross-model-pass
 authority-form: consolidated-direct-current-authority
@@ -10,14 +10,14 @@ implementation-baseline: 48a0c7499ab83bdf1d77f6cfb8a09562a7c046f7
 generation-model-family: OpenAI GPT-5
 generation-model-version: gpt-5.6-sol
 generation-session: 01a029aa-9127-7c42-ad28-81512b91ded6
-generation-synthesis-trajectory: "owner-authorized standalone architecture -> F-A through F-E code traces -> rejected reviews through 0.5.13 -> continuously reachable Rust and browser gates"
+generation-synthesis-trajectory: "owner-authorized standalone architecture -> F-A through F-E code traces -> rejected reviews through 0.5.13 -> continuously reachable Rust, browser, and relay-source gates"
 depends-on: "[[SPEC-007-cbcl-pairing-cutover]]; [[SPEC-004-application-scoped-identity]]; [[SPEC-003-android-apk-distribution]]; cbcl-pairing SPEC-001"
 last-updated: 2026-08-25
 ---
 
 # SPEC-008 — Production Pairing Claimant: Transport, Real Credential, and Origin Trust
 
-> **Consolidated current-law reissue.** Version 0.5.14 states the standalone
+> **Consolidated current-law reissue.** Version 0.5.15 states the standalone
 > first-contact authority directly. Trajectory documents and review reports
 > supply evidence only. They supply no current values.
 > The repository owner authorized local test-first implementation on
@@ -1116,17 +1116,17 @@ increment directly. Trajectory documents and review reports supply evidence
 only.
 
 The current SPEC-008 test set is TEST-901 through TEST-915 and TEST-1156
-through TEST-1167. Every member of that set is stated in this parent.
+through TEST-1168. Every member of that set is stated in this parent.
 [[SPEC-007-cbcl-pairing-cutover]] TEST-801 through TEST-821 remain the other
 current Selfsame test set and are stated in that parent. No plan or review can
 omit either set.
 
-The exact coordinated hub test set is TEST-115 through TEST-120. The hub's
+The exact coordinated hub test set is TEST-115 through TEST-121. The hub's
 base-parent tests remain current outside this coordinated increment set.
 
 The coordinated review set contains this parent,
 [[SPEC-007-cbcl-pairing-cutover]] 0.3.6-draft, cbcl-pairing SPEC-001
-0.5.7-draft, and cbcl-bus SPEC-053 0.17.10-draft.
+0.5.7-draft, and cbcl-bus SPEC-053 0.17.11-draft.
 
 The `anuna-ssi` namespace reference is outside that set. It is pinned at
 `c7d462029841ea1884bb6f089732058d8838728d` only to resolve
@@ -1150,7 +1150,7 @@ their separate gates.
 
 The exact candidate closure is Selfsame
 `48a0c7499ab83bdf1d77f6cfb8a09562a7c046f7`, cbcl-bus
-`c9e0838cf39e05cac00c292ed8077bf1069c5685`, cbcl-pairing
+`e1f2e9890f366e38fcd11c0fd19b2cf40e210a86`, cbcl-pairing
 `62ef4a968b46b4836374fcee1d78c410f730a7a7`, cbcl-rs
 `febc6691e6dd2d5f7116b1a4d84c984b64717564`, and did-crdt
 `1f409a4229d07a62dd4cc6b2dce3b5a2e18e78a1`. The vendored Selfsame browser
@@ -2168,7 +2168,33 @@ Require the screen-render gate, cbcl-pairing browser ceremony, and wallet
 pairing lifecycle to pass in their declared continuous-job order. No later
 passing command compensates for an earlier aborted step.
 
+### TEST-1168 — Release relay authenticates the credential/v2 source closure
+
+**Validates:** [[SPEC-008-production-pairing-claimant#CON-985]].
+
+From the clean five-repository candidate closure, run the hub release-target
+isolation harness and the pinned blind-relay shell matrix. Require the release
+builder to authenticate cbcl-pairing
+`62ef4a968b46b4836374fcee1d78c410f730a7a7` as its current executable
+baseline before Cargo runs. Replace that baseline with the pre-credential/v2
+revision `197d4cb3d1560ab5328df28fc984269799c510f9`; the isolation harness and
+release builder SHALL refuse the executable drift.
+
+Require the normal release build to pass. Inject the conformance-allocation
+feature through `RUSTFLAGS` and require refusal before compilation. Run locked
+default and conformance test suites plus deny-warnings Clippy in both feature
+configurations. No successful browser or NIF test compensates for an
+unauthenticated relay release source.
+
 ## Changelog
+
+- **0.5.15-draft — 2026-08-25 — authenticated relay release source.** The hub
+  release builder now authenticates the exact credential/v2 cbcl-pairing
+  source closure instead of rejecting it against the pre-v2 baseline.
+  TEST-1168 makes that source identity, the poisoned-cache isolation harness,
+  the feature-injection refusal, and both relay feature configurations part of
+  the coordinated evidence. Release and deployment remain prohibited pending
+  fresh cross-model PASS and separate owner approval.
 
 - **0.5.14-draft — 2026-08-25 — continuously reachable verification.** The
   exact Rust job now passes deny-warnings Clippy before TEST-1162. The browser
