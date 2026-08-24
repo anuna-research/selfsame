@@ -565,6 +565,7 @@ impl CredentialV2BrowserAllocatorSession {
     /// Re-validate and retain public hub offer facts needed by the browser
     /// shell after process restart. The sealed body authority remains the sole
     /// source for application decisions and payload display.
+    #[allow(clippy::too_many_arguments)]
     pub fn restore_offer_context(
         &mut self,
         raw_carrier: &[u8],
