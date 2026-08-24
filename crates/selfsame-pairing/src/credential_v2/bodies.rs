@@ -81,6 +81,14 @@ pub struct CredentialV2PayloadInput {
     pub grant: String,
 }
 
+/// Browser-authenticated immutable hub status returned to the claimant.
+pub struct CredentialV2ReceiptInput {
+    /// Exact compact final-status JWS.
+    pub final_status_jws: String,
+    /// SHA-256 of the exact JWS octets.
+    pub final_status_digest: [u8; 32],
+}
+
 /// Authenticated preview retained only after the closed preparation body was
 /// built or verified.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -503,6 +511,33 @@ impl CredentialV2BodyAuthority {
         Ok(built)
     }
 
+    /// Build the sole allocator receipt after the hub status has been
+    /// cryptographically checked and durably activated by the browser.
+    pub fn receipt(
+        &self,
+        predecessor: &CredentialV2Object,
+        input: CredentialV2ReceiptInput,
+    ) -> Result<CredentialV2Object, CredentialV2Error> {
+        if !valid_compact_jws(&input.final_status_jws)
+            || input.final_status_jws.len() > 8_192
+            || <[u8; 32]>::from(Sha256::digest(input.final_status_jws.as_bytes()))
+                != input.final_status_digest
+        {
+            return Err(CredentialV2Error::Schema);
+        }
+        let bound = self.bound()?;
+        require_predecessor(&bound, predecessor, &[CredentialV2Kind::Payload])?;
+        object(
+            &bound,
+            predecessor,
+            CredentialV2Kind::Receipt,
+            vec![
+                text("finalStatusJws", &input.final_status_jws),
+                bytes("finalStatusDigest", input.final_status_digest),
+            ],
+        )
+    }
+
     fn bound(&self) -> Result<BoundGuard<'_>, CredentialV2Error> {
         let slot = lock(&self.shared)?;
         if slot.is_none() {
@@ -534,7 +569,8 @@ impl CredentialV2BodyVerifier for SelfsameCredentialV2BodyVerifier {
             CredentialV2Kind::FinalApprove => verify_final(&entries, bound, "approve"),
             CredentialV2Kind::FinalDecline => verify_final(&entries, bound, "decline"),
             CredentialV2Kind::Payload => verify_payload(&entries, bound),
-            CredentialV2Kind::Offer | CredentialV2Kind::Receipt => Err(CredentialV2Error::Schema),
+            CredentialV2Kind::Receipt => verify_receipt(&entries),
+            CredentialV2Kind::Offer => Err(CredentialV2Error::Schema),
         }
     }
 }
@@ -616,6 +652,27 @@ fn verify_refusal(entries: &[(Value, Value)]) -> Result<(), CredentialV2Error> {
         &["carrierCeremonyId", "predecessorDigest", "reason"],
     )?;
     CredentialV2RefusalReason::recognise(text_field(entries, "reason")?).map(|_| ())
+}
+
+fn verify_receipt(entries: &[(Value, Value)]) -> Result<(), CredentialV2Error> {
+    exact_fields(
+        entries,
+        &[
+            "carrierCeremonyId",
+            "predecessorDigest",
+            "finalStatusJws",
+            "finalStatusDigest",
+        ],
+    )?;
+    let jws = text_field(entries, "finalStatusJws")?;
+    if !valid_compact_jws(jws) || jws.len() > 8_192 {
+        return Err(CredentialV2Error::Schema);
+    }
+    expect_fixed(
+        entries,
+        "finalStatusDigest",
+        &<[u8; 32]>::from(Sha256::digest(jws.as_bytes())),
+    )
 }
 
 fn verify_final(

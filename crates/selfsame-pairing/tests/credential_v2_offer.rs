@@ -18,7 +18,7 @@ use selfsame_pairing::credential_v2::{
     recognise_final_status, recognise_prepared_offer, recognise_signed_offer,
     verify_prepared_offer_device_proof, CredentialV2AuthorityStatus, CredentialV2FinalDecision,
     CredentialV2FinalStatusInput, CredentialV2IntentDecision, CredentialV2OfferBuildInput,
-    CredentialV2PayloadInput, CredentialV2WalletOfferVerifier,
+    CredentialV2PayloadInput, CredentialV2ReceiptInput, CredentialV2WalletOfferVerifier,
 };
 use sha2::{Digest, Sha256};
 
@@ -399,6 +399,20 @@ fn offer_is_one_canonical_signed_authority_for_hub_browser_and_wallet() {
             },
         )
         .is_err());
+
+    let final_status_jws = String::from("e30.e30.AA");
+    let final_status_digest: [u8; 32] = Sha256::digest(final_status_jws.as_bytes()).into();
+    let receipt = browser_bodies
+        .receipt(
+            &payload,
+            CredentialV2ReceiptInput {
+                final_status_jws,
+                final_status_digest,
+            },
+        )
+        .unwrap();
+    exchange(&mut allocator, &mut claimant, &receipt);
+    assert_eq!(receipt.kind(), CredentialV2Kind::Receipt);
 
     let bound = CredentialV2AuthorityStatus::Bound(format!("did:crdt:{}", "a".repeat(64)));
     let bound_authority = build_authority_status_response(

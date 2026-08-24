@@ -345,6 +345,7 @@ pub struct CredentialV2BrowserAllocatorSession {
     transcript_hash: Option<[u8; 64]>,
     prepared_offer_core: Option<Vec<u8>>,
     prepared_offer_digest: Option<[u8; 32]>,
+    offer_kid: Option<String>,
     authority_status: Option<selfsame_pairing::credential_v2::CredentialV2AuthorityStatus>,
     authority_response: Option<Vec<u8>>,
     body_authority: selfsame_pairing::credential_v2::CredentialV2BodyAuthority,
@@ -430,6 +431,7 @@ impl CredentialV2BrowserAllocatorSession {
             transcript_hash: None,
             prepared_offer_core: None,
             prepared_offer_digest: None,
+            offer_kid: None,
             authority_status: None,
             authority_response: None,
             body_authority,
@@ -634,6 +636,7 @@ impl CredentialV2BrowserAllocatorSession {
         self.body_authority
             .bind_offer(self.profile.clone(), &recognised)
             .map_err(|_| JsError::new("the credential/v2 body authority was refused"))?;
+        self.offer_kid = Some(recognised.kid.clone());
         let checkpoint_nonce: [u8; 12] = fixed_browser_bytes(checkpoint_nonce, "checkpoint nonce")?;
         let effects = self
             .session
@@ -794,6 +797,102 @@ impl CredentialV2BrowserAllocatorSession {
             signature,
         )
         .map_err(|_| JsError::new("the credential/v2 staging receipt was refused"))
+    }
+
+    /// Verify the immutable hub acknowledgement against every authenticated
+    /// offer and payload fact retained inside this allocator session.
+    pub fn verify_final_status(
+        &self,
+        final_status: &[u8],
+        final_status_digest: &[u8],
+        finalized_at: u64,
+    ) -> Result<(), JsError> {
+        let staging = self.browser_staging_input()?;
+        let expected = selfsame_pairing::credential_v2::CredentialV2FinalStatusInput {
+            application_id: staging.application_id,
+            carrier_ceremony_id: staging.carrier_ceremony_id,
+            request_id: self.request_id,
+            account_principal_digest: staging.account_principal_digest,
+            account_scope_id: staging.account_scope_id,
+            device_did: staging.device_did,
+            offer_core_digest: staging.offer_core_digest,
+            payload_digest: staging.payload_digest,
+            grant_id: staging.grant_id,
+            issuer_did: staging.issuer_did,
+            receipt_recovery_commitment: staging.receipt_recovery_commitment,
+            finalized_at,
+        };
+        let jws = std::str::from_utf8(final_status)
+            .map_err(|_| JsError::new("the credential/v2 final status was refused"))?;
+        let digest = fixed_browser_bytes(final_status_digest, "final-status digest")?;
+        let kid = self
+            .offer_kid
+            .as_deref()
+            .ok_or_else(|| JsError::new("the credential/v2 signed offer is unavailable"))?;
+        selfsame_pairing::credential_v2::recognise_final_status(
+            &self.profile,
+            jws,
+            digest,
+            &expected,
+            kid,
+        )
+        .map_err(|_| JsError::new("the credential/v2 final status was refused"))
+    }
+
+    /// Seal the already verified immutable status into the allocator receipt.
+    /// The browser calls this only after its active record is durable; the
+    /// returned checkpoint effect then places the relay send behind the usual
+    /// checkpoint-persisted barrier.
+    pub fn prepare_receipt(
+        &mut self,
+        final_status: &[u8],
+        final_status_digest: &[u8],
+        finalized_at: u64,
+        now: u64,
+        checkpoint_nonce: &[u8],
+    ) -> Result<String, JsError> {
+        self.verify_final_status(final_status, final_status_digest, finalized_at)?;
+        let predecessor = self
+            .last_received_object
+            .as_ref()
+            .filter(|object| {
+                object.kind() == cbcl_pairing::credential_v2::CredentialV2Kind::Payload
+            })
+            .ok_or_else(|| JsError::new("the credential/v2 payload is unavailable"))?;
+        let jws = std::str::from_utf8(final_status)
+            .map_err(|_| JsError::new("the credential/v2 final status was refused"))?;
+        let digest = fixed_browser_bytes(final_status_digest, "final-status digest")?;
+        let receipt = self
+            .body_authority
+            .receipt(
+                predecessor,
+                selfsame_pairing::credential_v2::CredentialV2ReceiptInput {
+                    final_status_jws: jws.into(),
+                    final_status_digest: digest,
+                },
+            )
+            .map_err(|_| JsError::new("the credential/v2 receipt was refused"))?;
+        let checkpoint_nonce: [u8; 12] =
+            fixed_browser_bytes(checkpoint_nonce, "checkpoint nonce")?;
+        let effects = self
+            .session
+            .as_mut()
+            .ok_or_else(|| JsError::new("the credential/v2 attempt was cancelled"))?
+            .prepare_application_object(
+                &receipt,
+                now,
+                cbcl_pairing::credential_v2::CredentialV2CheckpointNonce::from_csprng(
+                    checkpoint_nonce,
+                ),
+            )
+            .map_err(|_| JsError::new("the credential/v2 receipt release was refused"))?;
+        Ok(v2_allocator_effects_json(
+            &effects,
+            &self.request_id,
+            &self.intent_nonce,
+            &self.carrier_ceremony_id,
+            self.presence_code.as_ref().map(|value| value.as_str()),
+        ))
     }
 
     /// Burn the local attempt without releasing another protocol frame.
