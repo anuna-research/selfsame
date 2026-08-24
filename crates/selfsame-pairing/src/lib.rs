@@ -11,9 +11,9 @@
 
 #![forbid(unsafe_code)]
 
+pub mod credential_v2;
 pub mod legacy;
 pub mod live;
-pub mod credential_v2;
 #[cfg(feature = "local-pairing-demo")]
 pub mod local_demo;
 pub mod release;
@@ -33,7 +33,7 @@ pub struct DependencyBaseline {
 #[must_use]
 pub const fn dependency_baseline() -> DependencyBaseline {
     DependencyBaseline {
-        revision: "8e55160a3234127bd60ce723fd93ba6b2b67a06b",
+        revision: "aedbc4ca07068c3cf6356d95333f4c2ec0d374d9",
         bootstrap_source_sha256: cbcl_pairing::BOOTSTRAP_SOURCE_SHA256,
         session_source_sha256: cbcl_pairing::SESSION_SOURCE_SHA256,
     }

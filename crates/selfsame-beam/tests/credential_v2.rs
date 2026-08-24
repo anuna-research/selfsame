@@ -3,17 +3,21 @@ mod common;
 
 use cbcl_pairing::credential_v2::{CredentialV2Carrier, CredentialV2CarrierInput};
 use cbcl_selfsame_erl::credential_v2::{
-    prepare_credential_v2_acceptance, recognise_credential_v2_profile,
-    verify_credential_v2_staging_receipt, CredentialV2AcceptanceInput,
+    credential_v2_recovery_accepted, credential_v2_recovery_in_progress,
+    credential_v2_recovery_unknown, prepare_credential_v2_acceptance,
+    prepare_credential_v2_recovery_negative, recognise_credential_v2_profile,
+    recognise_credential_v2_recovery_request, verify_credential_v2_staging_receipt,
+    CredentialV2AcceptanceInput,
 };
 use ed25519_dalek::{Signer, SigningKey};
 use selfsame_app_identity::profile::ApplicationProfile;
 use selfsame_app_identity::{alias, codec, didkey, grant, json, path_b::InactiveStagedGrant};
 use selfsame_pairing::credential_v2::{
-    browser_staging_signature_input, build_browser_staging_receipt, device_possession_proof_input,
-    finalize_verified_offer, migration_confirmation_digest, prepare_offer_core,
-    verify_prepared_offer_device_proof, CredentialV2BrowserStagingInput,
-    CredentialV2OfferBuildInput,
+    browser_staging_signature_input, build_browser_staging_receipt,
+    decode_receipt_recovery_response, device_possession_proof_input,
+    encode_receipt_recovery_request, finalize_verified_offer, migration_confirmation_digest,
+    prepare_offer_core, verify_prepared_offer_device_proof, CredentialV2BrowserStagingInput,
+    CredentialV2OfferBuildInput, CredentialV2RecoveryNegativeInput, CredentialV2RecoveryResponse,
 };
 
 fn device_jwk(key: [u8; 32]) -> Vec<u8> {
@@ -22,6 +26,56 @@ fn device_jwk(key: [u8; 32]) -> Vec<u8> {
         ("kty", json::Json::text("OKP")),
         ("x", json::Json::text(codec::b64url(&key))),
     ]))
+}
+
+#[test]
+fn test_119_recovery_boundary_never_projects_the_secret_token() {
+    let application_key = SigningKey::from_bytes(&[0xa1; 32]);
+    let profile = credential_profile(&application_key);
+    let application_id = profile.application_id.as_str();
+    let ceremony = [0xa2; 32];
+    let token = [0xa3; 32];
+    let request = encode_receipt_recovery_request(application_id, ceremony, &token).unwrap();
+    let projection = recognise_credential_v2_recovery_request(&request).unwrap();
+    assert_eq!(projection.application_id, application_id);
+    assert_eq!(projection.carrier_ceremony_id, ceremony);
+    assert_ne!(projection.receipt_recovery_commitment, token);
+
+    let accepted = credential_v2_recovery_accepted("e30.e30.AA", [0xa4; 32]).unwrap();
+    assert!(matches!(
+        decode_receipt_recovery_response(&accepted).unwrap(),
+        CredentialV2RecoveryResponse::Accepted { .. }
+    ));
+    let progress = credential_v2_recovery_in_progress(1).unwrap();
+    assert_eq!(
+        decode_receipt_recovery_response(&progress).unwrap(),
+        CredentialV2RecoveryResponse::InProgress {
+            retry_after_seconds: 1
+        }
+    );
+    let unknown = credential_v2_recovery_unknown().unwrap();
+    assert_eq!(
+        decode_receipt_recovery_response(&unknown).unwrap(),
+        CredentialV2RecoveryResponse::Unknown
+    );
+
+    let kid = "https://photos.example/selfsame/application#credential-v2-test";
+    let negative = prepare_credential_v2_recovery_negative(
+        &profile,
+        &CredentialV2RecoveryNegativeInput {
+            application_id: application_id.into(),
+            carrier_ceremony_id: ceremony,
+            receipt_recovery_commitment: projection.receipt_recovery_commitment,
+            observed_at: 1_800_000_900,
+        },
+        kid,
+        &application_key,
+    )
+    .unwrap();
+    assert!(matches!(
+        decode_receipt_recovery_response(&negative).unwrap(),
+        CredentialV2RecoveryResponse::NotFinalized { .. }
+    ));
 }
 
 fn credential_profile(signing_key: &SigningKey) -> ApplicationProfile {

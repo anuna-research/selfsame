@@ -145,6 +145,79 @@ fn wasm_surface_carries_recovery_bindings_and_hub_correlators_only_after_checkpo
 }
 
 #[test]
+fn wasm_surface_restores_the_exact_allocator_membership_after_process_restart() {
+    let profile = local_demo::profile_octets(RELAY);
+    let mut allocator = CredentialV2BrowserAllocatorSession::new(
+        &profile,
+        RELAY.into(),
+        &[0x21; 32],
+        &[0x22; 32],
+        &[0x23; 32],
+        &[0x24; 16],
+        &[0x25; 16],
+        &[0x26; 32],
+        &[0x27; 32],
+        &[0x28; 32],
+        &[0x29; 32],
+        &[0x2a; 32],
+    )
+    .unwrap();
+    let expected_presence = allocator.restored_presence_code().unwrap();
+    let welcome = encode_server_message(&ServerMessage::Welcome).unwrap();
+    allocator
+        .receive(&welcome, 1_800_000_000, &[0x2b; 12])
+        .unwrap();
+    let allocated = encode_server_message(&ServerMessage::AllocatedV2 {
+        mailbox_id: [0x21; 32],
+        membership_token: [0x2c; 32],
+        expires_at: 1_800_000_900,
+    })
+    .unwrap();
+    let durable = effects(
+        allocator
+            .receive(&allocated, 1_800_000_000, &[0x2d; 12])
+            .unwrap(),
+    );
+    assert_eq!(durable.len(), 1);
+    assert_eq!(durable[0]["type"], "checkpoint");
+    let checkpoint = decode_b64u(durable[0]["checkpointB64u"].as_str().unwrap());
+    let carrier = decode_b64u(durable[0]["rawCarrierB64u"].as_str().unwrap());
+
+    drop(allocator);
+    let mut restored = CredentialV2BrowserAllocatorSession::restore(
+        &profile,
+        &carrier,
+        &checkpoint,
+        1,
+        &[0x27; 32],
+        &[0x28; 32],
+        &[0x29; 32],
+        &[0x2a; 32],
+        1_800_000_000,
+    )
+    .unwrap();
+    assert_eq!(restored.restored_phase(), "allocated");
+    assert_eq!(restored.restored_presence_code(), Some(expected_presence));
+    assert_eq!(
+        decode_client_message(&body(&effects(restored.start().unwrap())[0])).unwrap(),
+        ClientMessage::Bind,
+    );
+    let reopened = effects(
+        restored
+            .receive(&welcome, 1_800_000_000, &[0x2e; 12])
+            .unwrap(),
+    );
+    assert_eq!(reopened.len(), 1);
+    assert_eq!(
+        decode_client_message(&body(&reopened[0])).unwrap(),
+        ClientMessage::Open {
+            mailbox_id: [0x21; 32],
+            membership_token: [0x2c; 32],
+        },
+    );
+}
+
+#[test]
 fn wasm_surface_completes_cpace_only_through_persisted_relay_transitions() {
     let profile_octets = local_demo::profile_octets(RELAY);
     let profile = ApplicationProfile::recognise(&profile_octets).unwrap();

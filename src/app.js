@@ -922,7 +922,7 @@ const appIdentity = initAppIdentity({
 // because a pairing has three network waits a person watches — resolving the
 // record, meeting the application, and sending the bundle back — and `refresh`,
 // because the applications list is derived from what the wallet holds after one.
-initPairing({
+const pairing = initPairing({
   $, show, invoke, fail, message, renderLifehash, actions, busy, idle, refresh,
 });
 
@@ -957,9 +957,14 @@ $("#code-input").addEventListener("input", onCodeInput);
 // phone that was offline when a device was linked should catch up without the
 // user having to know that publication is a thing (REQ-020).
 document.addEventListener("visibilitychange", () => {
-  if (!document.hidden) invoke("flush_publications").catch(() => {});
+  if (!document.hidden) {
+    invoke("flush_publications").catch(() => {});
+    pairing.resumePending().catch(() => {});
+  }
 });
 
-refresh().catch((e) => {
-  document.body.textContent = `Selfsame could not start: ${message(e)}`;
-});
+refresh()
+  .then(() => pairing.resumePending())
+  .catch((e) => {
+    document.body.textContent = `Selfsame could not start: ${message(e)}`;
+  });

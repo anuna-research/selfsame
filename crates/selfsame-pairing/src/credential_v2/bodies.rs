@@ -2,8 +2,7 @@
 
 use super::{
     compact_jws_payload_digest, migration_confirmation_digest_parts,
-    recognise_authority_status_response,
-    CredentialV2AuthorityStatus, RecognisedCredentialV2Offer,
+    recognise_authority_status_response, CredentialV2AuthorityStatus, RecognisedCredentialV2Offer,
 };
 use cbcl_pairing::credential_v2::{
     CredentialV2BodyVerifier, CredentialV2Error, CredentialV2Kind, CredentialV2LogicalBody,
@@ -116,6 +115,49 @@ pub fn recognise_receipt(
         final_status_jws: text_field(&entries, "finalStatusJws")?.into(),
         final_status_digest: fixed_field(&entries, "finalStatusDigest")?,
     })
+}
+
+/// Reconstruct the exact terminal Receipt object from a retained payload
+/// content hash and an authenticated HTTPS final status.
+///
+/// This adapter has no authority to create or resend a payload. The caller
+/// supplies the intent and predecessor digests retained in the sealed claimant
+/// checkpoint; the restored cbcl-pairing endpoint checks both before accepting
+/// the object through its private recovered-receipt transition.
+pub fn recovered_receipt_object(
+    intent_digest: [u8; 32],
+    carrier_ceremony_id: [u8; 32],
+    payload_content_hash: [u8; 32],
+    input: CredentialV2ReceiptInput,
+) -> Result<CredentialV2Object, CredentialV2Error> {
+    if !valid_compact_jws(&input.final_status_jws)
+        || input.final_status_jws.len() > 8_192
+        || compact_jws_payload_digest(&input.final_status_jws)
+            .map_err(|_| CredentialV2Error::Schema)?
+            != input.final_status_digest
+    {
+        return Err(CredentialV2Error::Schema);
+    }
+    let body = cbor2::to_canonical_vec(&Value::Map(vec![
+        (
+            Value::Text("finalStatusJws".into()),
+            Value::Text(input.final_status_jws),
+        ),
+        (
+            Value::Text("finalStatusDigest".into()),
+            Value::Bytes(input.final_status_digest.to_vec()),
+        ),
+        (
+            Value::Text("carrierCeremonyId".into()),
+            Value::Bytes(carrier_ceremony_id.to_vec()),
+        ),
+        (
+            Value::Text("predecessorDigest".into()),
+            Value::Bytes(payload_content_hash.to_vec()),
+        ),
+    ]))
+    .map_err(|_| CredentialV2Error::Schema)?;
+    CredentialV2Object::new(CredentialV2Kind::Receipt, intent_digest, body)
 }
 
 /// Authenticated preview retained only after the closed preparation body was
@@ -272,6 +314,7 @@ impl std::fmt::Debug for CredentialV2BodyAuthority {
 /// Endpoint adapter for the nine closed Selfsame successor grammars.
 pub struct SelfsameCredentialV2BodyVerifier {
     shared: SharedAuthority,
+    restore_profile: Option<ApplicationProfile>,
 }
 
 impl std::fmt::Debug for SelfsameCredentialV2BodyVerifier {
@@ -287,16 +330,70 @@ impl std::fmt::Debug for SelfsameCredentialV2BodyVerifier {
 #[must_use]
 pub fn credential_v2_body_authority(
 ) -> (CredentialV2BodyAuthority, SelfsameCredentialV2BodyVerifier) {
+    body_authority(None)
+}
+
+/// Construct an initially unbound authority whose verifier may restore only a
+/// checkpoint bound to this independently authenticated profile.
+#[must_use]
+pub fn credential_v2_body_authority_for_restore(
+    profile: ApplicationProfile,
+) -> (CredentialV2BodyAuthority, SelfsameCredentialV2BodyVerifier) {
+    body_authority(Some(profile))
+}
+
+fn body_authority(
+    restore_profile: Option<ApplicationProfile>,
+) -> (CredentialV2BodyAuthority, SelfsameCredentialV2BodyVerifier) {
     let shared = Arc::new(Mutex::new(None));
     (
         CredentialV2BodyAuthority {
             shared: Arc::clone(&shared),
         },
-        SelfsameCredentialV2BodyVerifier { shared },
+        SelfsameCredentialV2BodyVerifier {
+            shared,
+            restore_profile,
+        },
     )
 }
 
 impl CredentialV2BodyAuthority {
+    /// Require an independently re-recognised offer to be the exact authority
+    /// already recovered from the sealed endpoint checkpoint.
+    pub fn require_bound_offer(
+        &self,
+        profile: &ApplicationProfile,
+        offer: &RecognisedCredentialV2Offer,
+    ) -> Result<(), CredentialV2Error> {
+        let bound = self.bound()?;
+        let transition = offer
+            .claims
+            .transition()
+            .as_path_a_to_b()
+            .ok_or(CredentialV2Error::Profile)?;
+        if bound.profile.digest() != profile.digest()
+            || bound.kid != offer.kid
+            || bound.ceremony != *offer.claims.carrier_ceremony_id()
+            || bound.intent_digest
+                != cbcl_pairing::credential_v2::credential_v2_intent_digest(
+                    *offer.claims.offer_core_digest(),
+                )
+            || bound.offer_core_digest != *offer.claims.offer_core_digest()
+            || bound.account_principal_digest
+                != *offer.claims.account_provenance().account_principal_digest()
+            || bound.account_scope_id != *offer.claims.account_provenance().account_scope_id()
+            || bound.device_did != offer.claims.device_binding().device_did()
+            || bound.device_key_digest != *offer.claims.device_binding().device_key_digest()
+            || bound.legacy_key_digest != *transition.legacy_key_digest()
+            || bound.room_set_digest != *transition.room_set_digest()
+            || bound.migration_snapshot_digest != *transition.migration_snapshot_digest()
+            || bound.snapshot_nonce != *transition.snapshot_nonce()
+        {
+            return Err(CredentialV2Error::Profile);
+        }
+        Ok(())
+    }
+
     /// Return the authenticated preview only after preparation has retained it.
     pub fn retained_preview(&self) -> Result<CredentialV2RetainedPreview, CredentialV2Error> {
         let bound = self.bound()?;
@@ -314,6 +411,26 @@ impl CredentialV2BodyAuthority {
             .payload
             .clone()
             .ok_or(CredentialV2Error::Phase)
+    }
+
+    /// Rebuild transient retained facts from the endpoint's authenticated last
+    /// peer object after restoring a sealed checkpoint. Large payload bytes are
+    /// deliberately retained only once, by the endpoint checkpoint itself.
+    pub fn restore_retained_received_object(
+        &self,
+        object: &CredentialV2Object,
+    ) -> Result<(), CredentialV2Error> {
+        let mut bound = self.bound()?;
+        if object.intent_digest() != &bound.intent_digest {
+            return Err(CredentialV2Error::Profile);
+        }
+        let entries = body_entries(object.body())?;
+        expect_fixed(&entries, "carrierCeremonyId", &bound.ceremony)?;
+        match object.kind() {
+            CredentialV2Kind::Preparation => verify_preparation(&entries, &mut bound),
+            CredentialV2Kind::Payload => verify_payload(&entries, &mut bound),
+            _ => Ok(()),
+        }
     }
 
     /// Bind this one-attempt grammar to a completely authenticated signed offer.
@@ -602,6 +719,173 @@ impl CredentialV2BodyVerifier for SelfsameCredentialV2BodyVerifier {
             CredentialV2Kind::Receipt => verify_receipt(&entries),
             CredentialV2Kind::Offer => Err(CredentialV2Error::Schema),
         }
+    }
+
+    fn checkpoint_state(&self) -> Result<Vec<u8>, CredentialV2Error> {
+        let slot = lock(&self.shared)?;
+        let Some(bound) = slot.as_ref() else {
+            return Ok(Vec::new());
+        };
+        encode_authority_checkpoint(bound)
+    }
+
+    fn restore_checkpoint_state(&mut self, state: &[u8]) -> Result<(), CredentialV2Error> {
+        if state.is_empty() {
+            return Ok(());
+        }
+        let profile = self
+            .restore_profile
+            .as_ref()
+            .ok_or(CredentialV2Error::Profile)?;
+        let restored = decode_authority_checkpoint(state, profile)?;
+        let mut slot = lock(&self.shared)?;
+        if slot.is_some() {
+            return Err(CredentialV2Error::Phase);
+        }
+        *slot = Some(restored);
+        Ok(())
+    }
+}
+
+const AUTHORITY_CHECKPOINT_DOMAIN: &str = "selfsame credential/v2 body authority v1";
+const MAX_AUTHORITY_CHECKPOINT_BYTES: usize = 60_000;
+
+fn encode_authority_checkpoint(bound: &BoundBodyAuthority) -> Result<Vec<u8>, CredentialV2Error> {
+    let preview_did = bound
+        .preview
+        .as_ref()
+        .map_or(Value::Null, |value| Value::Text(value.did.clone()));
+    let preview_digest = bound.preview.as_ref().map_or(Value::Null, |value| {
+        Value::Bytes(value.fingerprint_digest.to_vec())
+    });
+    let value = Value::Map(
+        vec![
+            text("domain", AUTHORITY_CHECKPOINT_DOMAIN),
+            bytes("profileDigest", *bound.profile.digest()),
+            text("kid", &bound.kid),
+            bytes("carrierCeremonyId", bound.ceremony),
+            bytes("intentDigest", bound.intent_digest),
+            bytes("offerCoreDigest", bound.offer_core_digest),
+            bytes("accountPrincipalDigest", bound.account_principal_digest),
+            bytes("accountScopeId", bound.account_scope_id),
+            text("deviceDid", &bound.device_did),
+            bytes("deviceKeyDigest", bound.device_key_digest),
+            bytes("legacyKeyDigest", bound.legacy_key_digest),
+            bytes("roomSetDigest", bound.room_set_digest),
+            bytes("migrationSnapshotDigest", bound.migration_snapshot_digest),
+            bytes("snapshotNonce", bound.snapshot_nonce),
+            ("previewIssuerDid", preview_did),
+            ("previewFingerprintDigest", preview_digest),
+        ]
+        .into_iter()
+        .map(|(name, value)| (Value::Text(name.into()), value))
+        .collect(),
+    );
+    let encoded = cbor2::to_canonical_vec(&value).map_err(|_| CredentialV2Error::Schema)?;
+    if encoded.is_empty() || encoded.len() > MAX_AUTHORITY_CHECKPOINT_BYTES {
+        return Err(CredentialV2Error::Size);
+    }
+    Ok(encoded)
+}
+
+fn decode_authority_checkpoint(
+    input: &[u8],
+    profile: &ApplicationProfile,
+) -> Result<BoundBodyAuthority, CredentialV2Error> {
+    if input.is_empty() || input.len() > MAX_AUTHORITY_CHECKPOINT_BYTES {
+        return Err(CredentialV2Error::Size);
+    }
+    let entries = body_entries(input)?;
+    exact_fields(
+        &entries,
+        &[
+            "domain",
+            "profileDigest",
+            "kid",
+            "carrierCeremonyId",
+            "intentDigest",
+            "offerCoreDigest",
+            "accountPrincipalDigest",
+            "accountScopeId",
+            "deviceDid",
+            "deviceKeyDigest",
+            "legacyKeyDigest",
+            "roomSetDigest",
+            "migrationSnapshotDigest",
+            "snapshotNonce",
+            "previewIssuerDid",
+            "previewFingerprintDigest",
+        ],
+    )?;
+    expect_text(&entries, "domain", AUTHORITY_CHECKPOINT_DOMAIN)?;
+    expect_fixed(&entries, "profileDigest", profile.digest())?;
+    let kid = text_field(&entries, "kid")?;
+    let device_did = text_field(&entries, "deviceDid")?;
+    if kid.is_empty()
+        || kid.len() > 2_048
+        || device_did.is_empty()
+        || device_did.len() > 512
+        || !device_did.starts_with("did:key:")
+    {
+        return Err(CredentialV2Error::Schema);
+    }
+    let offer_core_digest = fixed_field(&entries, "offerCoreDigest")?;
+    let intent_digest = fixed_field(&entries, "intentDigest")?;
+    if intent_digest != cbcl_pairing::credential_v2::credential_v2_intent_digest(offer_core_digest)
+    {
+        return Err(CredentialV2Error::Profile);
+    }
+
+    let preview_did = optional_text_field(&entries, "previewIssuerDid")?;
+    let preview_digest = optional_fixed_field(&entries, "previewFingerprintDigest")?;
+    let preview = match (preview_did, preview_digest) {
+        (None, None) => None,
+        (Some(did), Some(digest)) => Some(recognise_preview(&did, Some(digest))?),
+        _ => return Err(CredentialV2Error::Schema),
+    };
+
+    Ok(BoundBodyAuthority {
+        profile: profile.clone(),
+        kid: kid.into(),
+        ceremony: fixed_field(&entries, "carrierCeremonyId")?,
+        intent_digest,
+        offer_core_digest,
+        account_principal_digest: fixed_field(&entries, "accountPrincipalDigest")?,
+        account_scope_id: fixed_field(&entries, "accountScopeId")?,
+        device_did: device_did.into(),
+        device_key_digest: fixed_field(&entries, "deviceKeyDigest")?,
+        legacy_key_digest: fixed_field(&entries, "legacyKeyDigest")?,
+        room_set_digest: fixed_field(&entries, "roomSetDigest")?,
+        migration_snapshot_digest: fixed_field(&entries, "migrationSnapshotDigest")?,
+        snapshot_nonce: fixed_field(&entries, "snapshotNonce")?,
+        preview,
+        payload: None,
+    })
+}
+
+fn optional_fixed_field<const N: usize>(
+    entries: &[(Value, Value)],
+    name: &str,
+) -> Result<Option<[u8; N]>, CredentialV2Error> {
+    match field(entries, name)? {
+        Value::Null => Ok(None),
+        Value::Bytes(value) => value
+            .as_slice()
+            .try_into()
+            .map(Some)
+            .map_err(|_| CredentialV2Error::Schema),
+        _ => Err(CredentialV2Error::Schema),
+    }
+}
+
+fn optional_text_field(
+    entries: &[(Value, Value)],
+    name: &str,
+) -> Result<Option<String>, CredentialV2Error> {
+    match field(entries, name)? {
+        Value::Null => Ok(None),
+        Value::Text(value) => Ok(Some(value.clone())),
+        _ => Err(CredentialV2Error::Schema),
     }
 }
 

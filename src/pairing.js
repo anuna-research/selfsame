@@ -7,9 +7,10 @@
  */
 
 export function initPairing(d) {
-  const { $, show, invoke, fail, message, actions, busy, idle } = d;
+  const { $, show, invoke, fail, message, actions, busy, idle, refresh } = d;
   const presencePattern = /^PAIR1-(?:[0-9A-HJKMNP-TV-Z]{5}-){10}[0-9A-HJKMNP-TV-Z]{5}$/;
   let credentialV2Stage = "idle";
+  let recoveryApplication = null;
 
   // REQ-908: capability comes from the build, never from hardcoded prose.
   // Until the answer arrives the surface assumes the production shape, which
@@ -189,6 +190,42 @@ export function initPairing(d) {
     });
   }
 
+  function showRecovery(applicationId) {
+    recoveryApplication = applicationId;
+    credentialV2Stage = "recovery";
+    paintConsent({
+      title: "Finish interrupted link?",
+      authority: "Selfsame retained a sealed, non-authorising completion checkpoint after the blind relay window closed.",
+      application: applicationId,
+      action: "Recovery asks the authenticated application origin for its signed final status. It cannot derive, publish, issue, or resend the credential payload again.",
+      fields: [
+        { label: "Authenticated application", value: applicationId },
+        { label: "Recovery route", value: "Direct HTTPS final-status check" },
+      ],
+      approve: "Recover link",
+      decline: "Not now",
+    });
+  }
+
+  function showRecoveryRotation(view) {
+    credentialV2Stage = "recovery-rotation";
+    const rotation = view.authorityRotation;
+    paintConsent({
+      title: "Application authority changed",
+      authority: "The historical pairing result verified under the sealed offer profile, but the application’s currently authenticated signing authority differs.",
+      application: view.applicationId,
+      action: "Approve only if you expect this application authority rotation. Declining preserves the sealed pending link unchanged.",
+      fields: [
+        { label: "Retained key", value: rotation.retainedKid },
+        { label: "Current key", value: rotation.currentKid ?? "Retained key no longer listed" },
+        { label: "Retained profile digest", value: rotation.retainedProfileDigest },
+        { label: "Current profile digest", value: rotation.currentProfileDigest },
+      ],
+      approve: "Accept rotation",
+      decline: "Keep pending",
+    });
+  }
+
   function showResult(outcome, title, resultMessage, boundary) {
     $("[data-cbcl-result-title]").textContent = title;
     $("[data-cbcl-result-message]").textContent = resultMessage;
@@ -215,6 +252,58 @@ export function initPairing(d) {
   async function decide(approve) {
     busy(approve ? "Applying explicit approval…" : "Recording decline…");
     try {
+      if (credentialV2Stage === "recovery" || credentialV2Stage === "recovery-rotation") {
+        if (!approve) {
+          recoveryApplication = null;
+          credentialV2Stage = "idle";
+          const passcodeInput = $("#pairing-passcode");
+          if (passcodeInput) passcodeInput.value = "";
+          await refresh();
+          return;
+        }
+        const approveRotation = credentialV2Stage === "recovery-rotation";
+        const passcodeInput = $("#pairing-passcode");
+        const passcode = passcodeInput?.value ?? "";
+        const result = await invoke("cbcl_v2_recover", {
+          applicationId: recoveryApplication,
+          passcode,
+          approveRotation,
+        });
+        if (result.outcome === "authority-rotation") {
+          showRecoveryRotation(result);
+          return;
+        }
+        recoveryApplication = null;
+        credentialV2Stage = "idle";
+        if (passcodeInput) passcodeInput.value = "";
+        if (result.outcome === "installed") {
+          showResult(
+            "accepted",
+            "Application connected",
+            "The recovered signed hub status and live reciprocal account binding were verified before installation.",
+            "No key, grant, publication, or credential payload was created a second time.",
+          );
+          return;
+        }
+        if (result.outcome === "not-finalized") {
+          showResult(
+            "declined",
+            "Interrupted link closed",
+            "The application signed that this ceremony can no longer finalize, so Selfsame removed only its pending checkpoint.",
+            "No account grant was installed.",
+          );
+          return;
+        }
+        const detail = result.outcome === "in-progress"
+          ? `The application is still finalizing this link. Try again in about ${result.retryAfterSeconds} seconds.`
+          : result.outcome === "unknown"
+            ? "The application no longer retains enough evidence to answer. The sealed pending link remains until you explicitly unlink it or remove this wallet identity."
+            : result.outcome === "relay-window-open"
+              ? "The blind relay window is still open. Selfsame will use direct HTTPS recovery only after it closes."
+              : "The application’s recovery service is temporarily unavailable. The sealed pending link remains safe to retry.";
+        showResult("declined", "Recovery not complete", detail, "No pending state was removed and no capability was granted.");
+        return;
+      }
       if (credentialV2Stage === "relay") {
         await advanceRelay(approve);
         return;
@@ -342,6 +431,15 @@ export function initPairing(d) {
     const presence = $("#pairing-presence-code");
     if (presence) presence.value = "";
     credentialV2Stage = "idle";
+    recoveryApplication = null;
+  }
+
+  async function resumePending() {
+    if (credentialV2Stage !== "idle") return;
+    const applications = await invoke("cbcl_v2_pending_recoveries");
+    if (Array.isArray(applications) && applications.length > 0) {
+      showRecovery(applications[0]);
+    }
   }
 
   Object.assign(actions, {
@@ -368,5 +466,5 @@ export function initPairing(d) {
     const scanButton = $('[data-action="scan-cbcl-pairing"]');
     if (scanButton) scanButton.hidden = true;
   }
-  return { forget };
+  return { forget, resumePending };
 }

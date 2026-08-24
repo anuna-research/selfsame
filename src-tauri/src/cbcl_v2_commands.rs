@@ -10,6 +10,7 @@ use sha2::Digest as _;
 use std::net::TcpStream;
 use tauri::State;
 use tungstenite::{stream::MaybeTlsStream, Message, WebSocket};
+use zeroize::Zeroizing;
 
 use crate::{
     cbcl_transport,
@@ -94,6 +95,25 @@ pub struct CredentialV2FinalDecisionView {
 #[serde(rename_all = "camelCase")]
 pub struct CredentialV2FinishView {
     outcome: &'static str,
+}
+
+/// Restart-safe result of the direct application-origin recovery adapter.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CredentialV2RecoveryView {
+    outcome: &'static str,
+    application_id: String,
+    retry_after_seconds: Option<u8>,
+    authority_rotation: Option<CredentialV2AuthorityRotationView>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CredentialV2AuthorityRotationView {
+    retained_kid: String,
+    current_kid: Option<String>,
+    retained_profile_digest: String,
+    current_profile_digest: String,
 }
 
 /// Recognise carrier, PAIR1, live profile, declared relay, and exact-pair state.
@@ -647,6 +667,279 @@ pub async fn cbcl_v2_finish(
     Ok(CredentialV2FinishView {
         outcome: "installed",
     })
+}
+
+/// Discover crash-safe claimant slots without exposing checkpoint or recovery
+/// material to JavaScript.
+#[tauri::command]
+pub async fn cbcl_v2_pending_recoveries() -> Result<Vec<String>> {
+    crate::cbcl_v2_completion::pending_application_ids()
+}
+
+/// Recover the immutable terminal result after the blind relay window closes.
+///
+/// The raw recovery token exists only in cbcl-pairing and the native bounded
+/// POST body. JavaScript receives only this closed result projection.
+#[tauri::command]
+pub async fn cbcl_v2_recover(
+    application_id: String,
+    passcode: String,
+    approve_rotation: bool,
+) -> Result<CredentialV2RecoveryView> {
+    if passcode.is_empty() {
+        return Err(UiError::from("PresenceRequired"));
+    }
+    recover_claimant_completion(&application_id, &passcode, approve_rotation).await
+}
+
+async fn recover_claimant_completion(
+    application_id: &str,
+    passcode: &str,
+    approve_rotation: bool,
+) -> Result<CredentialV2RecoveryView> {
+    let durable = crate::cbcl_v2_completion::load_pending(application_id)?;
+    let application = selfsame_app_identity::profile::ApplicationId::parse(application_id)
+        .map_err(|_| UiError::from("PairingCheckpointRefused"))?;
+    let carrier = durable.carrier()?;
+    let now = crate::commands::now();
+    if now < carrier.relay_expires_at() {
+        return Ok(recovery_view(
+            application_id,
+            "relay-window-open",
+            None,
+            None,
+        ));
+    }
+
+    let historical_profile_octets = durable.offer_profile_octets()?;
+    let historical_profile =
+        selfsame_app_identity::profile::ApplicationProfile::recognise(&historical_profile_octets)
+            .map_err(|_| UiError::from("PairingCheckpointRefused"))?;
+    let offer_object = durable.offer_object()?;
+    let offer = selfsame_pairing::credential_v2::recognise_signed_offer(
+        &historical_profile,
+        offer_object.body(),
+    )
+    .map_err(|_| UiError::from("PairingCheckpointRefused"))?;
+    let payload = durable.payload_facts()?;
+    let checkpoint = durable.endpoint_checkpoint_octets()?;
+    durable.require_root_generation(crate::cbcl_v2_completion::root_generation(
+        &crate::custody::Custody::root_public_key()?,
+    ))?;
+
+    let (_body_authority, body_verifier) =
+        selfsame_pairing::credential_v2::credential_v2_body_authority_for_restore(
+            historical_profile.clone(),
+        );
+    let mut claimant = crate::custody::Custody::use_hierarchy_root(passcode, |root| {
+        let wrapping_key = crate::cbcl_v2_completion::checkpoint_wrapping_key(
+            root,
+            application_id,
+            carrier.carrier_ceremony_id(),
+        )?;
+        cbcl_pairing::credential_v2::CredentialV2ClaimantSession::restore(
+            checkpoint.as_slice(),
+            &wrapping_key,
+            carrier.clone(),
+            durable.checkpoint_generation(),
+            now,
+            Box::new(body_verifier),
+        )
+        .map_err(|_| UiError::from("PairingCheckpointRefused"))
+    })??;
+    let receipt_recovery_commitment = claimant
+        .receipt_recovery_commitment()
+        .map_err(|_| UiError::from("PairingCheckpointRefused"))?;
+    let request = claimant
+        .with_receipt_recovery_token(|token| {
+            selfsame_pairing::credential_v2::encode_receipt_recovery_request(
+                application_id,
+                *carrier.carrier_ceremony_id(),
+                token,
+            )
+        })
+        .map_err(|_| UiError::from("PairingCheckpointRefused"))?
+        .map_err(|_| UiError::from("PairingCheckpointRefused"))?;
+    let request = Zeroizing::new(request);
+    let current = selfsame_app_identity_net::profile::fetch(
+        &application,
+        i64::try_from(now).map_err(|_| UiError::from("PairingProfileUnavailable"))?,
+    )
+    .await
+    .map_err(|_| UiError::from("PairingProfileUnavailable"))?;
+    let http = match selfsame_app_identity_net::pairing_status::post(&application, &request).await {
+        Ok(value) => value,
+        Err(selfsame_app_identity_net::NetError::Timeout)
+        | Err(selfsame_app_identity_net::NetError::Transport(_)) => {
+            return Ok(recovery_view(application_id, "unavailable", None, None));
+        }
+        Err(_) => return Err(UiError::from("PairingRecoveryRefused")),
+    };
+    use selfsame_app_identity_net::pairing_status::PairingStatusHttpStatus as HttpStatus;
+    if http.status == HttpStatus::Unavailable {
+        return Ok(recovery_view(application_id, "unavailable", None, None));
+    }
+    let response = selfsame_pairing::credential_v2::decode_receipt_recovery_response(&http.body)
+        .map_err(|_| UiError::from("PairingRecoveryRefused"))?;
+    use selfsame_pairing::credential_v2::CredentialV2RecoveryResponse as Recovery;
+    match (http.status, response) {
+        (
+            HttpStatus::Terminal,
+            Recovery::Accepted {
+                final_status_jws,
+                final_status_digest,
+            },
+        ) => {
+            let receipt = selfsame_pairing::credential_v2::recovered_receipt_object(
+                *offer_object.intent_digest(),
+                *carrier.carrier_ceremony_id(),
+                payload.payload_content_hash,
+                selfsame_pairing::credential_v2::CredentialV2ReceiptInput {
+                    final_status_jws,
+                    final_status_digest,
+                },
+            )
+            .map_err(|_| UiError::from("PairingReceiptRefused"))?;
+            let recovered = claimant
+                .authenticate_recovered_receipt_object(receipt)
+                .map_err(|_| UiError::from("PairingReceiptRefused"))?;
+            let installed =
+                crate::cbcl_v2_completion::InstalledCredentialV2Link::from_authenticated_receipt(
+                    &durable,
+                    &historical_profile_octets,
+                    recovered.object(),
+                    receipt_recovery_commitment,
+                )?;
+            let rotation = accepted_rotation(&historical_profile, &current.profile, &offer.kid);
+            if rotation.is_some() && !approve_rotation {
+                return Ok(recovery_view(
+                    application_id,
+                    "authority-rotation",
+                    None,
+                    rotation,
+                ));
+            }
+            let account = installed.account()?;
+            let issuer_did = installed.issuer_did().to_owned();
+            let jrd = verify_live_installation(current.profile, account, issuer_did).await?;
+            crate::cbcl_v2_completion::install(&durable, &installed, &jrd)?;
+            claimant
+                .commit_recovered_receipt(recovered)
+                .map_err(|_| UiError::from("PairingReceiptRefused"))?;
+            Ok(recovery_view(application_id, "installed", None, None))
+        }
+        (
+            HttpStatus::Terminal,
+            Recovery::NotFinalized {
+                recovery_status_jws,
+                recovery_status_digest,
+            },
+        ) => {
+            let negative =
+                selfsame_pairing::credential_v2::recognise_recovery_not_finalized_status(
+                    &current.profile,
+                    &recovery_status_jws,
+                    recovery_status_digest,
+                    application_id,
+                    *carrier.carrier_ceremony_id(),
+                    receipt_recovery_commitment,
+                )
+                .map_err(|_| UiError::from("PairingRecoveryRefused"))?;
+            let rotation = negative_rotation(
+                &historical_profile,
+                &current.profile,
+                &offer.kid,
+                &negative.kid,
+            );
+            if rotation.is_some() && !approve_rotation {
+                return Ok(recovery_view(
+                    application_id,
+                    "authority-rotation",
+                    None,
+                    rotation,
+                ));
+            }
+            crate::cbcl_v2_completion::remove_pending(&durable)?;
+            Ok(recovery_view(application_id, "not-finalized", None, None))
+        }
+        (
+            HttpStatus::InProgress,
+            Recovery::InProgress {
+                retry_after_seconds,
+            },
+        ) => Ok(recovery_view(
+            application_id,
+            "in-progress",
+            Some(retry_after_seconds),
+            None,
+        )),
+        (HttpStatus::Unknown, Recovery::Unknown) => {
+            Ok(recovery_view(application_id, "unknown", None, None))
+        }
+        _ => Err(UiError::from("PairingRecoveryRefused")),
+    }
+}
+
+fn recovery_view(
+    application_id: &str,
+    outcome: &'static str,
+    retry_after_seconds: Option<u8>,
+    authority_rotation: Option<CredentialV2AuthorityRotationView>,
+) -> CredentialV2RecoveryView {
+    CredentialV2RecoveryView {
+        outcome,
+        application_id: application_id.into(),
+        retry_after_seconds,
+        authority_rotation,
+    }
+}
+
+fn accepted_rotation(
+    historical: &selfsame_app_identity::profile::ApplicationProfile,
+    current: &selfsame_app_identity::profile::ApplicationProfile,
+    retained_kid: &str,
+) -> Option<CredentialV2AuthorityRotationView> {
+    let retained = historical
+        .enrollment_keys
+        .iter()
+        .find(|candidate| candidate.kid == retained_kid)?;
+    let unchanged = current
+        .enrollment_keys
+        .iter()
+        .any(|candidate| candidate.kid == retained_kid && candidate.jwk == retained.jwk);
+    (!unchanged).then(|| rotation_view(historical, current, retained_kid, None))
+}
+
+fn negative_rotation(
+    historical: &selfsame_app_identity::profile::ApplicationProfile,
+    current: &selfsame_app_identity::profile::ApplicationProfile,
+    retained_kid: &str,
+    current_kid: &str,
+) -> Option<CredentialV2AuthorityRotationView> {
+    let retained = historical
+        .enrollment_keys
+        .iter()
+        .find(|candidate| candidate.kid == retained_kid)?;
+    let selected = current
+        .enrollment_keys
+        .iter()
+        .find(|candidate| candidate.kid == current_kid)?;
+    (retained_kid != current_kid || retained.jwk != selected.jwk)
+        .then(|| rotation_view(historical, current, retained_kid, Some(current_kid.into())))
+}
+
+fn rotation_view(
+    historical: &selfsame_app_identity::profile::ApplicationProfile,
+    current: &selfsame_app_identity::profile::ApplicationProfile,
+    retained_kid: &str,
+    current_kid: Option<String>,
+) -> CredentialV2AuthorityRotationView {
+    CredentialV2AuthorityRotationView {
+        retained_kid: retained_kid.into(),
+        current_kid,
+        retained_profile_digest: selfsame_app_identity::codec::b64url(historical.digest()),
+        current_profile_digest: selfsame_app_identity::codec::b64url(current.digest()),
+    }
 }
 
 /// Cancel a pre-socket decision or close one live credential/v2 relay session.

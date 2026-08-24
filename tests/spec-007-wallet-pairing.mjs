@@ -105,6 +105,64 @@ test("TEST-814 CBCL wallet states are keyboard complete and WCAG-clean", async (
   }
 });
 
+test("TEST-1161 restart recovery preserves pending through rotation consent", async (t) => {
+  const server = createServer((request, response) => {
+    const path = request.url === "/" ? "/index.html" : request.url.split("?")[0];
+    try {
+      const body = readFileSync(join(ROOT, path));
+      response.writeHead(200, { "content-type": MIME[extname(path)] ?? "application/octet-stream" });
+      response.end(body);
+    } catch {
+      response.writeHead(404).end();
+    }
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => server.close());
+  const browser = await puppeteer.launch({ headless: true });
+  t.after(() => browser.close());
+  const page = await browser.newPage();
+  await page.evaluateOnNewDocument(recoveryBridge);
+  await page.goto(`http://127.0.0.1:${server.address().port}`, { waitUntil: "networkidle0" });
+
+  await visible(page, "pairing-consent");
+  assert.match(
+    await page.$eval("[data-cbcl-consent-title]", (node) => node.textContent),
+    /Finish interrupted link/,
+  );
+  await page.type("#pairing-passcode", "correct horse battery staple");
+  await page.click('[data-action="approve-cbcl-pairing"]');
+  await page.waitForFunction(() => /authority changed/i.test(
+    document.querySelector("[data-cbcl-consent-title]").textContent,
+  ));
+  assert.match(
+    await page.$eval("[data-cbcl-intent-fields]", (node) => node.textContent),
+    /old-profile-digest.*new-profile-digest/s,
+  );
+  await page.click('[data-action="decline-cbcl-pairing"]');
+  await page.waitForFunction(() => document.querySelector('[data-screen="pairing-consent"]').hidden);
+  assert.equal(await page.evaluate(() => globalThis.__recoveryCalls.length), 1);
+  assert.equal(await page.evaluate(() => globalThis.__recoveryCalls[0].approveRotation), false);
+
+  await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+  await visible(page, "pairing-consent");
+  await page.type("#pairing-passcode", "correct horse battery staple");
+  await page.click('[data-action="approve-cbcl-pairing"]');
+  await page.waitForFunction(() => /authority changed/i.test(
+    document.querySelector("[data-cbcl-consent-title]").textContent,
+  ));
+  await page.click('[data-action="approve-cbcl-pairing"]');
+  await visible(page, "pairing-result");
+  assert.match(
+    await page.$eval("[data-cbcl-result-title]", (node) => node.textContent),
+    /Application connected/,
+  );
+  assert.equal(await page.evaluate(() => globalThis.__recoveryCalls.at(-1).approveRotation), true);
+  assert.equal(
+    await page.evaluate(() => JSON.stringify(globalThis.__recoveryCalls).includes("recoveryToken")),
+    false,
+  );
+});
+
 function bridge() {
   const state = {
     has_identity: true,
@@ -157,6 +215,45 @@ function bridge() {
         } : { outcome: "declined", finalReview: null };
         if (command === "cbcl_v2_final_decide") return { outcome: args.approve ? "payload-sent" : "declined" };
         if (command === "cbcl_v2_finish") return { outcome: "installed" };
+        return null;
+      },
+    },
+  };
+}
+
+function recoveryBridge() {
+  const applicationId = "https://photos.example/selfsame/application";
+  const state = {
+    has_identity: true,
+    backup_confirmed: true,
+    did: "did:crdt:fixture",
+    fingerprint: { hex: "2E 41 D0 88 6B 15", label: "garnet-plover-31", lifehash: "A".repeat(4096) },
+    pending_publications: 0,
+    devices: [],
+    applications: [],
+  };
+  globalThis.__recoveryCalls = [];
+  globalThis.__TAURI__ = {
+    core: {
+      invoke: async (command, args) => {
+        if (command === "get_state") return state;
+        if (command === "flush_publications") return 0;
+        if (command === "cbcl_v2_pending_recoveries") return [applicationId];
+        if (command === "cbcl_v2_recover") {
+          globalThis.__recoveryCalls.push(args);
+          if (!args.approveRotation) return {
+            outcome: "authority-rotation",
+            applicationId,
+            retryAfterSeconds: null,
+            authorityRotation: {
+              retainedKid: `${applicationId}#old`,
+              currentKid: `${applicationId}#new`,
+              retainedProfileDigest: "old-profile-digest",
+              currentProfileDigest: "new-profile-digest",
+            },
+          };
+          return { outcome: "installed", applicationId, retryAfterSeconds: null, authorityRotation: null };
+        }
         return null;
       },
     },

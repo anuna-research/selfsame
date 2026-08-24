@@ -1,14 +1,26 @@
 //! Selfsame's closed credential/v2 signed-offer authority.
 
 mod bodies;
+mod recovery;
 
 pub use bodies::{
-    credential_v2_body_authority, CredentialV2BodyAuthority, CredentialV2FinalDecision,
-    CredentialV2IntentDecision, CredentialV2PayloadInput, CredentialV2RefusalReason,
-    CredentialV2ReceiptInput, CredentialV2RetainedPayload, CredentialV2RetainedPreview,
-    RecognisedCredentialV2Receipt, SelfsameCredentialV2BodyVerifier, recognise_receipt,
+    credential_v2_body_authority, credential_v2_body_authority_for_restore, recognise_receipt,
+    recovered_receipt_object, CredentialV2BodyAuthority, CredentialV2FinalDecision,
+    CredentialV2IntentDecision, CredentialV2PayloadInput, CredentialV2ReceiptInput,
+    CredentialV2RefusalReason, CredentialV2RetainedPayload, CredentialV2RetainedPreview,
+    RecognisedCredentialV2Receipt, SelfsameCredentialV2BodyVerifier,
+};
+pub use recovery::{
+    build_recovery_not_finalized, credential_v2_receipt_recovery_commitment,
+    decode_receipt_recovery_response, encode_receipt_recovery_request,
+    encode_receipt_recovery_response, recognise_receipt_recovery_request,
+    recognise_recovery_not_finalized, recognise_recovery_not_finalized_status,
+    BuiltCredentialV2RecoveryNegative, CredentialV2RecoveryNegativeInput,
+    CredentialV2RecoveryRequest, CredentialV2RecoveryResponse,
+    RecognisedCredentialV2RecoveryNegative,
 };
 
+use base64ct::{Base64UrlUnpadded, Encoding};
 use cbcl_pairing::credential_v2::{
     credential_v2_intent_digest, CredentialV2AccountProvenance, CredentialV2Advance,
     CredentialV2Carrier, CredentialV2ClaimantOfferVerifier, CredentialV2DeviceBinding,
@@ -16,7 +28,6 @@ use cbcl_pairing::credential_v2::{
     CredentialV2IntentInput, CredentialV2IntentVerifier, CredentialV2Object,
     CredentialV2OfferParser, CredentialV2TofuState, CredentialV2Transition,
 };
-use base64ct::{Base64UrlUnpadded, Encoding};
 use ciborium::Value;
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use selfsame_app_identity::{
@@ -36,10 +47,8 @@ const ACCOUNT_PRINCIPAL_DOMAIN: &str = "selfsame-application-account-principal/v
 const LEGACY_KEY_DOMAIN: &[u8] = b"cbcl-chat credential/v2 legacy key v1\0";
 const ROOM_SET_DOMAIN: &[u8] = b"cbcl-chat credential/v2 room set v1\0";
 const SNAPSHOT_DOMAIN: &[u8] = b"cbcl-chat credential/v2 migration snapshot v1\0";
-const MIGRATION_CONFIRMATION_DOMAIN: &[u8] =
-    b"cbcl-chat credential/v2 migration confirmation v2\0";
-const BROWSER_STAGING_DOMAIN: &str =
-    "cbcl-chat credential/v2 browser staging receipt v1";
+const MIGRATION_CONFIRMATION_DOMAIN: &[u8] = b"cbcl-chat credential/v2 migration confirmation v2\0";
+const BROWSER_STAGING_DOMAIN: &str = "cbcl-chat credential/v2 browser staging receipt v1";
 const BROWSER_STAGING_SIGNATURE_DOMAIN: &[u8] =
     b"cbcl-chat credential/v2 browser staging receipt signature v1\0";
 const MAX_OFFER_CORE_BYTES: usize = 56_000;
@@ -705,8 +714,8 @@ pub fn recognise_browser_staging_receipt(
 fn browser_staging_members(
     input: &CredentialV2BrowserStagingInput,
 ) -> Result<Vec<Value>, CredentialV2OfferError> {
-    let application_id = ApplicationId::parse(&input.application_id)
-        .map_err(|_| CredentialV2OfferError::Refused)?;
+    let application_id =
+        ApplicationId::parse(&input.application_id).map_err(|_| CredentialV2OfferError::Refused)?;
     if application_id.as_str() != input.application_id
         || input.application_id.len() > 2_048
         || input.device_did.len() != 56
@@ -786,9 +795,12 @@ pub fn recognise_final_status(
         return Err(CredentialV2OfferError::Refused);
     }
     let mut segments = jws.split('.');
-    let (Some(encoded_header), Some(encoded_payload), Some(encoded_signature), None) =
-        (segments.next(), segments.next(), segments.next(), segments.next())
-    else {
+    let (Some(encoded_header), Some(encoded_payload), Some(encoded_signature), None) = (
+        segments.next(),
+        segments.next(),
+        segments.next(),
+        segments.next(),
+    ) else {
         return Err(CredentialV2OfferError::Refused);
     };
     if encoded_header.is_empty() || encoded_payload.is_empty() || encoded_signature.is_empty() {
@@ -852,9 +864,12 @@ where
         return Err(CredentialV2OfferError::Refused);
     }
     let mut segments = jws.split('.');
-    let (Some(_), Some(encoded_payload), Some(_), None) =
-        (segments.next(), segments.next(), segments.next(), segments.next())
-    else {
+    let (Some(_), Some(encoded_payload), Some(_), None) = (
+        segments.next(),
+        segments.next(),
+        segments.next(),
+        segments.next(),
+    ) else {
         return Err(CredentialV2OfferError::Refused);
     };
     let core = decode_canonical_b64(encoded_payload)?;
@@ -876,8 +891,8 @@ fn final_status_core(
     profile: &ApplicationProfile,
     input: &CredentialV2FinalStatusInput,
 ) -> Result<Vec<u8>, CredentialV2OfferError> {
-    let application_id = ApplicationId::parse(&input.application_id)
-        .map_err(|_| CredentialV2OfferError::Refused)?;
+    let application_id =
+        ApplicationId::parse(&input.application_id).map_err(|_| CredentialV2OfferError::Refused)?;
     if application_id.as_str() != input.application_id
         || profile.application_id.as_str() != input.application_id
         || input.application_id.len() > 2_048
@@ -924,8 +939,7 @@ fn final_status_core(
         (
             "finalizedAt",
             Json::int(
-                i64::try_from(input.finalized_at)
-                    .map_err(|_| CredentialV2OfferError::Refused)?,
+                i64::try_from(input.finalized_at).map_err(|_| CredentialV2OfferError::Refused)?,
             ),
         ),
     ]));
@@ -936,21 +950,22 @@ fn final_status_core(
 }
 
 fn decode_canonical_b64(value: &str) -> Result<Vec<u8>, CredentialV2OfferError> {
-    let decoded = Base64UrlUnpadded::decode_vec(value)
-        .map_err(|_| CredentialV2OfferError::Refused)?;
+    let decoded =
+        Base64UrlUnpadded::decode_vec(value).map_err(|_| CredentialV2OfferError::Refused)?;
     if codec::b64url(&decoded) != value {
         return Err(CredentialV2OfferError::Refused);
     }
     Ok(decoded)
 }
 
-pub(super) fn compact_jws_payload_digest(
-    jws: &str,
-) -> Result<[u8; 32], CredentialV2OfferError> {
+pub(super) fn compact_jws_payload_digest(jws: &str) -> Result<[u8; 32], CredentialV2OfferError> {
     let mut segments = jws.split('.');
-    let (Some(_), Some(encoded_payload), Some(_), None) =
-        (segments.next(), segments.next(), segments.next(), segments.next())
-    else {
+    let (Some(_), Some(encoded_payload), Some(_), None) = (
+        segments.next(),
+        segments.next(),
+        segments.next(),
+        segments.next(),
+    ) else {
         return Err(CredentialV2OfferError::Refused);
     };
     let payload = decode_canonical_b64(encoded_payload)?;

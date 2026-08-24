@@ -30,7 +30,11 @@ use zeroize::Zeroizing;
 use crate::{commands::UiError, store};
 
 const SLOT_PREFIX: &str = "credential-v2-link-v1-";
+const LINK_INDEX_ENTRY: &str = "credential-v2-link-index-v1";
 const SLOT_VERSION: u8 = 1;
+const LINK_INDEX_VERSION: u8 = 1;
+const MAX_LINKS: usize = 256;
+const MAX_LINK_INDEX_OCTETS: usize = 530_000;
 const CHECKPOINT_LABEL: &[u8] = b"selfsame credential/v2 claimant checkpoint wrapping v1";
 const ROOT_GENERATION_LABEL: &[u8] = b"selfsame credential/v2 root generation v1\0";
 const MAX_SLOT_OCTETS: usize = 400_000;
@@ -305,6 +309,16 @@ enum CredentialV2LinkSlot {
     Installed(InstalledCredentialV2Link),
 }
 
+/// Bounded discovery index for secure stores that deliberately expose no
+/// prefix scan. It contains application identifiers only, never grants,
+/// checkpoint bytes, recovery tokens, or other credential material.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CredentialV2LinkIndex {
+    version: u8,
+    applications: Vec<String>,
+}
+
 impl PendingCredentialV2Completion {
     /// Construct a closed pending record from typed ceremony objects.
     pub fn new(input: PendingCredentialV2Input<'_>) -> Result<Self> {
@@ -389,6 +403,30 @@ impl PendingCredentialV2Completion {
     pub fn carrier(&self) -> Result<CredentialV2Carrier> {
         self.validate()?;
         decode_carrier(&decode_bounded(&self.carrier, 4_096)?).map_err(checkpoint_error)
+    }
+
+    /// Decode the exact authenticated Offer object retained by the slot.
+    pub fn offer_object(&self) -> Result<CredentialV2Object> {
+        self.validate()?;
+        decoded_object(&self.offer, CredentialV2Kind::Offer)
+    }
+
+    /// Decode the opaque sealed claimant checkpoint for native restoration.
+    pub fn endpoint_checkpoint_octets(&self) -> Result<Zeroizing<Vec<u8>>> {
+        self.validate()?;
+        Ok(Zeroizing::new(decode_bounded(
+            &self.endpoint_checkpoint,
+            80_000,
+        )?))
+    }
+
+    /// Verify that this pending slot belongs to the currently unlocked root.
+    pub fn require_root_generation(&self, expected: [u8; 32]) -> Result<()> {
+        self.validate()?;
+        if codec::decode_b64url_32(&self.root_generation).ok() != Some(expected) {
+            return Err(UiError::from("PairingCheckpointRefused"));
+        }
+        Ok(())
     }
 
     /// Return the exact payload-stage grant and closure facts.
@@ -915,6 +953,7 @@ pub fn persist_pending(pending: &PendingCredentialV2Completion) -> Result<()> {
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     pending.validate()?;
+    ensure_indexed_locked(&pending.application_id)?;
     let entry = slot_name(&pending.application_id)?;
     let slot = CredentialV2LinkSlot::Pending(pending.clone());
     let encoded = encode_slot(&slot)?;
@@ -929,6 +968,93 @@ pub fn persist_pending(pending: &PendingCredentialV2Completion) -> Result<()> {
             }
         },
     }
+}
+
+/// List every fully recognised post-payload recovery candidate.
+///
+/// Stale index rows left by a crash between the index and slot writes are
+/// pruned. Installed rows remain indexed so root-lifecycle purge can discover
+/// and remove every link even though the platform store has no list API.
+pub fn pending_application_ids() -> Result<Vec<String>> {
+    let _guard = SLOT_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut index = load_index_locked()?;
+    let mut retained = Vec::with_capacity(index.applications.len());
+    let mut pending = Vec::new();
+    let now = crate::commands::now();
+    for application_id in &index.applications {
+        let entry = slot_name(application_id)?;
+        match store::get(&entry).map_err(|_| UiError::from("PairingCheckpointUnavailable"))? {
+            None => {}
+            Some(encoded) => match recognise_slot(&encoded)? {
+                CredentialV2LinkSlot::Pending(value) if value.application_id == *application_id => {
+                    retained.push(application_id.clone());
+                    if matches!(
+                        value.stage,
+                        PendingCredentialV2Stage::PayloadPrepared { .. }
+                    ) && now >= value.carrier()?.relay_expires_at()
+                    {
+                        pending.push(application_id.clone());
+                    }
+                }
+                CredentialV2LinkSlot::Installed(value)
+                    if value.application_id == *application_id =>
+                {
+                    retained.push(application_id.clone());
+                }
+                CredentialV2LinkSlot::Pending(_) | CredentialV2LinkSlot::Installed(_) => {
+                    return Err(UiError::from("PairingCheckpointRefused"));
+                }
+            },
+        }
+    }
+    if retained != index.applications {
+        index.applications = retained;
+        persist_index_locked(&index)?;
+    }
+    Ok(pending)
+}
+
+/// Remove one exact verified terminal-negative pending value.
+///
+/// A changed, installed, absent, or cross-application slot refuses. Deleting
+/// the slot before its public index row means a storage failure can leave only
+/// a harmless stale row, never a discoverability-losing live credential.
+pub fn remove_pending(expected: &PendingCredentialV2Completion) -> Result<()> {
+    let _guard = SLOT_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    expected.validate()?;
+    let entry = slot_name(&expected.application_id)?;
+    let encoded = store::get(&entry)
+        .map_err(|_| UiError::from("PairingCheckpointUnavailable"))?
+        .ok_or_else(|| UiError::from("PairingCheckpointRefused"))?;
+    match recognise_slot(&encoded)? {
+        CredentialV2LinkSlot::Pending(current) if current == *expected => {}
+        CredentialV2LinkSlot::Pending(_) | CredentialV2LinkSlot::Installed(_) => {
+            return Err(UiError::from("PairingCheckpointRefused"));
+        }
+    }
+    store::delete(&entry).map_err(|_| UiError::from("PairingCheckpointUnavailable"))?;
+    let mut index = load_index_locked()?;
+    index
+        .applications
+        .retain(|application_id| application_id != &expected.application_id);
+    persist_index_locked(&index)
+}
+
+/// Remove every credential/v2 pending or installed slot during root purge.
+pub fn purge_all_links() -> Result<()> {
+    let _guard = SLOT_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let index = load_index_locked()?;
+    for application_id in &index.applications {
+        store::delete(&slot_name(application_id)?)
+            .map_err(|_| UiError::from("PairingCheckpointUnavailable"))?;
+    }
+    store::delete(LINK_INDEX_ENTRY).map_err(|_| UiError::from("PairingCheckpointUnavailable"))
 }
 
 /// Replace one exact pending value with its next crash-safe phase. A stale,
@@ -1053,6 +1179,90 @@ fn recognise_slot(encoded: &str) -> Result<CredentialV2LinkSlot> {
         CredentialV2LinkSlot::Installed(value) => value.validate()?,
     }
     Ok(slot)
+}
+
+fn empty_index() -> CredentialV2LinkIndex {
+    CredentialV2LinkIndex {
+        version: LINK_INDEX_VERSION,
+        applications: Vec::new(),
+    }
+}
+
+fn load_index_locked() -> Result<CredentialV2LinkIndex> {
+    let Some(encoded) =
+        store::get(LINK_INDEX_ENTRY).map_err(|_| UiError::from("PairingCheckpointUnavailable"))?
+    else {
+        return Ok(empty_index());
+    };
+    recognise_index(&encoded)
+}
+
+fn ensure_indexed_locked(application_id: &str) -> Result<()> {
+    ApplicationId::parse(application_id).map_err(|_| UiError::from("PairingCheckpointRefused"))?;
+    let mut index = load_index_locked()?;
+    match index
+        .applications
+        .binary_search_by(|candidate| candidate.as_str().cmp(application_id))
+    {
+        Ok(_) => Ok(()),
+        Err(position) => {
+            if index.applications.len() >= MAX_LINKS {
+                return Err(UiError::from("PairingCheckpointUnavailable"));
+            }
+            index.applications.insert(position, application_id.into());
+            persist_index_locked(&index)
+        }
+    }
+}
+
+fn persist_index_locked(index: &CredentialV2LinkIndex) -> Result<()> {
+    let encoded = encode_index(index)?;
+    if index.applications.is_empty() {
+        store::delete(LINK_INDEX_ENTRY).map_err(|_| UiError::from("PairingCheckpointUnavailable"))
+    } else {
+        store::set(LINK_INDEX_ENTRY, &encoded)
+            .map_err(|_| UiError::from("PairingCheckpointUnavailable"))
+    }
+}
+
+fn encode_index(index: &CredentialV2LinkIndex) -> Result<String> {
+    validate_index(index)?;
+    let encoded =
+        serde_json::to_string(index).map_err(|_| UiError::from("PairingCheckpointRefused"))?;
+    if encoded.is_empty() || encoded.len() > MAX_LINK_INDEX_OCTETS {
+        return Err(UiError::from("PairingCheckpointRefused"));
+    }
+    Ok(encoded)
+}
+
+fn recognise_index(encoded: &str) -> Result<CredentialV2LinkIndex> {
+    if encoded.is_empty() || encoded.len() > MAX_LINK_INDEX_OCTETS {
+        return Err(UiError::from("PairingCheckpointRefused"));
+    }
+    let index: CredentialV2LinkIndex =
+        serde_json::from_str(encoded).map_err(|_| UiError::from("PairingCheckpointRefused"))?;
+    if encode_index(&index)? != encoded {
+        return Err(UiError::from("PairingCheckpointRefused"));
+    }
+    Ok(index)
+}
+
+fn validate_index(index: &CredentialV2LinkIndex) -> Result<()> {
+    if index.version != LINK_INDEX_VERSION || index.applications.len() > MAX_LINKS {
+        return Err(UiError::from("PairingCheckpointRefused"));
+    }
+    let mut previous: Option<&str> = None;
+    for application_id in &index.applications {
+        let parsed = ApplicationId::parse(application_id)
+            .map_err(|_| UiError::from("PairingCheckpointRefused"))?;
+        if parsed.as_str() != application_id
+            || previous.is_some_and(|candidate| candidate >= application_id.as_str())
+        {
+            return Err(UiError::from("PairingCheckpointRefused"));
+        }
+        previous = Some(application_id);
+    }
+    Ok(())
 }
 
 fn slot_name(application_id: &str) -> Result<String> {
@@ -1182,6 +1392,37 @@ mod tests {
         assert_ne!(first, second);
         assert!(first.starts_with(SLOT_PREFIX));
         assert!(!first.contains("chat.anuna.io"));
+    }
+
+    #[test]
+    fn test_1161_link_index_is_canonical_bounded_and_secret_free() {
+        let first = "https://chat.anuna.io/selfsame/v2";
+        let second = "https://photos.example/selfsame/v2";
+        let index = CredentialV2LinkIndex {
+            version: LINK_INDEX_VERSION,
+            applications: vec![first.into(), second.into()],
+        };
+        let encoded = encode_index(&index).unwrap();
+        assert_eq!(recognise_index(&encoded).unwrap(), index);
+        assert!(!encoded.contains("token"));
+        assert!(!encoded.contains("checkpoint"));
+
+        let mut reversed = index.clone();
+        reversed.applications.reverse();
+        assert!(encode_index(&reversed).is_err());
+        let duplicate = CredentialV2LinkIndex {
+            version: LINK_INDEX_VERSION,
+            applications: vec![first.into(), first.into()],
+        };
+        assert!(encode_index(&duplicate).is_err());
+        let oversized = CredentialV2LinkIndex {
+            version: LINK_INDEX_VERSION,
+            applications: (0..=MAX_LINKS)
+                .map(|number| format!("https://{number:03}.example/selfsame/v2"))
+                .collect(),
+        };
+        assert!(encode_index(&oversized).is_err());
+        assert!(recognise_index(&format!(" {encoded}")).is_err());
     }
 
     #[test]

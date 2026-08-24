@@ -12,14 +12,19 @@ use cbcl_pairing::wire::Side;
 use ed25519_dalek::SigningKey;
 use selfsame_app_identity::{json, json::Json, profile::ApplicationProfile};
 use selfsame_pairing::credential_v2::{
-    build_authority_status_response, build_final_status, credential_v2_body_authority,
-    device_possession_proof_input, finalize_verified_offer, prepare_offer_core,
-    migration_confirmation_digest, recognise_authority_status_response, recognise_final_status,
+    build_authority_status_response, build_final_status, build_recovery_not_finalized,
+    credential_v2_body_authority, credential_v2_body_authority_for_restore,
+    credential_v2_receipt_recovery_commitment, decode_receipt_recovery_response,
+    device_possession_proof_input, encode_receipt_recovery_request,
+    encode_receipt_recovery_response, finalize_verified_offer, migration_confirmation_digest,
+    prepare_offer_core, recognise_authority_status_response, recognise_final_status,
     recognise_final_status_with_embedded_time, recognise_prepared_offer, recognise_receipt,
-    recognise_signed_offer,
+    recognise_receipt_recovery_request, recognise_recovery_not_finalized,
+    recognise_recovery_not_finalized_status, recognise_signed_offer, recovered_receipt_object,
     verify_prepared_offer_device_proof, CredentialV2AuthorityStatus, CredentialV2FinalDecision,
     CredentialV2FinalStatusInput, CredentialV2IntentDecision, CredentialV2OfferBuildInput,
-    CredentialV2PayloadInput, CredentialV2ReceiptInput, CredentialV2WalletOfferVerifier,
+    CredentialV2PayloadInput, CredentialV2ReceiptInput, CredentialV2RecoveryNegativeInput,
+    CredentialV2RecoveryResponse, CredentialV2WalletOfferVerifier,
 };
 use sha2::{Digest, Sha256};
 
@@ -294,6 +299,75 @@ fn offer_is_one_canonical_signed_authority_for_hub_browser_and_wallet() {
     )
     .is_err());
 
+    let (checkpoint_authority, checkpoint_verifier) = credential_v2_body_authority();
+    checkpoint_authority
+        .bind_offer(profile.clone(), &recognised)
+        .unwrap();
+    let authority_checkpoint = checkpoint_verifier.checkpoint_state().unwrap();
+    assert!(!authority_checkpoint.is_empty());
+    let (restored_authority, mut restored_verifier) =
+        credential_v2_body_authority_for_restore(profile.clone());
+    restored_verifier
+        .restore_checkpoint_state(&authority_checkpoint)
+        .unwrap();
+    assert!(restored_authority
+        .intent_decision(&object, CredentialV2IntentDecision::Approve)
+        .is_ok());
+    let mut changed_checkpoint = authority_checkpoint;
+    *changed_checkpoint.last_mut().unwrap() ^= 1;
+    let (_, mut refused_verifier) = credential_v2_body_authority_for_restore(profile.clone());
+    assert!(refused_verifier
+        .restore_checkpoint_state(&changed_checkpoint)
+        .is_err());
+
+    let checkpoint_approve = checkpoint_authority
+        .intent_decision(&object, CredentialV2IntentDecision::Approve)
+        .unwrap();
+    let checkpoint_preview = format!("did:crdt:{}", "c".repeat(64));
+    let checkpoint_preparation = checkpoint_authority
+        .preparation(&checkpoint_approve, &checkpoint_preview)
+        .unwrap();
+    let checkpoint_comparison = checkpoint_authority
+        .comparison(&checkpoint_preparation, &authority.response)
+        .unwrap();
+    let checkpoint_final = checkpoint_authority
+        .final_decision(&checkpoint_comparison, CredentialV2FinalDecision::Approve)
+        .unwrap();
+    let large_grant = format!("e30.{}.AA", "A".repeat(48_000));
+    let checkpoint_payload = checkpoint_authority
+        .payload(
+            &checkpoint_final,
+            CredentialV2PayloadInput {
+                grant_id: [0x48; 32],
+                grant: large_grant.clone(),
+            },
+        )
+        .unwrap();
+    let compact_authority_checkpoint = checkpoint_verifier.checkpoint_state().unwrap();
+    assert!(
+        compact_authority_checkpoint.len() < 4_096,
+        "the endpoint owns the sole large payload copy"
+    );
+    let (payload_restored_authority, mut payload_restored_verifier) =
+        credential_v2_body_authority_for_restore(profile.clone());
+    payload_restored_verifier
+        .restore_checkpoint_state(&compact_authority_checkpoint)
+        .unwrap();
+    payload_restored_authority
+        .require_bound_offer(&profile, &recognised)
+        .unwrap();
+    assert!(payload_restored_authority.retained_payload().is_err());
+    payload_restored_authority
+        .restore_retained_received_object(&checkpoint_payload)
+        .unwrap();
+    assert_eq!(
+        payload_restored_authority
+            .retained_payload()
+            .unwrap()
+            .grant(),
+        large_grant
+    );
+
     let (browser_bodies, browser_body_verifier) = credential_v2_body_authority();
     let (wallet_bodies, wallet_body_verifier) = credential_v2_body_authority();
     browser_bodies
@@ -490,21 +564,131 @@ fn final_status_is_one_closed_jws_bound_to_every_accepted_fact() {
 
     let mut changed = input.clone();
     changed.payload_digest[0] ^= 1;
-    assert!(recognise_final_status(
-        &profile,
-        &built.jws,
-        built.digest,
-        &changed,
-        kid,
-    )
-    .is_err());
+    assert!(recognise_final_status(&profile, &built.jws, built.digest, &changed, kid,).is_err());
     let mut wrong_digest = built.digest;
     wrong_digest[0] ^= 1;
-    assert!(recognise_final_status(
+    assert!(recognise_final_status(&profile, &built.jws, wrong_digest, &input, kid,).is_err());
+}
+
+#[test]
+fn final_status_recovery_has_one_deterministic_cbor_and_signed_negative_grammar() {
+    let signing_key = SigningKey::from_bytes(&[0x81; 32]);
+    let profile = profile(&signing_key);
+    let application_id = profile.application_id.as_str();
+    let ceremony = [0x82; 32];
+    let token = [0x83; 32];
+    let request = encode_receipt_recovery_request(application_id, ceremony, &token).unwrap();
+    assert!(request.len() <= 2_304);
+    let recognised = recognise_receipt_recovery_request(&request).unwrap();
+    assert_eq!(recognised.application_id(), application_id);
+    assert_eq!(recognised.carrier_ceremony_id(), &ceremony);
+    assert_eq!(recognised.receipt_recovery_token(), &token);
+    assert_eq!(
+        credential_v2_receipt_recovery_commitment(&token, ceremony, application_id).unwrap(),
+        [
+            0x82, 0x55, 0x0b, 0x2c, 0x7f, 0xe5, 0x09, 0x8c, 0x67, 0xac, 0x0b, 0xf9, 0x22, 0x2f,
+            0x14, 0xd8, 0x0f, 0x3d, 0x4c, 0xe9, 0x5f, 0xd0, 0xd6, 0x26, 0x84, 0x7c, 0xa7, 0xbd,
+            0x28, 0x6b, 0xff, 0x38,
+        ]
+    );
+
+    let status_jws = "e30.e30.AA";
+    let status_digest: [u8; 32] = Sha256::digest(b"{}").into();
+    let accepted = CredentialV2RecoveryResponse::Accepted {
+        final_status_jws: status_jws.into(),
+        final_status_digest: status_digest,
+    };
+    let accepted_bytes = encode_receipt_recovery_response(&accepted).unwrap();
+    assert_eq!(
+        decode_receipt_recovery_response(&accepted_bytes).unwrap(),
+        accepted
+    );
+    let receipt = recovered_receipt_object(
+        [0x85; 32],
+        ceremony,
+        [0x86; 32],
+        CredentialV2ReceiptInput {
+            final_status_jws: status_jws.into(),
+            final_status_digest: status_digest,
+        },
+    )
+    .unwrap();
+    let recognised_receipt = recognise_receipt(&receipt, ceremony, [0x86; 32]).unwrap();
+    assert_eq!(recognised_receipt.final_status_jws, status_jws);
+    assert_eq!(recognised_receipt.final_status_digest, status_digest);
+    for response in [
+        CredentialV2RecoveryResponse::InProgress {
+            retry_after_seconds: 30,
+        },
+        CredentialV2RecoveryResponse::Unknown,
+    ] {
+        let bytes = encode_receipt_recovery_response(&response).unwrap();
+        assert!(bytes.len() <= 9_216);
+        assert_eq!(decode_receipt_recovery_response(&bytes).unwrap(), response);
+    }
+
+    let negative_input = CredentialV2RecoveryNegativeInput {
+        application_id: application_id.into(),
+        carrier_ceremony_id: ceremony,
+        receipt_recovery_commitment: credential_v2_receipt_recovery_commitment(
+            &token,
+            ceremony,
+            application_id,
+        )
+        .unwrap(),
+        observed_at: 1_800_000_800,
+    };
+    let kid = "https://photos.example/selfsame/application#credential-v2-test";
+    let negative =
+        build_recovery_not_finalized(&profile, &negative_input, kid, &signing_key).unwrap();
+    recognise_recovery_not_finalized(
         &profile,
-        &built.jws,
-        wrong_digest,
-        &input,
+        &negative.jws,
+        negative.digest,
+        &negative_input,
+        kid,
+    )
+    .unwrap();
+    let recognised_negative = recognise_recovery_not_finalized_status(
+        &profile,
+        &negative.jws,
+        negative.digest,
+        application_id,
+        ceremony,
+        negative_input.receipt_recovery_commitment,
+    )
+    .unwrap();
+    assert_eq!(recognised_negative.kid, kid);
+    assert_eq!(recognised_negative.observed_at, 1_800_000_800);
+    let response = CredentialV2RecoveryResponse::NotFinalized {
+        recovery_status_jws: negative.jws,
+        recovery_status_digest: negative.digest,
+    };
+    let bytes = encode_receipt_recovery_response(&response).unwrap();
+    assert_eq!(decode_receipt_recovery_response(&bytes).unwrap(), response);
+
+    let mut noncanonical = request.clone();
+    noncanonical.push(0);
+    assert!(recognise_receipt_recovery_request(&noncanonical).is_err());
+    let mut wrong = negative_input;
+    wrong.receipt_recovery_commitment[0] ^= 1;
+    assert!(recognise_recovery_not_finalized(
+        &profile,
+        match &response {
+            CredentialV2RecoveryResponse::NotFinalized {
+                recovery_status_jws,
+                ..
+            } => recovery_status_jws,
+            _ => unreachable!(),
+        },
+        match response {
+            CredentialV2RecoveryResponse::NotFinalized {
+                recovery_status_digest,
+                ..
+            } => recovery_status_digest,
+            _ => unreachable!(),
+        },
+        &wrong,
         kid,
     )
     .is_err());

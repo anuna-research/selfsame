@@ -3,7 +3,7 @@ id: SPEC-007
 title: cbcl-pairing Protocol Cutover
 status: draft
 tier: 1
-version: 0.3.6-draft
+version: 0.3.7-draft
 last-updated: 2026-08-24
 previous-approved-version: 0.2.1
 owner-repo: selfsame
@@ -478,7 +478,7 @@ Selfsame depends on one pinned `cbcl-pairing` revision.
 Selfsame does not copy CPace, Finished, CBCL dialects, channel framing,
 endpoint reduction, mailbox transitions, or relay limiting.
 
-The candidate baseline is revision `197d4cb3d1560ab5328df28fc984269799c510f9`.
+The candidate baseline is revision `aedbc4ca07068c3cf6356d95333f4c2ec0d374d9`.
 Changing that pin requires updated conformance evidence and owner review.
 
 Selfsame owns only its credential profile adapter, shell effects, consent UI,
@@ -1306,6 +1306,10 @@ No channel can waive a hard stop without a new specification version and require
 <details>
 <summary>Revision history</summary>
 
+- 0.3.7-draft — reconciles ADR-802, the root pin, the compiled dependency
+  baseline, and the fail-closed build-time source-integrity check to reviewed
+  cbcl-pairing revision `aedbc4ca07068c3cf6356d95333f4c2ec0d374d9`.
+  Release and deployment remain prohibited pending cross-model review PASS.
 - 0.3.6-draft — coordinates exact socket-generation, recovery-proof, and
   checkpoint-key inputs. It records the fixed v2 lifetime and frame-safety
   disposition. The consent and effect boundary remains unchanged. The owner

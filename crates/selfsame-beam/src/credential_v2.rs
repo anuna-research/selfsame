@@ -13,11 +13,14 @@ use selfsame_app_identity::path_b::{replay_resolver_closure, InactiveStagedGrant
 use selfsame_app_identity::profile::{ApplicationProfile, CbclRelayDescriptor};
 use selfsame_app_identity::{alias, codec, didkey, grant, json};
 use selfsame_pairing::credential_v2::{
-    build_authority_status_response, build_final_status, finalize_verified_offer,
-    migration_confirmation_digest, prepare_offer_core, recognise_browser_staging_receipt,
-    recognise_prepared_offer, recognise_signed_offer, verify_prepared_offer_device_proof,
+    build_authority_status_response, build_final_status, build_recovery_not_finalized,
+    credential_v2_receipt_recovery_commitment, encode_receipt_recovery_response,
+    finalize_verified_offer, migration_confirmation_digest, prepare_offer_core,
+    recognise_browser_staging_receipt, recognise_prepared_offer,
+    recognise_receipt_recovery_request, recognise_signed_offer, verify_prepared_offer_device_proof,
     CredentialV2AuthorityStatus, CredentialV2BrowserStagingInput, CredentialV2FinalStatusInput,
-    CredentialV2OfferBuildInput, CredentialV2RoomProvenance, CredentialV2RoomSnapshot,
+    CredentialV2OfferBuildInput, CredentialV2RecoveryNegativeInput, CredentialV2RecoveryResponse,
+    CredentialV2RoomProvenance, CredentialV2RoomSnapshot,
 };
 use std::sync::Mutex;
 
@@ -71,6 +74,181 @@ rustler::atoms! {
     standing,
     invite,
     undefined,
+}
+
+/// Secret-free facts returned after a recovery request is recognised and its
+/// token has been reduced to the public commitment.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CredentialV2RecoveryProjection {
+    pub application_id: String,
+    pub carrier_ceremony_id: [u8; 32],
+    pub receipt_recovery_commitment: [u8; 32],
+}
+
+/// Recognise a deterministic-CBOR request and drop the raw token before return.
+pub fn recognise_credential_v2_recovery_request(
+    request: &[u8],
+) -> Result<CredentialV2RecoveryProjection, String> {
+    let recognised =
+        recognise_receipt_recovery_request(request).map_err(|_| String::from(REFUSED))?;
+    let receipt_recovery_commitment = credential_v2_receipt_recovery_commitment(
+        recognised.receipt_recovery_token(),
+        *recognised.carrier_ceremony_id(),
+        recognised.application_id(),
+    )
+    .map_err(|_| String::from(REFUSED))?;
+    Ok(CredentialV2RecoveryProjection {
+        application_id: recognised.application_id().into(),
+        carrier_ceremony_id: *recognised.carrier_ceremony_id(),
+        receipt_recovery_commitment,
+    })
+}
+
+/// Encode one byte-identical accepted response from the immutable final row.
+pub fn credential_v2_recovery_accepted(
+    final_status_jws: &str,
+    final_status_digest: [u8; 32],
+) -> Result<Vec<u8>, String> {
+    encode_receipt_recovery_response(&CredentialV2RecoveryResponse::Accepted {
+        final_status_jws: final_status_jws.into(),
+        final_status_digest,
+    })
+    .map_err(|_| String::from(REFUSED))
+}
+
+/// Encode a bounded locked in-progress response.
+pub fn credential_v2_recovery_in_progress(retry_after_seconds: u8) -> Result<Vec<u8>, String> {
+    encode_receipt_recovery_response(&CredentialV2RecoveryResponse::InProgress {
+        retry_after_seconds,
+    })
+    .map_err(|_| String::from(REFUSED))
+}
+
+/// Encode the one fixed-size unknown response.
+pub fn credential_v2_recovery_unknown() -> Result<Vec<u8>, String> {
+    encode_receipt_recovery_response(&CredentialV2RecoveryResponse::Unknown)
+        .map_err(|_| String::from(REFUSED))
+}
+
+/// Sign and encode one locked terminal negative under the current profile.
+pub fn prepare_credential_v2_recovery_negative(
+    profile: &ApplicationProfile,
+    input: &CredentialV2RecoveryNegativeInput,
+    kid: &str,
+    signing_key: &ed25519_dalek::SigningKey,
+) -> Result<Vec<u8>, String> {
+    let built = build_recovery_not_finalized(profile, input, kid, signing_key)
+        .map_err(|_| String::from(REFUSED))?;
+    encode_receipt_recovery_response(&CredentialV2RecoveryResponse::NotFinalized {
+        recovery_status_jws: built.jws,
+        recovery_status_digest: built.digest,
+    })
+    .map_err(|_| String::from(REFUSED))
+}
+
+#[rustler::nif(
+    name = "recognise_credential_v2_recovery_request",
+    schedule = "DirtyCpu"
+)]
+pub fn recognise_credential_v2_recovery_request_nif<'a>(
+    env: Env<'a>,
+    request: Binary<'a>,
+) -> Term<'a> {
+    let result =
+        std::panic::catch_unwind(|| recognise_credential_v2_recovery_request(request.as_slice()));
+    match result {
+        Ok(Ok(projection)) => {
+            let mut map = rustler::types::map::map_new(env);
+            let encoded = (|| {
+                for (key, value) in [
+                    (
+                        application_id().encode(env),
+                        binary(env, projection.application_id.as_bytes())?,
+                    ),
+                    (
+                        carrier_ceremony_id().encode(env),
+                        binary(env, &projection.carrier_ceremony_id)?,
+                    ),
+                    (
+                        receipt_recovery_commitment().encode(env),
+                        binary(env, &projection.receipt_recovery_commitment)?,
+                    ),
+                ] {
+                    map = map.map_put(key, value).map_err(|_| String::from(REFUSED))?;
+                }
+                Ok::<Term<'a>, String>(map)
+            })();
+            match encoded {
+                Ok(value) => (atom::ok(), value).encode(env),
+                Err(_) => (atom::error(), rejected()).encode(env),
+            }
+        }
+        Ok(Err(_)) | Err(_) => (atom::error(), rejected()).encode(env),
+    }
+}
+
+#[rustler::nif(name = "credential_v2_recovery_accepted")]
+pub fn credential_v2_recovery_accepted_nif<'a>(
+    env: Env<'a>,
+    final_status_jws: Binary<'a>,
+    final_status_digest: Binary<'a>,
+) -> Term<'a> {
+    let result = std::panic::catch_unwind(|| {
+        credential_v2_recovery_accepted(
+            &utf8(final_status_jws.as_slice())?,
+            exact(final_status_digest.as_slice())?,
+        )
+    });
+    encode_binary_result(env, result)
+}
+
+#[rustler::nif(name = "credential_v2_recovery_in_progress")]
+pub fn credential_v2_recovery_in_progress_nif<'a>(env: Env<'a>, retry: u8) -> Term<'a> {
+    encode_binary_result(
+        env,
+        std::panic::catch_unwind(|| credential_v2_recovery_in_progress(retry)),
+    )
+}
+
+#[rustler::nif(name = "credential_v2_recovery_unknown")]
+pub fn credential_v2_recovery_unknown_nif<'a>(env: Env<'a>) -> Term<'a> {
+    encode_binary_result(
+        env,
+        std::panic::catch_unwind(credential_v2_recovery_unknown),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+#[rustler::nif(name = "credential_v2_recovery_not_finalized", schedule = "DirtyCpu")]
+pub fn credential_v2_recovery_not_finalized_nif<'a>(
+    env: Env<'a>,
+    profile_bytes: Binary<'a>,
+    application_id_value: Binary<'a>,
+    carrier_ceremony_id_value: Binary<'a>,
+    commitment_value: Binary<'a>,
+    observed_at_value: u64,
+    signing_kid: Binary<'a>,
+    signing_seed: Binary<'a>,
+) -> Term<'a> {
+    let result = std::panic::catch_unwind(|| {
+        let profile = ApplicationProfile::recognise(profile_bytes.as_slice())
+            .map_err(|_| String::from(REFUSED))?;
+        let input = CredentialV2RecoveryNegativeInput {
+            application_id: utf8(application_id_value.as_slice())?,
+            carrier_ceremony_id: exact(carrier_ceremony_id_value.as_slice())?,
+            receipt_recovery_commitment: exact(commitment_value.as_slice())?,
+            observed_at: observed_at_value,
+        };
+        let kid = utf8(signing_kid.as_slice())?;
+        let seed = exact(signing_seed.as_slice())?;
+        prepare_credential_v2_recovery_negative(
+            &profile,
+            &input,
+            &kid,
+            &ed25519_dalek::SigningKey::from_bytes(&seed),
+        )
+    });
+    encode_binary_result(env, result)
 }
 
 /// `cbcl_selfsame_erl:build_credential_v2_authority_status/6`.
@@ -645,7 +823,10 @@ fn encode_acceptance_projection<'a>(
             final_status_digest().encode(env),
             binary(env, &projection.final_status_digest)?,
         ),
-        (finalized_at().encode(env), projection.finalized_at.encode(env)),
+        (
+            finalized_at().encode(env),
+            projection.finalized_at.encode(env),
+        ),
     ] {
         map = map.map_put(key, value).map_err(|_| String::from(REFUSED))?;
     }
@@ -1103,4 +1284,17 @@ fn binary<'a>(env: Env<'a>, bytes: &[u8]) -> Result<Term<'a>, String> {
     let mut output = OwnedBinary::new(bytes.len()).ok_or_else(|| String::from(REFUSED))?;
     output.as_mut_slice().copy_from_slice(bytes);
     Ok(Binary::from_owned(output, env).encode(env))
+}
+
+fn encode_binary_result<'a>(
+    env: Env<'a>,
+    result: std::thread::Result<Result<Vec<u8>, String>>,
+) -> Term<'a> {
+    match result {
+        Ok(Ok(bytes)) => match binary(env, &bytes) {
+            Ok(value) => (atom::ok(), value).encode(env),
+            Err(_) => (atom::error(), rejected()).encode(env),
+        },
+        Ok(Err(_)) | Err(_) => (atom::error(), rejected()).encode(env),
+    }
 }

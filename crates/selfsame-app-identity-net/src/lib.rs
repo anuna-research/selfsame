@@ -53,6 +53,7 @@
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
+pub mod pairing_status;
 pub mod profile;
 pub mod projection;
 pub mod state;
