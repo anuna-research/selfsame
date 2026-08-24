@@ -3,18 +3,32 @@
 #[path = "../../selfsame-app-identity/tests/common/mod.rs"]
 mod fixture;
 
-use cbcl_pairing::credential_v2::{CredentialV2Carrier, CredentialV2CarrierInput};
+use cbcl_pairing::credential_v2::{
+    CredentialV2Advance, CredentialV2BodyVerifier, CredentialV2Carrier, CredentialV2CarrierInput,
+    CredentialV2ClaimantOfferVerifier, CredentialV2Endpoint, CredentialV2Error, CredentialV2Kind,
+    CredentialV2LogicalBody, CredentialV2Object, CredentialV2TofuState,
+};
+use cbcl_pairing::wire::Side;
 use ed25519_dalek::SigningKey;
 use selfsame_app_identity::{json, json::Json, profile::ApplicationProfile};
 use selfsame_pairing::credential_v2::{
     build_authority_status_response, device_possession_proof_input, finalize_verified_offer,
     prepare_offer_core, recognise_authority_status_response, recognise_prepared_offer,
     recognise_signed_offer, verify_prepared_offer_device_proof, CredentialV2AuthorityStatus,
-    CredentialV2OfferBuildInput,
+    CredentialV2OfferBuildInput, CredentialV2WalletOfferVerifier,
 };
 use sha2::{Digest, Sha256};
 
 const RELAY: &str = "https://photos.example:9443";
+
+#[derive(Debug)]
+struct AcceptBodies;
+
+impl CredentialV2BodyVerifier for AcceptBodies {
+    fn verify(&mut self, _: &CredentialV2LogicalBody<'_>) -> Result<(), CredentialV2Error> {
+        Ok(())
+    }
+}
 
 fn profile(signing_key: &SigningKey) -> ApplicationProfile {
     let Json::Object(mut members) = fixture::profile_value() else {
@@ -157,7 +171,53 @@ fn offer_is_one_canonical_signed_authority_for_hub_browser_and_wallet() {
     assert_eq!(recognised.transcript_hash, input.transcript_hash);
     assert_eq!(recognised.expires_at, input.expires_at);
 
-    let mut changed = built.signed_offer;
+    // The wallet display is created only after the signed offer is verified
+    // under the live profile and every local carrier/transcript value matches.
+    let object = CredentialV2Object::new(
+        CredentialV2Kind::Offer,
+        built.intent_digest,
+        built.signed_offer.clone(),
+    )
+    .unwrap();
+    let mut endpoint =
+        CredentialV2Endpoint::new(Side::Claimant, carrier.clone(), Box::new(AcceptBodies));
+    let mut wallet_verifier = CredentialV2WalletOfferVerifier::new(
+        profile.clone(),
+        carrier.clone(),
+        input.transcript_hash,
+        CredentialV2TofuState::NewPair,
+    )
+    .unwrap();
+    let CredentialV2Advance::DisplayIntent(display) = wallet_verifier
+        .verify_offer(&mut endpoint, &object, input.expires_at - 1)
+        .unwrap()
+    else {
+        panic!("a verified offer must produce the authenticated typed display")
+    };
+    assert_eq!(display.application_id(), profile.application_id.as_str());
+    assert_eq!(display.relay_origin(), RELAY);
+    assert_eq!(display.tofu_state(), CredentialV2TofuState::NewPair);
+
+    for (transcript, now) in [
+        ([0xff; 64], input.expires_at - 1),
+        (input.transcript_hash, input.expires_at),
+    ] {
+        let mut endpoint =
+            CredentialV2Endpoint::new(Side::Claimant, carrier.clone(), Box::new(AcceptBodies));
+        let mut refused = CredentialV2WalletOfferVerifier::new(
+            profile.clone(),
+            carrier.clone(),
+            transcript,
+            CredentialV2TofuState::TrustedPair,
+        )
+        .unwrap();
+        assert_eq!(
+            refused.verify_offer(&mut endpoint, &object, now),
+            Err(CredentialV2Error::Profile),
+        );
+    }
+
+    let mut changed = built.signed_offer.clone();
     *changed.last_mut().unwrap() ^= 1;
     assert!(recognise_signed_offer(&profile, &changed).is_err());
 

@@ -1,8 +1,11 @@
 //! Selfsame's closed credential/v2 signed-offer authority.
 
 use cbcl_pairing::credential_v2::{
-    credential_v2_intent_digest, CredentialV2AccountProvenance, CredentialV2Carrier,
-    CredentialV2DeviceBinding, CredentialV2Error, CredentialV2IntentClaims, CredentialV2Transition,
+    credential_v2_intent_digest, CredentialV2AccountProvenance, CredentialV2Advance,
+    CredentialV2Carrier, CredentialV2ClaimantOfferVerifier, CredentialV2DeviceBinding,
+    CredentialV2Endpoint, CredentialV2Error, CredentialV2IntentAuthority, CredentialV2IntentClaims,
+    CredentialV2IntentInput, CredentialV2IntentVerifier, CredentialV2Object,
+    CredentialV2OfferParser, CredentialV2TofuState, CredentialV2Transition,
 };
 use ciborium::Value;
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
@@ -195,6 +198,113 @@ pub enum CredentialV2OfferError {
     /// One input was outside the closed grammar or did not match authority.
     #[error("credential/v2 offer was refused")]
     Refused,
+}
+
+/// Wallet-side authenticated-display adapter for the allocator's first offer.
+///
+/// The peer object is not display authority. This adapter first verifies the
+/// signed offer under the independently fetched profile, checks every local
+/// carrier/transcript binding, and only then supplies cbcl-pairing's separate
+/// authority input.
+#[derive(Debug)]
+pub struct CredentialV2WalletOfferVerifier {
+    profile: ApplicationProfile,
+    carrier: CredentialV2Carrier,
+    transcript_hash: [u8; 64],
+    tofu_state: CredentialV2TofuState,
+}
+
+impl CredentialV2WalletOfferVerifier {
+    /// Bind one verifier to the exact live profile, carrier, transcript, and
+    /// person-owned exact-pair policy state.
+    pub fn new(
+        profile: ApplicationProfile,
+        carrier: CredentialV2Carrier,
+        transcript_hash: [u8; 64],
+        tofu_state: CredentialV2TofuState,
+    ) -> Result<Self, CredentialV2OfferError> {
+        let _ = selected_descriptor(&profile, &carrier)?;
+        Ok(Self {
+            profile,
+            carrier,
+            transcript_hash,
+            tofu_state,
+        })
+    }
+}
+
+impl CredentialV2ClaimantOfferVerifier for CredentialV2WalletOfferVerifier {
+    fn verify_offer(
+        &mut self,
+        endpoint: &mut CredentialV2Endpoint,
+        object: &CredentialV2Object,
+        now: u64,
+    ) -> Result<CredentialV2Advance, CredentialV2Error> {
+        let recognised = recognise_signed_offer(&self.profile, object.body())
+            .map_err(|_| CredentialV2Error::Profile)?;
+        let descriptor = selected_descriptor(&self.profile, &self.carrier)
+            .map_err(|_| CredentialV2Error::Profile)?;
+        let allocator_key = didkey::decode(recognised.claims.device_binding().device_did())
+            .map_err(|_| CredentialV2Error::Profile)?;
+        if recognised.profile_digest != *self.profile.digest()
+            || recognised.descriptor_digest != descriptor.digest
+            || recognised.carrier_digest != self.carrier.digest()
+            || recognised.transcript_hash != self.transcript_hash
+            || recognised.expires_at <= now
+            || recognised.claims.application_id() != self.carrier.application_context()
+            || recognised.claims.relay_origin() != self.carrier.relay_origin()
+            || recognised.claims.carrier_ceremony_id() != self.carrier.carrier_ceremony_id()
+            || self.carrier.expected_allocator_key() != Some(&allocator_key)
+        {
+            return Err(CredentialV2Error::Profile);
+        }
+        let authority =
+            CredentialV2IntentAuthority::new(recognised.claims.clone(), self.tofu_state)?;
+        let mut parser = AuthenticatedOfferParser {
+            exact_body: recognised.signed_offer,
+            claims: recognised.claims,
+        };
+        let mut verifier = AuthenticatedOfferVerdict;
+        endpoint.receive_offer(object, &authority, &mut parser, &mut verifier)
+    }
+}
+
+#[derive(Debug)]
+struct AuthenticatedOfferParser {
+    exact_body: Vec<u8>,
+    claims: CredentialV2IntentClaims,
+}
+
+impl CredentialV2OfferParser for AuthenticatedOfferParser {
+    fn parse_signed_offer(
+        &mut self,
+        body: &[u8],
+    ) -> Result<CredentialV2IntentClaims, CredentialV2Error> {
+        if body != self.exact_body {
+            return Err(CredentialV2Error::Profile);
+        }
+        Ok(self.claims.clone())
+    }
+}
+
+#[derive(Debug)]
+struct AuthenticatedOfferVerdict;
+
+impl CredentialV2IntentVerifier for AuthenticatedOfferVerdict {
+    fn verify(
+        &mut self,
+        peer: &CredentialV2IntentInput,
+        authority: &CredentialV2IntentAuthority,
+    ) -> Result<(), CredentialV2Error> {
+        if peer.application_id() != authority.application_id()
+            || peer.https_origin() != authority.https_origin()
+            || peer.relay_origin() != authority.relay_origin()
+            || peer.carrier_ceremony_id() != authority.carrier_ceremony_id()
+        {
+            return Err(CredentialV2Error::Profile);
+        }
+        Ok(())
+    }
 }
 
 /// Build one proof-free core from locked hub facts without touching a signing key.
