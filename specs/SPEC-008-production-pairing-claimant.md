@@ -2,22 +2,22 @@
 id: SPEC-008
 title: Production Pairing Claimant — Transport, Real Credential, and Origin Trust
 status: draft
-version: 0.5.13-draft
+version: 0.5.14-draft
 tier: 1
 review-gate: test-first-implementation-owner-authorized; release-and-deployment-prohibited-pending-cross-model-pass
 authority-form: consolidated-direct-current-authority
-implementation-baseline: ff2f1394813a38ce9d0409726892b6e0c63d00ea
+implementation-baseline: 48a0c7499ab83bdf1d77f6cfb8a09562a7c046f7
 generation-model-family: OpenAI GPT-5
 generation-model-version: gpt-5.6-sol
 generation-session: 01a029aa-9127-7c42-ad28-81512b91ded6
-generation-synthesis-trajectory: "owner-authorized standalone architecture -> F-A through F-E code traces -> rejected reviews through 0.5.12 -> production-boundary transaction and Linux WASM gate"
+generation-synthesis-trajectory: "owner-authorized standalone architecture -> F-A through F-E code traces -> rejected reviews through 0.5.13 -> continuously reachable Rust and browser gates"
 depends-on: "[[SPEC-007-cbcl-pairing-cutover]]; [[SPEC-004-application-scoped-identity]]; [[SPEC-003-android-apk-distribution]]; cbcl-pairing SPEC-001"
 last-updated: 2026-08-25
 ---
 
 # SPEC-008 — Production Pairing Claimant: Transport, Real Credential, and Origin Trust
 
-> **Consolidated current-law reissue.** Version 0.5.13 states the standalone
+> **Consolidated current-law reissue.** Version 0.5.14 states the standalone
 > first-contact authority directly. Trajectory documents and review reports
 > supply evidence only. They supply no current values.
 > The repository owner authorized local test-first implementation on
@@ -1116,17 +1116,17 @@ increment directly. Trajectory documents and review reports supply evidence
 only.
 
 The current SPEC-008 test set is TEST-901 through TEST-915 and TEST-1156
-through TEST-1166. Every member of that set is stated in this parent.
+through TEST-1167. Every member of that set is stated in this parent.
 [[SPEC-007-cbcl-pairing-cutover]] TEST-801 through TEST-821 remain the other
 current Selfsame test set and are stated in that parent. No plan or review can
 omit either set.
 
-The exact coordinated hub test set is TEST-115 through TEST-119. The hub's
+The exact coordinated hub test set is TEST-115 through TEST-120. The hub's
 base-parent tests remain current outside this coordinated increment set.
 
 The coordinated review set contains this parent,
 [[SPEC-007-cbcl-pairing-cutover]] 0.3.6-draft, cbcl-pairing SPEC-001
-0.5.7-draft, and cbcl-bus SPEC-053 0.17.9-draft.
+0.5.7-draft, and cbcl-bus SPEC-053 0.17.10-draft.
 
 The `anuna-ssi` namespace reference is outside that set. It is pinned at
 `c7d462029841ea1884bb6f089732058d8838728d` only to resolve
@@ -1149,8 +1149,8 @@ release, or deployment. Those actions still require the fresh Tier-1 PASS and
 their separate gates.
 
 The exact candidate closure is Selfsame
-`ff2f1394813a38ce9d0409726892b6e0c63d00ea`, cbcl-bus
-`22fcc012ff4d4746f251b497c11495b1b26c0f29`, cbcl-pairing
+`48a0c7499ab83bdf1d77f6cfb8a09562a7c046f7`, cbcl-bus
+`c9e0838cf39e05cac00c292ed8077bf1069c5685`, cbcl-pairing
 `62ef4a968b46b4836374fcee1d78c410f730a7a7`, cbcl-rs
 `febc6691e6dd2d5f7116b1a4d84c984b64717564`, and did-crdt
 `1f409a4229d07a62dd4cc6b2dce3b5a2e18e78a1`. The vendored Selfsame browser
@@ -2084,6 +2084,11 @@ either explicit invocation SHALL fail review evidence for this test. The
 isolated command SHALL assert the exact one-passed result so a renamed or
 unselected test cannot exit successfully.
 
+The Rust job SHALL pass its exact deny-warnings Clippy command before the
+isolated process starts. The browser job SHALL pass its screen-render command
+before the lifecycle suite starts. An earlier failing step does not satisfy
+continuous execution of this test.
+
 ### TEST-1163 — Oversized reload evidence is unavailable, not revoked
 
 **Validates:** [[SPEC-008-production-pairing-claimant#REQ-1006]].
@@ -2137,7 +2142,42 @@ to equal that item. Add a second definition at the crate root or elsewhere,
 remove the re-export, or make the exported value diverge and require the test
 to fail.
 
+### TEST-1167 — Continuous Rust and browser jobs reach credential/v2 gates
+
+**Validates:** [[SPEC-008-production-pairing-claimant#CON-985]] and
+[[SPEC-008-production-pairing-claimant#CON-990]].
+
+From the clean exact closure, run
+`cargo clippy --workspace --all-targets --locked -- -D warnings`. Require exit
+zero before the isolated [[SPEC-008-production-pairing-claimant#TEST-1162]]
+step. Remove the explicit lint disposition from the credential/v2 browser
+restore boundary and require the job to stop before TEST-1162.
+
+Run `CI=true npm run screens`. The harness SHALL enter one invitation and one
+well-formed PAIR1 code through the current credential/v2 surface. It SHALL
+render the pre-socket authentication wait, new exact-pair consent, and
+authenticated exact-intent consent.
+
+The invoke-surface check SHALL scan every JavaScript module that calls Tauri.
+It SHALL recognise every module prefix inside the actual `generate_handler!`
+block. Restore the legacy credential/v1 stub, omit the PAIR1 entry, exclude the
+pairing module, or hard-code a prefix set that excludes `app_grant`. Require
+the screen gate to fail for each mutation.
+
+Require the screen-render gate, cbcl-pairing browser ceremony, and wallet
+pairing lifecycle to pass in their declared continuous-job order. No later
+passing command compensates for an earlier aborted step.
+
 ## Changelog
+
+- **0.5.14-draft — 2026-08-25 — continuously reachable verification.** The
+  exact Rust job now passes deny-warnings Clippy before TEST-1162. The browser
+  harness drives credential/v2 with a PAIR1 code and renders pre-socket,
+  exact-pair, and exact-intent states. Its invoke scanner recognises every
+  handler module and includes the pairing caller. The coordinated hub gate
+  rejects a conditionally skipped rebuild and directly checks exact host and
+  tool provenance. Release and deployment remain prohibited pending a fresh
+  cross-model Tier-1 PASS and separate owner approval.
 
 - **0.5.13-draft — 2026-08-25 — production-boundary and reproducibility
   remediation.** This owner-authorized test-first reissue closes all four
