@@ -985,6 +985,10 @@ pub async fn cbcl_v2_unlink(
     })
 }
 
+// This is the closed assembly boundary for ten independently authenticated
+// reload facts. Grouping them would only move the same trust decisions into an
+// unverified bag, so keep the call explicit and acknowledge the lint here.
+#[allow(clippy::too_many_arguments)]
 fn reload_verified_view(
     installed: &crate::cbcl_v2_completion::InstalledCredentialV2Link,
     current: &selfsame_app_identity_net::profile::FetchedProfile,

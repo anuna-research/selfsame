@@ -165,6 +165,16 @@ jobs:
           set -o pipefail
           cargo test --workspace --locked 2>&1 | tee -a /tmp/rust-ci.log
 
+      # TEST-1162 replaces the process-global keyring backend, so it runs in a
+      # dedicated test process rather than concurrently with the library suite.
+      - name: Test credential/v2 interrupted-link compensation
+        run: |
+          set -o pipefail
+          cargo test -p selfsame --locked --lib -- \
+            --ignored --exact \
+            cbcl_v2_completion::tests::test_1162_pre_payload_failure_and_person_abandonment_release_the_exact_slot \
+            2>&1 | tee -a /tmp/rust-ci.log
+
       # The purity boundary, checked from the other side: a target with no
       # clock, no socket, and no disk simply will not link a core that reached
       # for one.
@@ -305,6 +315,11 @@ jobs:
         env:
           CI: "true"
         run: npm run e2e:pairing
+
+      - name: Run the wallet pairing lifecycle
+        env:
+          CI: "true"
+        run: npm run e2e:wallet-pairing
 
       # Kept on failure too — when an assertion trips, the picture of the screen
       # that tripped it is the fastest way to see why.

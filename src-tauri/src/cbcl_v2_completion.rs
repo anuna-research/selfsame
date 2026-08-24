@@ -2135,6 +2135,54 @@ mod tests {
         pending
     }
 
+    fn overwrite_test_slot(slot: &CredentialV2LinkSlot) {
+        let application_id = match slot {
+            CredentialV2LinkSlot::Pending(value) => &value.application_id,
+            CredentialV2LinkSlot::Installed(value) => &value.application_id,
+        };
+        store::set(
+            &slot_name(application_id).unwrap(),
+            &encode_slot(slot).unwrap(),
+        )
+        .unwrap();
+    }
+
+    fn pending_stage_fixtures(
+        final_approval: &PendingCredentialV2Completion,
+    ) -> (
+        PendingCredentialV2Completion,
+        PendingCredentialV2Completion,
+        PendingCredentialV2Completion,
+        PendingCredentialV2Completion,
+    ) {
+        let installed = installed_reload_fixture();
+        let mut acknowledged = final_approval.clone();
+        acknowledged.checkpoint_generation += 1;
+        acknowledged.endpoint_checkpoint = codec::b64url(b"sealed-acknowledged-checkpoint");
+        acknowledged.validate().unwrap();
+
+        let planned = acknowledged.planned(1_800_000_000, [0x35; 32]).unwrap();
+        let mut issuer_created = planned.clone();
+        issuer_created.stage = PendingCredentialV2Stage::IssuerCreated {
+            effect_time: 1_800_000_000,
+            grant_id: installed.grant_id.clone(),
+            issuer_did: installed.issuer_did.clone(),
+            resolver_closure: installed.resolver_closure.clone(),
+        };
+        issuer_created.validate().unwrap();
+
+        let mut provisioned = issuer_created.clone();
+        provisioned.stage = PendingCredentialV2Stage::Provisioned {
+            effect_time: 1_800_000_000,
+            grant_id: installed.grant_id,
+            issuer_did: installed.issuer_did,
+            grant: installed.grant,
+            resolver_closure: installed.resolver_closure,
+        };
+        provisioned.validate().unwrap();
+        (acknowledged, planned, issuer_created, provisioned)
+    }
+
     mod shared_memkeyring {
         use keyring::credential::{Credential, CredentialApi, CredentialBuilderApi};
         use std::any::Any;
@@ -2211,15 +2259,88 @@ mod tests {
         let pending = pending_abandonment_fixture();
         crate::cbcl_v2_policy::insert(pending.application_id(), &pending.relay_origin).unwrap();
 
+        let (acknowledged, planned, issuer_created, provisioned) = pending_stage_fixtures(&pending);
+        let failure_matrix = [
+            ("final approval release", pending.clone()),
+            ("acknowledgement read", pending.clone()),
+            ("acknowledgement recognition", pending.clone()),
+            (
+                "acknowledgement checkpoint replacement",
+                acknowledged.clone(),
+            ),
+            ("acknowledgement checkpoint commit", acknowledged.clone()),
+            ("plan construction", acknowledged),
+            ("planned-stage replacement", planned.clone()),
+            ("issuer custody", planned),
+            ("issuer-stage replacement", issuer_created.clone()),
+            ("issuer publication", issuer_created.clone()),
+            ("resolver verification", issuer_created.clone()),
+            ("grant construction", issuer_created),
+            ("provisioned-stage replacement", provisioned.clone()),
+            ("payload construction", provisioned.clone()),
+            ("payload checkpoint preparation", provisioned.clone()),
+        ];
+        for (boundary, stored) in failure_matrix {
+            persist_pending(&pending).unwrap();
+            {
+                let _failure_cleanup = PrePayloadPendingCleanup::new(pending.clone());
+                overwrite_test_slot(&CredentialV2LinkSlot::Pending(stored));
+                // Dropping here injects the named post-persist failure. The
+                // guard deliberately retains the first durable value, which
+                // also models a backend that commits a replacement immediately
+                // before reporting an error.
+            }
+            assert!(
+                pending_links().unwrap().is_empty(),
+                "{boundary} stranded the application slot"
+            );
+            // Every failure boundary releases the exact application for a new
+            // ceremony rather than merely hiding its pending row.
+            persist_pending(&pending).unwrap();
+            remove_pending(&pending).unwrap();
+        }
+
+        // A committed PayloadPrepared value belongs to signed final-status
+        // recovery and must survive any later guard cleanup.
+        let payload_prepared = provisioned.payload_prepared([0x3a; 32]).unwrap();
         persist_pending(&pending).unwrap();
         {
             let _failure_cleanup = PrePayloadPendingCleanup::new(pending.clone());
-            let advanced = pending.planned(1_800_000_000, [0x88; 32]).unwrap();
-            replace_pending(&pending, &advanced).unwrap();
-            // The guard deliberately still has the prior value. This models a
-            // backend that commits a replacement immediately before an error.
+            overwrite_test_slot(&CredentialV2LinkSlot::Pending(payload_prepared.clone()));
         }
-        assert!(pending_links().unwrap().is_empty());
+        assert_eq!(
+            load_pending(pending.application_id()).unwrap(),
+            payload_prepared
+        );
+        remove_pending(&payload_prepared).unwrap();
+
+        // Compensation anchored on attempt A must not remove a recognised
+        // attempt B that acquired the same application slot.
+        let mut other_attempt = pending.clone();
+        other_attempt.offer_expires_at += 1;
+        other_attempt.validate().unwrap();
+        persist_pending(&pending).unwrap();
+        {
+            let _failure_cleanup = PrePayloadPendingCleanup::new(pending.clone());
+            overwrite_test_slot(&CredentialV2LinkSlot::Pending(other_attempt.clone()));
+        }
+        assert_eq!(
+            load_pending(pending.application_id()).unwrap(),
+            other_attempt
+        );
+        remove_pending(&other_attempt).unwrap();
+
+        // A stale pre-payload guard must never delete a subsequently installed
+        // capability for the application.
+        let installed = installed_reload_fixture();
+        persist_pending(&pending).unwrap();
+        {
+            let _failure_cleanup = PrePayloadPendingCleanup::new(pending.clone());
+            overwrite_test_slot(&CredentialV2LinkSlot::Installed(installed.clone()));
+        }
+        assert_eq!(load_installed(pending.application_id()).unwrap(), installed);
+        let installed_local = load_local_link(pending.application_id()).unwrap();
+        unlink_local(&installed_local).unwrap();
 
         // A failed attempt no longer blocks a fresh ceremony for the same app.
         persist_pending(&pending).unwrap();
@@ -2240,6 +2361,22 @@ mod tests {
             crate::cbcl_v2_policy::state(pending.application_id(), &pending.relay_origin).unwrap(),
             crate::cbcl_v2_policy::ExactPairState::NewPair
         );
+
+        // Presence can be granted for one exact slot and race with a later
+        // replacement. Confirmed unlink must compare-and-delete, refuse the
+        // stale selection, and retain the replacement.
+        persist_pending(&pending).unwrap();
+        let stale_selection = load_local_link(pending.application_id()).unwrap();
+        overwrite_test_slot(&CredentialV2LinkSlot::Pending(other_attempt.clone()));
+        assert_eq!(
+            unlink_local(&stale_selection).unwrap_err().to_string(),
+            "PairingApplicationNotLinked"
+        );
+        assert_eq!(
+            load_pending(pending.application_id()).unwrap(),
+            other_attempt
+        );
+        remove_pending(&other_attempt).unwrap();
 
         // The confirmed escape also releases the exact app slot for retry.
         persist_pending(&pending).unwrap();
