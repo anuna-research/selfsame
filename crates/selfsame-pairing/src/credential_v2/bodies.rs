@@ -82,6 +82,28 @@ pub struct CredentialV2PayloadInput {
     pub grant: String,
 }
 
+/// Authenticated preview retained only after the closed preparation body was
+/// built or verified.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CredentialV2RetainedPreview {
+    did: String,
+    fingerprint_digest: [u8; 32],
+}
+
+impl CredentialV2RetainedPreview {
+    /// Borrow the exact preview issuer DID.
+    #[must_use]
+    pub fn did(&self) -> &str {
+        &self.did
+    }
+
+    /// Borrow SHA-256 over the exact issuer-DID UTF-8 bytes.
+    #[must_use]
+    pub const fn fingerprint_digest(&self) -> &[u8; 32] {
+        &self.fingerprint_digest
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct Preview {
     did: String,
@@ -167,6 +189,16 @@ pub fn credential_v2_body_authority(
 }
 
 impl CredentialV2BodyAuthority {
+    /// Return the authenticated preview only after preparation has retained it.
+    pub fn retained_preview(&self) -> Result<CredentialV2RetainedPreview, CredentialV2Error> {
+        let bound = self.bound()?;
+        let preview = bound.preview.as_ref().ok_or(CredentialV2Error::Phase)?;
+        Ok(CredentialV2RetainedPreview {
+            did: preview.did.clone(),
+            fingerprint_digest: preview.fingerprint_digest,
+        })
+    }
+
     /// Bind this one-attempt grammar to a completely authenticated signed offer.
     pub fn bind_offer(
         &self,

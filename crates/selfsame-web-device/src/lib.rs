@@ -689,6 +689,34 @@ impl CredentialV2BrowserAllocatorSession {
         ))
     }
 
+    /// Return only the Rust-authenticated preparation display. Raw peer body
+    /// fields never become browser display authority.
+    pub fn preparation_view_json(&self) -> Result<String, JsError> {
+        if self
+            .last_received_object
+            .as_ref()
+            .map(|object| object.kind())
+            != Some(cbcl_pairing::credential_v2::CredentialV2Kind::Preparation)
+        {
+            return Err(JsError::new("the credential/v2 preparation is unavailable"));
+        }
+        let preview = self
+            .body_authority
+            .retained_preview()
+            .map_err(|_| JsError::new("the credential/v2 preparation is unavailable"))?;
+        let fingerprint: serde_json::Value =
+            serde_json::from_str(&fingerprint_did_json(preview.did()))
+                .map_err(|_| JsError::new("the credential/v2 fingerprint is unavailable"))?;
+        Ok(serde_json::json!({
+            "previewIssuerDid": preview.did(),
+            "previewFingerprintDigestB64u": selfsame_app_identity::codec::b64url(
+                preview.fingerprint_digest()
+            ),
+            "fingerprint": fingerprint,
+        })
+        .to_string())
+    }
+
     /// Burn the local attempt without releasing another protocol frame.
     pub fn cancel(&mut self) -> String {
         self.session = None;

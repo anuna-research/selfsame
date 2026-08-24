@@ -332,6 +332,12 @@ fn offer_is_one_canonical_signed_authority_for_hub_browser_and_wallet() {
     let preview_did = format!("did:crdt:{}", "a".repeat(64));
     let preparation = wallet_bodies.preparation(&approve, &preview_did).unwrap();
     exchange(&mut claimant, &mut allocator, &preparation);
+    let retained_preview = browser_bodies.retained_preview().unwrap();
+    assert_eq!(retained_preview.did(), preview_did);
+    assert_eq!(
+        retained_preview.fingerprint_digest(),
+        &<[u8; 32]>::from(Sha256::digest(preview_did.as_bytes()))
+    );
     assert!(wallet_bodies
         .preparation(&approve, &format!("did:crdt:{}", "b".repeat(64)))
         .is_err());
