@@ -13,6 +13,7 @@
 
 pub mod legacy;
 pub mod live;
+pub mod credential_v2;
 #[cfg(feature = "local-pairing-demo")]
 pub mod local_demo;
 pub mod release;

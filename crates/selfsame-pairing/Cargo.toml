@@ -9,18 +9,20 @@ description = "Selfsame credential composition for cbcl-pairing"
 
 [features]
 default = []
-local-pairing-demo = ["dep:bip39", "dep:ed25519-dalek"]
+local-pairing-demo = ["dep:bip39"]
 
 [dependencies]
 base64ct = { workspace = true }
 cbcl-pairing = { workspace = true }
 cbcl-pairing-core = { package = "cbcl-core", version = "=0.1.0", git = "https://codeberg.org/anuna/cbcl-rs", rev = "febc6691e6dd2d5f7116b1a4d84c984b64717564" }
 ciborium = "=0.2.2"
+cbor2 = "=1.1.0"
 selfsame-app-identity = { workspace = true }
 thiserror = { workspace = true }
 zeroize = { version = "1", default-features = false, features = ["alloc"] }
 bip39 = { version = "2", optional = true }
-ed25519-dalek = { workspace = true, features = ["std"], optional = true }
+ed25519-dalek = { workspace = true, features = ["std"] }
+sha2 = { version = "0.11", default-features = false }
 
 # The browser allocator's local fixture inputs come from the same
 # `local_demo::credential` the wallet rebuilds; the example only serialises.
@@ -35,7 +37,6 @@ ed25519-dalek = { workspace = true }
 getrandom = "0.2"
 serde = { workspace = true }
 serde_json = { workspace = true }
-sha2 = "0.11"
 tokio = { workspace = true }
 tower = { version = "0.5", features = ["util"] }
 tungstenite = { version = "=0.30.0", default-features = false, features = ["handshake"] }

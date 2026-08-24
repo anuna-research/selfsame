@@ -4257,9 +4257,11 @@ name = "selfsame-beam"
 version = "0.1.0"
 dependencies = [
  "bip39",
+ "cbcl-pairing",
  "ed25519-dalek",
  "rustler",
  "selfsame-app-identity",
+ "selfsame-pairing",
 ]
 
 [[package]]
@@ -4320,6 +4322,7 @@ dependencies = [
  "bip39",
  "cbcl-core 0.1.0 (git+https://codeberg.org/anuna/cbcl-rs?rev=febc6691e6dd2d5f7116b1a4d84c984b64717564)",
  "cbcl-pairing",
+ "cbor2",
  "ciborium",
  "ed25519-dalek",
  "getrandom 0.2.17",

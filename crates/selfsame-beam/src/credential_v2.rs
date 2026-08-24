@@ -7,10 +7,15 @@
 //! or device key crosses the NIF boundary.
 
 use rustler::types::atom;
-use rustler::{Binary, Encoder, Env, OwnedBinary, Term};
+use rustler::{Atom, Binary, Decoder, Encoder, Env, OwnedBinary, Term};
 use selfsame_app_identity::json::{Json, Limits};
 use selfsame_app_identity::profile::{ApplicationProfile, CbclRelayDescriptor};
 use selfsame_app_identity::{codec, json};
+use selfsame_pairing::credential_v2::{
+    finalize_verified_offer, prepare_offer_core, recognise_prepared_offer,
+    verify_prepared_offer_device_proof, CredentialV2OfferBuildInput, CredentialV2RoomProvenance,
+    CredentialV2RoomSnapshot,
+};
 
 const MAX_DEVICE_JWK_OCTETS: usize = 96;
 const MAX_PERMISSION_OCTETS: usize = 128;
@@ -29,6 +34,20 @@ rustler::atoms! {
     requested_permissions,
     device_jwk,
     device_public_key,
+    offer_core,
+    offer_core_digest,
+    intent_digest,
+    signed_offer,
+    kid,
+    account_principal_digest,
+    device_did,
+    device_key_digest,
+    legacy_key_digest,
+    room_set_digest,
+    migration_snapshot_digest,
+    standing,
+    invite,
+    undefined,
 }
 
 /// Complete typed facts accepted for one credential/v2 pending allocation.
@@ -165,6 +184,250 @@ fn canonical_descriptor(descriptor: &CbclRelayDescriptor) -> Vec<u8> {
         ("relayOrigin", Json::text(descriptor.relay_origin.clone())),
         ("weight", Json::int(descriptor.weight)),
     ]))
+}
+
+/// `cbcl_selfsame_erl:prepare_credential_v2_offer/15`.
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+#[rustler::nif(name = "prepare_credential_v2_offer", schedule = "DirtyCpu")]
+pub fn prepare_credential_v2_offer_nif<'a>(
+    env: Env<'a>,
+    profile_bytes: Binary<'a>,
+    carrier_bytes: Binary<'a>,
+    request_id: Binary<'a>,
+    transcript_hash: Binary<'a>,
+    application_account_id: Binary<'a>,
+    account_scope_id: Binary<'a>,
+    device_public_key_value: Binary<'a>,
+    permissions: Vec<Binary<'a>>,
+    intent_nonce: Binary<'a>,
+    issued_at: u64,
+    expires_at: u64,
+    legacy_handle: Binary<'a>,
+    enrolled_key: Binary<'a>,
+    snapshot_rows: Vec<(
+        Binary<'a>,
+        Binary<'a>,
+        Binary<'a>,
+        Binary<'a>,
+        u64,
+        Atom,
+        Term<'a>,
+    )>,
+    snapshot_nonce: Binary<'a>,
+) -> Term<'a> {
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let profile = ApplicationProfile::recognise(profile_bytes.as_slice())
+            .map_err(|_| String::from(REFUSED))?;
+        let carrier = cbcl_pairing::credential_v2::decode_carrier(carrier_bytes.as_slice())
+            .map_err(|_| String::from(REFUSED))?;
+        let permissions = permissions
+            .iter()
+            .map(|value| utf8(value.as_slice()))
+            .collect::<Result<Vec<_>, _>>()?;
+        let rows = snapshot_rows
+            .into_iter()
+            .map(|(primary, room, handle, key, granted, provenance, since)| {
+                let provenance = if provenance == standing() {
+                    CredentialV2RoomProvenance::Standing
+                } else if provenance == invite() {
+                    CredentialV2RoomProvenance::Invite
+                } else {
+                    return Err(String::from(REFUSED));
+                };
+                let since = if since.decode::<Atom>().ok() == Some(undefined()) {
+                    None
+                } else {
+                    Some(u64::decode(since).map_err(|_| String::from(REFUSED))?)
+                };
+                Ok(CredentialV2RoomSnapshot {
+                    raw_primary_key: primary.as_slice().to_vec(),
+                    room: utf8(room.as_slice())?,
+                    legacy_handle: utf8(handle.as_slice())?,
+                    enrolled_key: exact(key.as_slice())?,
+                    granted,
+                    provenance,
+                    since,
+                })
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        let input = CredentialV2OfferBuildInput {
+            request_id: exact(request_id.as_slice())?,
+            transcript_hash: exact(transcript_hash.as_slice())?,
+            application_account_id: exact(application_account_id.as_slice())?,
+            account_scope_id: exact(account_scope_id.as_slice())?,
+            device_public_key: exact(device_public_key_value.as_slice())?,
+            requested_permissions: permissions,
+            intent_nonce: exact(intent_nonce.as_slice())?,
+            issued_at,
+            expires_at,
+            legacy_handle: utf8(legacy_handle.as_slice())?,
+            enrolled_key: exact(enrolled_key.as_slice())?,
+            snapshot_rows: rows,
+            snapshot_nonce: exact(snapshot_nonce.as_slice())?,
+        };
+        let prepared =
+            prepare_offer_core(&profile, &carrier, &input).map_err(|_| String::from(REFUSED))?;
+        encode_prepared_offer(env, &prepared)
+    }));
+    match result {
+        Ok(Ok(value)) => (atom::ok(), value).encode(env),
+        Ok(Err(_)) | Err(_) => (atom::error(), rejected()).encode(env),
+    }
+}
+
+/// `cbcl_selfsame_erl:finalize_credential_v2_offer/8`.
+///
+/// The signing seed is not decoded until the exact installation-device proof
+/// has been verified by the closed Rust recogniser.
+#[allow(clippy::too_many_arguments)]
+#[rustler::nif(name = "finalize_credential_v2_offer", schedule = "DirtyCpu")]
+pub fn finalize_credential_v2_offer_nif<'a>(
+    env: Env<'a>,
+    profile_bytes: Binary<'a>,
+    offer_core: Binary<'a>,
+    socket_generation_digest: Binary<'a>,
+    carrier_ceremony_id: Binary<'a>,
+    device_public_key: Binary<'a>,
+    device_possession_proof: Binary<'a>,
+    signing_kid: Binary<'a>,
+    signing_seed: Binary<'a>,
+) -> Term<'a> {
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let profile = ApplicationProfile::recognise(profile_bytes.as_slice())
+            .map_err(|_| String::from(REFUSED))?;
+        let prepared = recognise_prepared_offer(&profile, offer_core.as_slice())
+            .map_err(|_| String::from(REFUSED))?;
+        let verified = verify_prepared_offer_device_proof(
+            &profile,
+            &prepared,
+            exact(socket_generation_digest.as_slice())?,
+            exact(carrier_ceremony_id.as_slice())?,
+            exact(device_public_key.as_slice())?,
+            exact(device_possession_proof.as_slice())?,
+        )
+        .map_err(|_| String::from(REFUSED))?;
+
+        // Keep private-key decoding below the possession-proof hard stop.
+        let signing_kid = utf8(signing_kid.as_slice())?;
+        let seed: [u8; 32] = exact(signing_seed.as_slice())?;
+        let built = finalize_verified_offer(
+            &profile,
+            &verified,
+            &signing_kid,
+            &ed25519_dalek::SigningKey::from_bytes(&seed),
+        )
+        .map_err(|_| String::from(REFUSED))?;
+        encode_built_offer(env, &built)
+    }));
+    match result {
+        Ok(Ok(value)) => (atom::ok(), value).encode(env),
+        Ok(Err(_)) | Err(_) => (atom::error(), rejected()).encode(env),
+    }
+}
+
+fn encode_prepared_offer<'a>(
+    env: Env<'a>,
+    prepared: &selfsame_pairing::credential_v2::PreparedCredentialV2Offer,
+) -> Result<Term<'a>, String> {
+    let mut map = rustler::types::map::map_new(env);
+    for (key, value) in [
+        (offer_core().encode(env), binary(env, &prepared.offer_core)?),
+        (
+            offer_core_digest().encode(env),
+            binary(env, &prepared.offer_core_digest)?,
+        ),
+        (
+            intent_digest().encode(env),
+            binary(env, &prepared.intent_digest)?,
+        ),
+        (
+            account_principal_digest().encode(env),
+            binary(env, &prepared.account_principal_digest)?,
+        ),
+        (
+            device_did().encode(env),
+            binary(env, prepared.device_did.as_bytes())?,
+        ),
+        (
+            device_key_digest().encode(env),
+            binary(env, &prepared.device_key_digest)?,
+        ),
+        (
+            legacy_key_digest().encode(env),
+            binary(env, &prepared.legacy_key_digest)?,
+        ),
+        (
+            room_set_digest().encode(env),
+            binary(env, &prepared.room_set_digest)?,
+        ),
+        (
+            migration_snapshot_digest().encode(env),
+            binary(env, &prepared.migration_snapshot_digest)?,
+        ),
+    ] {
+        map = map.map_put(key, value).map_err(|_| String::from(REFUSED))?;
+    }
+    Ok(map)
+}
+
+fn encode_built_offer<'a>(
+    env: Env<'a>,
+    built: &selfsame_pairing::credential_v2::BuiltCredentialV2Offer,
+) -> Result<Term<'a>, String> {
+    let mut map = rustler::types::map::map_new(env);
+    for (key, value) in [
+        (offer_core().encode(env), binary(env, &built.offer_core)?),
+        (
+            offer_core_digest().encode(env),
+            binary(env, &built.offer_core_digest)?,
+        ),
+        (
+            intent_digest().encode(env),
+            binary(env, &built.intent_digest)?,
+        ),
+        (
+            signed_offer().encode(env),
+            binary(env, &built.signed_offer)?,
+        ),
+        (kid().encode(env), binary(env, built.kid.as_bytes())?),
+        (
+            account_principal_digest().encode(env),
+            binary(env, &built.account_principal_digest)?,
+        ),
+        (
+            device_did().encode(env),
+            binary(env, built.device_did.as_bytes())?,
+        ),
+        (
+            device_key_digest().encode(env),
+            binary(env, &built.device_key_digest)?,
+        ),
+        (
+            legacy_key_digest().encode(env),
+            binary(env, &built.legacy_key_digest)?,
+        ),
+        (
+            room_set_digest().encode(env),
+            binary(env, &built.room_set_digest)?,
+        ),
+        (
+            migration_snapshot_digest().encode(env),
+            binary(env, &built.migration_snapshot_digest)?,
+        ),
+    ] {
+        map = map.map_put(key, value).map_err(|_| String::from(REFUSED))?;
+    }
+    Ok(map)
+}
+
+fn utf8(input: &[u8]) -> Result<String, String> {
+    std::str::from_utf8(input)
+        .map(str::to_owned)
+        .map_err(|_| String::from(REFUSED))
+}
+
+fn exact<const N: usize>(input: &[u8]) -> Result<[u8; N], String> {
+    input.try_into().map_err(|_| String::from(REFUSED))
 }
 
 /// `cbcl_selfsame_erl:recognise_credential_v2_profile/5`.
