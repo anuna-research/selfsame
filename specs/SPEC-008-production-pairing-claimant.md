@@ -2,22 +2,22 @@
 id: SPEC-008
 title: Production Pairing Claimant — Transport, Real Credential, and Origin Trust
 status: draft
-version: 0.5.12-draft
+version: 0.5.13-draft
 tier: 1
 review-gate: test-first-implementation-owner-authorized; release-and-deployment-prohibited-pending-cross-model-pass
 authority-form: consolidated-direct-current-authority
-implementation-baseline: 0dbfb3c4323aec568ac2803d58c0aa71c301edda
+implementation-baseline: ff2f1394813a38ce9d0409726892b6e0c63d00ea
 generation-model-family: OpenAI GPT-5
 generation-model-version: gpt-5.6-sol
 generation-session: 01a029aa-9127-7c42-ad28-81512b91ded6
-generation-synthesis-trajectory: "owner-authorized standalone architecture -> F-A through F-E code traces -> rejected reviews through 0.5.11 -> executable TEST-1162 mutation gate"
+generation-synthesis-trajectory: "owner-authorized standalone architecture -> F-A through F-E code traces -> rejected reviews through 0.5.12 -> production-boundary transaction and Linux WASM gate"
 depends-on: "[[SPEC-007-cbcl-pairing-cutover]]; [[SPEC-004-application-scoped-identity]]; [[SPEC-003-android-apk-distribution]]; cbcl-pairing SPEC-001"
-last-updated: 2026-08-24
+last-updated: 2026-08-25
 ---
 
 # SPEC-008 — Production Pairing Claimant: Transport, Real Credential, and Origin Trust
 
-> **Consolidated current-law reissue.** Version 0.5.12 states the standalone
+> **Consolidated current-law reissue.** Version 0.5.13 states the standalone
 > first-contact authority directly. Trajectory documents and review reports
 > supply evidence only. They supply no current values.
 > The repository owner authorized local test-first implementation on
@@ -665,15 +665,14 @@ Untyped ingress-conversion evidence includes
 `crates/selfsame-app-identity/src/provider_hint.rs:96`, and
 `crates/selfsame-app-identity/src/profile.rs:384`.
 
-Production version-constant evidence includes
-`crates/selfsame-app-identity/src/lib.rs:109` and
-`crates/selfsame-app-identity/src/profile.rs:60`.
-
-Those two baseline sites are one recorded duplication, not two namespaces.
+Production version-constant evidence is
+`crates/selfsame-app-identity/src/profile.rs:60`. The crate root at
+`crates/selfsame-app-identity/src/lib.rs:109` publicly re-exports that item.
 The implementation SHALL keep `profile::PROFILE_VERSION` as the sole constant
 definition. The crate root MAY publicly re-export that item but SHALL NOT
-define a second `pub const PROFILE_VERSION`. The production scan SHALL prove
-one definition and any number of ordinary imports or re-exports.
+define a second `pub const PROFILE_VERSION`. The executable workspace scan
+SHALL prove exactly one definition, its owning source, and equality through
+the public re-export. Named witnesses never replace that complete scan.
 
 Named sites are evidence only. They cannot close or limit the production
 scan.
@@ -778,13 +777,21 @@ Unlink SHALL apply to an installed record and to every recognised pending
 record, including pre-payload phases that are not eligible for terminal
 recovery. Every pending record SHALL be visible to the person as an interrupted
 link after restart. Unlink SHALL require explicit confirmation and current-root
-presence. It SHALL remove only the exact pending-or-installed application
-record, the exact `(applicationId, relayOrigin)` policy selected by the person,
-and the profile cache contained by that record. It SHALL retain the root seed,
-sibling applications, and every remote hub record. It SHALL NOT claim remote
-hub revocation. Re-grant after hub-side deletion or confirmed local abandonment
-requires a complete fresh pairing ceremony. A local shortcut using the retained
-derived key is prohibited.
+presence. Selection SHALL retain both the exact pending-or-installed slot and
+the exact-pair policy state observed with it. Deletion SHALL refuse and retain
+the slot if either value differs at confirmed execution. An absent policy that
+was already absent at selection SHALL not prevent deletion. A trusted policy
+that was present at selection SHALL be removed before the exact slot. If slot
+deletion fails, policy restoration is best effort. A later selection of the
+still-present slot and now-absent policy SHALL remain deletable.
+
+Successful unlink SHALL remove only the selected application record, its
+selected `(applicationId, relayOrigin)` policy when present, and the profile
+cache contained by that record. It SHALL retain the root seed, sibling
+applications, and every remote hub record. It SHALL NOT claim remote hub
+revocation. Re-grant after hub-side deletion or confirmed local abandonment
+requires a complete fresh pairing ceremony. A local shortcut using the
+retained derived key is prohibited.
 
 Trace: [[SPEC-008-production-pairing-claimant#CON-986]], [[SPEC-008-production-pairing-claimant#CON-987]], [[SPEC-008-production-pairing-claimant#CON-988]], [[SPEC-008-production-pairing-claimant#CON-989]], [[SPEC-008-production-pairing-claimant#CON-990]], [[SPEC-008-production-pairing-claimant#TEST-1160]], [[SPEC-008-production-pairing-claimant#TEST-1161]], [[SPEC-008-production-pairing-claimant#TEST-1162]].
 
@@ -1109,7 +1116,7 @@ increment directly. Trajectory documents and review reports supply evidence
 only.
 
 The current SPEC-008 test set is TEST-901 through TEST-915 and TEST-1156
-through TEST-1164. Every member of that set is stated in this parent.
+through TEST-1166. Every member of that set is stated in this parent.
 [[SPEC-007-cbcl-pairing-cutover]] TEST-801 through TEST-821 remain the other
 current Selfsame test set and are stated in that parent. No plan or review can
 omit either set.
@@ -1119,7 +1126,7 @@ base-parent tests remain current outside this coordinated increment set.
 
 The coordinated review set contains this parent,
 [[SPEC-007-cbcl-pairing-cutover]] 0.3.6-draft, cbcl-pairing SPEC-001
-0.5.7-draft, and cbcl-bus SPEC-053 0.17.8-draft.
+0.5.7-draft, and cbcl-bus SPEC-053 0.17.9-draft.
 
 The `anuna-ssi` namespace reference is outside that set. It is pinned at
 `c7d462029841ea1884bb6f089732058d8838728d` only to resolve
@@ -1140,6 +1147,19 @@ The repository owner's 2026-08-24 waiver authorizes the Elephant SPL and local
 test-first implementation before PASS. It authorizes no production allocation,
 release, or deployment. Those actions still require the fresh Tier-1 PASS and
 their separate gates.
+
+The exact candidate closure is Selfsame
+`ff2f1394813a38ce9d0409726892b6e0c63d00ea`, cbcl-bus
+`22fcc012ff4d4746f251b497c11495b1b26c0f29`, cbcl-pairing
+`62ef4a968b46b4836374fcee1d78c410f730a7a7`, cbcl-rs
+`febc6691e6dd2d5f7116b1a4d84c984b64717564`, and did-crdt
+`1f409a4229d07a62dd4cc6b2dce3b5a2e18e78a1`. The vendored Selfsame browser
+WASM SHALL rebuild byte-identically under rustc 1.96.0 and wasm-bindgen
+0.2.126 on `x86_64-unknown-linux-gnu`, the hub CI container host. Its SHA-256
+is `23e14bf658321b49f759e43d002797e2f3cb3184fbe460c99b0b8f580ab5e781`.
+The provenance record SHALL equal all four source pins, the tool versions,
+host triple, and artefact digest. `--vendor` SHALL update those values from
+the already verified pin files rather than retaining caller-edited stale SHAs.
 
 ### CON-986 — Standalone claimant decisions, effects, and recovery
 
@@ -1308,7 +1328,7 @@ refuses before display, decision, or effect. Every `predecessorDigest` is the
 raw `objectContentHash` from cbcl-pairing SPEC-001 0.5.7-draft CON-031. The
 envelope field 2 carries the one retained `intentDigest`; no body can replace it.
 
-The offer body is exactly cbcl-bus SPEC-053 0.17.8-draft CON-012's
+The offer body is exactly cbcl-bus SPEC-053 0.17.9-draft CON-012's
 `signed-offer-v2`. The receipt body is exactly cbcl-pairing SPEC-001
 0.5.7-draft CON-028's `credential-v2-receipt-body`. The remaining nine bodies
 are:
@@ -1406,7 +1426,7 @@ ASCII. `previewFingerprintDigest` is
 those exact bytes. Every later occurrence is byte-identical to preparation.
 
 `authorityStatusResponse` is the exact deterministic-CBOR
-`authority-status-response-v2` from cbcl-bus SPEC-053 0.17.8-draft CON-012.
+`authority-status-response-v2` from cbcl-bus SPEC-053 0.17.9-draft CON-012.
 `authorityStatusDigest` is SHA-256 over those exact response bytes. The wallet
 SHALL recompute that digest and verify the response signature under the same
 profile `kid` and key that signed the offer. It SHALL require exact carrier
@@ -1420,7 +1440,7 @@ produce only refusal. The browser cannot replace the signed response with an
 outcome token or digest.
 
 `migrationConfirmationDigest` is the exact raw digest defined by cbcl-bus
-SPEC-053 0.17.8-draft CON-012. The wallet recomputes it from the authenticated
+SPEC-053 0.17.9-draft CON-012. The wallet recomputes it from the authenticated
 offer and its local `previewIssuerDid`. It copies no browser-supplied digest.
 
 The payload grant is one verbatim compact JWS in ASCII. It contains exactly
@@ -1519,7 +1539,7 @@ only the commitment in the authenticated finalization command.
 The hub includes that exact commitment in its signed immutable final status
 and indexes the status under the carrier ceremony. After ordinary relay
 receipt loss, `recover_claimant_completion` POSTs the token and ceremony. It
-uses cbcl-bus SPEC-053 0.17.8-draft CON-036's closed CBOR request to the
+uses cbcl-bus SPEC-053 0.17.9-draft CON-036's closed CBOR request to the
 exact application origin retained from
 [[SPEC-008-production-pairing-claimant#CON-988]]. The wallet repeats
 [[SPEC-004-application-scoped-identity#CON-220]] steps 1 through 5 against that
@@ -1568,36 +1588,38 @@ Verified by: [[SPEC-008-production-pairing-claimant#TEST-1161]].
 
 ### CON-990 — Pre-payload failure cannot strand an application slot
 
-Immediately after final approval becomes durable, the wallet SHALL arm one
-compensation guard over that immutable ceremony. The guard remains armed across
-the final-approval release, relay acknowledgement, every checkpoint
-replacement, plan, issuer creation, publication, resolver verification, grant
-construction, payload construction, and payload-checkpoint preparation.
+Before attempting to persist final approval, the wallet SHALL arm one
+compensation transaction over that immutable ceremony. Arming before the store
+call covers a backend that commits the initial slot and then reports failure.
+The transaction remains armed across the final-approval release and relay
+acknowledgement. It also covers every checkpoint replacement, plan, custody,
+publication, resolver, grant, payload, and payload-checkpoint operation.
 
-Every error return while that guard is armed SHALL, before returning, make a
-best-effort removal of the exact current recognised pending value for the same
-root generation, application, relay, profile, carrier, offer, decisions,
-preview, and exclusive offer deadline. A storage backend MAY have committed a
-replacement before reporting an error. Compensation therefore SHALL compare
-the immutable attempt identity and remove the recognised current pre-payload
-phase, rather than assuming that the guard's last in-memory phase is current.
+Every error return while the transaction is armed SHALL attempt exact pending
+removal before returning. Exact identity covers root generation, application,
+relay, profile, carrier, offer, decisions, preview, and exclusive deadline. A
+storage backend MAY have committed a replacement before reporting an error.
+Compensation SHALL compare the immutable attempt identity. It SHALL remove the
+recognised current pre-payload phase without assuming an in-memory phase.
 It SHALL NOT remove another attempt, an installed record, or a sibling
 application. Compensation failure SHALL NOT replace or hide the original
 protocol error.
 
-The guard SHALL disarm only after the application's slot contains a successfully
+One typed transaction SHALL own initial persistence, every phase replacement,
+the fifteen named failure hooks, the final `PayloadPrepared` replacement, and
+disarm. The command SHALL have no direct guard-disarm authority. The transaction
+SHALL disarm only after the application's slot contains a successfully
 recognised durable `PayloadPrepared` value with its endpoint checkpoint. If an
 ambiguous storage result exposes that `PayloadPrepared` value, compensation
 SHALL retain it for [[SPEC-008-production-pairing-claimant#CON-989]] recovery.
 Errors in payload release or later receipt handling likewise retain it.
 
-Automatic pre-payload compensation removes the pending ceremony cache but does
-not revoke the person's already accepted exact-pair policy. Independent of that
-automatic path, [[SPEC-008-production-pairing-claimant#REQ-1006]]'s confirmed
-unlink SHALL enumerate every pending phase and SHALL remove the exact local
-slot, its exact-pair policy, and its contained profile cache under current-root
-presence. That local action retains the hierarchy root and remote state and
-reports no remote revocation.
+Automatic pre-payload compensation removes the pending ceremony cache. It does
+not revoke the person's accepted exact-pair policy. Independently,
+[[SPEC-008-production-pairing-claimant#REQ-1006]]'s confirmed unlink SHALL
+enumerate every pending phase. It SHALL remove the exact slot, policy, and
+contained profile cache under current-root presence. It retains the hierarchy
+root and remote state and reports no remote revocation.
 
 Implements: [[SPEC-008-production-pairing-claimant#REQ-1006]].
 Verified by: [[SPEC-008-production-pairing-claimant#TEST-1162]].
@@ -1829,7 +1851,7 @@ Require credential/v2 to reach no classified credential-v1 site. Require
 frozen v1 bytes to remain byte-identical.
 
 Require this Selfsame parent and its open review gate. Require cbcl-bus
-SPEC-053 0.17.8-draft to name this coordinated review set.
+SPEC-053 0.17.9-draft to name this coordinated review set.
 
 Require the cbcl-pairing parent consumer pointer here. Require generation
 family, version, session, and synthesis trajectory in this parent,
@@ -2029,12 +2051,16 @@ accept a carrier, grant, or caller-selected status object.
 
 Inject one terminal error after each successful final-approval persistence and
 before each possible successful `PayloadPrepared` replacement. Include final
-approval release, acknowledgement read and recognition, every checkpoint and
-stage replacement, custody, publication, resolver, grant, payload construction,
-checkpoint preparation, and a storage backend that commits a newer phase before
+approval release, acknowledgement read, and recognition. Include every
+replacement, custody, publication, resolver, grant, payload, and checkpoint
+preparation boundary. Include a backend that commits a newer phase before
 reporting failure. Require the original error, no installed record, no
 pre-payload pending record, and successful persistence by a fresh ceremony for
-the same application. Delete or disarm the guard and require the test to fail.
+the same application. The injected steps SHALL use the exact typed hooks in
+`cbcl_v2_final_decide`. Each hook SHALL occur once and in causal order. They
+SHALL NOT be labels over synthetic guard drops. Move arming after persistence
+and require failure. Move disarm before durable `PayloadPrepared` and require
+failure. Delete a hook or disarm the transaction and require failure.
 
 Expose a recognised pending value at every phase after restart. Require a
 person-visible interrupted-link row containing only application, relay, and
@@ -2047,14 +2073,16 @@ fresh same-application ceremony to occupy the released slot.
 Persist a correct `PayloadPrepared` value and inject failures in payload release
 and receipt handling. Require preservation for
 [[SPEC-008-production-pairing-claimant#CON-989]] recovery. Substitute another
-attempt, an installed value, a changed root generation, or a changed exact-pair
-policy and require compensation or unlink to refuse rather than delete it.
+attempt, an installed value, or a changed root generation. Also substitute a
+changed exact-pair policy. Require refusal rather than deletion.
 
 The continuous gate SHALL execute this process-global keyring test in an
 isolated test process, even while it remains ignored by the concurrent default
 library suite. The continuous browser gate SHALL execute the wallet pairing
 lifecycle suite that exposes and abandons interrupted pending rows. Removing
-either explicit invocation SHALL fail review evidence for this test.
+either explicit invocation SHALL fail review evidence for this test. The
+isolated command SHALL assert the exact one-passed result so a renamed or
+unselected test cannot exit successfully.
 
 ### TEST-1163 — Oversized reload evidence is unavailable, not revoked
 
@@ -2064,7 +2092,7 @@ Return every typed WebFinger failure while reloading an installed link. A
 committed 404 absence SHALL select `hub-deleted`. Timeout, transport refusal,
 policy refusal, and an oversized bounded body SHALL select `unavailable`, retain
 the record, and grant no capability. A received but unrecognisable binding MAY
-select the invalid-or-revoked result, but no wildcard or future error arm may
+select the invalid-or-revoked result. No wildcard or future error arm can
 silently classify unavailability as revocation. Mutate the oversized mapping to
 revoked and require this test to fail.
 
@@ -2081,25 +2109,66 @@ tracked byte in each sibling in turn. The witness SHALL fail in every case even
 when the build override is set. Restore a clean exact-pin closure and require
 the witness and locked workspace build to pass without the override.
 
+### TEST-1165 — Hub CI reproduces the exact browser WASM
+
+**Validates:** [[SPEC-008-production-pairing-claimant#CON-985]].
+
+From clean detached checkouts at the five exact candidate revisions, execute
+`scripts/check-selfsame-wasm-rebuild.sh` inside the same
+`x86_64-unknown-linux-gnu` container platform as hub CI. Require rustc 1.96.0,
+wasm-bindgen 0.2.126, exact byte equality for all four generated artifacts,
+and SHA-256
+`23e14bf658321b49f759e43d002797e2f3cb3184fbe460c99b0b8f580ab5e781`
+for `selfsame_web_device_bg.wasm`. Change any recorded source SHA, tool
+version, host triple, generated byte, or digest and require refusal before the
+later hub gates claim success.
+
+Run the gate from the actual Linux CI job. A locally successful macOS rebuild,
+an unreachable runner platform, or a provenance-only edit is not evidence.
+
+### TEST-1166 — One profile-version definition governs the workspace
+
+**Validates:** [[SPEC-008-production-pairing-claimant#REQ-1005]].
+
+Recursively scan every Rust source in the workspace while excluding build
+outputs. Require exactly one `pub const PROFILE_VERSION` definition and require
+it to be `selfsame-app-identity/src/profile.rs`. Require the crate-root export
+to equal that item. Add a second definition at the crate root or elsewhere,
+remove the re-export, or make the exported value diverge and require the test
+to fail.
+
 ## Changelog
+
+- **0.5.13-draft — 2026-08-25 — production-boundary and reproducibility
+  remediation.** This owner-authorized test-first reissue closes all four
+  MEDIUM findings from the 0.5.12 fresh review. The post-approval command now
+  executes fifteen injectable typed transaction boundaries; arming precedes
+  initial persistence and only transaction-owned durable `PayloadPrepared`
+  commit can disarm. Unlink compares the selected slot and selected policy
+  state while permitting recovery from an absent-policy retry. One profile
+  version definition is executable law. The hub artefact is re-vendored and
+  byte-rebuilt on CI-compatible `x86_64-unknown-linux-gnu`. The isolated test
+  selector now proves one test ran, and the credential-v1 registry citation is
+  corrected. Release and deployment remain prohibited pending a fresh
+  cross-model Tier-1 PASS and separate owner approval.
 
 - **0.5.12-draft — 2026-08-24 — executable interrupted-link gate.** This
   owner-authorized test-first reissue closes the 0.5.11 review's only blocking
   finding. It executes [[SPEC-008-production-pairing-claimant#TEST-1162]] in an
-  isolated CI process, executes the wallet lifecycle browser suite, covers all
-  fifteen named pre-payload boundaries, and kills mutations that remove
-  payload retention, attempt identity, installed-slot protection, exact-slot
-  compare-and-delete, and exact-pair-policy stability. Release and deployment
+  isolated CI process. It also executes the wallet lifecycle browser suite and
+  covers all fifteen named boundaries. Its mutations remove payload retention,
+  attempt identity, installed-slot protection, exact-slot deletion, and policy
+  stability. Each mutation is killed. Release and deployment
   remain prohibited until a fresh cross-model Tier-1 PASS and separate owner
   approval.
 
 - **0.5.11-draft — 2026-08-24 — adversarial implementation remediation.**
   This owner-authorized consolidated reissue closes the 0.5.10 review's two HIGH
-  findings: acknowledged allocator bootstrap restoration and stranded
-  pre-payload wallet slots. It makes every pending phase person-visible and
-  confirmed-abandonable, preserves the post-payload recovery boundary, closes
-  the oversized WebFinger classification, and extends the local pin witness to
-  all three sibling dependencies. Test-first implementation is authorized;
+  findings: allocator restoration and stranded pre-payload wallet slots. Every
+  pending phase becomes person-visible and confirmed-abandonable. The reissue
+  preserves post-payload recovery and closes oversized WebFinger handling. It
+  extends the local pin witness to all three sibling dependencies. Test-first
+  implementation is authorized;
   release and deployment remain prohibited until a fresh cross-model Tier-1
   PASS and separate deployment approval.
 
