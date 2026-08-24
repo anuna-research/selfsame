@@ -366,7 +366,7 @@ pub async fn cbcl_v2_final_decide(
             Ok((generation, checkpoint))
         })??;
 
-    let durable = crate::cbcl_v2_completion::PendingCredentialV2Completion::new(
+    let mut durable = crate::cbcl_v2_completion::PendingCredentialV2Completion::new(
         crate::cbcl_v2_completion::PendingCredentialV2Input {
             root_generation,
             application_id: &application_id,
@@ -389,13 +389,173 @@ pub async fn cbcl_v2_final_decide(
         .checkpoint_persisted(generation)
         .map_err(|_| UiError::from("PairingFailed"))?;
     send_effects(&mut pending.socket, effects)?;
+
+    // The blind relay acknowledgement changes the cached-frame projection.
+    // Seal and replace the pending record before any identity signature.
+    let acknowledgement = read_binary(&mut pending.socket)?;
+    let acknowledgement_now = crate::commands::now();
+    let mut acknowledgement_nonce = [0_u8; 12];
+    rand::rngs::OsRng.fill_bytes(&mut acknowledgement_nonce);
+    let acknowledgement_effects =
+        crate::custody::Custody::use_hierarchy_root(&passcode, |root| -> Result<_> {
+            let wrapping_key = crate::cbcl_v2_completion::checkpoint_wrapping_key(
+                root,
+                &application_id,
+                carrier.carrier_ceremony_id(),
+            )?;
+            pending
+                .claimant
+                .core_mut()
+                .receive_durable(
+                    &acknowledgement,
+                    acknowledgement_now,
+                    &wrapping_key,
+                    cbcl_pairing::credential_v2::CredentialV2CheckpointNonce::from_csprng(
+                        acknowledgement_nonce,
+                    ),
+                )
+                .map_err(|_| UiError::from("PairingFailed"))
+        })??;
+    let (acknowledgement_generation, acknowledgement_checkpoint) =
+        one_checkpoint(acknowledgement_effects)?;
+    let acknowledged =
+        durable.with_checkpoint(acknowledgement_generation, &acknowledgement_checkpoint)?;
+    crate::cbcl_v2_completion::replace_pending(&durable, &acknowledged)?;
+    let after_acknowledgement = pending
+        .claimant
+        .core_mut()
+        .checkpoint_persisted(acknowledgement_generation)
+        .map_err(|_| UiError::from("PairingFailed"))?;
+    if !after_acknowledgement.is_empty() {
+        return Err(UiError::from("PairingFailed"));
+    }
+    durable = acknowledged;
+
+    let profile = pending.claimant.profile().clone();
+    let plan = crate::cbcl_v2_completion::CredentialV2ProvisioningPlan::from_authenticated_offer(
+        &profile,
+        &recognised,
+        &preview_did,
+    )?;
+    let effect_time = i64::try_from(crate::commands::now())
+        .map_err(|_| UiError::from("PairingProvisioningRefused"))?;
+    if u64::try_from(effect_time).map_or(true, |value| value >= recognised.expires_at) {
+        return Err(UiError::from("PairingOfferExpired"));
+    }
+    let mut grant_id = [0_u8; 32];
+    rand::rngs::OsRng.fill_bytes(&mut grant_id);
+    let planned = durable.planned(effect_time, grant_id)?;
+    crate::cbcl_v2_completion::replace_pending(&durable, &planned)?;
+    durable = planned;
+
+    // First final signature: issuer creation only. The deterministic plan was
+    // durable before this custody call, and the preview is re-derived before
+    // issuer construction inside the call.
+    let issuer = crate::custody::Custody::use_hierarchy_root(&passcode, |root| {
+        crate::cbcl_v2_completion::build_issuer_artifacts(root, &plan, effect_time)
+    })??;
+    let issuer_created = durable.issuer_created(&issuer)?;
+    crate::cbcl_v2_completion::replace_pending(&durable, &issuer_created)?;
+    durable = issuer_created;
+
+    let publication =
+        selfsame_app_identity_net::state::publish_issuer_identity(&profile, &issuer.identity)
+            .await
+            .map_err(|_| UiError::from("PairingResolverUnavailable"))?;
+    if publication.acknowledged.is_empty() {
+        return Err(UiError::from("PairingResolverUnavailable"));
+    }
+    let resolved = selfsame_app_identity_net::state::resolve_closure(
+        &profile,
+        &issuer.identity.did,
+        None,
+        selfsame_app_identity_net::state::Acceptance::Repeat,
+    )
+    .await
+    .map_err(|_| UiError::from("PairingResolverUnavailable"))?;
+    if resolved.document.did.as_str() != issuer.identity.did
+        || resolved.document.is_deactivated()
+        || !resolved
+            .document
+            .also_known_as()
+            .iter()
+            .any(|value| value == &issuer.identity.acct_uri)
+    {
+        return Err(UiError::from("PairingResolverRefused"));
+    }
+
+    // Grant construction follows verified resolver closure. Reciprocal
+    // WebFinger cannot exist until the hub consumes this grant; the browser/hub
+    // finalizer provisions it atomically, and wallet installation verifies it
+    // from the authenticated receipt before granting capability.
+    let grant = crate::custody::Custody::use_hierarchy_root(&passcode, |root| {
+        crate::cbcl_v2_completion::build_grant_artifacts(
+            root,
+            &plan,
+            &issuer,
+            grant_id,
+            effect_time,
+            profile.revocation.max_grant_lifetime_seconds,
+        )
+    })??;
+    let provisioned = durable.provisioned(&grant)?;
+    crate::cbcl_v2_completion::replace_pending(&durable, &provisioned)?;
+
+    let payload = pending
+        .claimant
+        .body_authority()
+        .payload(
+            &final_decision,
+            selfsame_pairing::credential_v2::CredentialV2PayloadInput {
+                grant_id: grant.grant_id,
+                grant: grant.grant.clone(),
+            },
+        )
+        .map_err(|_| UiError::from("PairingFailed"))?;
+    let payload_now = crate::commands::now();
+    if payload_now >= recognised.expires_at {
+        return Err(UiError::from("PairingOfferExpired"));
+    }
+    let mut payload_nonce = [0_u8; 12];
+    rand::rngs::OsRng.fill_bytes(&mut payload_nonce);
+    let payload_effects =
+        crate::custody::Custody::use_hierarchy_root(&passcode, |root| -> Result<_> {
+            let wrapping_key = crate::cbcl_v2_completion::checkpoint_wrapping_key(
+                root,
+                &application_id,
+                carrier.carrier_ceremony_id(),
+            )?;
+            pending
+                .claimant
+                .core_mut()
+                .prepare_payload(
+                    &payload,
+                    &wrapping_key,
+                    cbcl_pairing::credential_v2::CredentialV2CheckpointNonce::from_csprng(
+                        payload_nonce,
+                    ),
+                    payload_now,
+                )
+                .map_err(|_| UiError::from("PairingFailed"))
+        })??;
+    let (payload_generation, payload_checkpoint) = one_checkpoint(payload_effects)?;
+    let payload_prepared = provisioned
+        .payload_prepared(payload.content_hash())?
+        .with_checkpoint(payload_generation, &payload_checkpoint)?;
+    crate::cbcl_v2_completion::replace_pending(&provisioned, &payload_prepared)?;
+    let payload_release = pending
+        .claimant
+        .core_mut()
+        .checkpoint_persisted(payload_generation)
+        .map_err(|_| UiError::from("PairingFailed"))?;
+    send_effects(&mut pending.socket, payload_release)?;
     session
         .0
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .pending_cbcl_v2 = Some(pending);
     Ok(CredentialV2FinalDecisionView {
-        outcome: "provisioning-pending",
+        outcome: "payload-sent",
     })
 }
 
@@ -525,6 +685,23 @@ fn send_effects(
         }
     }
     Ok(())
+}
+
+fn one_checkpoint(
+    effects: Vec<CredentialV2ClaimantEffect>,
+) -> Result<(u64, cbcl_pairing::credential_v2::EndpointCheckpointV2)> {
+    let mut effects = effects.into_iter();
+    let Some(CredentialV2ClaimantEffect::Checkpoint {
+        generation,
+        checkpoint,
+    }) = effects.next()
+    else {
+        return Err(UiError::from("PairingFailed"));
+    };
+    if effects.next().is_some() {
+        return Err(UiError::from("PairingFailed"));
+    }
+    Ok((generation, checkpoint))
 }
 
 fn wait_outbound_ack(pending: &mut PendingCredentialV2Pairing) -> Result<()> {

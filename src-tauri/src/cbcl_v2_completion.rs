@@ -12,13 +12,19 @@ use cbcl_pairing::credential_v2::{
 };
 use hkdf::Hkdf;
 use selfsame_app_identity::{
-    codec,
+    alias::AcctUri,
+    codec, didkey, grant,
     hierarchy::HierarchyRoot,
+    issuer::{self, IssuerIdentity},
     profile::ApplicationId,
+    scope::AccountScopeId,
     uri::{self, UriPolicy},
 };
+use selfsame_app_identity_net::state::SignedClosure;
+use selfsame_pairing::credential_v2::RecognisedCredentialV2Offer;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256, Sha512};
+use std::sync::Mutex;
 use zeroize::Zeroizing;
 
 use crate::{commands::UiError, store};
@@ -29,7 +35,143 @@ const CHECKPOINT_LABEL: &[u8] = b"selfsame credential/v2 claimant checkpoint wra
 const ROOT_GENERATION_LABEL: &[u8] = b"selfsame credential/v2 root generation v1\0";
 const MAX_SLOT_OCTETS: usize = 180_000;
 
+// The platform store does not expose compare-and-swap. Selfsame is a
+// single-instance application, so one process-wide lock makes each slot's
+// read/recognise/write sequence indivisible inside the only writer process.
+// A future multi-process client needs a backend CAS primitive instead.
+static SLOT_LOCK: Mutex<()> = Mutex::new(());
+
 type Result<T> = std::result::Result<T, UiError>;
+
+pub(crate) struct CredentialV2ProvisioningPlan {
+    application: ApplicationId,
+    account_authority: String,
+    scope: AccountScopeId,
+    device_did: String,
+    device_public_key: [u8; 32],
+    permissions: Vec<String>,
+    preview_issuer_did: String,
+}
+
+pub(crate) struct CredentialV2IssuerArtifacts {
+    pub identity: IssuerIdentity,
+    pub resolver_closure: Vec<u8>,
+}
+
+pub(crate) struct CredentialV2GrantArtifacts {
+    pub grant_id: [u8; 32],
+    pub grant: String,
+}
+
+impl CredentialV2ProvisioningPlan {
+    pub fn from_authenticated_offer(
+        profile: &selfsame_app_identity::profile::ApplicationProfile,
+        offer: &RecognisedCredentialV2Offer,
+        preview_issuer_did: &str,
+    ) -> Result<Self> {
+        let offer_core_digest: [u8; 32] = Sha256::digest(&offer.offer_core).into();
+        if offer.profile_digest != *profile.digest()
+            || offer.claims.application_id() != profile.application_id.as_str()
+            || offer.claims.offer_core_digest() != &offer_core_digest
+            || preview_issuer_did.parse::<did_crdt::Did>().is_err()
+        {
+            return Err(UiError::from("PairingProvisioningRefused"));
+        }
+        let device_did = offer.claims.device_binding().device_did();
+        let device_public_key =
+            didkey::decode(device_did).map_err(|_| UiError::from("PairingProvisioningRefused"))?;
+        Ok(Self {
+            application: profile.application_id.clone(),
+            account_authority: profile.account_authority.clone(),
+            scope: AccountScopeId::from_octets(
+                *offer.claims.account_provenance().account_scope_id(),
+            ),
+            device_did: device_did.into(),
+            device_public_key,
+            permissions: offer.claims.permissions().to_vec(),
+            preview_issuer_did: preview_issuer_did.into(),
+        })
+    }
+}
+
+pub(crate) fn build_issuer_artifacts(
+    root: &HierarchyRoot,
+    plan: &CredentialV2ProvisioningPlan,
+    effect_time: i64,
+) -> Result<CredentialV2IssuerArtifacts> {
+    let now_ms = u64::try_from(effect_time)
+        .ok()
+        .and_then(|value| value.checked_mul(1_000))
+        .ok_or_else(|| UiError::from("PairingProvisioningRefused"))?;
+    let home = selfsame_app_identity::hierarchy::derive(root, &plan.application, &plan.scope);
+    let home_did = home
+        .home_did()
+        .map_err(|_| UiError::from("PairingIdentityUnavailable"))?;
+    if home_did != plan.preview_issuer_did {
+        return Err(UiError::from("PairingPreviewChanged"));
+    }
+    let identity = issuer::create(home.signing_key(), &plan.account_authority, now_ms)
+        .map_err(|_| UiError::from("PairingProvisioningRefused"))?;
+    if identity.did != home_did || !identity.authorises_grants {
+        return Err(UiError::from("PairingProvisioningRefused"));
+    }
+    let resolver_closure = serde_json::to_vec(&SignedClosure {
+        target: identity.closure.target.clone(),
+        deltas: identity.closure.deltas.clone(),
+    })
+    .map_err(|_| UiError::from("PairingProvisioningRefused"))?;
+    if resolver_closure.is_empty()
+        || resolver_closure.len() > selfsame_app_identity_net::state::MAX_CLOSURE_OCTETS
+    {
+        return Err(UiError::from("PairingProvisioningRefused"));
+    }
+    Ok(CredentialV2IssuerArtifacts {
+        identity,
+        resolver_closure,
+    })
+}
+
+pub(crate) fn build_grant_artifacts(
+    root: &HierarchyRoot,
+    plan: &CredentialV2ProvisioningPlan,
+    issuer: &CredentialV2IssuerArtifacts,
+    grant_id: [u8; 32],
+    effect_time: i64,
+    max_grant_lifetime_seconds: i64,
+) -> Result<CredentialV2GrantArtifacts> {
+    let valid_until = effect_time
+        .checked_add(max_grant_lifetime_seconds)
+        .filter(|value| *value > effect_time)
+        .ok_or_else(|| UiError::from("PairingProvisioningRefused"))?;
+    let home = selfsame_app_identity::hierarchy::derive(root, &plan.application, &plan.scope);
+    let home_did = home
+        .home_did()
+        .map_err(|_| UiError::from("PairingIdentityUnavailable"))?;
+    if home_did != plan.preview_issuer_did || home_did != issuer.identity.did {
+        return Err(UiError::from("PairingPreviewChanged"));
+    }
+    let account = AcctUri::parse(&issuer.identity.acct_uri)
+        .map_err(|_| UiError::from("PairingProvisioningRefused"))?;
+    let compact = grant::issue(
+        home.signing_key(),
+        &issuer.identity.did,
+        &grant_id,
+        &plan.device_did,
+        &plan.device_public_key,
+        &plan.application,
+        &account,
+        &plan.permissions,
+        effect_time,
+        valid_until,
+    );
+    if compact.len() > 49_152 {
+        return Err(UiError::from("PairingProvisioningRefused"));
+    }
+    Ok(CredentialV2GrantArtifacts {
+        grant_id,
+        grant: compact,
+    })
+}
 
 /// Inputs already authenticated by the live claimant ceremony.
 pub struct PendingCredentialV2Input<'a> {
@@ -77,6 +219,43 @@ pub struct PendingCredentialV2Completion {
     offer_expires_at: u64,
     checkpoint_generation: u64,
     endpoint_checkpoint: String,
+    stage: PendingCredentialV2Stage,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(
+    tag = "phase",
+    content = "facts",
+    rename_all = "kebab-case",
+    deny_unknown_fields
+)]
+enum PendingCredentialV2Stage {
+    FinalApproval,
+    Planned {
+        effect_time: i64,
+        grant_id: String,
+    },
+    IssuerCreated {
+        effect_time: i64,
+        grant_id: String,
+        issuer_did: String,
+        resolver_closure: String,
+    },
+    Provisioned {
+        effect_time: i64,
+        grant_id: String,
+        issuer_did: String,
+        grant: String,
+        resolver_closure: String,
+    },
+    PayloadPrepared {
+        effect_time: i64,
+        grant_id: String,
+        issuer_did: String,
+        grant: String,
+        resolver_closure: String,
+        payload_content_hash: String,
+    },
 }
 
 /// Installed capability facts retained only after immutable hub acknowledgement.
@@ -153,6 +332,7 @@ impl PendingCredentialV2Completion {
             offer_expires_at: input.offer_expires_at,
             checkpoint_generation: input.checkpoint_generation,
             endpoint_checkpoint: codec::b64url(input.checkpoint.as_bytes()),
+            stage: PendingCredentialV2Stage::FinalApproval,
         })
     }
 
@@ -166,6 +346,105 @@ impl PendingCredentialV2Completion {
     #[must_use]
     pub const fn checkpoint_generation(&self) -> u64 {
         self.checkpoint_generation
+    }
+
+    pub fn planned(&self, effect_time: i64, grant_id: [u8; 32]) -> Result<Self> {
+        if self.stage != PendingCredentialV2Stage::FinalApproval || effect_time <= 0 {
+            return Err(UiError::from("PairingCheckpointRefused"));
+        }
+        let mut next = self.clone();
+        next.stage = PendingCredentialV2Stage::Planned {
+            effect_time,
+            grant_id: codec::b64url(&grant_id),
+        };
+        next.validate()?;
+        Ok(next)
+    }
+
+    pub(crate) fn issuer_created(&self, artifacts: &CredentialV2IssuerArtifacts) -> Result<Self> {
+        let PendingCredentialV2Stage::Planned {
+            effect_time,
+            grant_id,
+        } = &self.stage
+        else {
+            return Err(UiError::from("PairingCheckpointRefused"));
+        };
+        if artifacts.identity.did != self.preview_issuer_did {
+            return Err(UiError::from("PairingCheckpointRefused"));
+        }
+        let mut next = self.clone();
+        next.stage = PendingCredentialV2Stage::IssuerCreated {
+            effect_time: *effect_time,
+            grant_id: grant_id.clone(),
+            issuer_did: artifacts.identity.did.clone(),
+            resolver_closure: codec::b64url(&artifacts.resolver_closure),
+        };
+        next.validate()?;
+        Ok(next)
+    }
+
+    pub(crate) fn provisioned(&self, artifacts: &CredentialV2GrantArtifacts) -> Result<Self> {
+        let PendingCredentialV2Stage::IssuerCreated {
+            effect_time,
+            grant_id,
+            issuer_did,
+            resolver_closure,
+        } = &self.stage
+        else {
+            return Err(UiError::from("PairingCheckpointRefused"));
+        };
+        if codec::decode_b64url_32(grant_id).ok() != Some(artifacts.grant_id) {
+            return Err(UiError::from("PairingCheckpointRefused"));
+        }
+        let mut next = self.clone();
+        next.stage = PendingCredentialV2Stage::Provisioned {
+            effect_time: *effect_time,
+            grant_id: grant_id.clone(),
+            issuer_did: issuer_did.clone(),
+            grant: artifacts.grant.clone(),
+            resolver_closure: resolver_closure.clone(),
+        };
+        next.validate()?;
+        Ok(next)
+    }
+
+    pub fn payload_prepared(&self, payload_content_hash: [u8; 32]) -> Result<Self> {
+        let PendingCredentialV2Stage::Provisioned {
+            effect_time,
+            grant_id,
+            issuer_did,
+            grant,
+            resolver_closure,
+        } = &self.stage
+        else {
+            return Err(UiError::from("PairingCheckpointRefused"));
+        };
+        let mut next = self.clone();
+        next.stage = PendingCredentialV2Stage::PayloadPrepared {
+            effect_time: *effect_time,
+            grant_id: grant_id.clone(),
+            issuer_did: issuer_did.clone(),
+            grant: grant.clone(),
+            resolver_closure: resolver_closure.clone(),
+            payload_content_hash: codec::b64url(&payload_content_hash),
+        };
+        next.validate()?;
+        Ok(next)
+    }
+
+    pub fn with_checkpoint(
+        &self,
+        generation: u64,
+        checkpoint: &EndpointCheckpointV2,
+    ) -> Result<Self> {
+        if generation <= self.checkpoint_generation || checkpoint.as_bytes().is_empty() {
+            return Err(UiError::from("PairingCheckpointRefused"));
+        }
+        let mut next = self.clone();
+        next.checkpoint_generation = generation;
+        next.endpoint_checkpoint = codec::b64url(checkpoint.as_bytes());
+        next.validate()?;
+        Ok(next)
     }
 
     fn validate(&self) -> Result<()> {
@@ -204,8 +483,108 @@ impl PendingCredentialV2Completion {
         {
             return Err(UiError::from("PairingCheckpointRefused"));
         }
+        self.stage.validate(&self.preview_issuer_did)?;
         Ok(())
     }
+}
+
+impl PendingCredentialV2Stage {
+    fn validate(&self, preview_issuer_did: &str) -> Result<()> {
+        let facts = match self {
+            Self::FinalApproval => return Ok(()),
+            Self::Planned {
+                effect_time,
+                grant_id,
+            } => {
+                if *effect_time <= 0 || codec::decode_b64url_32(grant_id).is_err() {
+                    return Err(UiError::from("PairingCheckpointRefused"));
+                }
+                return Ok(());
+            }
+            Self::IssuerCreated {
+                effect_time,
+                grant_id,
+                issuer_did,
+                resolver_closure,
+            } => {
+                if *effect_time <= 0
+                    || codec::decode_b64url_32(grant_id).is_err()
+                    || issuer_did != preview_issuer_did
+                    || issuer_did.parse::<did_crdt::Did>().is_err()
+                {
+                    return Err(UiError::from("PairingCheckpointRefused"));
+                }
+                validate_resolver_closure(resolver_closure, issuer_did)?;
+                return Ok(());
+            }
+            Self::Provisioned {
+                effect_time,
+                grant_id,
+                issuer_did,
+                grant,
+                resolver_closure,
+            }
+            | Self::PayloadPrepared {
+                effect_time,
+                grant_id,
+                issuer_did,
+                grant,
+                resolver_closure,
+                ..
+            } => (effect_time, grant_id, issuer_did, grant, resolver_closure),
+        };
+        let (effect_time, grant_id, issuer_did, grant, resolver_closure) = facts;
+        if *effect_time <= 0
+            || codec::decode_b64url_32(grant_id).is_err()
+            || issuer_did != preview_issuer_did
+            || issuer_did.parse::<did_crdt::Did>().is_err()
+            || grant.is_empty()
+            || grant.len() > 49_152
+        {
+            return Err(UiError::from("PairingCheckpointRefused"));
+        }
+        let compact = selfsame_app_identity::jws::recognise(grant, grant::GRANT_JWS, &[])
+            .map_err(|_| UiError::from("PairingCheckpointRefused"))?;
+        let recognised = grant::recognise(&compact.payload)
+            .map_err(|_| UiError::from("PairingCheckpointRefused"))?;
+        if recognised.issuer != *issuer_did || recognised.token != *grant_id {
+            return Err(UiError::from("PairingCheckpointRefused"));
+        }
+        validate_resolver_closure(resolver_closure, issuer_did)?;
+        if let Self::PayloadPrepared {
+            payload_content_hash,
+            ..
+        } = self
+        {
+            codec::decode_b64url_32(payload_content_hash)
+                .map_err(|_| UiError::from("PairingCheckpointRefused"))?;
+        }
+        Ok(())
+    }
+}
+
+fn validate_resolver_closure(value: &str, issuer_did: &str) -> Result<()> {
+    let closure = decode_bounded(value, selfsame_app_identity_net::state::MAX_CLOSURE_OCTETS)?;
+    let recognised: SignedClosure =
+        serde_json::from_slice(&closure).map_err(|_| UiError::from("PairingCheckpointRefused"))?;
+    let mut genesis = recognised
+        .deltas
+        .iter()
+        .filter(|delta| delta.parents.is_empty());
+    if recognised.deltas.is_empty()
+        || recognised
+            .deltas
+            .iter()
+            .any(|delta| delta.did.as_str() != issuer_did)
+        || !matches!((genesis.next(), genesis.next()), (Some(_), None))
+        || !recognised
+            .deltas
+            .iter()
+            .any(|delta| delta.content_hash().ok().as_ref() == Some(&recognised.target))
+    {
+        return Err(UiError::from("PairingCheckpointRefused"));
+    }
+    Ok(())
 }
 
 /// Derive a stable public generation identifier for the current root record.
@@ -245,9 +624,13 @@ pub fn checkpoint_wrapping_key(
     Ok(output)
 }
 
-/// Atomically occupy an empty application slot with one pending authority.
-/// Exact retry is idempotent; another pending or installed value refuses.
+/// Occupy an empty application slot with one pending authority.
+/// Exact retry is idempotent; another pending or installed value refuses. The
+/// read/recognise/write is process-atomic under [`SLOT_LOCK`].
 pub fn persist_pending(pending: &PendingCredentialV2Completion) -> Result<()> {
+    let _guard = SLOT_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     pending.validate()?;
     let entry = slot_name(&pending.application_id)?;
     let slot = CredentialV2LinkSlot::Pending(pending.clone());
@@ -262,6 +645,43 @@ pub fn persist_pending(pending: &PendingCredentialV2Completion) -> Result<()> {
                 Err(UiError::from("PairingApplicationAlreadyLinked"))
             }
         },
+    }
+}
+
+/// Replace one exact pending value with its next crash-safe phase. A stale,
+/// installed, or cross-application predecessor cannot advance the slot.
+pub fn replace_pending(
+    expected: &PendingCredentialV2Completion,
+    replacement: &PendingCredentialV2Completion,
+) -> Result<()> {
+    let _guard = SLOT_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    expected.validate()?;
+    replacement.validate()?;
+    if expected.application_id != replacement.application_id
+        || expected.root_generation != replacement.root_generation
+        || expected.carrier != replacement.carrier
+        || expected.offer != replacement.offer
+        || expected.intent_approve != replacement.intent_approve
+        || expected.comparison != replacement.comparison
+        || expected.final_approve != replacement.final_approve
+        || expected.preview_issuer_did != replacement.preview_issuer_did
+    {
+        return Err(UiError::from("PairingCheckpointRefused"));
+    }
+    let entry = slot_name(&expected.application_id)?;
+    let existing = store::get(&entry)
+        .map_err(|_| UiError::from("PairingCheckpointUnavailable"))?
+        .ok_or_else(|| UiError::from("PairingCheckpointRefused"))?;
+    match recognise_slot(&existing)? {
+        CredentialV2LinkSlot::Pending(current) if current == *expected => {
+            let encoded = encode_slot(&CredentialV2LinkSlot::Pending(replacement.clone()))?;
+            store::set(&entry, &encoded).map_err(|_| UiError::from("PairingCheckpointUnavailable"))
+        }
+        CredentialV2LinkSlot::Pending(_) | CredentialV2LinkSlot::Installed(_) => {
+            Err(UiError::from("PairingCheckpointRefused"))
+        }
     }
 }
 
@@ -403,5 +823,154 @@ mod tests {
         assert_ne!(first, second);
         assert!(first.starts_with(SLOT_PREFIX));
         assert!(!first.contains("chat.anuna.io"));
+    }
+
+    #[test]
+    fn post_approval_artifacts_bind_the_preview_scope_device_and_grant() {
+        let root = HierarchyRoot::from_octets([0x71; 64]);
+        let application = ApplicationId::parse("https://chat.anuna.io/selfsame/v2").unwrap();
+        let scope = AccountScopeId::from_octets([0x72; 32]);
+        let home = selfsame_app_identity::hierarchy::derive(&root, &application, &scope);
+        let preview = home.home_did().unwrap();
+        let home_public_key = home.public_key();
+        let installation_key = ed25519_dalek::SigningKey::from_bytes(&[0x73; 32])
+            .verifying_key()
+            .to_bytes();
+        let plan = CredentialV2ProvisioningPlan {
+            application,
+            account_authority: "accounts.chat.anuna.io".into(),
+            scope,
+            device_did: didkey::encode(&installation_key),
+            device_public_key: installation_key,
+            permissions: vec!["https://chat.anuna.io/permissions/account".into()],
+            preview_issuer_did: preview.clone(),
+        };
+        let issuer = build_issuer_artifacts(&root, &plan, 1_800_000_000).unwrap();
+        assert_eq!(issuer.identity.did, preview);
+        let artifacts =
+            build_grant_artifacts(&root, &plan, &issuer, [0x74; 32], 1_800_000_000, 86_400)
+                .unwrap();
+        assert_eq!(artifacts.grant_id, [0x74; 32]);
+        let compact =
+            selfsame_app_identity::jws::recognise(&artifacts.grant, grant::GRANT_JWS, &[]).unwrap();
+        compact.verify(&home_public_key).unwrap();
+        let recognised = grant::recognise(&compact.payload).unwrap();
+        assert_eq!(recognised.issuer, preview);
+        assert_eq!(recognised.device_public_key, installation_key);
+        assert_eq!(recognised.application, plan.application.as_str());
+        assert_eq!(recognised.token, codec::b64url(&artifacts.grant_id));
+        let closure: SignedClosure = serde_json::from_slice(&issuer.resolver_closure).unwrap();
+        assert_eq!(closure.deltas.len(), 3);
+    }
+
+    #[test]
+    fn preview_mismatch_refuses_before_issuer_construction() {
+        let root = HierarchyRoot::from_octets([0x61; 64]);
+        let application = ApplicationId::parse("https://chat.anuna.io/selfsame/v2").unwrap();
+        let scope = AccountScopeId::from_octets([0x62; 32]);
+        let installation_key = ed25519_dalek::SigningKey::from_bytes(&[0x63; 32])
+            .verifying_key()
+            .to_bytes();
+        let plan = CredentialV2ProvisioningPlan {
+            application,
+            account_authority: "accounts.chat.anuna.io".into(),
+            scope,
+            device_did: didkey::encode(&installation_key),
+            device_public_key: installation_key,
+            permissions: vec!["https://chat.anuna.io/permissions/account".into()],
+            preview_issuer_did: format!("did:crdt:{}", "a".repeat(64)),
+        };
+        assert!(build_issuer_artifacts(&root, &plan, 1_800_000_000).is_err());
+    }
+
+    #[test]
+    fn durable_effect_stages_bind_issuer_closure_grant_and_payload() {
+        let root = HierarchyRoot::from_octets([0x51; 64]);
+        let application = ApplicationId::parse("https://chat.anuna.io/selfsame/v2").unwrap();
+        let scope = AccountScopeId::from_octets([0x52; 32]);
+        let preview = selfsame_app_identity::hierarchy::derive(&root, &application, &scope)
+            .home_did()
+            .unwrap();
+        let installation_key = ed25519_dalek::SigningKey::from_bytes(&[0x53; 32])
+            .verifying_key()
+            .to_bytes();
+        let plan = CredentialV2ProvisioningPlan {
+            application,
+            account_authority: "accounts.chat.anuna.io".into(),
+            scope,
+            device_did: didkey::encode(&installation_key),
+            device_public_key: installation_key,
+            permissions: vec!["https://chat.anuna.io/permissions/account".into()],
+            preview_issuer_did: preview.clone(),
+        };
+        let issuer = build_issuer_artifacts(&root, &plan, 1_800_000_000).unwrap();
+        let grant = build_grant_artifacts(&root, &plan, &issuer, [0x54; 32], 1_800_000_000, 86_400)
+            .unwrap();
+        let closure = codec::b64url(&issuer.resolver_closure);
+        let grant_id = codec::b64url(&grant.grant_id);
+
+        let planned = PendingCredentialV2Stage::Planned {
+            effect_time: 1_800_000_000,
+            grant_id: grant_id.clone(),
+        };
+        assert!(planned.validate(&preview).is_ok());
+        let issuer_created = PendingCredentialV2Stage::IssuerCreated {
+            effect_time: 1_800_000_000,
+            grant_id: grant_id.clone(),
+            issuer_did: preview.clone(),
+            resolver_closure: closure.clone(),
+        };
+        assert!(issuer_created.validate(&preview).is_ok());
+        let provisioned = PendingCredentialV2Stage::Provisioned {
+            effect_time: 1_800_000_000,
+            grant_id: grant_id.clone(),
+            issuer_did: preview.clone(),
+            grant: grant.grant.clone(),
+            resolver_closure: closure.clone(),
+        };
+        assert!(provisioned.validate(&preview).is_ok());
+        let payload = PendingCredentialV2Stage::PayloadPrepared {
+            effect_time: 1_800_000_000,
+            grant_id,
+            issuer_did: preview.clone(),
+            grant: grant.grant,
+            resolver_closure: closure,
+            payload_content_hash: codec::b64url(&[0x55; 32]),
+        };
+        assert!(payload.validate(&preview).is_ok());
+
+        let other_root = HierarchyRoot::from_octets([0x56; 64]);
+        let other_preview =
+            selfsame_app_identity::hierarchy::derive(&other_root, &plan.application, &plan.scope)
+                .home_did()
+                .unwrap();
+        let other_plan = CredentialV2ProvisioningPlan {
+            application: plan.application.clone(),
+            account_authority: plan.account_authority.clone(),
+            scope: plan.scope.clone(),
+            device_did: plan.device_did.clone(),
+            device_public_key: plan.device_public_key,
+            permissions: plan.permissions.clone(),
+            preview_issuer_did: other_preview,
+        };
+        let other_issuer = build_issuer_artifacts(&other_root, &other_plan, 1_800_000_000).unwrap();
+        let substituted_closure = PendingCredentialV2Stage::IssuerCreated {
+            effect_time: 1_800_000_000,
+            grant_id: codec::b64url(&[0x54; 32]),
+            issuer_did: preview.clone(),
+            resolver_closure: codec::b64url(&other_issuer.resolver_closure),
+        };
+        assert!(substituted_closure.validate(&preview).is_err());
+
+        let mut malformed_payload = payload;
+        let PendingCredentialV2Stage::PayloadPrepared {
+            payload_content_hash,
+            ..
+        } = &mut malformed_payload
+        else {
+            unreachable!("the fixture is payload-prepared")
+        };
+        *payload_content_hash = "not-a-32-byte-digest".into();
+        assert!(malformed_payload.validate(&preview).is_err());
     }
 }
