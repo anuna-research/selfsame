@@ -2,7 +2,7 @@
 id: SPEC-008
 title: Production Pairing Claimant — Transport, Real Credential, and Origin Trust
 status: draft
-version: 0.5.16-draft
+version: 0.5.17-draft
 tier: 1
 review-gate: test-first-implementation-owner-authorized; release-and-deployment-prohibited-pending-cross-model-pass
 authority-form: consolidated-direct-current-authority
@@ -17,7 +17,7 @@ last-updated: 2026-08-25
 
 # SPEC-008 — Production Pairing Claimant: Transport, Real Credential, and Origin Trust
 
-> **Consolidated current-law reissue.** Version 0.5.16 states the standalone
+> **Consolidated current-law reissue.** Version 0.5.17 states the standalone
 > first-contact authority directly. Trajectory documents and review reports
 > supply evidence only. They supply no current values.
 > The repository owner authorized local test-first implementation on
@@ -600,7 +600,7 @@ terminal boundaries.
 This parent specification is the sole current Selfsame authority for this
 increment. Trajectory documents provide evidence and no normative precedence.
 
-Credential/v2 SHALL conform to cbcl-pairing SPEC-001 0.5.7-draft. The
+Credential/v2 SHALL conform to cbcl-pairing SPEC-001 0.5.8-draft. The
 cbcl-pairing parent records this document as its consumer.
 
 The wallet and browser use separate typed machine-carrier and PAIR1
@@ -705,7 +705,7 @@ The public machine carrier and human presence input SHALL remain separate typed
 values. The carrier SHALL contain no `PAIR1-` text, CPace secret, or claim
 bearer. The presence input SHALL contain exactly one recognised `PAIR1-` value
 that yields independent raw sixteen-octet CPace and claim tokens under
-cbcl-pairing SPEC-001 0.5.7-draft.
+cbcl-pairing SPEC-001 0.5.8-draft.
 
 The scan and paste carrier paths SHALL never populate the presence input. The
 type-only presence component SHALL have no paste, autofill, password-manager,
@@ -1125,8 +1125,8 @@ The exact coordinated hub test set is TEST-115 through TEST-121. The hub's
 base-parent tests remain current outside this coordinated increment set.
 
 The coordinated review set contains this parent,
-[[SPEC-007-cbcl-pairing-cutover]] 0.3.7-draft, cbcl-pairing SPEC-001
-0.5.7-draft, and cbcl-bus SPEC-053 0.17.12-draft.
+[[SPEC-007-cbcl-pairing-cutover]] 0.3.8-draft, cbcl-pairing SPEC-001
+0.5.8-draft, and cbcl-bus SPEC-053 0.17.13-draft.
 
 The `anuna-ssi` namespace reference is outside that set. It is pinned at
 `c7d462029841ea1884bb6f089732058d8838728d` only to resolve
@@ -1325,12 +1325,12 @@ Verified by: [[SPEC-008-production-pairing-claimant#TEST-1158]], [[SPEC-008-prod
 Every logical body below is exact deterministic CBOR. The map is closed: an
 unknown, missing, duplicate, reordered, non-canonical, or trailing member
 refuses before display, decision, or effect. Every `predecessorDigest` is the
-raw `objectContentHash` from cbcl-pairing SPEC-001 0.5.7-draft CON-031. The
+raw `objectContentHash` from cbcl-pairing SPEC-001 0.5.8-draft CON-031. The
 envelope field 2 carries the one retained `intentDigest`; no body can replace it.
 
-The offer body is exactly cbcl-bus SPEC-053 0.17.9-draft CON-012's
+The offer body is exactly cbcl-bus SPEC-053 0.17.13-draft CON-012's
 `signed-offer-v2`. The receipt body is exactly cbcl-pairing SPEC-001
-0.5.7-draft CON-028's `credential-v2-receipt-body`. The remaining nine bodies
+0.5.8-draft CON-028's `credential-v2-receipt-body`. The remaining nine bodies
 are:
 
 ```cddl
@@ -1426,7 +1426,7 @@ ASCII. `previewFingerprintDigest` is
 those exact bytes. Every later occurrence is byte-identical to preparation.
 
 `authorityStatusResponse` is the exact deterministic-CBOR
-`authority-status-response-v2` from cbcl-bus SPEC-053 0.17.9-draft CON-012.
+`authority-status-response-v2` from cbcl-bus SPEC-053 0.17.13-draft CON-012.
 `authorityStatusDigest` is SHA-256 over those exact response bytes. The wallet
 SHALL recompute that digest and verify the response signature under the same
 profile `kid` and key that signed the offer. It SHALL require exact carrier
@@ -1530,7 +1530,7 @@ receiptRecoveryCommitment = SHA-256(
 )
 ```
 
-`EXPORTER` and `TH` are the raw cbcl-pairing SPEC-001 0.5.7-draft CON-031
+`EXPORTER` and `TH` are the raw cbcl-pairing SPEC-001 0.5.8-draft CON-031
 values. Both results contain 32 octets. The token is secret and zeroizable. It
 is sealed inside the endpoint checkpoint. It never enters an offer, profile,
 log, error, metric, URL, hub record, or JavaScript. The browser sends
@@ -1539,7 +1539,7 @@ only the commitment in the authenticated finalization command.
 The hub includes that exact commitment in its signed immutable final status
 and indexes the status under the carrier ceremony. After ordinary relay
 receipt loss, `recover_claimant_completion` POSTs the token and ceremony. It
-uses cbcl-bus SPEC-053 0.17.9-draft CON-036's closed CBOR request to the
+uses cbcl-bus SPEC-053 0.17.13-draft CON-036's closed CBOR request to the
 exact application origin retained from
 [[SPEC-008-production-pairing-claimant#CON-988]]. The wallet repeats
 [[SPEC-004-application-scoped-identity#CON-220]] steps 1 through 5 against that
@@ -2009,7 +2009,7 @@ turns TLS-only bytes into authenticated display authority.
 ### TEST-1161 — Final status recovery survives the relay window
 
 **Validates:** [[SPEC-008-production-pairing-claimant#CON-989]] and
-cbcl-pairing SPEC-001 0.5.7-draft TEST-067.
+cbcl-pairing SPEC-001 0.5.8-draft TEST-067.
 
 Lose the ordinary receipt and delete the expired relay mailbox. Restart the
 wallet, browser, relay, and hub in every order. Retain only their declared
@@ -2204,6 +2204,12 @@ discovered callers where three are required. Restore the candidate and require
 the gate to pass again.
 
 ## Changelog
+
+- **0.5.17-draft — 2026-08-25 — four-parent authority alignment.** The
+  standalone protocol and implementation remain unchanged. The coordinated
+  review set now names Selfsame SPEC-007 0.3.8, cbcl-pairing SPEC-001 0.5.8,
+  and cbcl-bus SPEC-053 0.17.13. Production allocation, release, and deployment
+  remain prohibited pending a fresh cross-model PASS.
 
 - **0.5.16-draft — 2026-08-25 — fail-closed invoke caller discovery.** The
   screen gate recursively discovers JavaScript invoke callers instead of

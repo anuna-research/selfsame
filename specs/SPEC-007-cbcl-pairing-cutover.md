@@ -3,27 +3,27 @@ id: SPEC-007
 title: cbcl-pairing Protocol Cutover
 status: draft
 tier: 1
-version: 0.3.7-draft
+version: 0.3.8-draft
 last-updated: 2026-08-25
 previous-approved-version: 0.2.1
 owner-repo: selfsame
 review-gate: test-first-implementation-owner-authorized; release-prohibited-pending-cross-model-pass
 authority-form: direct-current-safety-authority
 implementation-baseline: 0220cec2dec44cd95d4f411ea4814d790b6716d2
-coordinated-claimant-design: selfsame SPEC-008 0.5.8-draft
-coordinated-hub-design: cbcl-bus SPEC-053 0.17.8-draft
-coordinated-pairing-design: cbcl-pairing SPEC-001 0.5.7-draft
+coordinated-claimant-design: selfsame SPEC-008 0.5.17-draft
+coordinated-hub-design: cbcl-bus SPEC-053 0.17.13-draft
+coordinated-pairing-design: cbcl-pairing SPEC-001 0.5.8-draft
 generation-model-family: OpenAI GPT-5
 generation-model-version: gpt-5.6-sol
 generation-session: 01a029aa-9127-7c42-ad28-81512b91ded6
-generation-synthesis-trajectory: "approved 0.2.1 cutover -> standalone credential/v2 ordering conflict -> rejected reviews through 0.5.7 -> direct 0.3.7 proof-input closure"
+generation-synthesis-trajectory: "approved 0.2.1 cutover -> standalone credential/v2 ordering conflict -> rejected reviews through 0.5.7 -> direct 0.3.8 proof-input closure"
 candidate-successor-to: SPEC-006
 depends-on: cbcl-pairing SPEC-001; SPEC-004; SCREEN-001
 ---
 
 # SPEC-007 — cbcl-pairing Protocol Cutover
 
-> **Current draft safety revision.** Version 0.3.7 states the credential/v2
+> **Current draft safety revision.** Version 0.3.8 states the credential/v2
 > consent and effect boundary directly. Version 0.2.1 remains the last approved
 > revision. The owner authorizes local test-first implementation. This draft
 > authorizes no production allocation, release, or deployment.
@@ -1249,8 +1249,8 @@ Production invitation allocation remains prohibited until all items have durable
 - the repository owner approves the recorded no-users finding and no-migration disposition;
 - coordinated SPEC-004, SPEC-006, and PROTO-002 through PROTO-004 amendments pass their own channels;
 - the upstream credential-profile disposition passes the `cbcl-pairing` amendment channel;
-- Selfsame SPEC-008 0.5.8-draft, cbcl-bus SPEC-053 0.17.8-draft,
-  and cbcl-pairing SPEC-001 0.5.7-draft pass one coordinated Tier-1 review;
+- Selfsame SPEC-008 0.5.17-draft, cbcl-bus SPEC-053 0.17.13-draft,
+  and cbcl-pairing SPEC-001 0.5.8-draft pass one coordinated Tier-1 review;
 - every SPEC-004 Tier-1 row has the exact disposition in the inherited gate ledger;
 - every retained or replaced SPEC-004 ledger row reaches pass through its exact disposition;
 - the exact upstream `cbcl-pairing` production gates pass without local reinterpretation;
@@ -1306,6 +1306,9 @@ No channel can waive a hard stop without a new specification version and require
 <details>
 <summary>Revision history</summary>
 
+- 0.3.8-draft — reissues the unchanged safety boundary against Selfsame
+  SPEC-008 0.5.17, cbcl-pairing SPEC-001 0.5.8, and cbcl-bus SPEC-053 0.17.13.
+  Production allocation, release, and deployment remain prohibited.
 - 0.3.7-draft — reconciles ADR-802, the root pin, the compiled dependency
   baseline, and the fail-closed build-time source-integrity check to reviewed
   cbcl-pairing revision `62ef4a968b46b4836374fcee1d78c410f730a7a7`.
