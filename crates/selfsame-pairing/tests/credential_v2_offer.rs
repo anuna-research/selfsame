@@ -12,10 +12,11 @@ use cbcl_pairing::wire::Side;
 use ed25519_dalek::SigningKey;
 use selfsame_app_identity::{json, json::Json, profile::ApplicationProfile};
 use selfsame_pairing::credential_v2::{
-    build_authority_status_response, credential_v2_body_authority, device_possession_proof_input,
-    finalize_verified_offer, prepare_offer_core, recognise_authority_status_response,
-    recognise_prepared_offer, recognise_signed_offer, verify_prepared_offer_device_proof,
-    CredentialV2AuthorityStatus, CredentialV2FinalDecision, CredentialV2IntentDecision,
+    build_authority_status_response, build_final_status, credential_v2_body_authority,
+    device_possession_proof_input, finalize_verified_offer, prepare_offer_core,
+    recognise_authority_status_response, recognise_final_status, recognise_prepared_offer,
+    recognise_signed_offer, verify_prepared_offer_device_proof, CredentialV2AuthorityStatus,
+    CredentialV2FinalDecision, CredentialV2FinalStatusInput, CredentialV2IntentDecision,
     CredentialV2OfferBuildInput, CredentialV2PayloadInput, CredentialV2WalletOfferVerifier,
 };
 use sha2::{Digest, Sha256};
@@ -415,6 +416,58 @@ fn offer_is_one_canonical_signed_authority_for_hub_browser_and_wallet() {
         .unwrap(),
         bound
     );
+}
+
+#[test]
+fn final_status_is_one_closed_jws_bound_to_every_accepted_fact() {
+    let signing_key = SigningKey::from_bytes(&[0x71; 32]);
+    let profile = profile(&signing_key);
+    let kid = "https://photos.example/selfsame/application#credential-v2-test";
+    let input = CredentialV2FinalStatusInput {
+        application_id: profile.application_id.as_str().into(),
+        carrier_ceremony_id: [0x72; 32],
+        request_id: [0x73; 32],
+        account_principal_digest: [0x74; 32],
+        account_scope_id: [0x75; 32],
+        device_did: selfsame_app_identity::didkey::encode(
+            &SigningKey::from_bytes(&[0x76; 32])
+                .verifying_key()
+                .to_bytes(),
+        ),
+        offer_core_digest: [0x77; 32],
+        payload_digest: [0x78; 32],
+        grant_id: [0x79; 32],
+        issuer_did: "did:crdt:z6MkFinalStatusIssuer".into(),
+        receipt_recovery_commitment: [0x7a; 32],
+        finalized_at: 1_800_000_700,
+    };
+    assert_eq!(input.device_did.len(), 56);
+    let built = build_final_status(&profile, &input, kid, &signing_key).unwrap();
+    assert_eq!(built.digest, <[u8; 32]>::from(Sha256::digest(&built.core)));
+    assert!(built.core.len() <= 4_096);
+    assert!(built.jws.len() <= 8_192);
+    recognise_final_status(&profile, &built.jws, built.digest, &input, kid).unwrap();
+
+    let mut changed = input.clone();
+    changed.payload_digest[0] ^= 1;
+    assert!(recognise_final_status(
+        &profile,
+        &built.jws,
+        built.digest,
+        &changed,
+        kid,
+    )
+    .is_err());
+    let mut wrong_digest = built.digest;
+    wrong_digest[0] ^= 1;
+    assert!(recognise_final_status(
+        &profile,
+        &built.jws,
+        wrong_digest,
+        &input,
+        kid,
+    )
+    .is_err());
 }
 
 fn exchange(

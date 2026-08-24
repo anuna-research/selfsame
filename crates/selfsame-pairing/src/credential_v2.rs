@@ -15,6 +15,7 @@ use cbcl_pairing::credential_v2::{
     CredentialV2IntentInput, CredentialV2IntentVerifier, CredentialV2Object,
     CredentialV2OfferParser, CredentialV2TofuState, CredentialV2Transition,
 };
+use base64ct::{Base64UrlUnpadded, Encoding};
 use ciborium::Value;
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use selfsame_app_identity::{
@@ -41,6 +42,10 @@ const BROWSER_STAGING_SIGNATURE_DOMAIN: &[u8] =
 const MAX_OFFER_CORE_BYTES: usize = 56_000;
 const MAX_SIGNED_OFFER_BYTES: usize = 56_640;
 const MAX_BROWSER_STAGING_RECEIPT_BYTES: usize = 4_608;
+const FINAL_STATUS_TYPE: &str = "selfsame-pairing-final-status+jws";
+const MAX_FINAL_STATUS_CORE_BYTES: usize = 4_096;
+const MAX_FINAL_STATUS_JWS_BYTES: usize = 8_192;
+const MAX_JSON_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 
 /// Provenance of one captured Path-A room membership.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -194,6 +199,48 @@ pub struct CredentialV2BrowserStagingInput {
     pub profile_digest: [u8; 32],
     /// Public commitment to the Rust-confined recovery token.
     pub receipt_recovery_commitment: [u8; 32],
+}
+
+/// Exact accepted facts committed by the hub's immutable final status.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CredentialV2FinalStatusInput {
+    /// Canonical application identifier.
+    pub application_id: String,
+    /// Sole carrier ceremony identifier.
+    pub carrier_ceremony_id: [u8; 32],
+    /// Original browser request identifier.
+    pub request_id: [u8; 32],
+    /// Stable account-principal digest.
+    pub account_principal_digest: [u8; 32],
+    /// Stable application-account scope.
+    pub account_scope_id: [u8; 32],
+    /// Installation device DID.
+    pub device_did: String,
+    /// Digest of the exact signed offer core.
+    pub offer_core_digest: [u8; 32],
+    /// Digest of the authenticated reverse payload.
+    pub payload_digest: [u8; 32],
+    /// Raw account-grant identifier.
+    pub grant_id: [u8; 32],
+    /// Canonical account issuer DID.
+    pub issuer_did: String,
+    /// Commitment to the endpoint-confined recovery token.
+    pub receipt_recovery_commitment: [u8; 32],
+    /// Whole UTC second at the atomic finalization point.
+    pub finalized_at: u64,
+}
+
+/// Exact immutable final-status bytes retained by hub, browser, and wallet.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BuiltCredentialV2FinalStatus {
+    /// Canonical RFC-8785 final-status core.
+    pub core: Vec<u8>,
+    /// Compact EdDSA JWS whose payload is the exact core.
+    pub jws: String,
+    /// Raw SHA-256 of the exact core.
+    pub digest: [u8; 32],
+    /// Profile key identifier used by offer and status.
+    pub kid: String,
 }
 
 /// Closed reciprocal-alias state authenticated by the hub response.
@@ -692,6 +739,166 @@ fn cbor_fixed<const N: usize>(value: &Value) -> Result<[u8; N], CredentialV2Offe
         .as_slice()
         .try_into()
         .map_err(|_| CredentialV2OfferError::Refused)
+}
+
+/// Build and sign the one immutable final status accepted by browser and wallet.
+pub fn build_final_status(
+    profile: &ApplicationProfile,
+    input: &CredentialV2FinalStatusInput,
+    kid: &str,
+    signing_key: &SigningKey,
+) -> Result<BuiltCredentialV2FinalStatus, CredentialV2OfferError> {
+    signing_key_declared(profile, kid, signing_key)?;
+    let core = final_status_core(profile, input)?;
+    let protected = json::canonicalise(&Json::obj([
+        ("alg", Json::text("EdDSA")),
+        ("kid", Json::text(kid)),
+        ("typ", Json::text(FINAL_STATUS_TYPE)),
+    ]));
+    let encoded_header = codec::b64url(&protected);
+    let encoded_payload = codec::b64url(&core);
+    let signing_input = format!("{encoded_header}.{encoded_payload}");
+    let signature = signing_key.sign(signing_input.as_bytes());
+    let jws = format!("{signing_input}.{}", codec::b64url(&signature.to_bytes()));
+    if jws.len() > MAX_FINAL_STATUS_JWS_BYTES {
+        return Err(CredentialV2OfferError::Refused);
+    }
+    Ok(BuiltCredentialV2FinalStatus {
+        digest: Sha256::digest(&core).into(),
+        core,
+        jws,
+        kid: kid.into(),
+    })
+}
+
+/// Verify one immutable final-status JWS and every retained accepted fact.
+pub fn recognise_final_status(
+    profile: &ApplicationProfile,
+    jws: &str,
+    expected_digest: [u8; 32],
+    expected: &CredentialV2FinalStatusInput,
+    expected_kid: &str,
+) -> Result<(), CredentialV2OfferError> {
+    if jws.is_empty() || jws.len() > MAX_FINAL_STATUS_JWS_BYTES || !jws.is_ascii() {
+        return Err(CredentialV2OfferError::Refused);
+    }
+    let mut segments = jws.split('.');
+    let (Some(encoded_header), Some(encoded_payload), Some(encoded_signature), None) =
+        (segments.next(), segments.next(), segments.next(), segments.next())
+    else {
+        return Err(CredentialV2OfferError::Refused);
+    };
+    if encoded_header.is_empty() || encoded_payload.is_empty() || encoded_signature.is_empty() {
+        return Err(CredentialV2OfferError::Refused);
+    }
+    let protected = decode_canonical_b64(encoded_header)?;
+    let core = decode_canonical_b64(encoded_payload)?;
+    let signature: [u8; 64] = decode_canonical_b64(encoded_signature)?
+        .try_into()
+        .map_err(|_| CredentialV2OfferError::Refused)?;
+    let header = json::recognise(
+        &protected,
+        Limits {
+            max_bytes: 1_024,
+            max_depth: 1,
+        },
+    )
+    .map_err(|_| CredentialV2OfferError::Refused)?;
+    const HEADER_MEMBERS: [&str; 3] = ["alg", "kid", "typ"];
+    if json::canonicalise(&header) != protected
+        || header.member_names() != HEADER_MEMBERS
+        || text(&header, "alg")? != "EdDSA"
+        || text(&header, "kid")? != expected_kid
+        || text(&header, "typ")? != FINAL_STATUS_TYPE
+        || Sha256::digest(&core).as_slice() != expected_digest
+        || core != final_status_core(profile, expected)?
+    {
+        return Err(CredentialV2OfferError::Refused);
+    }
+    let declared = profile
+        .enrollment_keys
+        .iter()
+        .find(|candidate| candidate.kid == expected_kid)
+        .ok_or(CredentialV2OfferError::Refused)?;
+    VerifyingKey::from_bytes(&declared.jwk.public_key)
+        .map_err(|_| CredentialV2OfferError::Refused)?
+        .verify(
+            format!("{encoded_header}.{encoded_payload}").as_bytes(),
+            &Signature::from_bytes(&signature),
+        )
+        .map_err(|_| CredentialV2OfferError::Refused)
+}
+
+fn final_status_core(
+    profile: &ApplicationProfile,
+    input: &CredentialV2FinalStatusInput,
+) -> Result<Vec<u8>, CredentialV2OfferError> {
+    let application_id = ApplicationId::parse(&input.application_id)
+        .map_err(|_| CredentialV2OfferError::Refused)?;
+    if application_id.as_str() != input.application_id
+        || profile.application_id.as_str() != input.application_id
+        || input.application_id.len() > 2_048
+        || input.device_did.len() != 56
+        || didkey::decode(&input.device_did).is_err()
+        || !valid_bound_did(&input.issuer_did)
+        || input.finalized_at > MAX_JSON_SAFE_INTEGER
+    {
+        return Err(CredentialV2OfferError::Refused);
+    }
+    let core = json::canonicalise(&Json::obj([
+        ("payloadVersion", Json::int(2)),
+        ("role", Json::text("final-status")),
+        ("applicationId", Json::text(&input.application_id)),
+        (
+            "carrierCeremonyId",
+            Json::text(codec::b64url(&input.carrier_ceremony_id)),
+        ),
+        ("requestId", Json::text(codec::b64url(&input.request_id))),
+        (
+            "accountPrincipalDigest",
+            Json::text(codec::b64url(&input.account_principal_digest)),
+        ),
+        (
+            "accountScopeId",
+            Json::text(codec::b64url(&input.account_scope_id)),
+        ),
+        ("deviceDid", Json::text(&input.device_did)),
+        (
+            "offerCoreDigest",
+            Json::text(codec::b64url(&input.offer_core_digest)),
+        ),
+        (
+            "payloadDigest",
+            Json::text(codec::b64url(&input.payload_digest)),
+        ),
+        ("grantId", Json::text(codec::b64url(&input.grant_id))),
+        ("issuerDid", Json::text(&input.issuer_did)),
+        (
+            "receiptRecoveryCommitment",
+            Json::text(codec::b64url(&input.receipt_recovery_commitment)),
+        ),
+        ("status", Json::text("accepted")),
+        (
+            "finalizedAt",
+            Json::int(
+                i64::try_from(input.finalized_at)
+                    .map_err(|_| CredentialV2OfferError::Refused)?,
+            ),
+        ),
+    ]));
+    if core.is_empty() || core.len() > MAX_FINAL_STATUS_CORE_BYTES {
+        return Err(CredentialV2OfferError::Refused);
+    }
+    Ok(core)
+}
+
+fn decode_canonical_b64(value: &str) -> Result<Vec<u8>, CredentialV2OfferError> {
+    let decoded = Base64UrlUnpadded::decode_vec(value)
+        .map_err(|_| CredentialV2OfferError::Refused)?;
+    if codec::b64url(&decoded) != value {
+        return Err(CredentialV2OfferError::Refused);
+    }
+    Ok(decoded)
 }
 
 /// Build and sign one exact reciprocal-alias authority response.
