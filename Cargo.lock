@@ -4189,6 +4189,7 @@ dependencies = [
  "base64ct",
  "bip39",
  "blake3",
+ "cbcl-pairing",
  "did-crdt",
  "ed25519-dalek",
  "keyring",

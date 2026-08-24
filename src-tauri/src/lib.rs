@@ -40,6 +40,7 @@ pub mod cbcl_context;
 pub mod cbcl_pairing;
 pub mod cbcl_registry;
 pub mod cbcl_transport;
+pub mod cbcl_v2_claimant;
 pub mod cbcl_v2_policy;
 mod commands;
 pub mod custody;
