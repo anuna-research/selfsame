@@ -7,10 +7,12 @@ use cbcl_pairing::credential_v2::{CredentialV2Carrier, CredentialV2CarrierInput}
 use ed25519_dalek::SigningKey;
 use selfsame_app_identity::{json, json::Json, profile::ApplicationProfile};
 use selfsame_pairing::credential_v2::{
-    device_possession_proof_input, finalize_verified_offer, prepare_offer_core,
-    recognise_prepared_offer, recognise_signed_offer, verify_prepared_offer_device_proof,
+    build_authority_status_response, device_possession_proof_input, finalize_verified_offer,
+    prepare_offer_core, recognise_authority_status_response, recognise_prepared_offer,
+    recognise_signed_offer, verify_prepared_offer_device_proof, CredentialV2AuthorityStatus,
     CredentialV2OfferBuildInput,
 };
+use sha2::{Digest, Sha256};
 
 const RELAY: &str = "https://photos.example:9443";
 
@@ -156,4 +158,94 @@ fn offer_is_one_canonical_signed_authority_for_hub_browser_and_wallet() {
     let mut changed = built.signed_offer;
     *changed.last_mut().unwrap() ^= 1;
     assert!(recognise_signed_offer(&profile, &changed).is_err());
+
+    let authority = build_authority_status_response(
+        &profile,
+        *carrier.carrier_ceremony_id(),
+        built.offer_core_digest,
+        &CredentialV2AuthorityStatus::NoBinding,
+        kid,
+        &offer_signing_key,
+    )
+    .unwrap();
+    assert_eq!(
+        authority.digest,
+        <[u8; 32]>::from(Sha256::digest(&authority.response))
+    );
+    assert_eq!(
+        recognise_authority_status_response(
+            &profile,
+            &authority.response,
+            kid,
+            *carrier.carrier_ceremony_id(),
+            built.offer_core_digest,
+        )
+        .unwrap(),
+        CredentialV2AuthorityStatus::NoBinding
+    );
+    assert!(recognise_authority_status_response(
+        &profile,
+        &authority.response,
+        kid,
+        [0x33; 32],
+        built.offer_core_digest,
+    )
+    .is_err());
+    assert!(recognise_authority_status_response(
+        &profile,
+        &authority.response,
+        kid,
+        *carrier.carrier_ceremony_id(),
+        [0x44; 32],
+    )
+    .is_err());
+    let mut changed_authority = authority.response.clone();
+    *changed_authority.last_mut().unwrap() ^= 1;
+    assert!(recognise_authority_status_response(
+        &profile,
+        &changed_authority,
+        kid,
+        *carrier.carrier_ceremony_id(),
+        built.offer_core_digest,
+    )
+    .is_err());
+    assert!(build_authority_status_response(
+        &profile,
+        *carrier.carrier_ceremony_id(),
+        built.offer_core_digest,
+        &CredentialV2AuthorityStatus::NoBinding,
+        kid,
+        &wrong_signing_key,
+    )
+    .is_err());
+    assert!(build_authority_status_response(
+        &profile,
+        *carrier.carrier_ceremony_id(),
+        built.offer_core_digest,
+        &CredentialV2AuthorityStatus::Bound("did:crdt:bad DID".into()),
+        kid,
+        &offer_signing_key,
+    )
+    .is_err());
+    let bound = CredentialV2AuthorityStatus::Bound(format!("did:crdt:{}", "a".repeat(64)));
+    let bound_authority = build_authority_status_response(
+        &profile,
+        *carrier.carrier_ceremony_id(),
+        built.offer_core_digest,
+        &bound,
+        kid,
+        &offer_signing_key,
+    )
+    .unwrap();
+    assert_eq!(
+        recognise_authority_status_response(
+            &profile,
+            &bound_authority.response,
+            kid,
+            *carrier.carrier_ceremony_id(),
+            built.offer_core_digest,
+        )
+        .unwrap(),
+        bound
+    );
 }

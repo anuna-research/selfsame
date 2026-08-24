@@ -16,6 +16,9 @@ use sha2::{Digest, Sha256};
 const SIGNED_OFFER_DOMAIN: &str = "selfsame credential/v2 signed offer v1";
 const OFFER_SIGNATURE_DOMAIN: &[u8] = b"selfsame credential/v2 offer signature\0";
 const DEVICE_POSSESSION_DOMAIN: &[u8] = b"cbcl-chat credential/v2 device possession proof v1\0";
+const AUTHORITY_STATUS_DOMAIN: &str = "cbcl-chat credential/v2 authority status v1";
+const AUTHORITY_SIGNATURE_DOMAIN: &[u8] =
+    b"cbcl-chat credential/v2 authority status signature v1\0";
 const ACCOUNT_PRINCIPAL_DOMAIN: &str = "selfsame-application-account-principal/v1";
 const LEGACY_KEY_DOMAIN: &[u8] = b"cbcl-chat credential/v2 legacy key v1\0";
 const ROOM_SET_DOMAIN: &[u8] = b"cbcl-chat credential/v2 room set v1\0";
@@ -137,6 +140,26 @@ pub struct BuiltCredentialV2Offer {
     pub room_set_digest: [u8; 32],
     /// Complete migration-snapshot digest.
     pub migration_snapshot_digest: [u8; 32],
+}
+
+/// Signed reciprocal-alias authority returned before the offer is released.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BuiltCredentialV2AuthorityStatus {
+    /// Exact deterministic-CBOR six-member response.
+    pub response: Vec<u8>,
+    /// SHA-256 of the complete response including its signature.
+    pub digest: [u8; 32],
+    /// Signing key identifier shared with the signed offer.
+    pub kid: String,
+}
+
+/// Closed reciprocal-alias state authenticated by the hub response.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum CredentialV2AuthorityStatus {
+    /// The stable application account has no reciprocal alias binding.
+    NoBinding,
+    /// A pre-existing reciprocal alias binds the stable account to this DID.
+    Bound(String),
 }
 
 /// Completely recognised signed offer and typed display claims.
@@ -283,14 +306,7 @@ fn sign_verified_offer(
     kid: &str,
     signing_key: &SigningKey,
 ) -> Result<BuiltCredentialV2Offer, CredentialV2OfferError> {
-    let declared = profile
-        .enrollment_keys
-        .iter()
-        .find(|candidate| candidate.kid == kid)
-        .ok_or(CredentialV2OfferError::Refused)?;
-    if declared.jwk.public_key != signing_key.verifying_key().to_bytes() {
-        return Err(CredentialV2OfferError::Refused);
-    }
+    signing_key_declared(profile, kid, signing_key)?;
     if recognise_prepared_offer(profile, &prepared.offer_core)? != *prepared {
         return Err(CredentialV2OfferError::Refused);
     }
@@ -381,6 +397,108 @@ pub fn device_possession_proof_input(
     ]))
     .map_err(|_| CredentialV2OfferError::Refused)?;
     Ok(labelled_hash(DEVICE_POSSESSION_DOMAIN, &body))
+}
+
+/// Build and sign one exact reciprocal-alias authority response.
+pub fn build_authority_status_response(
+    profile: &ApplicationProfile,
+    carrier_ceremony_id: [u8; 32],
+    offer_core_digest: [u8; 32],
+    status: &CredentialV2AuthorityStatus,
+    kid: &str,
+    signing_key: &SigningKey,
+) -> Result<BuiltCredentialV2AuthorityStatus, CredentialV2OfferError> {
+    signing_key_declared(profile, kid, signing_key)?;
+    let (status_text, bound_did) = match status {
+        CredentialV2AuthorityStatus::NoBinding => ("no-binding", Value::Null),
+        CredentialV2AuthorityStatus::Bound(did) if valid_bound_did(did) => {
+            ("bound", Value::Text(did.clone()))
+        }
+        CredentialV2AuthorityStatus::Bound(_) => return Err(CredentialV2OfferError::Refused),
+    };
+    let unsigned = Value::Array(vec![
+        Value::Text(AUTHORITY_STATUS_DOMAIN.into()),
+        Value::Bytes(carrier_ceremony_id.to_vec()),
+        Value::Bytes(offer_core_digest.to_vec()),
+        Value::Text(status_text.into()),
+        bound_did,
+    ]);
+    let unsigned_bytes =
+        cbor2::to_canonical_vec(&unsigned).map_err(|_| CredentialV2OfferError::Refused)?;
+    let signature = signing_key.sign(&labelled_hash(AUTHORITY_SIGNATURE_DOMAIN, &unsigned_bytes));
+    let Value::Array(mut response_members) = unsigned else {
+        unreachable!()
+    };
+    response_members.push(Value::Bytes(signature.to_bytes().to_vec()));
+    let response = cbor2::to_canonical_vec(&Value::Array(response_members))
+        .map_err(|_| CredentialV2OfferError::Refused)?;
+    if response.is_empty() || response.len() > 768 {
+        return Err(CredentialV2OfferError::Refused);
+    }
+    Ok(BuiltCredentialV2AuthorityStatus {
+        digest: Sha256::digest(&response).into(),
+        response,
+        kid: kid.into(),
+    })
+}
+
+/// Verify and recognise one exact authority response under the signed-offer key.
+pub fn recognise_authority_status_response(
+    profile: &ApplicationProfile,
+    response: &[u8],
+    kid: &str,
+    expected_ceremony_id: [u8; 32],
+    expected_offer_core_digest: [u8; 32],
+) -> Result<CredentialV2AuthorityStatus, CredentialV2OfferError> {
+    if response.is_empty() || response.len() > 768 {
+        return Err(CredentialV2OfferError::Refused);
+    }
+    let mut cursor = std::io::Cursor::new(response);
+    let value: Value =
+        ciborium::de::from_reader(&mut cursor).map_err(|_| CredentialV2OfferError::Refused)?;
+    if cursor.position() != response.len() as u64
+        || cbor2::to_canonical_vec(&value).map_err(|_| CredentialV2OfferError::Refused)? != response
+    {
+        return Err(CredentialV2OfferError::Refused);
+    }
+    let members = value.as_array().ok_or(CredentialV2OfferError::Refused)?;
+    let [domain, ceremony, offer_digest, status, did, signature] = members.as_slice() else {
+        return Err(CredentialV2OfferError::Refused);
+    };
+    if domain.as_text() != Some(AUTHORITY_STATUS_DOMAIN)
+        || ceremony.as_bytes().map(Vec::as_slice) != Some(expected_ceremony_id.as_slice())
+        || offer_digest.as_bytes().map(Vec::as_slice) != Some(expected_offer_core_digest.as_slice())
+    {
+        return Err(CredentialV2OfferError::Refused);
+    }
+    let recognised = match (status.as_text(), did) {
+        (Some("no-binding"), Value::Null) => CredentialV2AuthorityStatus::NoBinding,
+        (Some("bound"), Value::Text(value)) if valid_bound_did(value) => {
+            CredentialV2AuthorityStatus::Bound(value.clone())
+        }
+        _ => return Err(CredentialV2OfferError::Refused),
+    };
+    let signature: [u8; 64] = signature
+        .as_bytes()
+        .ok_or(CredentialV2OfferError::Refused)?
+        .as_slice()
+        .try_into()
+        .map_err(|_| CredentialV2OfferError::Refused)?;
+    let unsigned_bytes = cbor2::to_canonical_vec(&Value::Array(members[..5].to_vec()))
+        .map_err(|_| CredentialV2OfferError::Refused)?;
+    let declared = profile
+        .enrollment_keys
+        .iter()
+        .find(|candidate| candidate.kid == kid)
+        .ok_or(CredentialV2OfferError::Refused)?;
+    VerifyingKey::from_bytes(&declared.jwk.public_key)
+        .map_err(|_| CredentialV2OfferError::Refused)?
+        .verify(
+            &labelled_hash(AUTHORITY_SIGNATURE_DOMAIN, &unsigned_bytes),
+            &Signature::from_bytes(&signature),
+        )
+        .map_err(|_| CredentialV2OfferError::Refused)?;
+    Ok(recognised)
 }
 
 /// Re-recognise an unsigned core into the complete proof-free producer result.
@@ -853,6 +971,30 @@ fn labelled_hash(label: &[u8], value: &[u8]) -> [u8; 32] {
     hash.update(label);
     hash.update(value);
     hash.finalize().into()
+}
+
+fn signing_key_declared(
+    profile: &ApplicationProfile,
+    kid: &str,
+    signing_key: &SigningKey,
+) -> Result<(), CredentialV2OfferError> {
+    let declared = profile
+        .enrollment_keys
+        .iter()
+        .find(|candidate| candidate.kid == kid)
+        .ok_or(CredentialV2OfferError::Refused)?;
+    if declared.jwk.public_key != signing_key.verifying_key().to_bytes() {
+        return Err(CredentialV2OfferError::Refused);
+    }
+    Ok(())
+}
+
+fn valid_bound_did(value: &str) -> bool {
+    value.len() > "did:crdt:".len()
+        && value.len() <= 512
+        && value.starts_with("did:crdt:")
+        && !value.contains('#')
+        && value.bytes().all(|byte| (0x21..=0x7e).contains(&byte))
 }
 
 impl From<CredentialV2Error> for CredentialV2OfferError {

@@ -12,9 +12,9 @@ use selfsame_app_identity::json::{Json, Limits};
 use selfsame_app_identity::profile::{ApplicationProfile, CbclRelayDescriptor};
 use selfsame_app_identity::{codec, json};
 use selfsame_pairing::credential_v2::{
-    finalize_verified_offer, prepare_offer_core, recognise_prepared_offer,
-    verify_prepared_offer_device_proof, CredentialV2OfferBuildInput, CredentialV2RoomProvenance,
-    CredentialV2RoomSnapshot,
+    build_authority_status_response, finalize_verified_offer, prepare_offer_core,
+    recognise_prepared_offer, verify_prepared_offer_device_proof, CredentialV2AuthorityStatus,
+    CredentialV2OfferBuildInput, CredentialV2RoomProvenance, CredentialV2RoomSnapshot,
 };
 
 const MAX_DEVICE_JWK_OCTETS: usize = 96;
@@ -46,9 +46,65 @@ rustler::atoms! {
     legacy_key_digest,
     room_set_digest,
     migration_snapshot_digest,
+    authority_status_response,
+    authority_status_digest,
     standing,
     invite,
     undefined,
+}
+
+/// `cbcl_selfsame_erl:build_credential_v2_authority_status/6`.
+#[allow(clippy::too_many_arguments)]
+#[rustler::nif(name = "build_credential_v2_authority_status", schedule = "DirtyCpu")]
+pub fn build_credential_v2_authority_status_nif<'a>(
+    env: Env<'a>,
+    profile_bytes: Binary<'a>,
+    carrier_ceremony_id: Binary<'a>,
+    offer_core_digest_value: Binary<'a>,
+    bound_did: Term<'a>,
+    signing_kid: Binary<'a>,
+    signing_seed: Binary<'a>,
+) -> Term<'a> {
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let profile = ApplicationProfile::recognise(profile_bytes.as_slice())
+            .map_err(|_| String::from(REFUSED))?;
+        let status = if bound_did.decode::<Atom>().ok() == Some(undefined()) {
+            CredentialV2AuthorityStatus::NoBinding
+        } else {
+            let did = Binary::decode(bound_did).map_err(|_| String::from(REFUSED))?;
+            CredentialV2AuthorityStatus::Bound(utf8(did.as_slice())?)
+        };
+        let signing_kid = utf8(signing_kid.as_slice())?;
+        let seed: [u8; 32] = exact(signing_seed.as_slice())?;
+        let built = build_authority_status_response(
+            &profile,
+            exact(carrier_ceremony_id.as_slice())?,
+            exact(offer_core_digest_value.as_slice())?,
+            &status,
+            &signing_kid,
+            &ed25519_dalek::SigningKey::from_bytes(&seed),
+        )
+        .map_err(|_| String::from(REFUSED))?;
+        let mut map = rustler::types::map::map_new(env);
+        for (key, value) in [
+            (
+                authority_status_response().encode(env),
+                binary(env, &built.response)?,
+            ),
+            (
+                authority_status_digest().encode(env),
+                binary(env, &built.digest)?,
+            ),
+            (kid().encode(env), binary(env, built.kid.as_bytes())?),
+        ] {
+            map = map.map_put(key, value).map_err(|_| String::from(REFUSED))?;
+        }
+        Ok::<Term<'a>, String>(map)
+    }));
+    match result {
+        Ok(Ok(value)) => (atom::ok(), value).encode(env),
+        Ok(Err(_)) | Err(_) => (atom::error(), rejected()).encode(env),
+    }
 }
 
 /// `cbcl_selfsame_erl:verify_credential_v2_offer_proof/6`.
