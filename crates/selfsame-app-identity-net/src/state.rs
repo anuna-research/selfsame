@@ -88,6 +88,7 @@ use did_crdt::core::document::Document;
 use did_crdt::core::recon::ClosureBundle;
 
 use selfsame_app_identity::accept::ClosureSource;
+use selfsame_app_identity::issuer::IssuerIdentity;
 use selfsame_app_identity::path_b::{
     union_resolver_revocations, ResolverRevocations, MINIMUM_RESOLVER_QUORUM,
 };
@@ -671,6 +672,154 @@ pub struct SubmissionReport {
     pub unreachable: Vec<String>,
 }
 
+/// Result of publishing one new application-account issuer to the complete
+/// profile-declared resolver roster.
+pub struct IssuerPublicationReport {
+    /// Resolvers that idempotently created the DID and accepted every later
+    /// signed delta in causal order.
+    pub acknowledged: Vec<String>,
+    /// Resolvers that did not complete the whole sequence.
+    pub unreachable: Vec<String>,
+}
+
+struct IssuerPublicationPlan {
+    did: String,
+    create_body: Vec<u8>,
+    later_deltas: Vec<Vec<u8>>,
+}
+
+/// Publish a newly signed issuer identity to every declared state resolver.
+///
+/// Each resolver first receives the deterministic DID-creation request and
+/// then every non-genesis delta sequentially. Different resolvers run in
+/// parallel. A resolver counts only after the complete causal sequence was
+/// acknowledged; the caller must still resolve and replay a signed closure
+/// before treating publication as established.
+pub async fn publish_issuer_identity(
+    profile: &ApplicationProfile,
+    identity: &IssuerIdentity,
+) -> Result<IssuerPublicationReport, NetError> {
+    let plan = issuer_publication_plan(identity)?;
+    let results = join_all(
+        profile
+            .state_resolvers
+            .iter()
+            .map(|resolver| publish_issuer_to_one(resolver, &plan))
+            .collect(),
+    )
+    .await;
+    let mut acknowledged = Vec::new();
+    let mut unreachable = Vec::new();
+    for (resolver, complete) in profile.state_resolvers.iter().zip(results) {
+        if complete {
+            acknowledged.push(resolver.id.clone());
+        } else {
+            unreachable.push(resolver.id.clone());
+        }
+    }
+    Ok(IssuerPublicationReport {
+        acknowledged,
+        unreachable,
+    })
+}
+
+fn issuer_publication_plan(identity: &IssuerIdentity) -> Result<IssuerPublicationPlan, NetError> {
+    recognise_did(&identity.did)?;
+    let [genesis, later @ ..] = identity.deltas.as_slice() else {
+        return Err(NetError::Refused("the issuer closure is empty"));
+    };
+    let DeltaOp::AddVerificationMethod {
+        public_key_multibase,
+        ..
+    } = &genesis.op
+    else {
+        return Err(NetError::Refused("the issuer closure has no genesis"));
+    };
+    if !genesis.parents.is_empty() || genesis.did.as_str() != identity.did {
+        return Err(NetError::Refused("the issuer genesis binding is invalid"));
+    }
+    let (derived, derived_genesis) = Document::new(public_key_multibase)
+        .map_err(|_| NetError::Refused("the issuer genesis key is invalid"))?;
+    if derived.did.as_str() != identity.did
+        || derived_genesis.content_hash().ok() != genesis.content_hash().ok()
+    {
+        return Err(NetError::Refused(
+            "the issuer genesis does not derive its DID",
+        ));
+    }
+    let create_body = serde_json::to_vec(&serde_json::json!({
+        "publicKeyMultibase": public_key_multibase,
+    }))
+    .map_err(|_| NetError::Refused("the issuer create request is not serialisable"))?;
+    let later_deltas = later
+        .iter()
+        .map(|delta| {
+            if delta.did.as_str() != identity.did {
+                return Err(NetError::Refused("an issuer delta targets another DID"));
+            }
+            let body = serde_json::to_vec(delta)
+                .map_err(|_| NetError::Refused("an issuer delta is not serialisable"))?;
+            if body.is_empty() || body.len() > 65_536 {
+                return Err(NetError::Refused(
+                    "an issuer delta exceeds the service bound",
+                ));
+            }
+            Ok(body)
+        })
+        .collect::<Result<Vec<_>, NetError>>()?;
+    Ok(IssuerPublicationPlan {
+        did: identity.did.clone(),
+        create_body,
+        later_deltas,
+    })
+}
+
+async fn publish_issuer_to_one(resolver: &StateResolver, plan: &IssuerPublicationPlan) -> bool {
+    let Ok(http) = client(RESOLVER_DEADLINE) else {
+        return false;
+    };
+    let create = match http
+        .post(join(&resolver.url, "/dids"))
+        .header(reqwest::header::CONTENT_TYPE, "application/json")
+        .header(reqwest::header::ACCEPT_ENCODING, "identity")
+        .body(plan.create_body.clone())
+        .send()
+        .await
+    {
+        Ok(response)
+            if matches!(
+                response.status(),
+                reqwest::StatusCode::CREATED | reqwest::StatusCode::OK
+            ) =>
+        {
+            response
+        }
+        _ => return false,
+    };
+    let Ok(body) = bounded_body(create, 65_536).await else {
+        return false;
+    };
+    let Ok(response): Result<serde_json::Value, _> = serde_json::from_slice(&body) else {
+        return false;
+    };
+    if response.get("did").and_then(serde_json::Value::as_str) != Some(plan.did.as_str()) {
+        return false;
+    }
+    for delta in &plan.later_deltas {
+        let response = http
+            .post(join(&resolver.url, &submission_path(&plan.did)))
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .header(reqwest::header::ACCEPT_ENCODING, "identity")
+            .body(delta.clone())
+            .send()
+            .await;
+        if !matches!(response, Ok(value) if acknowledged(value.status())) {
+            return false;
+        }
+    }
+    true
+}
+
 /// Submit a signed revocation delta to every declared resolver, in parallel
 /// (`CON-210` step 5).
 ///
@@ -882,6 +1031,38 @@ mod tests {
         // revocation missed the node it was aimed at.
         assert_eq!(RESOLUTION_PATH, "/");
         assert_eq!(submission_path("did:crdt:abc"), "/dids/did:crdt:abc/deltas");
+    }
+
+    #[test]
+    fn issuer_publication_is_create_then_causally_ordered_deltas() {
+        let key = ed25519_dalek::SigningKey::from_bytes(&[0x51; 32]);
+        let identity =
+            selfsame_app_identity::issuer::create(&key, "accounts.example", 1_800_000_000_000)
+                .unwrap();
+        let plan = issuer_publication_plan(&identity).unwrap();
+        assert_eq!(plan.did, identity.did);
+        let create: serde_json::Value = serde_json::from_slice(&plan.create_body).unwrap();
+        let DeltaOp::AddVerificationMethod {
+            public_key_multibase,
+            ..
+        } = &identity.deltas[0].op
+        else {
+            panic!("issuer creation starts with the genesis method")
+        };
+        assert_eq!(
+            create
+                .get("publicKeyMultibase")
+                .and_then(serde_json::Value::as_str),
+            Some(public_key_multibase.as_str())
+        );
+        assert_eq!(plan.later_deltas.len(), identity.deltas.len() - 1);
+        for (wire, expected) in plan.later_deltas.iter().zip(&identity.deltas[1..]) {
+            let decoded = serde_json::from_slice::<SignedDelta>(wire).unwrap();
+            assert_eq!(
+                serde_json::to_vec(&decoded).unwrap(),
+                serde_json::to_vec(expected).unwrap()
+            );
+        }
     }
 
     #[test]
