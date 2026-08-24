@@ -64,6 +64,7 @@ rustler::atoms! {
     migration_confirmation_digest_atom = "migration_confirmation_digest",
     final_status_jws,
     final_status_digest,
+    finalized_at,
     valid_until,
     permissions,
     standing,
@@ -260,6 +261,7 @@ pub struct CredentialV2AcceptanceInput {
 #[derive(Clone)]
 pub struct CredentialV2AcceptanceProjection {
     pub application_id: String,
+    pub profile_digest: [u8; 32],
     pub request_id: [u8; 32],
     pub carrier_ceremony_id: [u8; 32],
     pub account_principal_digest: [u8; 32],
@@ -267,6 +269,8 @@ pub struct CredentialV2AcceptanceProjection {
     pub account: String,
     pub device_did: String,
     pub device_public_key: [u8; 32],
+    pub offer_core_digest: [u8; 32],
+    pub offer_kid: String,
     pub payload_digest: [u8; 32],
     pub migration_confirmation_digest: [u8; 32],
     pub grant_id: [u8; 32],
@@ -277,6 +281,7 @@ pub struct CredentialV2AcceptanceProjection {
     pub receipt_recovery_commitment: [u8; 32],
     pub final_status_jws: String,
     pub final_status_digest: [u8; 32],
+    pub finalized_at: u64,
 }
 
 /// Opaque verifier authority retained across retryable Mnesia transaction attempts.
@@ -370,6 +375,7 @@ fn validate_credential_v2_acceptance(
     Ok((
         CredentialV2AcceptanceProjection {
             application_id: profile.application_id.as_str().into(),
+            profile_digest: *profile.digest(),
             request_id: offer.request_id,
             carrier_ceremony_id: *claims.carrier_ceremony_id(),
             account_principal_digest: *claims.account_provenance().account_principal_digest(),
@@ -377,6 +383,8 @@ fn validate_credential_v2_acceptance(
             account,
             device_did: claims.device_binding().device_did().into(),
             device_public_key,
+            offer_core_digest: *claims.offer_core_digest(),
+            offer_kid: offer.kid.clone(),
             payload_digest: input.payload_digest,
             migration_confirmation_digest: input.migration_confirmation_digest,
             grant_id: input.grant_id,
@@ -387,6 +395,7 @@ fn validate_credential_v2_acceptance(
             receipt_recovery_commitment: input.receipt_recovery_commitment,
             final_status_jws: String::new(),
             final_status_digest: [0_u8; 32],
+            finalized_at: input.finalized_at,
         },
         final_input,
     ))
@@ -559,6 +568,10 @@ fn encode_acceptance_projection<'a>(
             binary(env, projection.application_id.as_bytes())?,
         ),
         (
+            profile_digest().encode(env),
+            binary(env, &projection.profile_digest)?,
+        ),
+        (
             request_id().encode(env),
             binary(env, &projection.request_id)?,
         ),
@@ -585,6 +598,14 @@ fn encode_acceptance_projection<'a>(
         (
             device_public_key().encode(env),
             binary(env, &projection.device_public_key)?,
+        ),
+        (
+            offer_core_digest().encode(env),
+            binary(env, &projection.offer_core_digest)?,
+        ),
+        (
+            kid().encode(env),
+            binary(env, projection.offer_kid.as_bytes())?,
         ),
         (
             payload_digest().encode(env),
@@ -617,6 +638,7 @@ fn encode_acceptance_projection<'a>(
             final_status_digest().encode(env),
             binary(env, &projection.final_status_digest)?,
         ),
+        (finalized_at().encode(env), projection.finalized_at.encode(env)),
     ] {
         map = map.map_put(key, value).map_err(|_| String::from(REFUSED))?;
     }
