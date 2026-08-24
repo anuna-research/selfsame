@@ -2,22 +2,22 @@
 id: SPEC-008
 title: Production Pairing Claimant — Transport, Real Credential, and Origin Trust
 status: draft
-version: 0.5.8-draft
+version: 0.5.11-draft
 tier: 1
 review-gate: test-first-implementation-owner-authorized; release-and-deployment-prohibited-pending-cross-model-pass
 authority-form: consolidated-direct-current-authority
-implementation-baseline: 0220cec2dec44cd95d4f411ea4814d790b6716d2
+implementation-baseline: 21caf38d5972fc65285c5f6c4b452c2f2572221f
 generation-model-family: OpenAI GPT-5
 generation-model-version: gpt-5.6-sol
 generation-session: 01a029aa-9127-7c42-ad28-81512b91ded6
-generation-synthesis-trajectory: "owner-authorized standalone architecture -> F-A through F-E code traces -> rejected reviews through 0.5.7 -> closed cryptographic inputs"
+generation-synthesis-trajectory: "owner-authorized standalone architecture -> F-A through F-E code traces -> rejected reviews through 0.5.10 -> test-first H-1/H-2 remediation"
 depends-on: "[[SPEC-007-cbcl-pairing-cutover]]; [[SPEC-004-application-scoped-identity]]; [[SPEC-003-android-apk-distribution]]; cbcl-pairing SPEC-001"
 last-updated: 2026-08-24
 ---
 
 # SPEC-008 — Production Pairing Claimant: Transport, Real Credential, and Origin Trust
 
-> **Consolidated current-law reissue.** Version 0.5.8 states the standalone
+> **Consolidated current-law reissue.** Version 0.5.11 states the standalone
 > first-contact authority directly. Trajectory documents and review reports
 > supply evidence only. They supply no current values.
 > The repository owner authorized local test-first implementation on
@@ -59,13 +59,14 @@ Controls:     [[SPEC-008-production-pairing-claimant#REQ-902]] fixture data SHAL
               [[SPEC-008-production-pairing-claimant#CON-903]] policy is exact `(applicationId, relayOrigin)`, never relay-only
               [[SPEC-008-production-pairing-claimant#REQ-907]] production allocation remains closed pending its gate
               [[SPEC-008-production-pairing-claimant#CON-986]] no credential/v2 identity effect precedes final approval
+              [[SPEC-008-production-pairing-claimant#CON-990]] no pre-payload checkpoint can strand an application slot
               Owner-authorized test-first implementation may precede the PASS
               A fresh Tier-1 PASS precedes release and production allocation
               Production deployment requires separate owner approval
 Open:         the coordinated fresh-context Tier-1 review (owner: repository owner)
               every production gate listed in [[SPEC-008-production-pairing-claimant#CON-985]] (owner: named gate owners)
 Detail:       [[SPEC-008-production-pairing-claimant#REQ-901]], [[SPEC-008-production-pairing-claimant#REQ-906]], [[SPEC-008-production-pairing-claimant#REQ-1005]], [[SPEC-008-production-pairing-claimant#NFR-928]],
-              [[SPEC-008-production-pairing-claimant#CON-903]], [[SPEC-008-production-pairing-claimant#CON-985]], [[SPEC-008-production-pairing-claimant#TEST-1156]], [[SPEC-008-production-pairing-claimant#TEST-1157]]
+              [[SPEC-008-production-pairing-claimant#CON-903]], [[SPEC-008-production-pairing-claimant#CON-985]], [[SPEC-008-production-pairing-claimant#CON-990]], [[SPEC-008-production-pairing-claimant#TEST-1162]], [[SPEC-008-production-pairing-claimant#TEST-1163]], [[SPEC-008-production-pairing-claimant#TEST-1164]]
 
 The key words MUST, MUST NOT, REQUIRED, SHALL, SHALL NOT, SHOULD, SHOULD NOT,
 RECOMMENDED, MAY, and OPTIONAL in this document are to be interpreted as described in
@@ -773,13 +774,19 @@ silently after full verification. Authority or issuer rotation SHALL prompt the
 person. A changed installed handle SHALL refuse. No network input can silently
 rename an installed account.
 
-Unlink SHALL require explicit confirmation and remove only the application
-record, exact-pair relay policy selected by the person, and application-owned
-cached material. It SHALL retain the root seed and SHALL NOT claim remote hub
-revocation. Re-grant after hub-side deletion requires a complete fresh pairing
-ceremony. A local shortcut using the retained derived key is prohibited.
+Unlink SHALL apply to an installed record and to every recognised pending
+record, including pre-payload phases that are not eligible for terminal
+recovery. Every pending record SHALL be visible to the person as an interrupted
+link after restart. Unlink SHALL require explicit confirmation and current-root
+presence. It SHALL remove only the exact pending-or-installed application
+record, the exact `(applicationId, relayOrigin)` policy selected by the person,
+and the profile cache contained by that record. It SHALL retain the root seed,
+sibling applications, and every remote hub record. It SHALL NOT claim remote
+hub revocation. Re-grant after hub-side deletion or confirmed local abandonment
+requires a complete fresh pairing ceremony. A local shortcut using the retained
+derived key is prohibited.
 
-Trace: [[SPEC-008-production-pairing-claimant#CON-986]], [[SPEC-008-production-pairing-claimant#CON-987]], [[SPEC-008-production-pairing-claimant#CON-988]], [[SPEC-008-production-pairing-claimant#CON-989]], [[SPEC-008-production-pairing-claimant#TEST-1160]], [[SPEC-008-production-pairing-claimant#TEST-1161]].
+Trace: [[SPEC-008-production-pairing-claimant#CON-986]], [[SPEC-008-production-pairing-claimant#CON-987]], [[SPEC-008-production-pairing-claimant#CON-988]], [[SPEC-008-production-pairing-claimant#CON-989]], [[SPEC-008-production-pairing-claimant#CON-990]], [[SPEC-008-production-pairing-claimant#TEST-1160]], [[SPEC-008-production-pairing-claimant#TEST-1161]], [[SPEC-008-production-pairing-claimant#TEST-1162]].
 
 ## Non-functional requirement
 
@@ -1102,7 +1109,7 @@ increment directly. Trajectory documents and review reports supply evidence
 only.
 
 The current SPEC-008 test set is TEST-901 through TEST-915 and TEST-1156
-through TEST-1161. Every member of that set is stated in this parent.
+through TEST-1164. Every member of that set is stated in this parent.
 [[SPEC-007-cbcl-pairing-cutover]] TEST-801 through TEST-821 remain the other
 current Selfsame test set and are stated in that parent. No plan or review can
 omit either set.
@@ -1262,9 +1269,13 @@ reauthenticate the current HTTPS origin and profile under CON-989. It first
 resumes only its cached protocol frame. After relay
 expiry it SHALL use only CON-989. Verified ordinary or recovered receipt
 atomically replaces the tagged pending value with the installed record.
-Decline, terminal refusal before payload, authenticated signed `not-finalized`,
-explicit unlink, or root purge removes the pending value. Relay, offer, or
-mailbox expiry after a payload was durably sent SHALL NOT erase it.
+Decline before final-approval persistence creates no pending value. Every
+terminal result after final-approval persistence and before a successful
+durable `PayloadPrepared` replacement SHALL run
+[[SPEC-008-production-pairing-claimant#CON-990]]'s exact-attempt compensation
+before returning. Authenticated signed `not-finalized`, explicit unlink, or
+root purge removes the applicable pending value. Relay, offer, or mailbox
+expiry after a payload was durably sent SHALL NOT erase it.
 Cbcl-pairing refuses a post-payload refusal object and retains the exact
 `payload -> receipt` checkpoint for CON-989 recovery.
 
@@ -1554,6 +1565,42 @@ preserves pending. Only explicit unlink or root purge can then clear it.
 
 Implements: [[SPEC-008-production-pairing-claimant#REQ-1006]].
 Verified by: [[SPEC-008-production-pairing-claimant#TEST-1161]].
+
+### CON-990 — Pre-payload failure cannot strand an application slot
+
+Immediately after final approval becomes durable, the wallet SHALL arm one
+compensation guard over that immutable ceremony. The guard remains armed across
+the final-approval release, relay acknowledgement, every checkpoint
+replacement, plan, issuer creation, publication, resolver verification, grant
+construction, payload construction, and payload-checkpoint preparation.
+
+Every error return while that guard is armed SHALL, before returning, make a
+best-effort removal of the exact current recognised pending value for the same
+root generation, application, relay, profile, carrier, offer, decisions,
+preview, and exclusive offer deadline. A storage backend MAY have committed a
+replacement before reporting an error. Compensation therefore SHALL compare
+the immutable attempt identity and remove the recognised current pre-payload
+phase, rather than assuming that the guard's last in-memory phase is current.
+It SHALL NOT remove another attempt, an installed record, or a sibling
+application. Compensation failure SHALL NOT replace or hide the original
+protocol error.
+
+The guard SHALL disarm only after the application's slot contains a successfully
+recognised durable `PayloadPrepared` value with its endpoint checkpoint. If an
+ambiguous storage result exposes that `PayloadPrepared` value, compensation
+SHALL retain it for [[SPEC-008-production-pairing-claimant#CON-989]] recovery.
+Errors in payload release or later receipt handling likewise retain it.
+
+Automatic pre-payload compensation removes the pending ceremony cache but does
+not revoke the person's already accepted exact-pair policy. Independent of that
+automatic path, [[SPEC-008-production-pairing-claimant#REQ-1006]]'s confirmed
+unlink SHALL enumerate every pending phase and SHALL remove the exact local
+slot, its exact-pair policy, and its contained profile cache under current-root
+presence. That local action retains the hierarchy root and remote state and
+reports no remote revocation.
+
+Implements: [[SPEC-008-production-pairing-claimant#REQ-1006]].
+Verified by: [[SPEC-008-production-pairing-claimant#TEST-1162]].
 
 ## Decision
 
@@ -1975,7 +2022,70 @@ wallet state for `receiptRecoveryToken`. Require absence. Require one bounded
 commitment and immutable status per finalized account and no recovery route to
 accept a carrier, grant, or caller-selected status object.
 
+### TEST-1162 — Pre-payload failure and confirmed abandonment release one exact slot
+
+**Validates:** [[SPEC-008-production-pairing-claimant#REQ-1006]] and
+[[SPEC-008-production-pairing-claimant#CON-990]].
+
+Inject one terminal error after each successful final-approval persistence and
+before each possible successful `PayloadPrepared` replacement. Include final
+approval release, acknowledgement read and recognition, every checkpoint and
+stage replacement, custody, publication, resolver, grant, payload construction,
+checkpoint preparation, and a storage backend that commits a newer phase before
+reporting failure. Require the original error, no installed record, no
+pre-payload pending record, and successful persistence by a fresh ceremony for
+the same application. Delete or disarm the guard and require the test to fail.
+
+Expose a recognised pending value at every phase after restart. Require a
+person-visible interrupted-link row containing only application, relay, and
+phase. Confirm local abandonment with current-root presence. Require removal of
+only the exact application slot, exact `(applicationId, relayOrigin)` policy,
+and contained profile cache. Require the root, sibling application slots, and
+remote state to remain. Require the result to claim no remote revocation and a
+fresh same-application ceremony to occupy the released slot.
+
+Persist a correct `PayloadPrepared` value and inject failures in payload release
+and receipt handling. Require preservation for
+[[SPEC-008-production-pairing-claimant#CON-989]] recovery. Substitute another
+attempt, an installed value, a changed root generation, or a changed exact-pair
+policy and require compensation or unlink to refuse rather than delete it.
+
+### TEST-1163 — Oversized reload evidence is unavailable, not revoked
+
+**Validates:** [[SPEC-008-production-pairing-claimant#REQ-1006]].
+
+Return every typed WebFinger failure while reloading an installed link. A
+committed 404 absence SHALL select `hub-deleted`. Timeout, transport refusal,
+policy refusal, and an oversized bounded body SHALL select `unavailable`, retain
+the record, and grant no capability. A received but unrecognisable binding MAY
+select the invalid-or-revoked result, but no wildcard or future error arm may
+silently classify unavailability as revocation. Mutate the oversized mapping to
+revoked and require this test to fail.
+
+### TEST-1164 — The local pin witness covers the whole sibling closure
+
+**Validates:** [[SPEC-008-production-pairing-claimant#CON-985]] and
+[[SPEC-007-cbcl-pairing-cutover#ADR-802]].
+
+Run the compiled dependency witness with and without the explicitly labelled
+development override. Independently compare `git rev-parse HEAD` and tracked
+status for `cbcl-pairing`, `cbcl-rs`, and `did-crdt` against
+`cbcl-pairing.sha`, `cbcl-rs.sha`, and `did-crdt.sha`. Change the HEAD or one
+tracked byte in each sibling in turn. The witness SHALL fail in every case even
+when the build override is set. Restore a clean exact-pin closure and require
+the witness and locked workspace build to pass without the override.
+
 ## Changelog
+
+- **0.5.11-draft — 2026-08-24 — adversarial implementation remediation.**
+  This owner-authorized consolidated reissue closes the 0.5.10 review's two HIGH
+  findings: acknowledged allocator bootstrap restoration and stranded
+  pre-payload wallet slots. It makes every pending phase person-visible and
+  confirmed-abandonable, preserves the post-payload recovery boundary, closes
+  the oversized WebFinger classification, and extends the local pin witness to
+  all three sibling dependencies. Test-first implementation is authorized;
+  release and deployment remain prohibited until a fresh cross-model Tier-1
+  PASS and separate deployment approval.
 
 - **0.5.8-draft — 2026-08-24 — closed cryptographic inputs.** This revision
   coordinates exact socket-generation, recovery-proof, and checkpoint-key
