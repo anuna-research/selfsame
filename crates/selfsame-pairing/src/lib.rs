@@ -21,7 +21,7 @@ pub mod release;
 /// Dependency evidence exposed to conformance tests.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct DependencyBaseline {
-    /// Reviewed sibling Git revision.
+    /// Pinned candidate sibling Git revision.
     pub revision: &'static str,
     /// Published bootstrap dialect source hash.
     pub bootstrap_source_sha256: &'static str,

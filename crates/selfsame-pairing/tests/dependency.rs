@@ -4,7 +4,7 @@ use std::{path::PathBuf, process::Command};
 const CANDIDATE_REVISION: &str = include_str!("../../../cbcl-pairing.sha");
 
 #[test]
-fn test_701_compiled_dependency_matches_the_reviewed_baseline() {
+fn test_701_compiled_dependency_matches_the_pinned_candidate() {
     let baseline = selfsame_pairing::dependency_baseline();
     assert_eq!(baseline.revision, CANDIDATE_REVISION.trim());
     assert_eq!(
@@ -41,7 +41,7 @@ fn test_701_compiled_dependency_matches_the_reviewed_baseline() {
     );
     assert!(
         tracked.stdout.is_empty(),
-        "reviewed sibling checkout has tracked drift"
+        "pinned sibling checkout has tracked drift"
     );
 }
 
