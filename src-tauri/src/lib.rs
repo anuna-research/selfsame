@@ -42,6 +42,7 @@ pub mod cbcl_registry;
 pub mod cbcl_transport;
 pub mod cbcl_v2_claimant;
 pub mod cbcl_v2_commands;
+pub mod cbcl_v2_completion;
 pub mod cbcl_v2_policy;
 mod commands;
 pub mod custody;
@@ -99,6 +100,7 @@ pub fn run() {
             cbcl_v2_commands::cbcl_v2_recognise,
             cbcl_v2_commands::cbcl_v2_relay_decide,
             cbcl_v2_commands::cbcl_v2_preliminary_decide,
+            cbcl_v2_commands::cbcl_v2_final_decide,
             cbcl_v2_commands::cbcl_v2_cancel,
             app_grant::app_grant_review,
             app_grant::app_grant_prepare,

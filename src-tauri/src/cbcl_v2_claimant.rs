@@ -78,6 +78,12 @@ impl RelayConsentPlan {
     pub fn relay_origin(&self) -> &str {
         self.carrier.relay_origin()
     }
+
+    /// Borrow the exact public carrier retained for checkpoint recovery.
+    #[must_use]
+    pub const fn carrier(&self) -> &CredentialV2Carrier {
+        &self.carrier
+    }
 }
 
 /// Closed command-owned choice for one pre-socket plan.
@@ -252,6 +258,12 @@ impl PreparedClaimant {
     #[must_use]
     pub fn relay_origin(&self) -> &str {
         self.carrier.relay_origin()
+    }
+
+    /// Borrow the exact public carrier retained for checkpoint recovery.
+    #[must_use]
+    pub const fn carrier(&self) -> &CredentialV2Carrier {
+        &self.carrier
     }
 
     /// Borrow the sole builder for authenticated Selfsame successor objects.

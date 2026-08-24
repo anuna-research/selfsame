@@ -6,6 +6,7 @@ use cbcl_pairing::{
 };
 use rand::RngCore as _;
 use serde::Serialize;
+use sha2::Digest as _;
 use std::net::TcpStream;
 use tauri::State;
 use tungstenite::{stream::MaybeTlsStream, Message, WebSocket};
@@ -25,6 +26,7 @@ type Result<T> = std::result::Result<T, UiError>;
 pub struct PendingCredentialV2Pairing {
     claimant: PreparedClaimant,
     socket: WebSocket<MaybeTlsStream<TcpStream>>,
+    intent_approve: Option<cbcl_pairing::credential_v2::CredentialV2Object>,
     preview_did: Option<String>,
     comparison: Option<cbcl_pairing::credential_v2::CredentialV2Object>,
 }
@@ -75,6 +77,14 @@ pub struct CredentialV2FinalReviewView {
 pub struct CredentialV2PreliminaryDecisionView {
     outcome: &'static str,
     final_review: Option<CredentialV2FinalReviewView>,
+}
+
+/// Final decision result. Provisioning continues only from a durable pending
+/// checkpoint; decline performs no identity effect.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CredentialV2FinalDecisionView {
+    outcome: &'static str,
 }
 
 /// Recognise carrier, PAIR1, live profile, declared relay, and exact-pair state.
@@ -209,6 +219,7 @@ pub async fn cbcl_v2_preliminary_decide(
         let application_id = pending.claimant.profile().application_id.as_str().into();
         let preview_fingerprint = selfsame_core::fingerprint::fingerprint_did(&preview_did).into();
         pending.preview_did = Some(preview_did.clone());
+        pending.intent_approve = Some(decision);
         pending.comparison = Some(comparison);
         Ok::<_, UiError>((
             pending,
@@ -230,6 +241,161 @@ pub async fn cbcl_v2_preliminary_decide(
     Ok(CredentialV2PreliminaryDecisionView {
         outcome: "final-review",
         final_review: Some(view),
+    })
+}
+
+/// Commit the second person decision. Final approval is checkpointed into the
+/// application's secure-store slot before its protocol frame is released.
+/// No issuer or grant effect is performed by this first durable boundary.
+#[tauri::command]
+pub async fn cbcl_v2_final_decide(
+    approve: bool,
+    passcode: Option<String>,
+    session: State<'_, AppSession>,
+) -> Result<CredentialV2FinalDecisionView> {
+    let mut pending = take_pending(&session)?;
+    let comparison = pending
+        .comparison
+        .clone()
+        .ok_or_else(|| UiError::from("PairingFailed"))?;
+    let preview_did = pending
+        .preview_did
+        .clone()
+        .ok_or_else(|| UiError::from("PairingFailed"))?;
+    let final_decision = pending
+        .claimant
+        .body_authority()
+        .final_decision(
+            &comparison,
+            if approve {
+                selfsame_pairing::credential_v2::CredentialV2FinalDecision::Approve
+            } else {
+                selfsame_pairing::credential_v2::CredentialV2FinalDecision::Decline
+            },
+        )
+        .map_err(|_| UiError::from("PairingFailed"))?;
+    if !approve {
+        send_claimant_object(&mut pending, &final_decision)?;
+        return Ok(CredentialV2FinalDecisionView {
+            outcome: "declined",
+        });
+    }
+
+    let passcode = passcode
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| UiError::from("PresenceRequired"))?;
+    crate::custody::Custody::require_backup_confirmed()?;
+    let offer_object = pending
+        .claimant
+        .authenticated_offer()
+        .cloned()
+        .ok_or_else(|| UiError::from("PairingFailed"))?;
+    let recognised = selfsame_pairing::credential_v2::recognise_signed_offer(
+        pending.claimant.profile(),
+        offer_object.body(),
+    )
+    .map_err(|_| UiError::from("PairingFailed"))?;
+    let now = crate::commands::now();
+    if now >= recognised.expires_at {
+        return Err(UiError::from("PairingOfferExpired"));
+    }
+    let intent_approve = pending
+        .intent_approve
+        .clone()
+        .ok_or_else(|| UiError::from("PairingFailed"))?;
+    let application_id = pending
+        .claimant
+        .profile()
+        .application_id
+        .as_str()
+        .to_owned();
+    let profile_digest = *pending.claimant.profile().digest();
+    let carrier = pending.claimant.carrier().clone();
+    let root_generation =
+        crate::cbcl_v2_completion::root_generation(&crate::custody::Custody::root_public_key()?);
+    let preview_fingerprint: [u8; 32] = sha2::Sha256::digest(preview_did.as_bytes()).into();
+    let mut checkpoint_nonce = [0_u8; 12];
+    rand::rngs::OsRng.fill_bytes(&mut checkpoint_nonce);
+
+    let (generation, checkpoint) =
+        crate::custody::Custody::use_hierarchy_root(&passcode, |root| -> Result<_> {
+            let claims = recognised.claims.account_provenance();
+            let scope = selfsame_app_identity::scope::AccountScopeId::from_octets(
+                *claims.account_scope_id(),
+            );
+            let home = selfsame_app_identity::hierarchy::derive(
+                root,
+                &pending.claimant.profile().application_id,
+                &scope,
+            );
+            let final_did = home
+                .home_did()
+                .map_err(|_| UiError::from("PairingIdentityUnavailable"))?;
+            let final_fingerprint: [u8; 32] = sha2::Sha256::digest(final_did.as_bytes()).into();
+            if final_did != preview_did || final_fingerprint != preview_fingerprint {
+                return Err(UiError::from("PairingPreviewChanged"));
+            }
+            let wrapping_key = crate::cbcl_v2_completion::checkpoint_wrapping_key(
+                root,
+                &application_id,
+                carrier.carrier_ceremony_id(),
+            )?;
+            let effects = pending
+                .claimant
+                .core_mut()
+                .prepare_final_approval(
+                    &final_decision,
+                    &wrapping_key,
+                    cbcl_pairing::credential_v2::CredentialV2CheckpointNonce::from_csprng(
+                        checkpoint_nonce,
+                    ),
+                    now,
+                )
+                .map_err(|_| UiError::from("PairingFailed"))?;
+            let mut effects = effects.into_iter();
+            let Some(CredentialV2ClaimantEffect::Checkpoint {
+                generation,
+                checkpoint,
+            }) = effects.next()
+            else {
+                return Err(UiError::from("PairingFailed"));
+            };
+            if effects.next().is_some() {
+                return Err(UiError::from("PairingFailed"));
+            }
+            Ok((generation, checkpoint))
+        })??;
+
+    let durable = crate::cbcl_v2_completion::PendingCredentialV2Completion::new(
+        crate::cbcl_v2_completion::PendingCredentialV2Input {
+            root_generation,
+            application_id: &application_id,
+            profile_digest,
+            carrier: &carrier,
+            offer: &offer_object,
+            intent_approve: &intent_approve,
+            comparison: &comparison,
+            final_approve: &final_decision,
+            preview_issuer_did: &preview_did,
+            offer_expires_at: recognised.expires_at,
+            checkpoint_generation: generation,
+            checkpoint: &checkpoint,
+        },
+    )?;
+    crate::cbcl_v2_completion::persist_pending(&durable)?;
+    let effects = pending
+        .claimant
+        .core_mut()
+        .checkpoint_persisted(generation)
+        .map_err(|_| UiError::from("PairingFailed"))?;
+    send_effects(&mut pending.socket, effects)?;
+    session
+        .0
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .pending_cbcl_v2 = Some(pending);
+    Ok(CredentialV2FinalDecisionView {
+        outcome: "provisioning-pending",
     })
 }
 
@@ -296,6 +462,7 @@ fn pump_to_offer(
                         PendingCredentialV2Pairing {
                             claimant,
                             socket,
+                            intent_approve: None,
                             preview_did: None,
                             comparison: None,
                         },
@@ -337,6 +504,23 @@ fn send_claimant_object(
                 .socket
                 .send(Message::Binary(bytes.into()))
                 .map_err(|_| UiError::from("PairingRelayUnavailable"))?,
+            _ => return Err(UiError::from("PairingFailed")),
+        }
+    }
+    Ok(())
+}
+
+fn send_effects(
+    socket: &mut WebSocket<MaybeTlsStream<TcpStream>>,
+    effects: Vec<CredentialV2ClaimantEffect>,
+) -> Result<()> {
+    for effect in effects {
+        match effect {
+            CredentialV2ClaimantEffect::Send(bytes) => {
+                socket
+                    .send(Message::Binary(bytes.into()))
+                    .map_err(|_| UiError::from("PairingRelayUnavailable"))?
+            }
             _ => return Err(UiError::from("PairingFailed")),
         }
     }
