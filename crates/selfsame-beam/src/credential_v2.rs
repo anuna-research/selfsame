@@ -13,8 +13,10 @@ use selfsame_app_identity::profile::{ApplicationProfile, CbclRelayDescriptor};
 use selfsame_app_identity::{codec, json};
 use selfsame_pairing::credential_v2::{
     build_authority_status_response, finalize_verified_offer, prepare_offer_core,
-    recognise_prepared_offer, verify_prepared_offer_device_proof, CredentialV2AuthorityStatus,
-    CredentialV2OfferBuildInput, CredentialV2RoomProvenance, CredentialV2RoomSnapshot,
+    recognise_browser_staging_receipt, recognise_prepared_offer,
+    verify_prepared_offer_device_proof, CredentialV2AuthorityStatus,
+    CredentialV2BrowserStagingInput, CredentialV2OfferBuildInput,
+    CredentialV2RoomProvenance, CredentialV2RoomSnapshot,
 };
 
 const MAX_DEVICE_JWK_OCTETS: usize = 96;
@@ -167,6 +169,62 @@ pub struct CredentialV2ProfileProjection {
     pub device_jwk: Vec<u8>,
     /// Raw Ed25519 installation public key from that JWK.
     pub device_public_key: [u8; 32],
+}
+
+/// Verify the exact browser staging receipt under the held installation key.
+pub fn verify_credential_v2_staging_receipt(
+    expected: &CredentialV2BrowserStagingInput,
+    device_public_key: [u8; 32],
+    receipt: &[u8],
+) -> Result<(), String> {
+    recognise_browser_staging_receipt(receipt, expected, device_public_key)
+        .map_err(|_| String::from(REFUSED))
+}
+
+/// `cbcl_selfsame_erl:verify_credential_v2_staging_receipt/13`.
+#[allow(clippy::too_many_arguments)]
+#[rustler::nif(name = "verify_credential_v2_staging_receipt", schedule = "DirtyCpu")]
+pub fn verify_credential_v2_staging_receipt_nif<'a>(
+    env: Env<'a>,
+    application_id_value: Binary<'a>,
+    carrier_ceremony_id: Binary<'a>,
+    account_principal_digest_value: Binary<'a>,
+    account_scope_id: Binary<'a>,
+    device_did_value: Binary<'a>,
+    offer_core_digest_value: Binary<'a>,
+    payload_digest: Binary<'a>,
+    grant_id: Binary<'a>,
+    issuer_did: Binary<'a>,
+    profile_digest_value: Binary<'a>,
+    receipt_recovery_commitment: Binary<'a>,
+    device_public_key_value: Binary<'a>,
+    receipt: Binary<'a>,
+) -> Term<'a> {
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let expected = CredentialV2BrowserStagingInput {
+            application_id: utf8(application_id_value.as_slice())?,
+            carrier_ceremony_id: exact(carrier_ceremony_id.as_slice())?,
+            account_principal_digest: exact(account_principal_digest_value.as_slice())?,
+            account_scope_id: exact(account_scope_id.as_slice())?,
+            device_did: utf8(device_did_value.as_slice())?,
+            offer_core_digest: exact(offer_core_digest_value.as_slice())?,
+            payload_digest: exact(payload_digest.as_slice())?,
+            grant_id: exact(grant_id.as_slice())?,
+            issuer_did: utf8(issuer_did.as_slice())?,
+            profile_digest: exact(profile_digest_value.as_slice())?,
+            receipt_recovery_commitment: exact(receipt_recovery_commitment.as_slice())?,
+        };
+        verify_credential_v2_staging_receipt(
+            &expected,
+            exact(device_public_key_value.as_slice())?,
+            receipt.as_slice(),
+        )?;
+        Ok::<Atom, String>(verified())
+    }));
+    match result {
+        Ok(Ok(value)) => (atom::ok(), value).encode(env),
+        Ok(Err(_)) | Err(_) => (atom::error(), rejected()).encode(env),
+    }
 }
 
 /// Recognise and bind every profile-owned allocation field in one operation.

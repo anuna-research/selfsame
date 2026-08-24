@@ -1,8 +1,15 @@
 #[path = "../../selfsame-app-identity/tests/common/mod.rs"]
 mod common;
 
-use cbcl_selfsame_erl::credential_v2::recognise_credential_v2_profile;
-use selfsame_app_identity::{codec, json};
+use cbcl_selfsame_erl::credential_v2::{
+    recognise_credential_v2_profile, verify_credential_v2_staging_receipt,
+};
+use ed25519_dalek::{Signer, SigningKey};
+use selfsame_app_identity::{codec, didkey, json};
+use selfsame_pairing::credential_v2::{
+    browser_staging_signature_input, build_browser_staging_receipt,
+    CredentialV2BrowserStagingInput,
+};
 
 fn device_jwk(key: [u8; 32]) -> Vec<u8> {
     json::canonicalise(&json::Json::obj([
@@ -97,6 +104,48 @@ fn test_117_profile_projection_refuses_every_caller_selected_binding() {
         "https://cbcl-au.provider.example",
         &permission,
         br#"{"alg":"EdDSA","crv":"Ed25519","kty":"OKP","x":"d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3c"}"#,
+    )
+    .is_err());
+}
+
+#[test]
+fn test_117_staging_receipt_boundary_verifies_signature_and_every_held_fact() {
+    let key = SigningKey::from_bytes(&[0x88; 32]);
+    let input = CredentialV2BrowserStagingInput {
+        application_id: common::APPLICATION_ID.into(),
+        carrier_ceremony_id: [0x11; 32],
+        account_principal_digest: [0x22; 32],
+        account_scope_id: [0x33; 32],
+        device_did: didkey::encode(&key.verifying_key().to_bytes()),
+        offer_core_digest: [0x44; 32],
+        payload_digest: [0x55; 32],
+        grant_id: [0x66; 32],
+        issuer_did: "did:crdt:z6MkBeamStagingIssuer".into(),
+        profile_digest: [0x77; 32],
+        receipt_recovery_commitment: [0x99; 32],
+    };
+    let signature = key
+        .sign(&browser_staging_signature_input(&input).unwrap())
+        .to_bytes();
+    let receipt = build_browser_staging_receipt(
+        &input,
+        key.verifying_key().to_bytes(),
+        signature,
+    )
+    .unwrap();
+    verify_credential_v2_staging_receipt(
+        &input,
+        key.verifying_key().to_bytes(),
+        &receipt,
+    )
+    .unwrap();
+
+    let mut changed = input.clone();
+    changed.grant_id[0] ^= 1;
+    assert!(verify_credential_v2_staging_receipt(
+        &changed,
+        key.verifying_key().to_bytes(),
+        &receipt,
     )
     .is_err());
 }
