@@ -804,30 +804,30 @@ pub async fn cbcl_v2_reload_verify(
     let account = installed.account()?;
     let jrd = match selfsame_app_identity_net::webfinger::fetch(&account).await {
         Ok(value) => value,
-        Err(selfsame_app_identity_net::NetError::NotFound) => {
-            let check = installed.verify_reload(Observation::HubDeleted, None)?;
-            return reload_view(&installed, check.outcome, approve_rotation, None);
-        }
-        Err(selfsame_app_identity_net::NetError::Timeout)
-        | Err(selfsame_app_identity_net::NetError::Transport(_))
-        | Err(selfsame_app_identity_net::NetError::Refused(_)) => {
-            let check = installed.verify_reload(Observation::Unavailable, None)?;
-            return reload_view(&installed, check.outcome, approve_rotation, None);
-        }
-        Err(_) => {
-            return reload_verified_view(
-                &installed,
-                &current,
-                current_root_generation,
-                &observed_account,
-                installed.issuer_did(),
-                offer_key_retained,
-                false,
-                true,
-                approve_rotation,
-                None,
-            );
-        }
+        Err(error) => match classify_webfinger_failure(error) {
+            WebFingerReloadFailure::HubDeleted => {
+                let check = installed.verify_reload(Observation::HubDeleted, None)?;
+                return reload_view(&installed, check.outcome, approve_rotation, None);
+            }
+            WebFingerReloadFailure::Unavailable => {
+                let check = installed.verify_reload(Observation::Unavailable, None)?;
+                return reload_view(&installed, check.outcome, approve_rotation, None);
+            }
+            WebFingerReloadFailure::InvalidBinding => {
+                return reload_verified_view(
+                    &installed,
+                    &current,
+                    current_root_generation,
+                    &observed_account,
+                    installed.issuer_did(),
+                    offer_key_retained,
+                    false,
+                    true,
+                    approve_rotation,
+                    None,
+                );
+            }
+        },
     };
     if jrd.subject != observed_account {
         return reload_verified_view(
@@ -1734,5 +1734,40 @@ fn map_transport(error: cbcl_transport::TransportError) -> UiError {
         cbcl_transport::TransportError::Connect | cbcl_transport::TransportError::Handshake => {
             UiError::from("PairingRelayUnavailable")
         }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum WebFingerReloadFailure {
+    HubDeleted,
+    Unavailable,
+    InvalidBinding,
+}
+
+fn classify_webfinger_failure(
+    error: selfsame_app_identity_net::NetError,
+) -> WebFingerReloadFailure {
+    match error {
+        selfsame_app_identity_net::NetError::NotFound => WebFingerReloadFailure::HubDeleted,
+        selfsame_app_identity_net::NetError::TooLarge
+        | selfsame_app_identity_net::NetError::Timeout
+        | selfsame_app_identity_net::NetError::Transport(_)
+        | selfsame_app_identity_net::NetError::Refused(_) => WebFingerReloadFailure::Unavailable,
+        selfsame_app_identity_net::NetError::Recognition(_) => {
+            WebFingerReloadFailure::InvalidBinding
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_1163_oversized_webfinger_is_unavailable_not_revoked() {
+        assert_eq!(
+            classify_webfinger_failure(selfsame_app_identity_net::NetError::TooLarge),
+            WebFingerReloadFailure::Unavailable
+        );
     }
 }
