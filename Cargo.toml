@@ -36,15 +36,14 @@ cbcl-pairing = { path = "../cbcl-pairing", features = ["relay"] }
 #   git clone https://git.anuna.io/anuna-research/cbcl-rs  ../cbcl-rs
 #   git clone https://git.anuna.io/anuna-research/cbcl-pairing ../cbcl-pairing
 #
-# `cbcl-rs.sha` and `cbcl-pairing.sha` pin their sibling checkouts; the first is
-# pinned by the revision recorded in crates/selfsame-core/tests/vectors.rs.
-# .forgejo/workflows/ci.yml clones all three from those pins.
+# `cbcl-rs.sha`, `did-crdt.sha`, and `cbcl-pairing.sha` pin their sibling
+# checkouts. `.forgejo/workflows/ci.yml` clones all three from those files and
+# `crates/selfsame-pairing/build.rs` rejects a mismatched or tracked-dirty tree.
 #
-# did-crdt is pinned at fbccfd5885cd0c0136218f809ea0e183bc7e49f3 by SPEC-001
-# ADR-010: its DID derivation and `u`-multibase encoding are adopted verbatim,
-# and any change to either is a breaking change to the specification.
+# did-crdt's DID derivation and `u`-multibase encoding are adopted verbatim by
+# SPEC-001 ADR-010, and any change to either is a breaking change to the spec.
 # `crates/selfsame-core/tests/pinned_derivation.rs` fails if the derivation
-# drifts, so the pin is enforced by a test rather than by a comment.
+# drifts; `did-crdt.sha` is the sole dependency-revision source of truth.
 did-crdt = { path = "../did-crdt", default-features = false }
 
 # cbcl-rs supplies the wire encoding and the canonical signing form (ADR-013).

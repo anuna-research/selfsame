@@ -29,9 +29,14 @@ selfsame-core = { workspace = true }
 selfsame-app-identity = { workspace = true }
 selfsame-pairing = { path = "../selfsame-pairing" }
 ed25519-dalek = { workspace = true, features = ["std"] }
+cbcl-pairing = { workspace = true }
+hkdf = "0.12"
+sha2 = { version = "0.10", default-features = false }
+zeroize = "1"
 wasm-bindgen = "0.2"
 serde = { workspace = true }
 serde_json = { workspace = true }
+did-crdt = { workspace = true }
 # CON-402's QR, encoded here rather than in JavaScript so the symbol a browser
 # paints and the one `selfsame-cli` prints come from one encoder. Two encoders
 # for one payload is the parser-differential shape this repository refuses, and
@@ -45,19 +50,15 @@ qrcode = { version = "0.14", default-features = false }
 # dev-dependency on `tokio` in a crate that compiles to wasm would otherwise be
 # alarming enough to warrant this note.
 [dev-dependencies]
-# For the vendored-vector digest pin only.
-sha2 = { version = "0.10", default-features = false }
 # So the CON-409 round-trip test decodes the published envelope exactly the way
 # the wallet's `resolve_record` does, rather than through a helper that happens
 # to agree.
 base64ct = { workspace = true }
 selfsame-rendezvous = { path = "../selfsame-rendezvous" }
-cbcl-pairing = { workspace = true }
 # The allocator round-trip test plays the browser surface against the real
 # relay service and the native claimant, both fed by the deterministic local
 # demo credential. The feature reaches test builds only.
 selfsame-pairing = { path = "../selfsame-pairing", features = ["local-pairing-demo"] }
-did-crdt = { workspace = true }
 tokio = { workspace = true }
 reqwest = { version = "0.12", features = ["json", "blocking"] }
 axum = "0.7"

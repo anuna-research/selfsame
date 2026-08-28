@@ -88,11 +88,11 @@ fn run() -> Result<(), String> {
             match effect {
                 LiveEffect::Send(bytes) => send(&mut socket, bytes)?,
                 LiveEffect::DisplayIntent(intent) if !decided => {
-                    println!("Application: {}", intent.application);
-                    println!("Action: {}", intent.action);
-                    println!("Authority: {}", intent.authority_summary);
-                    for field in intent.fields {
-                        println!("{}: {}", field.label, field.value);
+                    println!("Application: {}", intent.application());
+                    println!("Action: {}", intent.action());
+                    println!("Authority: {}", intent.authority_summary());
+                    for field in intent.fields() {
+                        println!("{}: {}", field.label(), field.value());
                     }
                     let decision = if decline {
                         Decision::Decline

@@ -40,6 +40,10 @@ pub mod cbcl_context;
 pub mod cbcl_pairing;
 pub mod cbcl_registry;
 pub mod cbcl_transport;
+pub mod cbcl_v2_claimant;
+pub mod cbcl_v2_commands;
+pub mod cbcl_v2_completion;
+pub mod cbcl_v2_policy;
 mod commands;
 pub mod custody;
 pub mod net;
@@ -94,9 +98,24 @@ pub fn run() {
             cbcl_pairing::cbcl_pairing_approve,
             cbcl_pairing::cbcl_pairing_decline,
             cbcl_pairing::cbcl_pairing_cancel,
+            cbcl_v2_commands::cbcl_v2_recognise,
+            cbcl_v2_commands::cbcl_v2_relay_decide,
+            cbcl_v2_commands::cbcl_v2_preliminary_decide,
+            cbcl_v2_commands::cbcl_v2_final_decide,
+            cbcl_v2_commands::cbcl_v2_finish,
+            cbcl_v2_commands::cbcl_v2_pending_recoveries,
+            cbcl_v2_commands::cbcl_v2_pending_links,
+            cbcl_v2_commands::cbcl_v2_installed_links,
+            cbcl_v2_commands::cbcl_v2_reload_verify,
+            cbcl_v2_commands::cbcl_v2_unlink,
+            cbcl_v2_commands::cbcl_v2_recover,
+            cbcl_v2_commands::cbcl_v2_cancel,
             app_grant::app_grant_review,
             app_grant::app_grant_prepare,
             app_grant::app_grant_confirm,
+            app_grant::cbcl_enrol_start,
+            app_grant::cbcl_enrol_prepare,
+            app_grant::cbcl_enrol_confirm,
             app_identity::provision_username,
             app_identity::revoke_grant,
             app_identity::revocation_status,

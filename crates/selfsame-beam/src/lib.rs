@@ -5,6 +5,7 @@
 //! established CBCL parser NIF; keeping the dependency graphs separate avoids
 //! turning an identity-verifier addition into a parser availability risk.
 
+pub mod credential_v2;
 pub mod enrollment;
 pub mod path_b;
 
@@ -16,6 +17,9 @@ pub use path_b::{
 
 fn load(env: rustler::Env<'_>, _info: rustler::Term<'_>) -> bool {
     env.register::<path_b::StandingGrantResource>().is_ok()
+        && env
+            .register::<credential_v2::CredentialV2AcceptanceWitness>()
+            .is_ok()
 }
 
 rustler::init!("cbcl_selfsame_erl", load = load);

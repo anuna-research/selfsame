@@ -25,6 +25,7 @@ use ed25519_dalek::SigningKey;
 use serde::{Deserialize, Serialize};
 
 const VECTORS_PATH: &str = "../../test-vectors/spec-001-v1.json";
+const DID_CRDT_PIN: &str = include_str!("../../../did-crdt.sha");
 
 #[derive(Serialize, Deserialize, PartialEq, Debug)]
 struct Vectors {
@@ -175,7 +176,7 @@ fn build() -> Vectors {
 
     Vectors {
         spec: "SPEC-001 v0.3.0".to_owned(),
-        did_crdt_revision: "fbccfd5885cd0c0136218f809ea0e183bc7e49f3".to_owned(),
+        did_crdt_revision: DID_CRDT_PIN.trim().to_owned(),
         con_007_root_derivation: con_007,
         adr_010_did_derivation: adr_010,
         con_001_link_code: con_001,

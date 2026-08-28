@@ -121,7 +121,7 @@ jobs:
           # the previous pin after ci.yml had moved on, so `rust` passed and
           # `android` failed to compile selfsame-core — a failure that reads
           # like a target problem and is actually a stale sibling.
-          did_sha="$(grep -oE '[0-9a-f]{40}' crates/selfsame-core/tests/vectors.rs | head -1)"
+          did_sha="$(tr -d '[:space:]' < did-crdt.sha)"
           cbcl_sha="$(tr -d '[:space:]' < cbcl-rs.sha)"
           pairing_sha="$(tr -d '[:space:]' < cbcl-pairing.sha)"
           echo "did-crdt @ ${did_sha}"
@@ -208,7 +208,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             ~/.cargo/bin
-          key: android-cargo-${{ hashFiles('Cargo.lock', 'cbcl-rs.sha', 'cbcl-pairing.sha') }}
+          key: android-cargo-${{ hashFiles('Cargo.lock', 'cbcl-rs.sha', 'did-crdt.sha', 'cbcl-pairing.sha') }}
           restore-keys: android-cargo-
 
       - name: Ensure Rust and the aarch64 Android target

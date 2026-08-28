@@ -340,7 +340,7 @@ pub fn accept_grant(
     expect: &Expectation<'_>,
     evidence: &Evidence<'_>,
 ) -> Result<Acceptance, AcceptError> {
-    accept_grant_inner(grant_bytes, expect, evidence, true)
+    accept_grant_inner(grant_bytes, expect, evidence, true, true)
 }
 
 /// Re-validate a credential through `CON-206` steps 1--12 only.
@@ -351,11 +351,33 @@ pub fn accept_grant(
 pub(crate) fn rehydrate_accepted_grant(
     grant_bytes: &[u8], expect: &Expectation<'_>, evidence: &Evidence<'_>,
 ) -> Result<Acceptance, AcceptError> {
-    accept_grant_inner(grant_bytes, expect, evidence, false)
+    accept_grant_inner(grant_bytes, expect, evidence, true, false)
+}
+
+/// Validate a grant for an inactive record before reciprocal alias
+/// provisioning exists.
+///
+/// This is crate-private and deliberately skips only CON-206 steps 9 and 13:
+/// WebFinger is created by the application's later atomic finalization, and
+/// the installation key already proved possession when the signed offer was
+/// finalized. The public Path-B adapter exposes the result as a deliberately
+/// non-authorizing type.
+pub(crate) fn stage_accepted_grant(
+    grant_bytes: &[u8], expect: &Expectation<'_>, issuer: &IssuerState,
+    projection: Option<Projection>,
+) -> Result<Acceptance, AcceptError> {
+    accept_grant_inner(
+        grant_bytes,
+        expect,
+        &Evidence { issuer: Some(issuer), jrd: None, projection, proof: None },
+        false,
+        false,
+    )
 }
 
 fn accept_grant_inner(
-    grant_bytes: &[u8], expect: &Expectation<'_>, evidence: &Evidence<'_>, require_proof: bool,
+    grant_bytes: &[u8], expect: &Expectation<'_>, evidence: &Evidence<'_>,
+    require_account_binding: bool, require_proof: bool,
 ) -> Result<Acceptance, AcceptError> {
     // ── 1 ──────────────────────────────────────────────────────────────────
     if grant_bytes.len() > grant::MAX_GRANT_OCTETS {
@@ -470,11 +492,13 @@ fn accept_grant_inner(
     // The sole gate on alias provisioning. A deterministically named but
     // unprovisioned alias fails closed here, whatever order issuance and
     // provisioning happened to take.
-    let jrd = evidence.jrd.ok_or_else(|| {
-        AcceptError::at(AcceptStep::AccountBinding, "no reciprocal account binding available")
-    })?;
-    alias::verify_reciprocal_binding(jrd, &grant.account, &grant.issuer, &issuer.also_known_as)
-        .map_err(|e| AcceptError::at(AcceptStep::AccountBinding, e.to_string()))?;
+    if require_account_binding {
+        let jrd = evidence.jrd.ok_or_else(|| {
+            AcceptError::at(AcceptStep::AccountBinding, "no reciprocal account binding available")
+        })?;
+        alias::verify_reciprocal_binding(jrd, &grant.account, &grant.issuer, &issuer.also_known_as)
+            .map_err(|e| AcceptError::at(AcceptStep::AccountBinding, e.to_string()))?;
+    }
 
     // ── 10 ─────────────────────────────────────────────────────────────────
     check_status(&grant, expect, issuer, evidence.projection)?;

@@ -55,7 +55,9 @@
 
 use ed25519_dalek::SigningKey;
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
 use wasm_bindgen::prelude::*;
+use zeroize::Zeroizing;
 
 use selfsame_app_identity::accept::{ClosureSource, IssuerState};
 use selfsame_app_identity::alias::{AcctUri, Jrd};
@@ -63,7 +65,8 @@ use selfsame_app_identity::ceremony::{self as identity_ceremony, BundlePayload, 
 use selfsame_app_identity::enrollment::{self as identity_enrollment, EnrollmentStatement};
 use selfsame_app_identity::json::{self as identity_json, Json};
 use selfsame_app_identity::path_b::{
-    agree_closures, issuer_state_of, ClosureAssertionMethod, ResolverObservation,
+    agree_closures, issuer_state_of, replay_resolver_closure, verify_inactive_staging,
+    ClosureAssertionMethod, InactiveStagedGrant, ResolverObservation,
 };
 use selfsame_app_identity::path_b::{rehydrate_verified_grant, GrantRequest, VerifiedGrant};
 use selfsame_app_identity::profile::ApplicationProfile;
@@ -290,16 +293,16 @@ fn live_effects_json(effects: &[selfsame_pairing::live::LiveEffect]) -> String {
             }),
             LiveEffect::DisplayIntent(intent) => serde_json::json!({
                 "type": "display-intent",
-                "application": intent.application,
-                "action": intent.action,
-                "authoritySummary": intent.authority_summary,
+                "application": intent.application(),
+                "action": intent.action(),
+                "authoritySummary": intent.authority_summary(),
                 "fields": intent
-                    .fields
+                    .fields()
                     .iter()
                     .map(|field| serde_json::json!({
-                        "label": field.label,
-                        "value": field.value,
-                        "claimedBySecretHolder": field.claimed_by_secret_holder,
+                        "label": field.label(),
+                        "value": field.value(),
+                        "claimedBySecretHolder": field.claimed_by_secret_holder(),
                     }))
                     .collect::<Vec<_>>(),
             }),
@@ -320,6 +323,900 @@ fn live_effects_json(effects: &[selfsame_pairing::live::LiveEffect]) -> String {
         })
         .collect();
     serde_json::Value::Array(entries).to_string()
+}
+
+const V2_ALLOCATOR_CHECKPOINT_INFO: &[u8] =
+    b"cbcl-chat credential/v2 allocator checkpoint wrapping v1";
+
+/// Distinct browser allocator for standalone credential/v2 pairing.
+///
+/// This surface cannot select credential/v1. It returns a closed JSON effect
+/// list consumed by `credential-v2-allocator.mjs`; checkpoint effects are
+/// acknowledged through [`CredentialV2BrowserAllocatorSession::checkpoint_persisted`]
+/// before the Rust session releases any cached relay frame.
+#[wasm_bindgen]
+pub struct CredentialV2BrowserAllocatorSession {
+    session: Option<cbcl_pairing::credential_v2::CredentialV2AllocatorSession>,
+    profile: ApplicationProfile,
+    request_id: [u8; 32],
+    intent_nonce: [u8; 32],
+    carrier_ceremony_id: [u8; 32],
+    expected_allocator_key: [u8; 32],
+    transcript_hash: Option<[u8; 64]>,
+    prepared_offer_core: Option<Vec<u8>>,
+    prepared_offer_digest: Option<[u8; 32]>,
+    offer_kid: Option<String>,
+    authority_status: Option<selfsame_pairing::credential_v2::CredentialV2AuthorityStatus>,
+    authority_response: Option<Vec<u8>>,
+    body_authority: selfsame_pairing::credential_v2::CredentialV2BodyAuthority,
+    last_received_object: Option<cbcl_pairing::credential_v2::CredentialV2Object>,
+    presence_code: Option<Zeroizing<String>>,
+}
+
+#[wasm_bindgen]
+impl CredentialV2BrowserAllocatorSession {
+    /// Construct a v2 attempt from a recognised live profile and shell CSPRNG bytes.
+    #[wasm_bindgen(constructor)]
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        profile: &[u8],
+        relay_origin: String,
+        mailbox_id: &[u8],
+        carrier_ceremony_id: &[u8],
+        carrier_nonce: &[u8],
+        cpace_secret: &[u8],
+        claim_token: &[u8],
+        cpace_scalar: &[u8],
+        request_id: &[u8],
+        intent_nonce: &[u8],
+        expected_allocator_key: &[u8],
+        installation_seed: &[u8],
+    ) -> Result<CredentialV2BrowserAllocatorSession, JsError> {
+        let profile = ApplicationProfile::recognise(profile)
+            .map_err(|_| JsError::new("the credential/v2 application profile was refused"))?;
+        if !profile
+            .cbcl_pairing_relays
+            .iter()
+            .any(|descriptor| descriptor.relay_origin == relay_origin)
+        {
+            return Err(JsError::new(
+                "the credential/v2 relay is absent from the application profile",
+            ));
+        }
+        let mailbox_id = fixed_browser_bytes(mailbox_id, "mailbox ID")?;
+        let carrier_ceremony_id = fixed_browser_bytes(carrier_ceremony_id, "carrier ceremony ID")?;
+        let carrier_nonce = fixed_browser_bytes(carrier_nonce, "carrier nonce")?;
+        let cpace_secret = fixed_browser_bytes(cpace_secret, "CPace presence secret")?;
+        let claim_token = fixed_browser_bytes(claim_token, "relay claim token")?;
+        let presence_code =
+            cbcl_pairing::credential_v2::CredentialV2PresenceCode::new(cpace_secret, claim_token)
+                .to_string();
+        let cpace_scalar = fixed_browser_bytes(cpace_scalar, "CPace scalar")?;
+        let request_id = fixed_browser_bytes(request_id, "request ID")?;
+        let intent_nonce = fixed_browser_bytes(intent_nonce, "intent nonce")?;
+        let expected_allocator_key = fixed_browser_bytes(expected_allocator_key, "allocator key")?;
+        let installation_seed: [u8; 32] =
+            fixed_browser_bytes(installation_seed, "installation seed")?;
+        let mut wrapping_key = [0_u8; 32];
+        hkdf::Hkdf::<sha2::Sha512>::new(Some(&carrier_ceremony_id), &installation_seed)
+            .expand(V2_ALLOCATOR_CHECKPOINT_INFO, &mut wrapping_key)
+            .map_err(|_| JsError::new("credential/v2 checkpoint key derivation failed"))?;
+        let input = cbcl_pairing::credential_v2::CredentialV2AllocatorSessionInput {
+            application_context: profile.application_id.as_str().into(),
+            relay_origin,
+            mailbox_id,
+            carrier_ceremony_id,
+            carrier_nonce,
+            cpace_secret,
+            claim_token,
+            cpace_scalar,
+            profile_digest: *profile.digest(),
+            expected_allocator_key: Some(expected_allocator_key),
+            checkpoint_wrapping_key: wrapping_key,
+        };
+        let (body_authority, body_verifier) =
+            selfsame_pairing::credential_v2::credential_v2_body_authority();
+        let session = cbcl_pairing::credential_v2::CredentialV2AllocatorSession::new(
+            input,
+            Box::new(body_verifier),
+        )
+        .map_err(|_| JsError::new("the credential/v2 allocator attempt was refused"))?;
+        Ok(Self {
+            session: Some(session),
+            profile,
+            request_id,
+            intent_nonce,
+            carrier_ceremony_id,
+            expected_allocator_key,
+            transcript_hash: None,
+            prepared_offer_core: None,
+            prepared_offer_digest: None,
+            offer_kid: None,
+            authority_status: None,
+            authority_response: None,
+            body_authority,
+            last_received_object: None,
+            presence_code: Some(Zeroizing::new(presence_code)),
+        })
+    }
+
+    /// Restore one exact allocator checkpoint under its persisted carrier,
+    /// generation, authenticated profile and installation seed.
+    #[wasm_bindgen(js_name = restore)]
+    #[allow(clippy::too_many_arguments)]
+    pub fn restore(
+        profile: &[u8],
+        carrier: &[u8],
+        checkpoint: &[u8],
+        generation: u64,
+        request_id: &[u8],
+        intent_nonce: &[u8],
+        expected_allocator_key: &[u8],
+        installation_seed: &[u8],
+        now: u64,
+    ) -> Result<CredentialV2BrowserAllocatorSession, JsError> {
+        let profile = ApplicationProfile::recognise(profile)
+            .map_err(|_| JsError::new("the credential/v2 application profile was refused"))?;
+        let carrier = cbcl_pairing::credential_v2::decode_carrier(carrier)
+            .map_err(|_| JsError::new("the credential/v2 carrier was refused"))?;
+        let request_id = fixed_browser_bytes(request_id, "request ID")?;
+        let intent_nonce = fixed_browser_bytes(intent_nonce, "intent nonce")?;
+        let expected_allocator_key = fixed_browser_bytes(expected_allocator_key, "allocator key")?;
+        let installation_seed: [u8; 32] =
+            fixed_browser_bytes(installation_seed, "installation seed")?;
+        if generation == 0
+            || carrier.application_context() != profile.application_id.as_str()
+            || carrier.expected_allocator_key() != Some(&expected_allocator_key)
+        {
+            return Err(JsError::new(
+                "the credential/v2 checkpoint binding was refused",
+            ));
+        }
+        let mut wrapping_key = [0_u8; 32];
+        hkdf::Hkdf::<sha2::Sha512>::new(Some(carrier.carrier_ceremony_id()), &installation_seed)
+            .expand(V2_ALLOCATOR_CHECKPOINT_INFO, &mut wrapping_key)
+            .map_err(|_| JsError::new("credential/v2 checkpoint key derivation failed"))?;
+        let (body_authority, body_verifier) =
+            selfsame_pairing::credential_v2::credential_v2_body_authority_for_restore(
+                profile.clone(),
+            );
+        let session = cbcl_pairing::credential_v2::CredentialV2AllocatorSession::restore(
+            checkpoint,
+            &wrapping_key,
+            carrier.clone(),
+            generation,
+            *profile.digest(),
+            now,
+            Box::new(body_verifier),
+        )
+        .map_err(|_| JsError::new("the credential/v2 allocator checkpoint was refused"))?;
+        let transcript_hash = session.transcript_hash();
+        let last_received_object = session
+            .last_received_object()
+            .map_err(|_| JsError::new("the credential/v2 restored object was refused"))?;
+        if let Some(object) = last_received_object.as_ref() {
+            body_authority
+                .restore_retained_received_object(object)
+                .map_err(|_| JsError::new("the credential/v2 retained body was refused"))?;
+        }
+        let presence_code = session.presence_code().map(Zeroizing::new);
+        Ok(Self {
+            session: Some(session),
+            profile,
+            request_id,
+            intent_nonce,
+            carrier_ceremony_id: *carrier.carrier_ceremony_id(),
+            expected_allocator_key,
+            transcript_hash,
+            prepared_offer_core: None,
+            prepared_offer_digest: None,
+            offer_kid: None,
+            authority_status: None,
+            authority_response: None,
+            body_authority,
+            last_received_object,
+            presence_code,
+        })
+    }
+
+    /// Return the restored endpoint phase, or `bootstrap` before Finished.
+    pub fn restored_phase(&self) -> String {
+        use cbcl_pairing::credential_v2::{CredentialV2AllocatorBootstrapPhase, CredentialV2Phase};
+        if let Some(phase) = self
+            .session
+            .as_ref()
+            .and_then(|session| session.bootstrap_phase())
+        {
+            return match phase {
+                CredentialV2AllocatorBootstrapPhase::Allocated => "allocated",
+                CredentialV2AllocatorBootstrapPhase::Claimed => "claimed",
+                CredentialV2AllocatorBootstrapPhase::ShareSent => "share-sent",
+                CredentialV2AllocatorBootstrapPhase::FinishedSent => "finished-sent",
+            }
+            .into();
+        }
+        match self
+            .session
+            .as_ref()
+            .and_then(|session| session.endpoint_phase())
+        {
+            None => "bootstrap",
+            Some(CredentialV2Phase::Begin) => "begin",
+            Some(CredentialV2Phase::Offered) => "offered",
+            Some(CredentialV2Phase::IntentApproved) => "intent-approved",
+            Some(CredentialV2Phase::Prepared) => "prepared",
+            Some(CredentialV2Phase::Confirmed) => "confirmed",
+            Some(CredentialV2Phase::FinalApproved) => "final-approved",
+            Some(CredentialV2Phase::PayloadSent) => "payload-sent",
+            Some(CredentialV2Phase::Terminal) => "terminal",
+            Some(_) => "unknown",
+        }
+        .into()
+    }
+
+    /// Return the restored one-use presence code while the claim token remains
+    /// sealed in the allocator bootstrap checkpoint.
+    pub fn restored_presence_code(&self) -> Option<String> {
+        self.presence_code
+            .as_ref()
+            .map(|value| value.as_str().to_string())
+    }
+
+    /// Re-validate and retain public hub offer facts needed by the browser
+    /// shell after process restart. The sealed body authority remains the sole
+    /// source for application decisions and payload display.
+    #[allow(clippy::too_many_arguments)]
+    pub fn restore_offer_context(
+        &mut self,
+        raw_carrier: &[u8],
+        offer_core: &[u8],
+        offer_core_digest: &[u8],
+        pending_expires_at: u64,
+        signed_offer: &[u8],
+        authority_response: &[u8],
+        authority_digest: &[u8],
+        now: u64,
+    ) -> Result<(), JsError> {
+        if now >= pending_expires_at {
+            return Err(JsError::new("the credential/v2 restored offer expired"));
+        }
+        let carrier = cbcl_pairing::credential_v2::decode_carrier(raw_carrier)
+            .map_err(|_| JsError::new("the credential/v2 carrier was refused"))?;
+        let supplied_digest: [u8; 32] =
+            fixed_browser_bytes(offer_core_digest, "offer-core digest")?;
+        let supplied_authority_digest: [u8; 32] =
+            fixed_browser_bytes(authority_digest, "authority-status digest")?;
+        let recognised =
+            selfsame_pairing::credential_v2::recognise_signed_offer(&self.profile, signed_offer)
+                .map_err(|_| JsError::new("the credential/v2 signed offer was refused"))?;
+        if carrier.carrier_ceremony_id() != &self.carrier_ceremony_id
+            || carrier.application_context() != self.profile.application_id.as_str()
+            || recognised.offer_core.as_slice() != offer_core
+            || recognised.claims.offer_core_digest() != &supplied_digest
+            || <[u8; 32]>::from(Sha256::digest(offer_core)) != supplied_digest
+            || recognised.request_id != self.request_id
+            || recognised.intent_nonce != self.intent_nonce
+            || recognised.expires_at != pending_expires_at
+            || <[u8; 32]>::from(Sha256::digest(authority_response)) != supplied_authority_digest
+        {
+            return Err(JsError::new(
+                "the credential/v2 restored offer binding was refused",
+            ));
+        }
+        let status = selfsame_pairing::credential_v2::recognise_authority_status_response(
+            &self.profile,
+            authority_response,
+            &recognised.kid,
+            self.carrier_ceremony_id,
+            supplied_digest,
+        )
+        .map_err(|_| JsError::new("the credential/v2 signed authority was refused"))?;
+        if !matches!(
+            self.session
+                .as_ref()
+                .and_then(|session| session.endpoint_phase()),
+            Some(cbcl_pairing::credential_v2::CredentialV2Phase::Begin) | None
+        ) {
+            self.body_authority
+                .require_bound_offer(&self.profile, &recognised)
+                .map_err(|_| JsError::new("the restored body authority was refused"))?;
+        }
+        self.prepared_offer_core = Some(offer_core.to_vec());
+        self.prepared_offer_digest = Some(supplied_digest);
+        self.offer_kid = Some(recognised.kid);
+        self.authority_status = Some(status);
+        self.authority_response = Some(authority_response.to_vec());
+        Ok(())
+    }
+
+    /// Return the first relay binding as one closed send effect.
+    pub fn start(&self) -> Result<String, JsError> {
+        let body = self
+            .session
+            .as_ref()
+            .ok_or_else(|| JsError::new("the credential/v2 attempt was cancelled"))?
+            .start()
+            .map_err(|_| JsError::new("the credential/v2 relay frame was refused"))?;
+        Ok(v2_allocator_effects_json(
+            &[cbcl_pairing::credential_v2::CredentialV2AllocatorEffect::Send(body)],
+            &self.request_id,
+            &self.intent_nonce,
+            &self.carrier_ceremony_id,
+            self.presence_code.as_ref().map(|value| value.as_str()),
+        ))
+    }
+
+    /// Apply one relay response with a fresh checkpoint nonce and shell clock.
+    pub fn receive(
+        &mut self,
+        input: &[u8],
+        now: u64,
+        checkpoint_nonce: &[u8],
+    ) -> Result<String, JsError> {
+        let checkpoint_nonce: [u8; 12] = fixed_browser_bytes(checkpoint_nonce, "checkpoint nonce")?;
+        let effects = self
+            .session
+            .as_mut()
+            .ok_or_else(|| JsError::new("the credential/v2 attempt was cancelled"))?
+            .receive(
+                input,
+                now,
+                cbcl_pairing::credential_v2::CredentialV2CheckpointNonce::from_csprng(
+                    checkpoint_nonce,
+                ),
+            )
+            .map_err(|_| JsError::new("the credential/v2 relay message was refused"))?;
+        self.capture_allocator_effects(&effects)?;
+        Ok(v2_allocator_effects_json(
+            &effects,
+            &self.request_id,
+            &self.intent_nonce,
+            &self.carrier_ceremony_id,
+            self.presence_code.as_ref().map(|value| value.as_str()),
+        ))
+    }
+
+    /// Confirm one durable checkpoint and release only its covered effects.
+    pub fn checkpoint_persisted(&mut self, generation: u64) -> Result<String, JsError> {
+        let effects = self
+            .session
+            .as_mut()
+            .ok_or_else(|| JsError::new("the credential/v2 attempt was cancelled"))?
+            .checkpoint_persisted(generation)
+            .map_err(|_| {
+                JsError::new("the credential/v2 checkpoint acknowledgement was refused")
+            })?;
+        self.capture_allocator_effects(&effects)?;
+        Ok(v2_allocator_effects_json(
+            &effects,
+            &self.request_id,
+            &self.intent_nonce,
+            &self.carrier_ceremony_id,
+            self.presence_code.as_ref().map(|value| value.as_str()),
+        ))
+    }
+
+    /// Return the public receipt-recovery commitment after the protected
+    /// channel is established. The HMAC token and exporter remain in Rust.
+    pub fn receipt_recovery_commitment(&self) -> Result<Vec<u8>, JsError> {
+        self.session
+            .as_ref()
+            .ok_or_else(|| JsError::new("the credential/v2 attempt was cancelled"))?
+            .receipt_recovery_commitment()
+            .map(|commitment| commitment.to_vec())
+            .map_err(|_| {
+                JsError::new("the credential/v2 receipt-recovery commitment is unavailable")
+            })
+    }
+
+    /// Recognise the unsigned hub core against this attempt and return the exact
+    /// 32-octet installation-device possession signing input.
+    #[allow(clippy::too_many_arguments)]
+    pub fn device_possession_input(
+        &mut self,
+        raw_carrier: &[u8],
+        offer_core: &[u8],
+        socket_generation_digest: &[u8],
+        offer_core_digest: &[u8],
+        pending_expires_at: u64,
+        now: u64,
+    ) -> Result<Vec<u8>, JsError> {
+        if self.prepared_offer_core.is_some() || now >= pending_expires_at {
+            return Err(JsError::new("the credential/v2 prepared offer was refused"));
+        }
+        let transcript_hash = self
+            .transcript_hash
+            .ok_or_else(|| JsError::new("the credential/v2 channel is not established"))?;
+        let carrier = cbcl_pairing::credential_v2::decode_carrier(raw_carrier)
+            .map_err(|_| JsError::new("the credential/v2 carrier was refused"))?;
+        let recognised =
+            selfsame_pairing::credential_v2::recognise_offer_core(&self.profile, offer_core)
+                .map_err(|_| JsError::new("the credential/v2 prepared offer was refused"))?;
+        let supplied_digest: [u8; 32] =
+            fixed_browser_bytes(offer_core_digest, "offer-core digest")?;
+        let actual_digest: [u8; 32] = Sha256::digest(offer_core).into();
+        let expected_device_jwk = identity_json::canonicalise(&Json::obj([
+            ("crv", Json::text("Ed25519")),
+            ("kty", Json::text("OKP")),
+            (
+                "x",
+                Json::text(selfsame_app_identity::codec::b64url(
+                    &self.expected_allocator_key,
+                )),
+            ),
+        ]));
+        let claims = &recognised.claims;
+        if supplied_digest != actual_digest
+            || supplied_digest != *claims.offer_core_digest()
+            || carrier.application_context() != self.profile.application_id.as_str()
+            || carrier.relay_origin() != claims.relay_origin()
+            || carrier.carrier_ceremony_id() != &self.carrier_ceremony_id
+            || carrier.expected_allocator_key() != Some(&self.expected_allocator_key)
+            || carrier.digest() != recognised.carrier_digest
+            || claims.carrier_ceremony_id() != &self.carrier_ceremony_id
+            || recognised.request_id != self.request_id
+            || recognised.intent_nonce != self.intent_nonce
+            || recognised.transcript_hash != transcript_hash
+            || recognised.expires_at != pending_expires_at
+            || pending_expires_at > carrier.relay_expires_at()
+            || claims.device_binding().device_key_digest()
+                != &<[u8; 32]>::from(Sha256::digest(&expected_device_jwk))
+        {
+            return Err(JsError::new("the credential/v2 prepared offer was refused"));
+        }
+        let socket_generation_digest =
+            fixed_browser_bytes(socket_generation_digest, "socket-generation digest")?;
+        let input = selfsame_pairing::credential_v2::device_possession_proof_input(
+            socket_generation_digest,
+            self.carrier_ceremony_id,
+            supplied_digest,
+        )
+        .map_err(|_| JsError::new("the credential/v2 possession input was refused"))?;
+        self.prepared_offer_core = Some(offer_core.to_vec());
+        self.prepared_offer_digest = Some(supplied_digest);
+        Ok(input.to_vec())
+    }
+
+    /// Verify the exact signed offer and signed reciprocal authority, then seal
+    /// the allocator's first application object behind the checkpoint barrier.
+    pub fn prepare_offer(
+        &mut self,
+        signed_offer: &[u8],
+        authority_response: &[u8],
+        authority_digest: &[u8],
+        now: u64,
+        checkpoint_nonce: &[u8],
+    ) -> Result<String, JsError> {
+        let prepared_core = self
+            .prepared_offer_core
+            .as_ref()
+            .ok_or_else(|| JsError::new("the credential/v2 offer was not prepared"))?;
+        let prepared_digest = self
+            .prepared_offer_digest
+            .ok_or_else(|| JsError::new("the credential/v2 offer was not prepared"))?;
+        let recognised =
+            selfsame_pairing::credential_v2::recognise_signed_offer(&self.profile, signed_offer)
+                .map_err(|_| JsError::new("the credential/v2 signed offer was refused"))?;
+        let supplied_authority_digest: [u8; 32] =
+            fixed_browser_bytes(authority_digest, "authority-status digest")?;
+        if recognised.offer_core.as_slice() != prepared_core
+            || recognised.claims.offer_core_digest() != &prepared_digest
+            || recognised.expires_at <= now
+            || <[u8; 32]>::from(Sha256::digest(authority_response)) != supplied_authority_digest
+        {
+            return Err(JsError::new(
+                "the credential/v2 signed authority was refused",
+            ));
+        }
+        let status = selfsame_pairing::credential_v2::recognise_authority_status_response(
+            &self.profile,
+            authority_response,
+            &recognised.kid,
+            self.carrier_ceremony_id,
+            prepared_digest,
+        )
+        .map_err(|_| JsError::new("the credential/v2 signed authority was refused"))?;
+        let object = cbcl_pairing::credential_v2::CredentialV2Object::new(
+            cbcl_pairing::credential_v2::CredentialV2Kind::Offer,
+            cbcl_pairing::credential_v2::credential_v2_intent_digest(prepared_digest),
+            signed_offer.to_vec(),
+        )
+        .map_err(|_| JsError::new("the credential/v2 offer object was refused"))?;
+        self.body_authority
+            .bind_offer(self.profile.clone(), &recognised)
+            .map_err(|_| JsError::new("the credential/v2 body authority was refused"))?;
+        self.offer_kid = Some(recognised.kid.clone());
+        let checkpoint_nonce: [u8; 12] = fixed_browser_bytes(checkpoint_nonce, "checkpoint nonce")?;
+        let effects = self
+            .session
+            .as_mut()
+            .ok_or_else(|| JsError::new("the credential/v2 attempt was cancelled"))?
+            .prepare_application_object(
+                &object,
+                now,
+                cbcl_pairing::credential_v2::CredentialV2CheckpointNonce::from_csprng(
+                    checkpoint_nonce,
+                ),
+            )
+            .map_err(|_| JsError::new("the credential/v2 offer release was refused"))?;
+        self.authority_status = Some(status);
+        self.authority_response = Some(authority_response.to_vec());
+        Ok(v2_allocator_effects_json(
+            &effects,
+            &self.request_id,
+            &self.intent_nonce,
+            &self.carrier_ceremony_id,
+            self.presence_code.as_ref().map(|value| value.as_str()),
+        ))
+    }
+
+    /// After an authenticated claimant preparation and the person's browser
+    /// comparison action, seal the signed comparison result behind the
+    /// allocator checkpoint barrier.
+    pub fn prepare_comparison(
+        &mut self,
+        now: u64,
+        checkpoint_nonce: &[u8],
+    ) -> Result<String, JsError> {
+        let preparation = self
+            .last_received_object
+            .as_ref()
+            .filter(|object| {
+                object.kind() == cbcl_pairing::credential_v2::CredentialV2Kind::Preparation
+            })
+            .ok_or_else(|| JsError::new("the credential/v2 preparation is unavailable"))?;
+        let authority_response = self
+            .authority_response
+            .as_deref()
+            .ok_or_else(|| JsError::new("the credential/v2 authority response is unavailable"))?;
+        let object = self
+            .body_authority
+            .comparison(preparation, authority_response)
+            .map_err(|_| JsError::new("the credential/v2 comparison was refused"))?;
+        let checkpoint_nonce: [u8; 12] = fixed_browser_bytes(checkpoint_nonce, "checkpoint nonce")?;
+        let effects = self
+            .session
+            .as_mut()
+            .ok_or_else(|| JsError::new("the credential/v2 attempt was cancelled"))?
+            .prepare_application_object(
+                &object,
+                now,
+                cbcl_pairing::credential_v2::CredentialV2CheckpointNonce::from_csprng(
+                    checkpoint_nonce,
+                ),
+            )
+            .map_err(|_| JsError::new("the credential/v2 comparison release was refused"))?;
+        Ok(v2_allocator_effects_json(
+            &effects,
+            &self.request_id,
+            &self.intent_nonce,
+            &self.carrier_ceremony_id,
+            self.presence_code.as_ref().map(|value| value.as_str()),
+        ))
+    }
+
+    /// Return only the Rust-authenticated preparation display. Raw peer body
+    /// fields never become browser display authority.
+    pub fn preparation_view_json(&self) -> Result<String, JsError> {
+        if self
+            .last_received_object
+            .as_ref()
+            .map(|object| object.kind())
+            != Some(cbcl_pairing::credential_v2::CredentialV2Kind::Preparation)
+        {
+            return Err(JsError::new("the credential/v2 preparation is unavailable"));
+        }
+        let preview = self
+            .body_authority
+            .retained_preview()
+            .map_err(|_| JsError::new("the credential/v2 preparation is unavailable"))?;
+        let fingerprint: serde_json::Value =
+            serde_json::from_str(&fingerprint_did_json(preview.did()))
+                .map_err(|_| JsError::new("the credential/v2 fingerprint is unavailable"))?;
+        Ok(serde_json::json!({
+            "previewIssuerDid": preview.did(),
+            "previewFingerprintDigestB64u": selfsame_app_identity::codec::b64url(
+                preview.fingerprint_digest()
+            ),
+            "fingerprint": fingerprint,
+        })
+        .to_string())
+    }
+
+    /// Return only the Rust-authenticated reverse-payload projection. The
+    /// browser never parses peer body bytes to obtain grant or account facts.
+    pub fn payload_view_json(&self) -> Result<String, JsError> {
+        let object = self
+            .last_received_object
+            .as_ref()
+            .filter(|object| {
+                object.kind() == cbcl_pairing::credential_v2::CredentialV2Kind::Payload
+            })
+            .ok_or_else(|| JsError::new("the credential/v2 payload is unavailable"))?;
+        let payload = self
+            .body_authority
+            .retained_payload()
+            .map_err(|_| JsError::new("the credential/v2 payload is unavailable"))?;
+        Ok(serde_json::json!({
+            "applicationId": self.profile.application_id.as_str(),
+            "profileDigestB64u": selfsame_app_identity::codec::b64url(self.profile.digest()),
+            "bodyB64u": selfsame_app_identity::codec::b64url(object.body()),
+            "contentHashB64u": selfsame_app_identity::codec::b64url(&object.content_hash()),
+            "offerCoreDigestB64u": selfsame_app_identity::codec::b64url(
+                payload.offer_core_digest()
+            ),
+            "previewIssuerDid": payload.preview_issuer_did(),
+            "previewFingerprintDigestB64u": selfsame_app_identity::codec::b64url(
+                payload.preview_fingerprint_digest()
+            ),
+            "accountPrincipalDigestB64u": selfsame_app_identity::codec::b64url(
+                payload.account_principal_digest()
+            ),
+            "accountScopeIdB64u": selfsame_app_identity::codec::b64url(
+                payload.account_scope_id()
+            ),
+            "deviceDid": payload.device_did(),
+            "grantIdB64u": selfsame_app_identity::codec::b64url(payload.grant_id()),
+            "grantMediaType": selfsame_app_identity::grant::GRANT_MEDIA_TYPE,
+            "grant": payload.grant(),
+            "migrationConfirmationDigestB64u": selfsame_app_identity::codec::b64url(
+                payload.migration_confirmation_digest()
+            ),
+        })
+        .to_string())
+    }
+
+    /// Return the exact digest the browser installation key signs after the
+    /// authenticated payload has been durably staged.
+    pub fn staging_receipt_signature_input(&self) -> Result<Vec<u8>, JsError> {
+        selfsame_pairing::credential_v2::browser_staging_signature_input(
+            &self.browser_staging_input()?,
+        )
+        .map(|value| value.to_vec())
+        .map_err(|_| JsError::new("the credential/v2 staging receipt input was refused"))
+    }
+
+    /// Verify the browser installation signature and return the one canonical
+    /// staging receipt accepted by the hub.
+    pub fn build_staging_receipt(&self, signature: &[u8]) -> Result<Vec<u8>, JsError> {
+        let signature: [u8; 64] = fixed_browser_bytes(signature, "staging receipt signature")?;
+        selfsame_pairing::credential_v2::build_browser_staging_receipt(
+            &self.browser_staging_input()?,
+            self.expected_allocator_key,
+            signature,
+        )
+        .map_err(|_| JsError::new("the credential/v2 staging receipt was refused"))
+    }
+
+    /// Verify the immutable hub acknowledgement against every authenticated
+    /// offer and payload fact retained inside this allocator session.
+    pub fn verify_final_status(
+        &self,
+        final_status: &[u8],
+        final_status_digest: &[u8],
+        finalized_at: u64,
+    ) -> Result<(), JsError> {
+        let staging = self.browser_staging_input()?;
+        let expected = selfsame_pairing::credential_v2::CredentialV2FinalStatusInput {
+            application_id: staging.application_id,
+            carrier_ceremony_id: staging.carrier_ceremony_id,
+            request_id: self.request_id,
+            account_principal_digest: staging.account_principal_digest,
+            account_scope_id: staging.account_scope_id,
+            device_did: staging.device_did,
+            offer_core_digest: staging.offer_core_digest,
+            payload_digest: staging.payload_digest,
+            grant_id: staging.grant_id,
+            issuer_did: staging.issuer_did,
+            receipt_recovery_commitment: staging.receipt_recovery_commitment,
+            finalized_at,
+        };
+        let jws = std::str::from_utf8(final_status)
+            .map_err(|_| JsError::new("the credential/v2 final status was refused"))?;
+        let digest = fixed_browser_bytes(final_status_digest, "final-status digest")?;
+        let kid = self
+            .offer_kid
+            .as_deref()
+            .ok_or_else(|| JsError::new("the credential/v2 signed offer is unavailable"))?;
+        selfsame_pairing::credential_v2::recognise_final_status(
+            &self.profile,
+            jws,
+            digest,
+            &expected,
+            kid,
+        )
+        .map_err(|_| JsError::new("the credential/v2 final status was refused"))
+    }
+
+    /// Seal the already verified immutable status into the allocator receipt.
+    /// The browser calls this only after its active record is durable; the
+    /// returned checkpoint effect then places the relay send behind the usual
+    /// checkpoint-persisted barrier.
+    pub fn prepare_receipt(
+        &mut self,
+        final_status: &[u8],
+        final_status_digest: &[u8],
+        finalized_at: u64,
+        now: u64,
+        checkpoint_nonce: &[u8],
+    ) -> Result<String, JsError> {
+        self.verify_final_status(final_status, final_status_digest, finalized_at)?;
+        let predecessor = self
+            .last_received_object
+            .as_ref()
+            .filter(|object| {
+                object.kind() == cbcl_pairing::credential_v2::CredentialV2Kind::Payload
+            })
+            .ok_or_else(|| JsError::new("the credential/v2 payload is unavailable"))?;
+        let jws = std::str::from_utf8(final_status)
+            .map_err(|_| JsError::new("the credential/v2 final status was refused"))?;
+        let digest = fixed_browser_bytes(final_status_digest, "final-status digest")?;
+        let receipt = self
+            .body_authority
+            .receipt(
+                predecessor,
+                selfsame_pairing::credential_v2::CredentialV2ReceiptInput {
+                    final_status_jws: jws.into(),
+                    final_status_digest: digest,
+                },
+            )
+            .map_err(|_| JsError::new("the credential/v2 receipt was refused"))?;
+        let checkpoint_nonce: [u8; 12] = fixed_browser_bytes(checkpoint_nonce, "checkpoint nonce")?;
+        let effects = self
+            .session
+            .as_mut()
+            .ok_or_else(|| JsError::new("the credential/v2 attempt was cancelled"))?
+            .prepare_application_object(
+                &receipt,
+                now,
+                cbcl_pairing::credential_v2::CredentialV2CheckpointNonce::from_csprng(
+                    checkpoint_nonce,
+                ),
+            )
+            .map_err(|_| JsError::new("the credential/v2 receipt release was refused"))?;
+        Ok(v2_allocator_effects_json(
+            &effects,
+            &self.request_id,
+            &self.intent_nonce,
+            &self.carrier_ceremony_id,
+            self.presence_code.as_ref().map(|value| value.as_str()),
+        ))
+    }
+
+    /// Burn the local attempt without releasing another protocol frame.
+    pub fn cancel(&mut self) -> String {
+        self.session = None;
+        self.presence_code = None;
+        r#"[{"outcome":"cancelled","type":"terminal"}]"#.into()
+    }
+
+    fn capture_allocator_effects(
+        &mut self,
+        effects: &[cbcl_pairing::credential_v2::CredentialV2AllocatorEffect],
+    ) -> Result<(), JsError> {
+        for effect in effects {
+            match effect {
+                cbcl_pairing::credential_v2::CredentialV2AllocatorEffect::Established {
+                    transcript_hash,
+                } => {
+                    if self.transcript_hash.replace(*transcript_hash).is_some() {
+                        return Err(JsError::new(
+                            "the credential/v2 transcript was established twice",
+                        ));
+                    }
+                    self.presence_code = None;
+                }
+                cbcl_pairing::credential_v2::CredentialV2AllocatorEffect::ReceivedObject {
+                    object,
+                } => self.last_received_object = Some(object.clone()),
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
+    fn browser_staging_input(
+        &self,
+    ) -> Result<selfsame_pairing::credential_v2::CredentialV2BrowserStagingInput, JsError> {
+        let object = self
+            .last_received_object
+            .as_ref()
+            .filter(|object| {
+                object.kind() == cbcl_pairing::credential_v2::CredentialV2Kind::Payload
+            })
+            .ok_or_else(|| JsError::new("the credential/v2 payload is unavailable"))?;
+        let payload = self
+            .body_authority
+            .retained_payload()
+            .map_err(|_| JsError::new("the credential/v2 payload is unavailable"))?;
+        let receipt_recovery_commitment = self
+            .session
+            .as_ref()
+            .ok_or_else(|| JsError::new("the credential/v2 attempt was cancelled"))?
+            .receipt_recovery_commitment()
+            .map_err(|_| {
+                JsError::new("the credential/v2 receipt-recovery commitment is unavailable")
+            })?;
+        Ok(
+            selfsame_pairing::credential_v2::CredentialV2BrowserStagingInput {
+                application_id: self.profile.application_id.as_str().into(),
+                carrier_ceremony_id: self.carrier_ceremony_id,
+                account_principal_digest: *payload.account_principal_digest(),
+                account_scope_id: *payload.account_scope_id(),
+                device_did: payload.device_did().into(),
+                offer_core_digest: *payload.offer_core_digest(),
+                payload_digest: object.content_hash(),
+                grant_id: *payload.grant_id(),
+                issuer_did: payload.preview_issuer_did().into(),
+                profile_digest: *self.profile.digest(),
+                receipt_recovery_commitment,
+            },
+        )
+    }
+}
+
+fn fixed_browser_bytes<const LENGTH: usize>(
+    value: &[u8],
+    label: &str,
+) -> Result<[u8; LENGTH], JsError> {
+    value.try_into().map_err(|_| {
+        JsError::new(&format!(
+            "the credential/v2 {label} is exactly {LENGTH} octets"
+        ))
+    })
+}
+
+fn v2_allocator_effects_json(
+    effects: &[cbcl_pairing::credential_v2::CredentialV2AllocatorEffect],
+    request_id: &[u8; 32],
+    intent_nonce: &[u8; 32],
+    carrier_ceremony_id: &[u8; 32],
+    presence_code: Option<&str>,
+) -> String {
+    use cbcl_pairing::credential_v2::CredentialV2AllocatorEffect;
+    let values = effects
+        .iter()
+        .map(|effect| match effect {
+            CredentialV2AllocatorEffect::Send(body) => serde_json::json!({
+                "type": "send",
+                "bodyB64u": selfsame_app_identity::codec::b64url(body),
+            }),
+            CredentialV2AllocatorEffect::Checkpoint {
+                generation,
+                checkpoint,
+                carrier,
+            } => serde_json::json!({
+                "type": "checkpoint",
+                "generation": generation,
+                "checkpointB64u": selfsame_app_identity::codec::b64url(checkpoint.as_bytes()),
+                "rawCarrierB64u": selfsame_app_identity::codec::b64url(carrier),
+                "carrierCeremonyIdB64u": selfsame_app_identity::codec::b64url(carrier_ceremony_id),
+            }),
+            CredentialV2AllocatorEffect::PendingAllocation { carrier } => serde_json::json!({
+                "type": "pending-allocation",
+                "rawCarrierB64u": selfsame_app_identity::codec::b64url(carrier),
+                "requestIdB64u": selfsame_app_identity::codec::b64url(request_id),
+                "carrierCeremonyIdB64u": selfsame_app_identity::codec::b64url(carrier_ceremony_id),
+                "intentNonceB64u": selfsame_app_identity::codec::b64url(intent_nonce),
+                "presenceCode": presence_code,
+            }),
+            CredentialV2AllocatorEffect::Established { transcript_hash } => serde_json::json!({
+                "type": "established",
+                "transcriptHashB64u": selfsame_app_identity::codec::b64url(transcript_hash),
+            }),
+            CredentialV2AllocatorEffect::ReceivedObject { object } => serde_json::json!({
+                "type": "received-object",
+                "kind": object.kind().number(),
+                "bodyB64u": selfsame_app_identity::codec::b64url(object.body()),
+                "contentHashB64u": selfsame_app_identity::codec::b64url(&object.content_hash()),
+            }),
+            CredentialV2AllocatorEffect::Terminal => serde_json::json!({
+                "type": "terminal",
+                "outcome": "closed",
+            }),
+        })
+        .collect::<Vec<_>>();
+    serde_json::Value::Array(values).to_string()
 }
 
 /// QR module matrix for one complete CBCL invitation carrier.
@@ -526,6 +1423,25 @@ pub fn recognise_bundle(bundle: &[u8]) -> Result<BundlePayload, IdentityError> {
     identity_ceremony::recognise_bundle(bundle).map_err(|_| IdentityError::Refused)
 }
 
+/// The SPEC-002 fingerprint of an issuer DID, as the application must render it
+/// for the CON-221 cross-screen comparison.
+///
+/// The application derives this *itself* from the issuer DID the phone
+/// announced, so a substituted issuer produces a visibly different fingerprint
+/// — the whole point of the human comparison. `hex` is the normative compared
+/// value (REQ-103); the label and 32×32 LifeHash are recognition aids rendered
+/// beside it, exactly as the wallet renders them.
+#[wasm_bindgen]
+pub fn fingerprint_did_json(did: &str) -> String {
+    let fp = selfsame_core::fingerprint::fingerprint_did(did);
+    format!(
+        r#"{{"hex":{},"label":{},"lifehash":{}}}"#,
+        json_string(&fp.hex()),
+        json_string(&fp.label()),
+        json_string(&fp.lifehash().base64()),
+    )
+}
+
 /// Require a returned bundle to name the exact complete offer the browser sent.
 #[wasm_bindgen]
 pub fn bundle_matches_offer_json(bundle: &[u8], offer: &[u8]) -> Result<(), JsError> {
@@ -574,8 +1490,20 @@ pub fn profile_facts(profile: &[u8]) -> Result<String, IdentityError> {
             )
         })
         .collect();
+    let resolvers: Vec<String> = profile
+        .state_resolvers
+        .iter()
+        .map(|resolver| {
+            format!(
+                r#"{{"id":{},"protocol":{},"url":{}}}"#,
+                json_string(&resolver.id),
+                json_string(&resolver.protocol),
+                json_string(&resolver.url),
+            )
+        })
+        .collect();
     Ok(format!(
-        r#"{{"applicationId":{},"accountAuthority":{},"profileVersion":{},"profileDigest":{},"allowedPermissions":[{}],"cbclPairingRelays":[{}]}}"#,
+        r#"{{"applicationId":{},"accountAuthority":{},"profileVersion":{},"profileDigest":{},"allowedPermissions":[{}],"cbclPairingRelays":[{}],"stateResolvers":[{}]}}"#,
         json_string(profile.application_id.as_str()),
         json_string(profile.account_authority.as_str()),
         selfsame_app_identity::PROFILE_VERSION,
@@ -587,6 +1515,7 @@ pub fn profile_facts(profile: &[u8]) -> Result<String, IdentityError> {
             .collect::<Vec<_>>()
             .join(","),
         descriptors.join(","),
+        resolvers.join(","),
     ))
 }
 
@@ -969,6 +1898,232 @@ pub fn verify_path_b_peer_json(
         .map_err(|_| JsError::new("Path-B grant refused"))
 }
 
+const MAX_CREDENTIAL_V2_RESOLVER_CLOSURE_OCTETS: usize = 1_048_576;
+const MAX_CREDENTIAL_V2_RESOLVER_CLOSURE_DEPTH: usize = 64;
+
+#[derive(Clone, Copy)]
+struct ClosedJsonSeed {
+    depth: usize,
+}
+
+impl<'de> serde::de::DeserializeSeed<'de> for ClosedJsonSeed {
+    type Value = ();
+    fn deserialize<D>(self, deserializer: D) -> Result<(), D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        deserializer.deserialize_any(ClosedJsonVisitor { depth: self.depth })
+    }
+}
+
+struct ClosedJsonVisitor {
+    depth: usize,
+}
+
+impl<'de> serde::de::Visitor<'de> for ClosedJsonVisitor {
+    type Value = ();
+    fn expecting(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str("bounded JSON without duplicate members or floating-point numbers")
+    }
+    fn visit_bool<E>(self, _: bool) -> Result<(), E> {
+        Ok(())
+    }
+    fn visit_i64<E>(self, _: i64) -> Result<(), E> {
+        Ok(())
+    }
+    fn visit_u64<E>(self, _: u64) -> Result<(), E> {
+        Ok(())
+    }
+    fn visit_f64<E>(self, _: f64) -> Result<(), E>
+    where
+        E: serde::de::Error,
+    {
+        Err(E::custom("floating-point numbers are not admitted"))
+    }
+    fn visit_str<E>(self, _: &str) -> Result<(), E> {
+        Ok(())
+    }
+    fn visit_string<E>(self, _: String) -> Result<(), E> {
+        Ok(())
+    }
+    fn visit_none<E>(self) -> Result<(), E> {
+        Ok(())
+    }
+    fn visit_unit<E>(self) -> Result<(), E> {
+        Ok(())
+    }
+    fn visit_some<D>(self, deserializer: D) -> Result<(), D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        serde::de::DeserializeSeed::deserialize(ClosedJsonSeed { depth: self.depth }, deserializer)
+    }
+    fn visit_seq<A>(self, mut sequence: A) -> Result<(), A::Error>
+    where
+        A: serde::de::SeqAccess<'de>,
+    {
+        if self.depth >= MAX_CREDENTIAL_V2_RESOLVER_CLOSURE_DEPTH {
+            return Err(serde::de::Error::custom(
+                "resolver closure JSON is too deep",
+            ));
+        }
+        while sequence
+            .next_element_seed(ClosedJsonSeed {
+                depth: self.depth + 1,
+            })?
+            .is_some()
+        {}
+        Ok(())
+    }
+    fn visit_map<A>(self, mut object: A) -> Result<(), A::Error>
+    where
+        A: serde::de::MapAccess<'de>,
+    {
+        if self.depth >= MAX_CREDENTIAL_V2_RESOLVER_CLOSURE_DEPTH {
+            return Err(serde::de::Error::custom(
+                "resolver closure JSON is too deep",
+            ));
+        }
+        let mut names = std::collections::BTreeSet::new();
+        while let Some(name) = object.next_key::<String>()? {
+            if !names.insert(name) {
+                return Err(serde::de::Error::custom(
+                    "resolver closure JSON has a duplicate member",
+                ));
+            }
+            object.next_value_seed(ClosedJsonSeed {
+                depth: self.depth + 1,
+            })?;
+        }
+        Ok(())
+    }
+}
+
+fn recognise_closed_resolver_closure_json(input: &[u8]) -> Result<(), DeviceError> {
+    let mut deserializer = serde_json::Deserializer::from_slice(input);
+    serde::de::DeserializeSeed::deserialize(ClosedJsonSeed { depth: 0 }, &mut deserializer)
+        .map_err(|_| DeviceError::Refused)?;
+    deserializer.end().map_err(|_| DeviceError::Refused)
+}
+
+/// Verify a credential/v2 payload for an inactive browser stage.
+///
+/// `resolver_closure` is raw signed history fetched by this browser from the
+/// named profile resolver. Rust replays it; no JavaScript-provided verification
+/// boolean or materialized DID document can enter this boundary. Success is
+/// explicitly non-authorizing until the hub's atomic finalization.
+#[allow(clippy::too_many_arguments)]
+#[wasm_bindgen]
+pub fn verify_credential_v2_inactive_staging_json(
+    profile: &[u8],
+    preview_issuer_did: &str,
+    device_key: &[u8],
+    permissions_json: &str,
+    now: f64,
+    clock_skew_seconds: i64,
+    resolver_id: &str,
+    grant: &[u8],
+    resolver_closure: &[u8],
+) -> Result<String, JsError> {
+    let result = (|| -> Result<InactiveStagedGrant, DeviceError> {
+        let profile = ApplicationProfile::recognise(profile).map_err(|_| DeviceError::Refused)?;
+        let device_key: [u8; 32] = device_key.try_into().map_err(|_| DeviceError::Refused)?;
+        identity_json::recognise(
+            permissions_json.as_bytes(),
+            selfsame_app_identity::json::Limits {
+                max_bytes: 1_024,
+                max_depth: 2,
+            },
+        )
+        .map_err(|_| DeviceError::Refused)?;
+        let permissions: Vec<String> =
+            serde_json::from_str(permissions_json).map_err(|_| DeviceError::Refused)?;
+        if permissions.is_empty()
+            || permissions.len() > 4
+            || permissions.windows(2).any(|pair| pair[0] >= pair[1])
+            || serde_json::to_string(&permissions).ok().as_deref() != Some(permissions_json)
+        {
+            return Err(DeviceError::Refused);
+        }
+        let refs: Vec<&str> = permissions.iter().map(String::as_str).collect();
+        verify_credential_v2_inactive_staging(
+            &profile,
+            preview_issuer_did,
+            &device_key,
+            &refs,
+            browser_unix_seconds(now)?,
+            clock_skew_seconds,
+            resolver_id,
+            grant,
+            resolver_closure,
+        )
+    })();
+    result
+        .and_then(|staged| {
+            serde_json::to_string(&serde_json::json!({
+        "accountDid": staged.account_did, "account": staged.account,
+        "grantId": staged.grant_id,
+        "grantTokenB64u": selfsame_app_identity::codec::b64url(&staged.grant_token),
+        "deviceDid": staged.device_did,
+        "devicePublicKeyB64u": selfsame_app_identity::codec::b64url(&staged.device_public_key),
+        "permissions": staged.permissions, "validUntil": staged.valid_until,
+    })).map_err(|_| DeviceError::Refused)
+        })
+        .map_err(|_| JsError::new("credential/v2 inactive staging refused"))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn verify_credential_v2_inactive_staging(
+    profile: &ApplicationProfile,
+    preview_issuer_did: &str,
+    device_key: &[u8; 32],
+    permissions: &[&str],
+    now: UnixSeconds,
+    clock_skew_seconds: i64,
+    resolver_id: &str,
+    grant: &[u8],
+    resolver_closure: &[u8],
+) -> Result<InactiveStagedGrant, DeviceError> {
+    let now_seconds = i64::try_from(now).map_err(|_| DeviceError::Refused)?;
+    if resolver_closure.is_empty()
+        || resolver_closure.len() > MAX_CREDENTIAL_V2_RESOLVER_CLOSURE_OCTETS
+        || clock_skew_seconds < 0
+        || now_seconds.checked_add(clock_skew_seconds).is_none()
+        || now_seconds.checked_sub(clock_skew_seconds).is_none()
+    {
+        return Err(DeviceError::Refused);
+    }
+    recognise_closed_resolver_closure_json(resolver_closure)?;
+    let bundle: did_crdt::core::recon::ClosureBundle =
+        serde_json::from_slice(resolver_closure).map_err(|_| DeviceError::Refused)?;
+    if serde_json::to_vec(&bundle).ok().as_deref() != Some(resolver_closure) {
+        return Err(DeviceError::Refused);
+    }
+    let observation = replay_resolver_closure(bundle, preview_issuer_did, resolver_id, now_seconds)
+        .map_err(|_| DeviceError::Refused)?;
+    let agreed = agree_closures(profile, &[observation]).map_err(|_| DeviceError::Refused)?;
+    let issuer = issuer_state_of(&agreed, now_seconds);
+    let account = AcctUri::parse(&selfsame_app_identity::alias::stable_acct_uri(
+        preview_issuer_did,
+        &profile.account_authority,
+    ))
+    .map_err(|_| DeviceError::Refused)?;
+    verify_inactive_staging(
+        &GrantRequest::new(
+            profile,
+            &account,
+            device_key,
+            permissions,
+            now_seconds,
+            clock_skew_seconds,
+        ),
+        &issuer,
+        None,
+        grant,
+    )
+    .map_err(|_| DeviceError::Refused)
+}
+
 /// Verify a distributed Path-B grant for a peer without consulting any hub.
 ///
 /// The browser supplies only its own already-resolved, locally verified closure
@@ -1267,6 +2422,239 @@ fn json_string(s: &str) -> String {
     out
 }
 
+// ── CON-219 first-contact enrolment allocator (IMPL-008 ADR-913) ────────────
+//
+// The chat web app is the developer allocator: it builds a CON-219 offer,
+// gets its CON-214 evidence signed by the hub, seals the offer to the
+// rendezvous, and shows the person a link code. Every intricate field —
+// `did:key`, the device-key digest, the offer digest, the web binding, the
+// link code — is computed here in Rust where the recogniser and the digests
+// are unit-tested, not hand-rolled in JS across the wasm boundary. The four
+// CSPRNG values are the caller's to draw (this module generates nothing), the
+// same discipline `Device`/`LinkSession` follow.
+/// One first-contact CON-219 enrolment allocator attempt (`IMPL-008` `ADR-913`).
+///
+/// Holds the offer, provider hint, and unsigned statement between building the
+/// statement (sent to the hub to sign) and sealing the offer (with the returned
+/// evidence), plus the offer plaintext needed to open the wallet's bundle.
+#[wasm_bindgen(js_name = EnrolmentAllocator)]
+pub struct EnrolmentAllocator {
+    secret: [u8; 16],
+    profile_octets: Vec<u8>,
+    core: OfferCore,
+    hint: ProviderHint,
+    statement: EnrollmentStatement,
+    offer_plaintext: Option<Vec<u8>>,
+}
+
+impl EnrolmentAllocator {
+    /// Build one allocator attempt from a recognised profile and caller
+    /// randomness. `now` is the absolute Unix second the offer is issued at;
+    /// the offer expires `OFFER_TTL_SECONDS` later.
+    pub fn new_native(
+        profile_octets: &[u8],
+        secret: &[u8],
+        device_seed: &[u8],
+        account_scope: &[u8],
+        ceremony_id: &[u8],
+        request_id: &[u8],
+        now: i64,
+    ) -> Result<Self, IdentityError> {
+        use selfsame_app_identity::{codec, didkey};
+        let secret: [u8; 16] = secret.try_into().map_err(|_| IdentityError::Refused)?;
+        let seed: [u8; 32] = device_seed.try_into().map_err(|_| IdentityError::Refused)?;
+        if account_scope.len() != 32 || ceremony_id.len() != 32 || request_id.len() != 32 {
+            return Err(IdentityError::Refused);
+        }
+        let profile =
+            ApplicationProfile::recognise(profile_octets).map_err(|_| IdentityError::Refused)?;
+        let descriptor = profile
+            .cbcl_pairing_relays
+            .first()
+            .ok_or(IdentityError::Refused)?;
+        let origin = profile.application_id.origin().to_string();
+        let device_public_key = SigningKey::from_bytes(&seed).verifying_key().to_bytes();
+
+        let core = OfferCore {
+            ceremony_id: codec::b64url(ceremony_id),
+            request_id: codec::b64url(request_id),
+            application_id: profile.application_id.as_str().to_string(),
+            profile_version: 1,
+            profile_digest: codec::b64url(profile.digest()),
+            account_scope_id: codec::b64url(account_scope),
+            device_did: didkey::encode(&device_public_key),
+            device_public_key,
+            requested_permissions: profile.allowed_permissions.clone(),
+            issued_at: now,
+            // The offer and the CON-214 statement share this expiry, so it is
+            // bounded by CON-214's 120-second evidence window, not the longer
+            // SPEC-001 device-link offer TTL.
+            expires_at: now + identity_enrollment::MAX_EVIDENCE_WINDOW_SECONDS,
+        };
+        let hint = ProviderHint {
+            application_id: core.application_id.clone(),
+            profile_version: 1,
+            provider_id: descriptor.operator_id.clone(),
+            descriptor_digest: codec::b64url(&descriptor.digest),
+            offer_digest: core.digest(),
+        };
+        let statement = EnrollmentStatement {
+            request_id: core.request_id.clone(),
+            ceremony_id: core.ceremony_id.clone(),
+            application_id: core.application_id.clone(),
+            profile_version: core.profile_version,
+            profile_digest: core.profile_digest.clone(),
+            account_scope_id: core.account_scope_id.clone(),
+            device_key_digest: identity_enrollment::device_key_digest(&core),
+            requested_permissions: core.requested_permissions.clone(),
+            provider_id: hint.provider_id.clone(),
+            descriptor_digest: hint.descriptor_digest.clone(),
+            offer_digest: core.digest(),
+            // First contact is the manual cross-device path: the CON-227 web
+            // binding, which the wallet accepts against unattributed evidence.
+            platform_binding_id: format!("web:{origin}"),
+            return_uri: format!("{origin}/.well-known/selfsame/return"),
+            issued_at: core.issued_at,
+            expires_at: core.expires_at,
+        };
+        Ok(Self {
+            secret,
+            profile_octets: profile_octets.to_vec(),
+            core,
+            hint,
+            statement,
+            offer_plaintext: None,
+        })
+    }
+
+    /// The canonical CON-214 statement octets to send to the hub for signing.
+    pub fn statement_bytes_native(&self) -> Vec<u8> {
+        identity_json::canonicalise(&identity_enrollment::build(&self.statement))
+    }
+
+    /// Seal the offer once the hub has returned its compact JWS evidence, and
+    /// retain the plaintext for opening the bundle later.
+    pub fn seal_offer_native(&mut self, evidence: &str) -> Result<Vec<u8>, IdentityError> {
+        let offer = build_offer(&self.core, evidence, &self.hint, &self.profile_octets)?;
+        let sealed = seal::seal_offer(&seal::derive_key(&self.secret), &offer);
+        self.offer_plaintext = Some(offer);
+        Ok(sealed)
+    }
+
+    fn link_code_native(&self) -> String {
+        LinkCode {
+            application: APPLICATION,
+            secret: LinkSecret::from_bytes(self.secret),
+        }
+        .render()
+    }
+}
+
+#[wasm_bindgen(js_class = EnrolmentAllocator)]
+impl EnrolmentAllocator {
+    /// Begin. See [`EnrolmentAllocator::new_native`]; the four random values are
+    /// drawn by the browser with `crypto.getRandomValues`.
+    #[wasm_bindgen(constructor)]
+    pub fn new(
+        profile: &[u8],
+        secret: &[u8],
+        device_seed: &[u8],
+        account_scope: &[u8],
+        ceremony_id: &[u8],
+        request_id: &[u8],
+        now: f64,
+    ) -> Result<EnrolmentAllocator, JsError> {
+        Self::new_native(
+            profile,
+            secret,
+            device_seed,
+            account_scope,
+            ceremony_id,
+            request_id,
+            now as i64,
+        )
+        .map_err(|_| JsError::new("SPEC-004 enrolment refused"))
+    }
+
+    /// The canonical CON-214 statement octets to POST to `/selfsame/enrolment/sign`.
+    pub fn statement_bytes(&self) -> Vec<u8> {
+        self.statement_bytes_native()
+    }
+
+    /// The link code the person enters into the wallet.
+    #[wasm_bindgen(getter)]
+    pub fn link_code(&self) -> String {
+        self.link_code_native()
+    }
+
+    /// The rendezvous slot the sealed offer is written to.
+    #[wasm_bindgen(getter)]
+    pub fn offer_slot(&self) -> String {
+        seal::slot(seal::Role::Offer, &self.secret)
+    }
+
+    /// The rendezvous slot the wallet's sealed bundle appears in.
+    #[wasm_bindgen(getter)]
+    pub fn bundle_slot(&self) -> String {
+        seal::slot(seal::Role::Bundle, &self.secret)
+    }
+
+    /// The rendezvous slot the wallet's pre-grant issuer announcement appears
+    /// in (SPEC-004 CON-221). Present only when the wallet requires the
+    /// fingerprint comparison; the client polls it alongside the bundle slot.
+    #[wasm_bindgen(getter)]
+    pub fn announce_slot(&self) -> String {
+        seal::slot(seal::Role::Announce, &self.secret)
+    }
+
+    /// Open the wallet's sealed issuer announcement over the retained offer
+    /// plaintext, returning the announced issuer DID. Bound to this allocator's
+    /// own offer transcript, so an announcement answering a different offer
+    /// cannot open here.
+    pub fn open_announce(&self, sealed_announce: &[u8]) -> Result<String, JsError> {
+        let offer = self
+            .offer_plaintext
+            .as_ref()
+            .ok_or_else(|| JsError::new("no offer sealed yet"))?;
+        let did = seal::open_announce(
+            &seal::derive_key(&self.secret),
+            sealed_announce,
+            &seal::transcript(offer),
+        )
+        .map_err(|_| JsError::new("SPEC-004 announcement refused"))?;
+        String::from_utf8(did).map_err(|_| JsError::new("SPEC-004 announcement refused"))
+    }
+
+    /// Seal the offer given the hub's compact JWS evidence.
+    pub fn seal_offer(&mut self, evidence: &str) -> Result<Vec<u8>, JsError> {
+        self.seal_offer_native(evidence)
+            .map_err(|_| JsError::new("SPEC-004 offer refused"))
+    }
+
+    /// Open the wallet's sealed bundle over the retained offer plaintext, and
+    /// require it to name *this* allocator's offer.
+    ///
+    /// Codex review, "one ceremony's grant delivered into another": AEAD alone
+    /// authenticates the bundle to whatever secret and transcript opened it, so
+    /// a grant sealed under this allocator's secret decrypts here even when its
+    /// ceremony/request IDs name a different offer. `bundle_matches_offer` binds
+    /// the opened bundle to this allocator's own `OfferCore` before any field is
+    /// used, so a cross-ceremony grant is refused rather than accepted.
+    pub fn open_bundle(&self, sealed_bundle: &[u8]) -> Result<Vec<u8>, JsError> {
+        let offer = self
+            .offer_plaintext
+            .as_ref()
+            .ok_or_else(|| JsError::new("no offer sealed yet"))?;
+        let opened = open_bundle_for(&self.secret, sealed_bundle, offer)
+            .map_err(|_| JsError::new("SPEC-004 bundle refused"))?;
+        let bundle =
+            recognise_bundle(&opened).map_err(|_| JsError::new("SPEC-004 bundle refused"))?;
+        bundle_matches_offer(&bundle, &self.core)
+            .map_err(|_| JsError::new("SPEC-004 bundle refused"))?;
+        Ok(opened)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1298,6 +2686,7 @@ mod tests {
         account: AcctUri,
         device_public_key: [u8; 32],
         grant: Vec<u8>,
+        resolver_closure: Vec<u8>,
         issuer: IssuerState,
         jrd: Jrd,
         jrd_octets: Vec<u8>,
@@ -1326,6 +2715,14 @@ mod tests {
         .expect("test mnemonic");
         let home = hierarchy::derive_from_mnemonic(&mnemonic, &application, &scope);
         let home_did = home.home_did().expect("home DID");
+        let identity = selfsame_app_identity::issuer::create(
+            home.signing_key(),
+            &profile.account_authority,
+            (NOW as u64) * 1_000,
+        )
+        .expect("issuer closure");
+        assert_eq!(identity.did, home_did);
+        let resolver_closure = serde_json::to_vec(&identity.closure).expect("closure JSON");
         let account = AcctUri::parse(&alias::stable_acct_uri(
             &home_did,
             &profile.account_authority,
@@ -1396,6 +2793,7 @@ mod tests {
             account,
             device_public_key,
             grant,
+            resolver_closure,
             issuer,
             jrd,
             jrd_octets,
@@ -1825,6 +3223,66 @@ mod tests {
     }
 
     #[test]
+    fn credential_v2_inactive_staging_replays_raw_signed_closure() {
+        let fixture = grant_fixture();
+        recognise_closed_resolver_closure_json(&fixture.resolver_closure)
+            .expect("strict closure JSON");
+        let staged = verify_credential_v2_inactive_staging(
+            &fixture.profile,
+            &fixture.issuer.did,
+            &fixture.device_public_key,
+            &[PERMISSION],
+            NOW as UnixSeconds,
+            0,
+            "app-own",
+            &fixture.grant,
+            &fixture.resolver_closure,
+        )
+        .expect("raw resolver history establishes an inactive stage");
+        assert_eq!(staged.account_did, fixture.issuer.did);
+        assert_eq!(staged.account, fixture.account.as_str());
+        assert_eq!(staged.device_public_key, fixture.device_public_key);
+        assert_eq!(staged.grant_token, [12u8; 32]);
+        assert_eq!(staged.permissions, vec![PERMISSION]);
+    }
+
+    #[test]
+    fn credential_v2_inactive_staging_refuses_unclosed_or_substituted_history() {
+        let fixture = grant_fixture();
+        let mut with_extra: serde_json::Value =
+            serde_json::from_slice(&fixture.resolver_closure).expect("closure JSON");
+        with_extra
+            .as_object_mut()
+            .expect("closure object")
+            .insert("trusted".to_owned(), serde_json::Value::Bool(true));
+        let with_extra = serde_json::to_vec(&with_extra).expect("mutated JSON");
+        assert!(verify_credential_v2_inactive_staging(
+            &fixture.profile,
+            &fixture.issuer.did,
+            &fixture.device_public_key,
+            &[PERMISSION],
+            NOW as UnixSeconds,
+            0,
+            "app-own",
+            &fixture.grant,
+            &with_extra,
+        )
+        .is_err());
+        assert!(verify_credential_v2_inactive_staging(
+            &fixture.profile,
+            "did:crdt:not-the-preview",
+            &fixture.device_public_key,
+            &[PERMISSION],
+            NOW as UnixSeconds,
+            0,
+            "app-own",
+            &fixture.grant,
+            &fixture.resolver_closure,
+        )
+        .is_err());
+    }
+
+    #[test]
     fn peer_verification_refuses_a_negative_closure_age() {
         let fixture = grant_fixture();
         let control = verify_path_b_peer(
@@ -2232,6 +3690,14 @@ mod tests {
         let fixture = grant_fixture();
         let facts: serde_json::Value =
             serde_json::from_str(&profile_facts(&fixture.profile_octets).expect("facts")).unwrap();
+        assert_eq!(facts["stateResolvers"][0]["id"], "app-own");
+        assert_eq!(
+            facts["stateResolvers"][0]["protocol"],
+            "did-crdt-service-v1"
+        );
+        assert!(facts["stateResolvers"][0]["url"]
+            .as_str()
+            .is_some_and(|url| url.starts_with("https://")));
 
         let descriptor = &facts["cbclPairingRelays"][0];
         let (core, _, _, _) = offer_fixture(&fixture);
@@ -2284,5 +3750,90 @@ mod tests {
     fn facts_are_refused_for_a_profile_the_recogniser_rejects() {
         assert!(profile_facts(b"{}").is_err());
         assert!(profile_facts(b"not json").is_err());
+    }
+}
+
+#[cfg(test)]
+mod enrolment_allocator_tests {
+    //! IMPL-008 ADR-913 — the browser CON-219 allocator builds a web-binding
+    //! offer the wallet recogniser accepts, a link code the wallet parses, and
+    //! well-formed rendezvous slots. The full ceremony (rendezvous I/O + the
+    //! wallet accept) is the e2e harness's; this pins the construction.
+    use super::*;
+    use ed25519_dalek::SigningKey;
+    use selfsame_app_identity::enrollment as en;
+
+    const KID: &str = "https://photos.example/selfsame/application#enrollment-test";
+    const NOW: i64 = 1_785_412_800;
+
+    fn profile_octets() -> Vec<u8> {
+        let corpus: serde_json::Value =
+            serde_json::from_str(include_str!("../../../test-vectors/spec-004-v1.json")).unwrap();
+        corpus["con_201_application_profile"][0]["input"]["profile"]
+            .as_str()
+            .unwrap()
+            .as_bytes()
+            .to_vec()
+    }
+
+    fn allocator() -> EnrolmentAllocator {
+        EnrolmentAllocator::new_native(
+            &profile_octets(),
+            &[9u8; 16],
+            &[3u8; 32],
+            &[4u8; 32],
+            &[1u8; 32],
+            &[2u8; 32],
+            NOW,
+        )
+        .expect("a recognised profile and 16/32-octet randomness build an allocator")
+    }
+
+    #[test]
+    fn the_statement_names_the_web_binding_and_the_application_origin() {
+        let alloc = allocator();
+        let statement = en::recognise_unsigned_payload(&alloc.statement_bytes_native())
+            .expect("the built statement is a recognised CON-214 payload");
+        assert_eq!(statement.platform_binding_id, "web:https://photos.example");
+        assert_eq!(
+            statement.return_uri,
+            "https://photos.example/.well-known/selfsame/return"
+        );
+        assert_eq!(
+            statement.application_id,
+            "https://photos.example/selfsame/application"
+        );
+    }
+
+    #[test]
+    fn the_link_code_round_trips_and_the_slots_are_well_formed() {
+        let alloc = allocator();
+        let code = alloc.link_code_native();
+        let parsed = selfsame_core::code::LinkCode::parse(&code).expect("wallet parses the code");
+        assert_eq!(parsed.secret.as_bytes(), &[9u8; 16]);
+        assert_eq!(alloc.offer_slot().len(), 26);
+        assert_eq!(alloc.bundle_slot().len(), 26);
+        assert_ne!(alloc.offer_slot(), alloc.bundle_slot());
+    }
+
+    #[test]
+    fn the_sealed_offer_opens_and_recognises_as_a_con_219_offer() {
+        let mut alloc = allocator();
+        // The hub would sign the statement; here a test key stands in for the
+        // enrolment key, exercising the seal + recognise path.
+        let statement = en::recognise_unsigned_payload(&alloc.statement_bytes_native()).unwrap();
+        let evidence = en::sign(&statement, KID, &SigningKey::from_bytes(&[6u8; 32]));
+        let sealed = alloc.seal_offer_native(&evidence).expect("the offer seals");
+
+        let opened =
+            seal::open_offer(&seal::derive_key(&[9u8; 16]), &sealed).expect("the offer opens");
+        let offer = selfsame_app_identity::ceremony::recognise_offer(&opened)
+            .expect("the sealed offer recognises as CON-219");
+        assert_eq!(
+            offer.core.application_id,
+            "https://photos.example/selfsame/application"
+        );
+        // The offer digest the statement bound equals the offer's own.
+        assert_eq!(statement.offer_digest, offer.core.digest());
     }
 }

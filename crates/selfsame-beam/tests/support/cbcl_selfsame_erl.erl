@@ -10,6 +10,19 @@
 -export([
     operation_permission/2,
     path_b_standing_cache_expiry/1,
+    recognise_credential_v2_profile/5,
+    prepare_credential_v2_offer/15,
+    finalize_credential_v2_offer/8,
+    verify_credential_v2_offer_proof/6,
+    verify_credential_v2_staging_receipt/13,
+    verify_credential_v2_acceptance/14,
+    credential_v2_acceptance_facts/1,
+    build_credential_v2_authority_status/6,
+    recognise_credential_v2_recovery_request/1,
+    credential_v2_recovery_accepted/2,
+    credential_v2_recovery_in_progress/1,
+    credential_v2_recovery_unknown/0,
+    credential_v2_recovery_not_finalized/7,
     rehydrate_path_b/2,
     run/0,
     sign_enrollment/4,
@@ -26,6 +39,25 @@ load_nif() ->
 operation_permission(_, _) -> nif_not_loaded().
 path_b_standing_cache_expiry(_) -> nif_not_loaded().
 rehydrate_path_b(_, _) -> nif_not_loaded().
+recognise_credential_v2_profile(_, _, _, _, _) -> nif_not_loaded().
+prepare_credential_v2_offer(_, _, _, _, _, _, _, _, _, _, _, _, _, _, _) ->
+    nif_not_loaded().
+finalize_credential_v2_offer(_, _, _, _, _, _, _, _) ->
+    nif_not_loaded().
+verify_credential_v2_offer_proof(_, _, _, _, _, _) ->
+    nif_not_loaded().
+verify_credential_v2_staging_receipt(_, _, _, _, _, _, _, _, _, _, _, _, _) ->
+    nif_not_loaded().
+verify_credential_v2_acceptance(_, _, _, _, _, _, _, _, _, _, _, _, _, _) ->
+    nif_not_loaded().
+credential_v2_acceptance_facts(_) -> nif_not_loaded().
+build_credential_v2_authority_status(_, _, _, _, _, _) ->
+    nif_not_loaded().
+recognise_credential_v2_recovery_request(_) -> nif_not_loaded().
+credential_v2_recovery_accepted(_, _) -> nif_not_loaded().
+credential_v2_recovery_in_progress(_) -> nif_not_loaded().
+credential_v2_recovery_unknown() -> nif_not_loaded().
+credential_v2_recovery_not_finalized(_, _, _, _, _, _, _) -> nif_not_loaded().
 sign_enrollment(_, _, _, _) -> nif_not_loaded().
 
 %% Declared because `rustler::init!` registers every NIF in the crate and

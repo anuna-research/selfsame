@@ -1,0 +1,115 @@
+# Pairing completion runbook — chat.anuna.io
+
+**Status 2026-08-22: the enrolment ceremony is LIVE and verified in production
+up to the wallet accept.** The browser allocator, the deployed hub CON-214
+signing endpoint (real enrolment key), and the live rendezvous were exercised
+end to end — a valid link code was produced and the hub-signed sealed offer
+landed readable in `did.anuna.io`. The ONLY remaining step is a wallet with a
+provisioned identity accepting a code (custody-gated, so it needs a running
+wallet — desktop or phone).
+
+## The one remaining step
+
+Run a wallet with a provisioned identity, open `https://chat.anuna.io`, click
+**"link my Selfsame wallet"**, and enter the code it shows:
+
+- **Desktop:** `cd ~/Code/selfsame && cargo tauri dev` (branch
+  `spec/spec-004-web-manual-binding`), create/restore an identity, then enter
+  the code. The wallet's `cbcl_enrol_start` fetches the offer, authenticates
+  the profile live (CON-220), shows consent; on confirm it issues the grant,
+  writes the ADR-912 pairing-trust record, and returns the sealed bundle to the
+  rendezvous.
+- **Phone:** install the signed APK at `outputs/selfsame-wallet-debugsigned.apk`
+  (rebuild after the latest wallet commits with `cargo tauri android build`),
+  then the same flow.
+
+Once the trust record is written, `cbcl_pairing_start` against a
+`chat.anuna.io:9443` invitation finds it, REQ-906 admits the relay, and the
+original "names a relay none of your connected applications vouches for"
+refusal is gone.
+
+---
+
+## History / full sequence (all done unless noted)
+
+## Already live (no action needed)
+
+- `https://chat.anuna.io/selfsame/application` — ratified web-only CON-002
+  profile, HTTP 200, `application/selfsame-profile+json`, SHA-256
+  `6ac06f627bcf30755553cce415a168cff1498350da6464874397f12b10bc4999`.
+- `https://did.anuna.io/rendezvous/:slot` + `/dids/:did/closure` — SPEC-001
+  mailbox and closure, verified (201 / 200-once / 404).
+- Wallet enrolment wire code-complete: `cbcl_enrol_start/prepare/confirm`
+  (selfsame branch `spec/spec-004-web-manual-binding`).
+
+## Branches to merge (all pushed, none merged; deploys ran from branches)
+
+- selfsame `spec/spec-004-web-manual-binding` (CON-227 + wallet wire)
+- cbcl-bus `feat/ratify-production-profile` (profile ratified, routes, authority fix)
+- did-crdt `feat/spec-001-rendezvous-routes` (rendezvous upstream)
+
+## The three remaining actions
+
+### 1 — Open the hub CON-214 signing gate (Tier-1 GATE-00 decision — OWNER ONLY)
+
+The hub enrolment signer (`cbcl-chat-enrolment-signer:sign/1`) is gated by
+`cbcl-chat-path-b-gate:profile/0`, which returns `tier-1-unapproved` by design.
+SPEC-053 requires **cross-stack gate evidence** to exist before this opens —
+this is a reviewed-release decision, not a code flip, and deliberately so
+(a rejected shortcut this session, SPEC-008 REQ-909, is the cautionary case).
+
+To open it, as the repository owner:
+- produce/record the GATE-00 cross-stack evidence the spec names;
+- point the signer at the published profile
+  (`cbcl-chat-selfsame-application-gate:document/0`, already open) or open the
+  Path-B admission gate per its own review;
+- provision the enrolment seed as a Fly secret to the path
+  `selfsame_enrolment_seed_path` names, and set `selfsame_enrolment_kid` =
+  `enrollment-2026-08`, `selfsame_application_id` =
+  `https://chat.anuna.io/selfsame/application`.
+  The seed is held at `~/.selfsame/enrolment-seed-2026-08.hex` (64 hex, mode
+  600); its public half is already in the ratified profile.
+
+### 2 — Deploy the merged branches
+
+```
+# cbcl-bus (hub: routes + ratified profile + signer, once gate opened)
+cd ~/Code/cbcl-bus && fly deploy --remote-only
+# did-crdt already deployed from its branch; redeploy after merge if desired
+```
+
+### 3 — Install the wallet and link (PHYSICAL — OWNER ONLY)
+
+The APK is **already built** (2026-08-22), carrying the CON-227 web-binding
+recognition and the `cbcl_enrol_*` wire:
+
+```
+src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release-unsigned.apk
+```
+
+It is unsigned. To install:
+```
+# sign it (or build a signed variant with your release keystore), then:
+adb install -r <signed.apk>
+```
+Rebuild after any wallet change with:
+```
+cd ~/Code/selfsame
+NDK_HOME=~/Library/Android/sdk/ndk/27.1.12297006 ANDROID_HOME=~/Library/Android/sdk \
+  cargo tauri android build --apk --target aarch64
+```
+
+Then on the phone: open the wallet, and from chat.anuna.io start a link — the
+chat app allocates a CON-219 offer (signed by the now-enabled hub), writes it
+to the did.anuna.io mailbox; the wallet's `cbcl_enrol_start` fetches it,
+authenticates the profile live, shows consent; on confirm the trust record is
+written and the SPEC-008 origin gate then admits the anuna-1 relay. Pairing
+proceeds.
+
+## Why the refusal persists until all three are done
+
+The pairing gate (SPEC-008 REQ-906) needs a held pairing-trust record. That
+record is written only by `cbcl_enrol_confirm` after a completed enrolment
+ceremony. The ceremony needs a hub-signed CON-214 offer (action 1) reachable
+by an installed wallet build (action 3). Until both, every pairing attempt
+correctly refuses — which is the fail-closed behaviour, not a bug.

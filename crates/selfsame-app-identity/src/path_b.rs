@@ -17,13 +17,17 @@
 //! JWS recogniser and the one authorization predicate in `selfsame-app-identity`.
 
 use crate::accept::{
-    accept_grant, check_standing, rehydrate_accepted_grant, AcceptError, ClosureSource, Evidence, Expectation, Freshness, IssuerState,
-    Projection, VerificationMethod,
+    accept_grant, check_standing, rehydrate_accepted_grant, stage_accepted_grant, AcceptError,
+    ClosureSource, Evidence, Expectation, Freshness, IssuerState, Projection, VerificationMethod,
 };
 use crate::alias::{AcctUri, Jrd};
 use crate::profile::{ApplicationProfile, Ed25519Jwk};
 use crate::proof::Challenge;
 use crate::UnixSeconds;
+use base64ct::{Base64UrlUnpadded, Encoding};
+use did_crdt::core::delta::{DeltaOp, VerificationRelationship};
+use did_crdt::core::document::Document;
+use did_crdt::core::recon::ClosureBundle;
 
 /// Minimum distinct declared resolver observations required by CBCL Path-B
 /// admission.
@@ -197,6 +201,34 @@ pub struct VerifiedGrant {
     grant: crate::grant::DeviceGrant,
 }
 
+/// A cryptographically verified grant held in an inactive browser stage.
+///
+/// This value is not authorization. It proves only the checks possible before
+/// the application's atomic finalization: JWS/issuer/offer bindings,
+/// revocation, freshness, validity, and permissions. It contains no private
+/// `DeviceGrant`, has no conversion to [`VerifiedGrant`], and cannot pass the
+/// per-frame standing API. Reciprocal WebFinger and the ordinary device proof
+/// remain mandatory for an authorized Path-B session.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct InactiveStagedGrant {
+    /// The account home DID that signed the grant.
+    pub account_did: String,
+    /// The stable reciprocal account URI expected from the held offer.
+    pub account: String,
+    /// The credential identifier used by the revocation G-Set.
+    pub grant_id: String,
+    /// The exact raw 32-octet identifier shared by grant and payload.
+    pub grant_token: [u8; 32],
+    /// The credential subject DID.
+    pub device_did: String,
+    /// The exact installation device key held by the offer.
+    pub device_public_key: [u8; 32],
+    /// Permissions checked against both profile and requested operation.
+    pub permissions: Vec<String>,
+    /// Verified exclusive expiry instant.
+    pub valid_until: UnixSeconds,
+}
+
 /// Authenticated inputs for a Path-B per-frame standing check.
 ///
 /// The checker accepts a [`VerifiedGrant`], never credential bytes.  The only
@@ -251,6 +283,83 @@ pub enum VerifyError {
     /// One of `CON-206`'s thirteen ordered checks rejected the grant.
     #[error(transparent)]
     Grant(#[from] AcceptError),
+    /// A recognised fact could not enter the closed inactive-stage projection.
+    #[error("the inactive grant projection was inconsistent")]
+    StagingProjection,
+}
+
+/// Why raw resolver history could not become a verified Path-B observation.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum ClosureReplayError {
+    /// The bundle did not contain exactly one parentless genesis delta.
+    #[error("the resolver closure has no unique genesis")]
+    GenesisCount,
+    /// The unique genesis did not add the root verification method.
+    #[error("the resolver closure genesis is not a verification method")]
+    GenesisOperation,
+    /// The root key could not bootstrap a did:crdt document.
+    #[error("the resolver closure genesis is inadmissible")]
+    GenesisRejected,
+    /// The root key derives a different self-certifying DID.
+    #[error("the resolver closure belongs to another DID")]
+    DidMismatch,
+    /// A delta signature, causal parent, target, or authorization rule failed.
+    #[error("the resolver closure did not replay")]
+    DeltaRejected,
+    /// An asserting verification method was not base64url multibase.
+    #[error("an assertion key has an unsupported encoding")]
+    AssertionKeyEncoding,
+    /// An asserting verification method was not exactly one Ed25519 key.
+    #[error("an assertion key is not Ed25519 length")]
+    AssertionKeyLength,
+}
+
+/// Replay one typed signed resolver closure and project its verified facts.
+///
+/// This is the only constructor from resolver history to
+/// [`ResolverObservation`]. The positive replay flags are set only after
+/// [`Document::merge_verified_bundle`] verifies every signature and causal
+/// edge. Adapters never deserialize those flags from an untrusted map.
+pub fn replay_resolver_closure(
+    bundle: ClosureBundle, expected_did: &str, resolver_id: &str,
+    fetched_at_seconds: UnixSeconds,
+) -> Result<ResolverObservation, ClosureReplayError> {
+    let mut genesis = bundle.deltas.iter().filter(|delta| delta.parents.is_empty());
+    let (Some(root), None) = (genesis.next(), genesis.next()) else {
+        return Err(ClosureReplayError::GenesisCount);
+    };
+    let DeltaOp::AddVerificationMethod { public_key_multibase, .. } = &root.op else {
+        return Err(ClosureReplayError::GenesisOperation);
+    };
+    let (mut document, _) = Document::new(public_key_multibase)
+        .map_err(|_| ClosureReplayError::GenesisRejected)?;
+    if document.did.as_str() != expected_did { return Err(ClosureReplayError::DidMismatch); }
+    document.merge_verified_bundle(bundle).map_err(|_| ClosureReplayError::DeltaRejected)?;
+
+    let mut asserting: Vec<_> = document.verification_methods().into_iter()
+        .filter(|entry| entry.relationships.contains(&VerificationRelationship::AssertionMethod))
+        .collect();
+    asserting.sort_by(|left, right| left.id.cmp(&right.id));
+    let assertion_methods = asserting.into_iter().enumerate().map(|(index, entry)| {
+        let encoded = entry.public_key_multibase.strip_prefix('u')
+            .ok_or(ClosureReplayError::AssertionKeyEncoding)?;
+        let decoded = Base64UrlUnpadded::decode_vec(encoded)
+            .map_err(|_| ClosureReplayError::AssertionKeyEncoding)?;
+        let public_key: [u8; 32] = decoded.try_into()
+            .map_err(|_| ClosureReplayError::AssertionKeyLength)?;
+        Ok(ClosureAssertionMethod {
+            id: format!("{}#jwk-{index}", document.did),
+            kind: "JsonWebKey".to_owned(), public_key, has_private_component: false,
+        })
+    }).collect::<Result<Vec<_>, ClosureReplayError>>()?;
+
+    Ok(ResolverObservation {
+        resolver_id: resolver_id.to_owned(), did: document.did.to_string(),
+        did_recomputed_ok: true, deltas_verified: true, locally_closed: true,
+        deactivated: document.is_deactivated(), assertion_methods,
+        revoked_credential_ids: document.revoked_credential_ids(),
+        also_known_as: document.also_known_as(), fetched_at_seconds,
+    })
 }
 
 // ── the resolver quorum, in one place ────────────────────────────────────────
@@ -471,6 +580,41 @@ pub fn verify_session_establishment(
         permissions: acceptance.grant.permissions.clone(),
         valid_until: acceptance.grant.valid_until,
         grant: acceptance.grant,
+    })
+}
+
+/// Verify a grant for browser-local inactive staging before hub finalization.
+///
+/// The verifier runs CON-206 steps 1--8 and 10--12. Step 9 cannot succeed
+/// until the hub atomically provisions reciprocal WebFinger, and step 13 is
+/// the ordinary Path-B session proof rather than the offer-finalization proof.
+/// Skipping those two steps never yields [`VerifiedGrant`] and never authorizes
+/// a frame.
+pub fn verify_inactive_staging(
+    request: &GrantRequest<'_>, issuer: &IssuerState, projection: Option<Projection>,
+    grant_bytes: &[u8],
+) -> Result<InactiveStagedGrant, VerifyError> {
+    if issuer.source != ClosureSource::StateResolver { return Err(VerifyError::NonResolverClosure); }
+    let acceptance = stage_accepted_grant(
+        grant_bytes,
+        &Expectation {
+            profile: request.profile, account: request.account,
+            device_public_key: request.device_public_key,
+            operation_permissions: request.operation_permissions, now: request.now,
+            clock_skew_seconds: request.clock_skew_seconds,
+            freshness: Freshness::SessionEstablishment,
+        },
+        issuer,
+        projection,
+    )?;
+    let grant = acceptance.grant;
+    let grant_token = crate::codec::decode_b64url_32(&grant.token)
+        .map_err(|_| VerifyError::StagingProjection)?;
+    Ok(InactiveStagedGrant {
+        account_did: grant.issuer, account: grant.account.as_str().to_owned(),
+        grant_id: grant.id, grant_token, device_did: grant.device_did,
+        device_public_key: grant.device_public_key, permissions: grant.permissions,
+        valid_until: grant.valid_until,
     })
 }
 

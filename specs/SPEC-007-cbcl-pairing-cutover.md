@@ -1,18 +1,32 @@
 ---
 id: SPEC-007
 title: cbcl-pairing Protocol Cutover
-status: approved
+status: draft
 tier: 1
-version: 0.2.1
-last-updated: 2026-08-17
-approved-date: 2026-08-17
+version: 0.3.8-draft
+last-updated: 2026-08-25
+previous-approved-version: 0.2.1
 owner-repo: selfsame
-review-gate: approved-for-development; production-gates-pending
+review-gate: test-first-implementation-owner-authorized; release-prohibited-pending-cross-model-pass
+authority-form: direct-current-safety-authority
+implementation-baseline: 0220cec2dec44cd95d4f411ea4814d790b6716d2
+coordinated-claimant-design: selfsame SPEC-008 0.5.17-draft
+coordinated-hub-design: cbcl-bus SPEC-053 0.17.13-draft
+coordinated-pairing-design: cbcl-pairing SPEC-001 0.5.8-draft
+generation-model-family: OpenAI GPT-5
+generation-model-version: gpt-5.6-sol
+generation-session: 01a029aa-9127-7c42-ad28-81512b91ded6
+generation-synthesis-trajectory: "approved 0.2.1 cutover -> standalone credential/v2 ordering conflict -> rejected reviews through 0.5.7 -> direct 0.3.8 proof-input closure"
 candidate-successor-to: SPEC-006
 depends-on: cbcl-pairing SPEC-001; SPEC-004; SCREEN-001
 ---
 
 # SPEC-007 — cbcl-pairing Protocol Cutover
+
+> **Current draft safety revision.** Version 0.3.8 states the credential/v2
+> consent and effect boundary directly. Version 0.2.1 remains the last approved
+> revision. The owner authorizes local test-first implementation. This draft
+> authorizes no production allocation, release, or deployment.
 
 The key words MUST, MUST NOT, REQUIRED, SHALL, SHALL NOT, SHOULD, SHOULD NOT,
 RECOMMENDED, MAY, and OPTIONAL are interpreted as described in BCP 14. Their
@@ -50,10 +64,13 @@ The cutover removes Selfsame's duplicate protocol before any production user exi
 negotiating. [[SPEC-007-cbcl-pairing-cutover#ADR-802]] composes the upstream
 engine. [[SPEC-007-cbcl-pairing-cutover#ADR-803]] separates endpoint shells.
 [[SPEC-007-cbcl-pairing-cutover#ADR-804]] uses release rollback.
+[[SPEC-007-cbcl-pairing-cutover#ADR-805]] permits only staged reverse issuance
+after final approval.
 
 **Load-bearing.** [[SPEC-007-cbcl-pairing-cutover#REQ-801]] selects one engine.
 [[SPEC-007-cbcl-pairing-cutover#REQ-803]] preserves Selfsame authority.
 [[SPEC-007-cbcl-pairing-cutover#REQ-804]] preserves explicit consent.
+[[SPEC-007-cbcl-pairing-cutover#REQ-812]] bounds every credential/v2 effect.
 [[SPEC-007-cbcl-pairing-cutover#REQ-809]] holds production allocation.
 
 **Controls.**
@@ -66,9 +83,10 @@ engine. [[SPEC-007-cbcl-pairing-cutover#ADR-803]] separates endpoint shells.
 - [[SPEC-007-cbcl-pairing-cutover#REQ-807]] makes stale legacy carriers inert.
 - [[SPEC-007-cbcl-pairing-cutover#REQ-809]] forbids production allocation before every named gate closes.
 - [[SPEC-007-cbcl-pairing-cutover#REQ-811]] consumes invitations before online guesses.
+- [[SPEC-007-cbcl-pairing-cutover#REQ-812]] forbids active capability before immutable final acceptance.
 - [[SPEC-007-cbcl-pairing-cutover#NFR-801]] forbids secret-bearing telemetry.
 
-**Open.** The Gate Evidence Record identifies every completed and pending review.
+**Open.** The 0.3.0 Gate Evidence Record identifies every pending review.
 Production allocation remains disabled until the complete Production gate closes.
 
 **Detail.** Reviewer: [[SPEC-007-cbcl-pairing-cutover#Architecture decisions]]
@@ -87,6 +105,10 @@ endpoint reduction, and relay state.
 
 Two engines duplicate transcript rules, consent ordering, invitation burn,
 relay limits, and error closure. A repair in one engine leaves the other unchanged.
+
+Credential/v2 adds a distinct ordering hazard. It needs a derived issuer and
+grant to construct the reverse payload that the person finally approves.
+The prior REQ-812 wording forbids that causal construction until after delivery.
 
 The previous compatibility hold preserved the duplicate path for hypothetical users.
 The repository owner reports that no users exist, so compatibility protects no deployed state.
@@ -109,6 +131,7 @@ This specification includes:
 - one `cbcl-pairing` engine for the Tauri wallet, CLI, web-device, and application adapter;
 - separate allocator and claimant endpoint sessions across a real blind relay;
 - the `anuna.io/credential/v1` profile for [[Selfsame Credential Transfer]];
+- the standalone `anuna.io/credential/v2` reverse-issuance safety boundary;
 - a 62,000-octet maximum for its canonical CON-219 payload bytes;
 - removal of legacy pairing commands, source modules, dependencies, profile fields, and tests;
 - fail-closed rejection vectors for legacy words, QR payloads, sessions, and relay messages;
@@ -226,8 +249,12 @@ Trace:
 
 ### REQ-804: Consent precedes payload
 
-The allocator SHALL NOT release a credential payload before the claimant approves
-the exact recognised intent digest through an explicit person action.
+For credential/v1, the allocator SHALL NOT release a payload before explicit
+approval of the exact recognised intent digest.
+
+For credential/v2, the claimant SHALL NOT construct or release the reverse
+payload before final approval. Preliminary approval authorizes only the preview
+specified by [[SPEC-007-cbcl-pairing-cutover#REQ-812]].
 
 Trace:
 - [[SPEC-007-cbcl-pairing-cutover#CON-801]]
@@ -327,17 +354,41 @@ Trace:
 
 ### REQ-812: Endpoint failures cannot authorise
 
-Mismatch, protocol violation, cancellation, relay closure, and expiry SHALL
-produce no accepted credential or identity side effect before approved payload delivery.
+For profiles without credential/v2 reverse issuance, failures SHALL produce no
+accepted credential or identity side effect before approved payload delivery.
 
-After approved delivery, only the standing CON-204 provisioning and compensation
-effects are permitted before CON-206 returns acceptance.
+Before credential/v2 preliminary approval, the endpoint SHALL produce no
+application identity effect. Preliminary approval authorizes one zeroizing
+derivation, pure DID and fingerprint computation, and the stated authenticated
+preview disclosure.
+
+Before credential/v2 final approval, the endpoint SHALL NOT sign, publish,
+resolve, issue, persist, stage capability, or construct a credential payload.
+
+Final approval authorizes only causal work required to construct the approved
+credential/v2 reverse payload. That work includes re-derivation, preview equality,
+issuer creation, signing, DID publication, closure resolution, WebFinger
+verification, grant construction, and payload construction.
+
+Final approval also authorizes one encrypted non-authorizing completion
+checkpoint before the first causal effect. That checkpoint binds only the
+approved ceremony and cannot grant application capability.
+
+Browser verification SHALL create only a crash-safe, non-authorizing staged
+installation. The hub's immutable final acceptance SHALL precede activation of
+that installation and every application capability.
+
+Failure before immutable final acceptance yields no accepted capability.
+Compensation SHALL remove only effects created by this ceremony. It SHALL NOT
+change pre-existing identity state or operator withdrawal state.
 
 Trace:
 - [[SPEC-007-cbcl-pairing-cutover#CON-801]]
 - [[SPEC-007-cbcl-pairing-cutover#CON-803]]
+- [[SPEC-007-cbcl-pairing-cutover#CON-807]]
 - [[SPEC-007-cbcl-pairing-cutover#TEST-806]]
 - [[SPEC-007-cbcl-pairing-cutover#TEST-813]]
+- [[SPEC-007-cbcl-pairing-cutover#TEST-821]]
 - [[SPEC-007-cbcl-pairing-cutover#OBS-802]]
 
 ### REQ-813: Authenticated profile selects the relay
@@ -347,6 +398,9 @@ The person SHALL NOT enter, choose, or repair a relay origin.
 
 The claimant SHALL match the invitation relay origin to exactly one eligible
 profile descriptor before consent. No declared relay match means refusal.
+
+Credential/v2 eligibility uses the live authenticated descriptor and exact-pair
+person policy. It SHALL NOT use a compiled relay allowlist or conformance registry.
 
 Relay failure burns the attempt and requires a fresh selection and invitation.
 The SDK SHALL NOT use an undeclared fallback.
@@ -424,7 +478,7 @@ Selfsame depends on one pinned `cbcl-pairing` revision.
 Selfsame does not copy CPace, Finished, CBCL dialects, channel framing,
 endpoint reduction, mailbox transitions, or relay limiting.
 
-The candidate baseline is revision `197d4cb3d1560ab5328df28fc984269799c510f9`.
+The candidate baseline is revision `62ef4a968b46b4836374fcee1d78c410f730a7a7`.
 Changing that pin requires updated conformance evidence and owner review.
 
 Selfsame owns only its credential profile adapter, shell effects, consent UI,
@@ -455,6 +509,24 @@ The first cutover instead disables pairing when no preceding reviewed release ex
 
 A runtime legacy selector was rejected because no user state requires it.
 The selector creates a permanent downgrade surface and a second test matrix.
+
+### ADR-805: Stage reverse issuance after final approval
+
+**Status:** candidate, pending the coordinated Tier-1 review.
+
+Credential/v2 needs identity material to construct the payload that travels
+from the wallet to the application. Final approval therefore authorizes that
+causal construction before delivery.
+
+The application writes a non-authorizing staged record before hub finalization.
+Only immutable hub acceptance activates it. This order supports crash recovery
+without granting capability from a partial ceremony.
+
+Construction before preliminary or final approval was rejected. Active browser
+installation before hub acceptance was also rejected.
+
+**Simplicity Ladder:** rung 5. Existing staging, status, and compensation
+primitives compose the boundary without another identity authority.
 
 ## Contracts
 
@@ -644,12 +716,32 @@ pairing engine, carrier, relay client, or command registration.
 
 ### CON-806: Authenticated relay selection
 
-**Profile grammar:** the coordinated SPEC-004 amendment defines
-`cbclPairingRelays` as one to sixteen closed descriptors.
+**Profile grammar:** this contract defines `cbclPairingRelays` as one to
+sixteen closed RFC-8785 JSON descriptors. No SPEC-004 amendment supplies this
+member.
 
 Each descriptor contains only `operatorId`, canonical `relayOrigin`, numeric
 `priority`, numeric `weight`, `privacyPolicyDigest`, and `conformanceEvidenceDigest`.
 Operator IDs and relay origins are unique within one profile.
+
+`operatorId` contains 1 through 63 ASCII octets and matches
+`[a-z0-9][a-z0-9-]{0,62}`. `relayOrigin` contains 1 through 272 ASCII octets
+and is one canonical HTTPS origin with no credentials, path, query, or
+fragment. `priority` and `weight` are JSON integers in `[0, 65535]`; a selected
+descriptor has positive weight. Both digest strings are canonical unpadded
+base64url and decode to exactly 32 octets.
+
+For a completely recognised descriptor object `D`:
+
+```text
+descriptorDigest = SHA-256(RFC8785(D))
+```
+
+The browser-selected descriptor is the unique descriptor whose
+`relayOrigin` equals the allocated carrier relay origin. That complete object,
+and no origin-only projection or another descriptor at the same priority,
+supplies `descriptorDigest` to the hub offer. The wallet recomputes the same
+digest from the unique live-profile descriptor before display.
 
 A production profile contains at least two eligible descriptors unless its
 approved availability exception names one operator and its bounded consequence.
@@ -660,7 +752,7 @@ digests, zero weight, and non-canonical origins. Loopback origins are developmen
 **Selection:** the allocator applies these ordered steps:
 
 1. recognise the authenticated profile under CON-201;
-2. reject descriptors forbidden by build policy or missing approved conformance evidence;
+2. apply the standing build policy only for credential/v1;
 3. take the lowest numeric priority that has an eligible descriptor;
 4. choose within that group by CSPRNG-weighted selection;
 5. allocate at the chosen relay and place its exact origin in the invitation; and
@@ -669,9 +761,20 @@ digests, zero weight, and non-canonical origins. Loopback origins are developmen
 Selection uses no account, DID, device key, recovery value, or stable user identifier.
 No capability probe or undeclared endpoint exists outside the pinned relay protocol.
 
-After the secure channel delivers intent, the claimant authenticates the exact
-profile from the claimed application origin under CON-201. The application ID,
-HTTPS origin, and requested scope come from the recognised credential intent.
+For credential/v2, complete profile recognition makes a declared descriptor
+eligible. No compiled relay allowlist, digest registry, or global relay policy
+participates in selection or claimant trust.
+
+For credential/v1 only, after the secure channel delivers intent, the claimant
+authenticates the exact profile from the claimed application origin under
+CON-201. Its application ID, HTTPS origin, and requested scope come from that
+recognised credential/v1 intent.
+
+For credential/v2, the application ID and HTTPS origin come only from the live
+profile bound by [[SPEC-008-production-pairing-claimant#CON-988]]. The requested
+scope comes only from the signed hub offer after equality with the protected
+peer input. No unchecked or merely channel-authenticated peer string supplies
+any of those values.
 
 Before consent, the claimant requires the invitation relay origin to match one
 eligible descriptor exactly. The descriptor's operator and privacy policy are display-only.
@@ -681,6 +784,60 @@ eligible descriptor exactly. The descriptor's operator and privacy policy are di
 
 **Verified by:**
 - [[SPEC-007-cbcl-pairing-cutover#TEST-817]]
+
+### CON-807: Credential/v2 consent and activation boundary
+
+**Interface:** the standalone credential/v2 claimant uses five ordered owned
+functions followed by activation and terminal recovery.
+
+1. `recognise_claimant_invitation` produces an origin-recognised zero-effect
+   relay-consent plan without a socket.
+2. `authorise_claimant_relay` produces only a single-use socket capability
+   after an existing exact-pair lookup or explicit person approval.
+3. `prepare_claimant` produces an authenticated zero-effect plan after relay
+   consent and cbcl-pairing authentication.
+4. `preview_claimant_identity` consumes preliminary approval and returns only
+   zeroizable public preview material.
+5. `complete_claimant` consumes final approval and performs the causal
+   construction allowed by [[SPEC-007-cbcl-pairing-cutover#REQ-812]]. It first
+   persists the sealed non-authorizing completion checkpoint.
+
+Browser and wallet activation then consume the immutable hub final status.
+`recover_claimant_completion` is not a sixth construction function: it can
+only authenticate that retained status and finish the already-sent payload's
+receipt transition.
+
+**Preconditions:** the exact application-relay pair has person-owned policy.
+The profile, carrier, transcript, hub offer, transition, and display sources
+have passed complete recognition and authentication.
+
+**Postconditions:** preliminary decline creates no derived identity residue.
+Final decline creates no signature, publication, grant, staged record, or
+application capability.
+
+After final approval, the browser verifies the payload and writes one inactive
+staged record. The hub verifies its receipt before one atomic final transaction.
+The browser activates the staged record only after verifying the immutable
+hub status JWS against the live profile key that signed the offer.
+
+The cbcl-pairing receipt carries that exact JWS and its digest. The wallet
+atomically replaces its pending completion checkpoint only after verifying
+both against the live profile and retained ceremony state.
+
+After relay expiry, the signed-status recovery in
+[[SPEC-008-production-pairing-claimant#CON-989]] has the same activation
+postcondition and no construction capability.
+
+**Error model:** mismatch, cancellation, relay closure, expiry, unavailable
+authority, and failed causal work return closed outcomes. Compensation touches
+only ceremony-owned effects and leaves no accepted application capability.
+
+**Implements:**
+- [[SPEC-007-cbcl-pairing-cutover#REQ-804]]
+- [[SPEC-007-cbcl-pairing-cutover#REQ-812]]
+
+**Verified by:**
+- [[SPEC-007-cbcl-pairing-cutover#TEST-821]]
 
 ## Purity Boundary Map
 
@@ -698,7 +855,8 @@ eligible descriptor exactly. The descriptor's operator and privacy policy are di
 ### Boundary values
 
 - `Invitation`, `InvitationRecord`, `ClientMessage`, `ChannelFrame`, `EndpointEffect`,
-  `CredentialGrant`, `CbclRelayDescriptor`, and `Acceptance`.
+  `CredentialGrant`, `CbclRelayDescriptor`, `StagedInstallation`,
+  `PendingCredentialV2Completion`, and `Acceptance`.
 
 ### Dependency rule
 
@@ -940,6 +1098,9 @@ Verify fresh selection, fresh invitation material, and no undeclared fallback.
 Present an invitation whose relay origin matches zero or two profile descriptors.
 Verify refusal before consent, payload, or Selfsame acceptance.
 
+For credential/v2, install an empty or hostile compiled relay registry.
+Verify the registry has no selection, prompt, socket, or acceptance effect.
+
 #### TEST-818: Credential payload boundary
 
 **Validates:** [[SPEC-007-cbcl-pairing-cutover#REQ-814]].
@@ -966,9 +1127,37 @@ Verify no change weakens unrelated identity, security, recovery, or protocol dut
 [[SPEC-007-cbcl-pairing-cutover#REQ-809]].
 
 Inspect the Phase 3 Gate Evidence Record.
-Verify every locally runnable TEST-801 through TEST-819 check cites durable evidence.
+Verify every locally runnable TEST-801 through TEST-819 and TEST-821 check cites durable evidence.
 Verify every external production gate remains unverified with a named owner until it passes.
 Verify production invitation allocation remains false.
+
+#### TEST-821: Credential/v2 effects follow both approvals and final acceptance
+
+**Validates:** [[SPEC-007-cbcl-pairing-cutover#REQ-804]],
+[[SPEC-007-cbcl-pairing-cutover#REQ-812]].
+
+Instrument custody, derivation, DID computation, issuer creation, signing,
+publication, closure, WebFinger, grant construction, persistence, payload,
+hub finalization, and both installation activations.
+
+Before preliminary approval, require zero calls. At preliminary approval,
+permit one zeroizing derivation, pure preview computation, and stated disclosure.
+
+Before final approval, require zero signatures, publications, resolutions,
+grants, payloads, staged records, and active application capabilities.
+
+After final approval, require causal construction in the declared order.
+Require browser verification to write only one inactive staged record.
+
+Lose every response before and after hub commit. Require status recovery to
+return absent, pending, or immutable finalized state without duplicate effects.
+
+Before immutable hub acceptance, require zero active application capability.
+After that acceptance, require one browser activation and one authenticated
+wallet installation.
+
+Fail every causal operation independently. Require ceremony-only compensation,
+zero active capability, and unchanged pre-existing and withdrawal state.
 
 ## Mutation gate
 
@@ -980,6 +1169,9 @@ Before implementation completion, replace direct Selfsame acceptance with parse-
 
 Before implementation completion, register one legacy command temporarily.
 [[SPEC-007-cbcl-pairing-cutover#TEST-802]] SHALL fail behaviourally.
+
+Before implementation completion, activate a staged credential before hub
+acceptance. [[SPEC-007-cbcl-pairing-cutover#TEST-821]] SHALL fail behaviourally.
 
 ## Observability
 
@@ -1024,6 +1216,32 @@ Without such a release, rollback disables pairing and preserves unrelated identi
 The Selfsame security owner and affected application owners receive notice before
 the first release that permits production invitation allocation.
 
+## Gate Evidence Record — 0.3.6-draft
+
+```yaml
+phase: 2
+gates:
+  - gate: "Accepted rejection imported before repair"
+    mechanism: "Circus Claude subscription review record"
+    result: pass
+    evidence: "[[spec-008-0.5.7-claude-adversarial-review-2026-08-24]] records REJECT and its N-1 blocker"
+  - gate: "Coordinated 0.3.6 and 0.5.8 Tier-1 review returns PASS"
+    mechanism: "fresh-context cross-model adversarial review"
+    result: unverified
+    owner: "Selfsame security owner"
+    evidence: "pending after the consolidated specification reissue"
+  - gate: "TEST-821 red, mutation, and final verification evidence exists"
+    mechanism: "test-first implementation evidence"
+    result: unverified
+    owner: "Selfsame implementation owner"
+    evidence: "owner waiver permits local test-first work; release remains prohibited"
+  - gate: "Production invitation allocation is approved"
+    mechanism: "complete Production gate and separate owner decision"
+    result: unverified
+    owner: "repository owner and named human reviewers"
+    evidence: "production allocation remains disabled"
+```
+
 ## Production gate
 
 Production invitation allocation remains prohibited until all items have durable evidence:
@@ -1031,6 +1249,8 @@ Production invitation allocation remains prohibited until all items have durable
 - the repository owner approves the recorded no-users finding and no-migration disposition;
 - coordinated SPEC-004, SPEC-006, and PROTO-002 through PROTO-004 amendments pass their own channels;
 - the upstream credential-profile disposition passes the `cbcl-pairing` amendment channel;
+- Selfsame SPEC-008 0.5.17-draft, cbcl-bus SPEC-053 0.17.13-draft,
+  and cbcl-pairing SPEC-001 0.5.8-draft pass one coordinated Tier-1 review;
 - every SPEC-004 Tier-1 row has the exact disposition in the inherited gate ledger;
 - every retained or replaced SPEC-004 ledger row reaches pass through its exact disposition;
 - the exact upstream `cbcl-pairing` production gates pass without local reinterpretation;
@@ -1076,6 +1296,7 @@ Hard stops: [[SPEC-007-cbcl-pairing-cutover#REQ-803]],
 [[SPEC-007-cbcl-pairing-cutover#REQ-807]],
 [[SPEC-007-cbcl-pairing-cutover#REQ-809]],
 [[SPEC-007-cbcl-pairing-cutover#REQ-811]],
+[[SPEC-007-cbcl-pairing-cutover#REQ-812]],
 [[SPEC-007-cbcl-pairing-cutover#NFR-801]], and every production gate.
 
 No channel can waive a hard stop without a new specification version and required Tier-1 review.
@@ -1085,6 +1306,38 @@ No channel can waive a hard stop without a new specification version and require
 <details>
 <summary>Revision history</summary>
 
+- 0.3.8-draft — reissues the unchanged safety boundary against Selfsame
+  SPEC-008 0.5.17, cbcl-pairing SPEC-001 0.5.8, and cbcl-bus SPEC-053 0.17.13.
+  Production allocation, release, and deployment remain prohibited.
+- 0.3.7-draft — reconciles ADR-802, the root pin, the compiled dependency
+  baseline, and the fail-closed build-time source-integrity check to reviewed
+  cbcl-pairing revision `62ef4a968b46b4836374fcee1d78c410f730a7a7`.
+  Release and deployment remain prohibited pending cross-model review PASS.
+- 0.3.6-draft — coordinates exact socket-generation, recovery-proof, and
+  checkpoint-key inputs. It records the fixed v2 lifetime and frame-safety
+  disposition. The consent and effect boundary remains unchanged. The owner
+  authorizes local test-first work. Release and deployment remain prohibited.
+- 0.3.5-draft — coordinates the possession-proof input and credential/v2
+  mailbox lifetime. The consent and effect boundary remains unchanged. The
+  coordinated Tier-1 review remains open, so this revision authorizes no
+  implementation.
+- 0.3.4-draft — coordinates the corrected Selfsame and hub parents. The
+  consent and effect boundary remains unchanged. The coordinated Tier-1 review
+  remains open, so this revision authorizes no implementation.
+- 0.3.3-draft — coordinates the bounded final authority command and the
+  remaining attempt-5 observations. The coordinated Tier-1 review remains
+  open, so this revision authorizes no implementation.
+- 0.3.2-draft — coordinates the signed hub authority response, one exclusive
+  offer deadline, exact object kinds, and retained post-payload recovery. The
+  coordinated Tier-1 review remains open, so this revision authorizes no
+  implementation.
+- 0.3.1-draft — defines the relay descriptor and digest directly, scopes the
+  peer-sourced identifier rule to credential/v1, and reconciles the five
+  claimant functions plus terminal recovery. The coordinated Tier-1 review
+  remains open, so this revision authorizes no implementation.
+- 0.3.0-draft — directly states the standalone credential/v2 consent and effect
+  boundary. It adds ADR-805, CON-807, and TEST-821. The coordinated Tier-1
+  review remains open, so this revision authorizes no implementation.
 - 0.2.1 — separates local development authority from upstream production approval.
   It accepts ADR-801 through ADR-804 and adds TEST-819 and TEST-820.
   It records legacy fixture provenance and preserves unrelated identity functions during rollback.

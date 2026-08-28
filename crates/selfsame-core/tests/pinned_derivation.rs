@@ -1,6 +1,6 @@
 //! ADR-010 pin enforcement — SPEC-001 TEST-003, Tier-1 gate condition B.
 //!
-//! ADR-010 depends on `did-crdt` at `fbccfd5885cd0c0136218f809ea0e183bc7e49f3`,
+//! ADR-010 depends on the exact `did-crdt` revision in `did-crdt.sha`,
 //! adopts its DID derivation and `u`-multibase encoding **verbatim**, and
 //! declares that *any change to either is a breaking change to the
 //! specification*. A comment cannot enforce that. This file can: it restates

@@ -1,12 +1,14 @@
 use sha2::{Digest, Sha256};
 use std::{path::PathBuf, process::Command};
 
-const REVIEWED_REVISION: &str = "8e55160a3234127bd60ce723fd93ba6b2b67a06b";
+const CANDIDATE_REVISION: &str = include_str!("../../../cbcl-pairing.sha");
+const CBCL_RS_REVISION: &str = include_str!("../../../cbcl-rs.sha");
+const DID_CRDT_REVISION: &str = include_str!("../../../did-crdt.sha");
 
 #[test]
-fn test_701_compiled_dependency_matches_the_reviewed_baseline() {
+fn test_701_compiled_dependency_matches_the_pinned_candidate() {
     let baseline = selfsame_pairing::dependency_baseline();
-    assert_eq!(baseline.revision, REVIEWED_REVISION);
+    assert_eq!(baseline.revision, CANDIDATE_REVISION.trim());
     assert_eq!(
         baseline.bootstrap_source_sha256,
         cbcl_pairing::BOOTSTRAP_SOURCE_SHA256
@@ -22,27 +24,34 @@ fn test_701_compiled_dependency_matches_the_reviewed_baseline() {
     assert_eq!(hex(&session), cbcl_pairing::SESSION_SOURCE_SHA256);
 
     let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let sibling = manifest
+    let siblings = manifest
         .parent()
         .and_then(|crates| crates.parent())
         .and_then(|root| root.parent())
-        .expect("workspace has a parent")
-        .join("cbcl-pairing");
-    let head = git(&sibling, &["rev-parse", "HEAD"]);
-    assert!(head.status.success(), "sibling HEAD must be readable");
-    assert_eq!(
-        String::from_utf8_lossy(&head.stdout).trim(),
-        REVIEWED_REVISION
-    );
-    let tracked = git(&sibling, &["status", "--porcelain", "--untracked-files=no"]);
-    assert!(
-        tracked.status.success(),
-        "sibling tracked status must be readable"
-    );
-    assert!(
-        tracked.stdout.is_empty(),
-        "reviewed sibling checkout has tracked drift"
-    );
+        .expect("workspace has a parent");
+    for (label, directory, expected) in [
+        ("cbcl-pairing", "cbcl-pairing", CANDIDATE_REVISION),
+        ("cbcl-rs", "cbcl-rs", CBCL_RS_REVISION),
+        ("did-crdt", "did-crdt", DID_CRDT_REVISION),
+    ] {
+        let sibling = siblings.join(directory);
+        let head = git(&sibling, &["rev-parse", "HEAD"]);
+        assert!(head.status.success(), "{label} HEAD must be readable");
+        assert_eq!(
+            String::from_utf8_lossy(&head.stdout).trim(),
+            expected.trim(),
+            "{label} HEAD differs from its pin"
+        );
+        let tracked = git(&sibling, &["status", "--porcelain", "--untracked-files=no"]);
+        assert!(
+            tracked.status.success(),
+            "{label} tracked status must be readable"
+        );
+        assert!(
+            tracked.stdout.is_empty(),
+            "{label} pinned checkout has tracked drift"
+        );
+    }
 }
 
 fn git(sibling: &std::path::Path, arguments: &[&str]) -> std::process::Output {

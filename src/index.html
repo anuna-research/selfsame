@@ -494,8 +494,85 @@
           No applications yet. Sign into one that supports Selfsame and it will
           appear here.
         </p>
+        <div class="section-head">
+          <h2>Selfsame wallet links</h2>
+        </div>
+        <ul class="applications" data-cbcl-v2-links></ul>
+        <p class="empty" data-cbcl-v2-links-empty>
+          No cbcl-pairing wallet links yet.
+        </p>
         <div class="spacer"></div>
         <button class="btn btn--primary" data-action="to-pairing">Connect an application</button>
+      </section>
+
+      <section class="screen screen--scroll" data-screen="pairing-link" hidden>
+        <button class="back" data-action="to-applications">Applications</button>
+        <h1>Selfsame wallet link</h1>
+        <div class="evidence">
+          <div class="evidence__row">
+            <p class="evidence__key">Application</p>
+            <p class="evidence__val evidence__val--mono" data-cbcl-v2-link-application></p>
+          </div>
+          <div class="evidence__row">
+            <p class="evidence__key">Installed account</p>
+            <p class="evidence__val evidence__val--mono" data-cbcl-v2-link-account></p>
+            <p class="evidence__note">cannot be silently renamed</p>
+          </div>
+          <div class="evidence__row">
+            <p class="evidence__key">Person-approved relay</p>
+            <p class="evidence__val evidence__val--mono" data-cbcl-v2-link-relay></p>
+          </div>
+        </div>
+        <p class="lede" data-cbcl-v2-link-status aria-live="polite">
+          Verify current standing before using this installed capability.
+        </p>
+        <p class="error" data-error="cbcl-v2-link" hidden></p>
+        <button class="btn btn--primary" data-action="verify-cbcl-v2-link">Verify current standing</button>
+        <button class="btn btn--primary" data-action="accept-cbcl-v2-rotation" hidden>Acknowledge rotation</button>
+        <button class="btn btn--danger" data-action="to-cbcl-v2-unlink">Unlink this application</button>
+      </section>
+
+      <section class="screen screen--scroll" data-screen="pairing-pending-link" hidden>
+        <button class="back" data-action="to-applications">Applications</button>
+        <h1>Interrupted wallet link</h1>
+        <p class="lede">
+          This attempt stopped before Selfsame installed an application capability.
+          You can remove its local checkpoint and exact relay policy, then start again.
+        </p>
+        <div class="evidence">
+          <div class="evidence__row">
+            <p class="evidence__key">Application</p>
+            <p class="evidence__val evidence__val--mono" data-cbcl-v2-pending-application></p>
+          </div>
+          <div class="evidence__row">
+            <p class="evidence__key">Person-approved relay</p>
+            <p class="evidence__val evidence__val--mono" data-cbcl-v2-pending-relay></p>
+          </div>
+          <div class="evidence__row">
+            <p class="evidence__key">Durable phase</p>
+            <p class="evidence__val evidence__val--mono" data-cbcl-v2-pending-phase></p>
+          </div>
+        </div>
+        <button class="btn btn--danger" data-action="to-cbcl-v2-pending-unlink">
+          Abandon this interrupted link
+        </button>
+      </section>
+
+      <section class="screen" data-screen="pairing-link-unlink" hidden>
+        <button class="back" data-action="back-to-cbcl-v2-link">Back</button>
+        <h1>Unlink this application?</h1>
+        <p class="lede" data-cbcl-v2-unlink-application></p>
+        <p class="caution" data-cbcl-v2-unlink-boundary>
+          This removes only the local application record and its exact relay policy.
+          It retains your recovery root and does not revoke anything at the remote hub.
+        </p>
+        <label class="field">
+          <span class="field__label">Your Selfsame passcode</span>
+          <input type="password" id="cbcl-v2-unlink-passcode" autocomplete="current-password" />
+        </label>
+        <p class="error" data-error="cbcl-v2-unlink" hidden></p>
+        <div class="spacer"></div>
+        <button class="btn btn--danger" data-action="confirm-cbcl-v2-unlink">Unlink locally</button>
       </section>
 
       <!-- SPEC-007: one CBCL invitation, no protocol selector or fallback. -->
@@ -514,10 +591,16 @@
           <textarea id="pairing-input" rows="4" autocomplete="off" spellcheck="false"
                     autocapitalize="none" inputmode="text"></textarea>
         </label>
+        <label class="field">
+          <span class="field__label">PAIR1 presence code</span>
+          <input id="pairing-presence-code" autocomplete="off" spellcheck="false"
+                 autocapitalize="characters" inputmode="text"
+                 placeholder="PAIR1-…" />
+        </label>
         <p class="code-state" data-pairing-state aria-live="polite">Paste one invitation</p>
-        <!-- SPEC-008 CON-902: a production claimant derives the wallet's
-             per-application identity inside custody before any socket opens,
-             so presence is asked for here. The demo build hides this field. -->
+        <!-- SPEC-008 credential/v2 sends this value to Rust only after the
+             authenticated intent is approved. No identity is derived before
+             relay consent and exact-intent consent have both completed. -->
         <label class="field" data-pairing-passcode-field hidden>
           <span class="field__label">Your Selfsame passcode</span>
           <input type="password" id="pairing-passcode" autocomplete="current-password" />
@@ -546,7 +629,7 @@
 
       <section class="screen screen--scroll" data-screen="pairing-consent" tabindex="-1" hidden>
         <button class="back" data-action="cancel-cbcl-pairing">Cancel</button>
-        <h1>Review this request</h1>
+        <h1 data-cbcl-consent-title>Review this request</h1>
         <p class="lede" data-cbcl-authority></p>
         <div class="evidence">
           <div class="evidence__row">
@@ -565,6 +648,7 @@
           Approve only if these exact fields match the application in front of you.
           Approval releases one credential; decline releases none.
         </p>
+        <p class="error" data-error="pairing-consent" hidden></p>
         <div class="spacer"></div>
         <button class="btn btn--primary" data-action="approve-cbcl-pairing">Approve request</button>
         <button class="btn btn--quiet" data-action="decline-cbcl-pairing">Decline</button>

@@ -17,8 +17,8 @@ use selfsame_app_identity::accept::Projection;
 use selfsame_app_identity::alias::{recognise_jrd, AcctUri};
 use selfsame_app_identity::path_b::{agree_closures, issuer_state_of, ClosureAssertionMethod, ResolverObservation, 
     rehydrate_verified_grant, verify_session_establishment,
-    verify_standing, GrantEvidence, GrantRequest, StandingEvidence,
-    StandingRequest, VerifiedGrant,
+    verify_inactive_staging, verify_standing, GrantEvidence, GrantRequest,
+    InactiveStagedGrant, StandingEvidence, StandingRequest, VerifiedGrant,
 };
 use selfsame_app_identity::profile::ApplicationProfile;
 use selfsame_app_identity::proof::Challenge;
@@ -239,6 +239,46 @@ pub fn verify_path_b_pure(
         permissions: accepted.permissions,
         valid_until: accepted.valid_until,
     })
+}
+
+/// Verify a credential/v2 grant against a live sidecar-owned resolver
+/// observation without requiring reciprocal WebFinger before finalization.
+#[allow(clippy::too_many_arguments)]
+pub fn verify_inactive_grant_pure(
+    profile_bytes: &[u8],
+    issuer_did: &str,
+    account: &str,
+    device_public_key: &[u8; 32],
+    operation_permissions: &[String],
+    now: i64,
+    clock_skew_seconds: i64,
+    grant: &[u8],
+    closures: &[ResolverClosure],
+) -> Result<InactiveStagedGrant, String> {
+    let profile =
+        ApplicationProfile::recognise(profile_bytes).map_err(|_| String::from("profile"))?;
+    let agreed = agree_closures(&profile, &observations(closures))
+        .map_err(|_| String::from("resolver_quorum"))?;
+    if agreed.did != issuer_did {
+        return Err(String::from("resolver_closure"));
+    }
+    let account = AcctUri::parse(account).map_err(|_| String::from("account"))?;
+    let issuer = issuer_state_of(&agreed, now);
+    let permissions: Vec<&str> = operation_permissions.iter().map(String::as_str).collect();
+    verify_inactive_staging(
+        &GrantRequest::new(
+            &profile,
+            &account,
+            device_public_key,
+            &permissions,
+            now,
+            clock_skew_seconds,
+        ),
+        &issuer,
+        None,
+        grant,
+    )
+    .map_err(|_| String::from("rejected"))
 }
 
 /// Verify exactly the resolver evidence that can drive a durable revocation.
@@ -551,7 +591,7 @@ fn decode_presentation<'a>(env: Env<'a>, term: Term<'a>) -> Result<PathBPresenta
     })
 }
 
-fn decode_closures<'a>(env: Env<'a>, term: Term<'a>) -> Result<Vec<ResolverClosure>, String> {
+pub(crate) fn decode_closures<'a>(env: Env<'a>, term: Term<'a>) -> Result<Vec<ResolverClosure>, String> {
     reject_unknown(term, &["resolver_closures"])?;
     let closures: Vec<Term<'a>> = value(env, term, "resolver_closures")?;
     closures

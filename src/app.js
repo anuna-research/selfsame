@@ -512,11 +512,119 @@ async function readCode(code) {
     // REQ-018 happens inside this call: the offer's signature is verified
     // before any field comes back, so nothing below can render an unverified
     // claim. The "never reached" rows of SCREEN-001 are this throwing.
-    const offer = await invoke("read_link_code", { code });
-    renderConsent(offer);
-    show("consent");
+    //
+    // One code carries one of two offer grammars, told apart only by opening
+    // the read-once slot. The backend opens it once and returns which flow this
+    // is — a SPEC-001 device link, or a SPEC-004 CON-219 application enrolment.
+    const outcome = await invoke("read_link_code", { code });
+    if (outcome.kind === "enrolment") {
+      ui.enrol = { active: true };
+      renderEnrolConsent(outcome);
+      show("consent-application");
+    } else {
+      ui.enrol = null;
+      renderConsent(outcome);
+      show("consent");
+    }
   } catch (e) {
     refuseCode(code, message(e));
+  } finally {
+    idle();
+  }
+}
+
+// ── SPEC-004 CON-219: application enrolment over the rendezvous ─────────────
+//
+// The same three screens the same-device path uses (consent-application,
+// presence, fingerprint-compare) drive the cross-device ceremony here, backed
+// by cbcl_enrol_prepare/confirm rather than navigation. `ui.enrol` is the flag
+// the shared action handlers branch on; it holds the ceremony id between the
+// fingerprint comparison and the confirm.
+
+/** Render the CON-219 consent screen from the GrantRequestView. */
+function renderEnrolConsent(grant) {
+  // REQ-222: the application's authenticated id is the verified fact; it has no
+  // separate self-described display name on this wire, so the id stands in both
+  // the verified row and is not repeated as an unchecked claim.
+  $("[data-consent-origin]").textContent = grant.application_id;
+  $("[data-consent-name]").textContent = grant.application_id;
+  // The account alias is not known until the grant is signed (the issuer DID
+  // stays private until confirmation), so it is named at the end, not here.
+  $("[data-consent-alias]").textContent = "—";
+
+  const list = $("[data-consent-permissions]");
+  list.textContent = "";
+  for (const uri of grant.permissions ?? []) {
+    const li = document.createElement("li");
+    li.className = "permission";
+    const what = document.createElement("span");
+    what.className = "permission__what";
+    // The permission URI verbatim — paraphrasing one would consent the person
+    // to a description nobody wrote.
+    what.textContent = uri;
+    li.append(what);
+    list.append(li);
+  }
+}
+
+/** Consent granted — collect the passcode (REQ-024 presence) to sign. */
+function enrolApprove() {
+  show("presence");
+}
+
+/** REQ-024: sign the grant under the passcode, then the CON-221 comparison. */
+async function enrolPrepare() {
+  const passcode = $("#presence-passcode").value;
+  busy("Signing…");
+  try {
+    const req = await invoke("cbcl_enrol_prepare", { passcode });
+    $("#presence-passcode").value = "";
+    ui.enrol.ceremonyId = req.ceremony_id;
+
+    // CON-221: an already-bound account needs no comparison; a fail-closed
+    // authority is refused; only a first enrolment shows the fingerprint.
+    if (req.applicability === "notRequired") {
+      await enrolConfirm(true);
+      return;
+    }
+    if (req.applicability === "failClosed" || !req.fingerprint) {
+      fail("presence", "EnrollmentAuthorityUnavailable — nothing was bound.");
+      return;
+    }
+
+    $("[data-home-fp-hex]").textContent = req.fingerprint.hex;
+    $("[data-home-fp-label]").textContent = req.fingerprint.label;
+    renderLifehash($("[data-home-fp-lifehash]"), req.fingerprint.lifehash);
+    $("[data-fp-app]").textContent = req.account || "this application";
+    show("fingerprint-compare");
+  } catch (e) {
+    fail("presence", message(e));
+  } finally {
+    idle();
+  }
+}
+
+/** CON-221: the person's answer to the comparison, then write the bundle back. */
+async function enrolConfirm(confirmed) {
+  const ceremonyId = ui.enrol?.ceremonyId;
+  if (!ceremonyId) return;
+  if (!confirmed) {
+    // "They're different": decline the grant. confirm_issuance rejects, so no
+    // bundle is ever written, and the ceremony state is dropped.
+    ui.enrol = null;
+    invoke("cbcl_enrol_confirm", { ceremonyId, confirmed: false }).catch(() => {});
+    show("fingerprint-mismatch");
+    return;
+  }
+  busy("Finishing…");
+  try {
+    await invoke("cbcl_enrol_confirm", { ceremonyId, confirmed: true });
+    ui.enrol = null;
+    await refresh();
+  } catch (e) {
+    ui.enrol = null;
+    fail("presence", message(e));
+    show("presence");
   } finally {
     idle();
   }
@@ -817,9 +925,27 @@ const appIdentity = initAppIdentity({
 // because a pairing has three network waits a person watches — resolving the
 // record, meeting the application, and sending the bundle back — and `refresh`,
 // because the applications list is derived from what the wallet holds after one.
-initPairing({
+const pairing = initPairing({
   $, show, invoke, fail, message, renderLifehash, actions, busy, idle, refresh,
 });
+
+// The CON-219 enrolment reuses three screens the same-device path (IMPL-004)
+// also owns: consent-application, presence, and fingerprint-compare. Their
+// handlers are wrapped here so that, when a cross-device enrolment is in flight
+// (`ui.enrol`), the buttons drive the cbcl_enrol_* ceremony; otherwise they
+// fall through to the behaviour IMPL-004 and the device-link flow registered.
+const wrap = (name, whenEnrol) => {
+  const prev = actions[name] ?? (() => {});
+  actions[name] = (...args) => (ui.enrol ? whenEnrol() : prev(...args));
+};
+wrap("authorise", enrolPrepare);
+wrap("consent-approve", enrolApprove);
+wrap("consent-refuse", () => {
+  ui.enrol = null;
+  refresh();
+});
+wrap("fingerprint-matches", () => enrolConfirm(true));
+wrap("fingerprint-differs", () => enrolConfirm(false));
 
 document.addEventListener("click", (e) => {
   const el = e.target.closest("[data-action]");
@@ -834,12 +960,17 @@ $("#code-input").addEventListener("input", onCodeInput);
 // phone that was offline when a device was linked should catch up without the
 // user having to know that publication is a thing (REQ-020).
 document.addEventListener("visibilitychange", () => {
-  if (!document.hidden) invoke("flush_publications").catch(() => {});
+  if (!document.hidden) {
+    invoke("flush_publications").catch(() => {});
+    pairing.resumePending().catch(() => {});
+  }
 });
 
-refresh().catch((e) => {
-  document.body.textContent = `Selfsame could not start: ${message(e)}`;
-});
+refresh()
+  .then(() => pairing.resumePending())
+  .catch((e) => {
+    document.body.textContent = `Selfsame could not start: ${message(e)}`;
+  });
 
 // Which build is this, exactly — asked of the binary, not of this page, so a
 // stale webview asset cannot misreport the build it rides in. Best-effort:

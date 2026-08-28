@@ -140,7 +140,11 @@ pub struct Fp {
 
 impl From<fingerprint::Fingerprint> for Fp {
     fn from(f: fingerprint::Fingerprint) -> Self {
-        Self { hex: f.hex(), label: f.label(), lifehash: f.lifehash().base64() }
+        Self {
+            hex: f.hex(),
+            label: f.label(),
+            lifehash: f.lifehash().base64(),
+        }
     }
 }
 
@@ -236,11 +240,14 @@ pub async fn create_identity(
     let did = identity::derive_did(&root_pk)?;
 
     // Sign the genesis and the profile declaration.
-    let signed = with_root(passcode, move |root| -> std::result::Result<_, identity::IdentityError> {
-        let (document, genesis) = identity::sign_genesis(root)?;
-        let profile = identity::declare_profile(&document, root, now() * 1_000)?;
-        Ok((genesis, profile))
-    })
+    let signed = with_root(
+        passcode,
+        move |root| -> std::result::Result<_, identity::IdentityError> {
+            let (document, genesis) = identity::sign_genesis(root)?;
+            let profile = identity::declare_profile(&document, root, now() * 1_000)?;
+            Ok((genesis, profile))
+        },
+    )
     .await??;
 
     {
@@ -309,14 +316,38 @@ pub struct OfferView {
     pub expires_in: u64,
 }
 
+/// What a recognised code turned out to be.
+///
+/// One link code carries one of two offer grammars — a SPEC-001 device-link
+/// offer or a SPEC-004 CON-219 application-enrolment offer — and they are told
+/// apart only by opening the sealed slot, which is **read-once**. So the wallet
+/// must decide *from the single opened plaintext* which flow this is; it cannot
+/// fetch, guess wrong, and fetch again. This is that decision, returned to the
+/// frontend so it can show the matching screen.
+#[derive(Serialize)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+pub enum LinkOutcome {
+    /// A SPEC-001 device-link offer — the SCREEN-001 consent flow.
+    Device(OfferView),
+    /// A SPEC-004 CON-219 enrolment offer — the application-consent flow.
+    Enrolment(crate::app_grant::GrantRequestView),
+}
+
 /// Read a typed or scanned code, fetch the offer, and **verify it** — REQ-018.
 ///
 /// Nothing is shown unless this returns `Ok`. SCREEN-001's "Never reached" rows
 /// are the `Err` arms: an absent, wrong-key, or wrong-domain signature, an
 /// application outside the compiled table, and an expired offer each stop here.
 /// Parsing the offer is not authorising it.
+///
+/// The sealed slot is fetched and opened **once** (CON-002 read-once), then the
+/// opened plaintext is matched against both offer grammars: a SPEC-001 device
+/// offer takes the [`LinkOutcome::Device`] path here, and a CON-219 enrolment
+/// offer is dispatched — on that same plaintext, before any device-offer state
+/// is committed — to [`crate::app_grant::enrol_from_opened`]. Neither grammar
+/// gets a second read the read-once contract would refuse.
 #[tauri::command]
-pub async fn read_link_code(code: String, session: State<'_, AppSession>) -> Result<OfferView> {
+pub async fn read_link_code(code: String, session: State<'_, AppSession>) -> Result<LinkOutcome> {
     // REQ-002: refuse before doing any work, so the UI can route to the backup
     // flow rather than discovering the block after the user has scanned.
     Custody::require_backup_confirmed()?;
@@ -334,16 +365,27 @@ pub async fn read_link_code(code: String, session: State<'_, AppSession>) -> Res
     let plaintext = seal::open_offer(&seal::derive_key(&secret), &sealed)
         .map_err(|_| UiError("That code isn't valid.".into()))?;
 
-    // Recognise fully, and verify the signature, before any field exists.
-    let offer =
-        Offer::parse(&plaintext).map_err(|_| UiError("That code isn't valid.".into()))?;
+    // Recognise fully, and verify the signature, before any field exists. A
+    // CON-219 enrolment offer fails this SPEC-001 grammar and is dispatched to
+    // the enrolment ceremony below, on the same already-opened plaintext.
+    let offer = match Offer::parse(&plaintext) {
+        Ok(offer) => offer,
+        Err(_) => {
+            let view =
+                crate::app_grant::enrol_from_opened(plaintext, secret, application, &session)
+                    .await?;
+            return Ok(LinkOutcome::Enrolment(view));
+        }
+    };
     if offer.application != application {
         return Err(UiError("That code isn't valid.".into()));
     }
 
     let now = now();
     if now > offer.expiry {
-        return Err(UiError("That code has expired — generate a new one.".into()));
+        return Err(UiError(
+            "That code has expired — generate a new one.".into(),
+        ));
     }
 
     let view = OfferView {
@@ -355,8 +397,12 @@ pub async fn read_link_code(code: String, session: State<'_, AppSession>) -> Res
     };
 
     let mut s = session.0.lock().unwrap_or_else(|p| p.into_inner());
-    s.pending_offer = Some(PendingOffer { expires_at: offer.expiry, offer, secret });
-    Ok(view)
+    s.pending_offer = Some(PendingOffer {
+        expires_at: offer.expiry,
+        offer,
+        secret,
+    });
+    Ok(LinkOutcome::Device(view))
 }
 
 /// *This isn't me — reject.* Nothing is signed, written, or published.
@@ -390,9 +436,14 @@ pub async fn authorise(passcode: String, session: State<'_, AppSession>) -> Resu
 
     let (offer, secret) = {
         let s = session.0.lock().unwrap_or_else(|p| p.into_inner());
-        let pending = s.pending_offer.as_ref().ok_or_else(|| UiError("Nothing to authorise.".into()))?;
+        let pending = s
+            .pending_offer
+            .as_ref()
+            .ok_or_else(|| UiError("Nothing to authorise.".into()))?;
         if now() > pending.expires_at {
-            return Err(UiError("That code has expired — generate a new one.".into()));
+            return Err(UiError(
+                "That code has expired — generate a new one.".into(),
+            ));
         }
         (pending.offer.clone(), pending.secret)
     };
@@ -428,8 +479,9 @@ pub async fn authorise(passcode: String, session: State<'_, AppSession>) -> Resu
     // genesis converges with everything else. The full closure — profile
     // declaration included — reaches verifiers from the resolver (REQ-025); the
     // bundle carries the offline-verifiable minimum (NFR-006).
-    let (genesis, add, label_delta) =
-        with_root(passcode, move |root| -> std::result::Result<_, identity::IdentityError> {
+    let (genesis, add, label_delta) = with_root(
+        passcode,
+        move |root| -> std::result::Result<_, identity::IdentityError> {
             let ms = now() * 1_000;
             let (mut from_genesis, genesis) = identity::sign_genesis(root)?;
             let add = identity::add_device(&from_genesis, root, &device_key, &fragment, ms)?;
@@ -440,8 +492,9 @@ pub async fn authorise(passcode: String, session: State<'_, AppSession>) -> Resu
             let label_delta =
                 identity::set_device_label(&from_genesis, root, &id_for_signing, &label, ms + 1)?;
             Ok((genesis, add, label_delta))
-        })
-        .await??;
+        },
+    )
+    .await??;
 
     // Assemble the bundle: genesis, the add, and the label — CON-002's 2–3
     // deltas. It is self-contained, so the client can recompute the DID from
@@ -451,8 +504,11 @@ pub async fn authorise(passcode: String, session: State<'_, AppSession>) -> Resu
         .map(|d| serde_json::to_vec(d).unwrap_or_default())
         .collect();
     let grant = Grant::new(did.to_string(), deltas);
-    let sealed =
-        seal::seal_bundle(&seal::derive_key(&secret), &grant.to_bytes(), &offer.transcript());
+    let sealed = seal::seal_bundle(
+        &seal::derive_key(&secret),
+        &grant.to_bytes(),
+        &offer.transcript(),
+    );
 
     net::put_bundle(APP, &secret, sealed)
         .await
@@ -522,7 +578,9 @@ pub async fn flush_publications(session: State<'_, AppSession>) -> Result<usize>
 }
 
 async fn flush(session: &State<'_, AppSession>) -> Result<usize> {
-    let Ok(root_pk) = Custody::root_public_key() else { return Ok(0) };
+    let Ok(root_pk) = Custody::root_public_key() else {
+        return Ok(0);
+    };
     let did = identity::derive_did(&root_pk)?.to_string();
 
     let pending = {
@@ -556,6 +614,8 @@ async fn flush(session: &State<'_, AppSession>) -> Result<usize> {
 /// nobody able to change that. The UI says exactly that before calling it.
 #[tauri::command]
 pub async fn forget_identity(session: State<'_, AppSession>) -> Result<()> {
+    crate::cbcl_v2_completion::purge_all_links()?;
+    crate::cbcl_v2_policy::purge()?;
     Custody::forget()?;
     let mut s = session.0.lock().unwrap_or_else(|p| p.into_inner());
     s.clear();

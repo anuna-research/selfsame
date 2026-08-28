@@ -381,6 +381,13 @@ pub fn caller_matches_binding(
         // Apple: the platform attributed nothing, which CON-223 anticipates.
         // Not evidence, and not a failure.
         (CallerEvidence::Unattributed, MobileBinding::Apple { .. }) => Ok(()),
+        // Web: the binding is the profile's authenticated admission that no
+        // platform will attribute a caller (CON-227), so unattributed is the
+        // conforming case — and the ONLY passing case. Any attributed caller
+        // against a web binding falls to the catch-all below: an OS-mediated
+        // handoff claiming a manual binding is a contradiction, and refusing
+        // it keeps same-device dispatch on the stronger CON-222/CON-223 forms.
+        (CallerEvidence::Unattributed, MobileBinding::Web { .. }) => Ok(()),
         // Android: CON-222 requires the calling-package comparison, and an
         // unattributed caller is one it could not be performed on.
         (CallerEvidence::Unattributed, MobileBinding::Android { .. }) => {

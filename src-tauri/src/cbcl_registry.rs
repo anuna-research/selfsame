@@ -1,4 +1,4 @@
-//! SPEC-008 `CON-903` — the compiled approved-conformance registry.
+//! SPEC-007 `CON-806` — the compiled approved-conformance registry.
 //!
 //! Each entry is the SHA-256 digest of one operator's published relay
 //! conformance evidence. Adding an entry is a reviewed release change with an

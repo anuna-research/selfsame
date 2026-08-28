@@ -837,16 +837,16 @@ fn require_ceremony(
 fn intent_view(ceremony: &DemoCeremony) -> IntentView {
     let intent = ceremony.display_intent();
     IntentView {
-        application: intent.application.clone(),
-        action: intent.action.clone(),
-        authority_summary: intent.authority_summary.clone(),
+        application: intent.application().to_owned(),
+        action: intent.action().to_owned(),
+        authority_summary: intent.authority_summary().to_owned(),
         fields: intent
-            .fields
+            .fields()
             .iter()
             .map(|field| IntentFieldView {
-                label: field.label.into(),
-                value: field.value.clone(),
-                claimed_by_secret_holder: field.claimed_by_secret_holder,
+                label: field.label().into(),
+                value: field.value().to_owned(),
+                claimed_by_secret_holder: field.claimed_by_secret_holder(),
             })
             .collect(),
     }

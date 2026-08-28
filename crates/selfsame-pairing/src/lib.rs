@@ -11,6 +11,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod credential_v2;
 pub mod legacy;
 pub mod live;
 #[cfg(feature = "local-pairing-demo")]
@@ -20,7 +21,7 @@ pub mod release;
 /// Dependency evidence exposed to conformance tests.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct DependencyBaseline {
-    /// Reviewed sibling Git revision.
+    /// Pinned candidate sibling Git revision.
     pub revision: &'static str,
     /// Published bootstrap dialect source hash.
     pub bootstrap_source_sha256: &'static str,
@@ -32,7 +33,7 @@ pub struct DependencyBaseline {
 #[must_use]
 pub const fn dependency_baseline() -> DependencyBaseline {
     DependencyBaseline {
-        revision: "8e55160a3234127bd60ce723fd93ba6b2b67a06b",
+        revision: env!("SELFSAME_CBCL_PAIRING_REVISION"),
         bootstrap_source_sha256: cbcl_pairing::BOOTSTRAP_SOURCE_SHA256,
         session_source_sha256: cbcl_pairing::SESSION_SOURCE_SHA256,
     }

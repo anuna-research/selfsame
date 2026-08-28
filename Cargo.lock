@@ -490,6 +490,7 @@ name = "cbcl-core"
 version = "0.1.0"
 dependencies = [
  "hashbrown 0.15.5",
+ "sha2 0.10.9",
 ]
 
 [[package]]
@@ -4188,8 +4189,10 @@ dependencies = [
  "base64ct",
  "bip39",
  "blake3",
+ "cbcl-pairing",
  "did-crdt",
  "ed25519-dalek",
+ "hkdf 0.12.4",
  "keyring",
  "rand 0.8.7",
  "rcgen",
@@ -4202,6 +4205,7 @@ dependencies = [
  "selfsame-pairing",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "tauri",
  "tauri-build",
  "tauri-plugin-barcode-scanner",
@@ -4255,9 +4259,14 @@ dependencies = [
 name = "selfsame-beam"
 version = "0.1.0"
 dependencies = [
+ "bip39",
+ "cbcl-pairing",
+ "did-crdt",
  "ed25519-dalek",
  "rustler",
  "selfsame-app-identity",
+ "selfsame-pairing",
+ "serde_json",
 ]
 
 [[package]]
@@ -4318,7 +4327,9 @@ dependencies = [
  "bip39",
  "cbcl-core 0.1.0 (git+https://codeberg.org/anuna/cbcl-rs?rev=febc6691e6dd2d5f7116b1a4d84c984b64717564)",
  "cbcl-pairing",
+ "cbor2",
  "ciborium",
+ "did-crdt",
  "ed25519-dalek",
  "getrandom 0.2.17",
  "selfsame-app-identity",
@@ -4358,6 +4369,7 @@ dependencies = [
  "cbcl-pairing",
  "did-crdt",
  "ed25519-dalek",
+ "hkdf 0.12.4",
  "qrcode",
  "reqwest 0.12.28",
  "selfsame-app-identity",
@@ -4369,6 +4381,7 @@ dependencies = [
  "sha2 0.10.9",
  "tokio",
  "wasm-bindgen",
+ "zeroize",
 ]
 
 [[package]]

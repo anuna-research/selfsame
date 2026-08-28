@@ -165,7 +165,7 @@ fn browser_allocator_surface_completes_a_ceremony_over_the_relay_wire() {
                         submit(&mut relay, &mut queue, &mut tick, CLAIMANT, bytes)
                     }
                     LiveEffect::DisplayIntent(intent) => {
-                        assert_eq!(intent.application, "anuna.io/credential/v1");
+                        assert_eq!(intent.application(), "anuna.io/credential/v1");
                         let decision = claimant
                             .as_mut()
                             .expect("claimant deciding")

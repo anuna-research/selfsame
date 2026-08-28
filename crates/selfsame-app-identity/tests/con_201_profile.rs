@@ -588,3 +588,115 @@ fn a_rejected_profile_produces_no_profile_at_all() {
     assert!(outcome.is_err());
     assert!(outcome.ok().is_none());
 }
+
+// ── TEST-246 (recogniser rows): the web manual binding, CON-227 ────────────
+
+/// The example profile with its `mobileBindings` array replaced.
+fn with_bindings(bindings: Json) -> Vec<u8> {
+    let Json::Object(mut members) = profile_value() else {
+        unreachable!()
+    };
+    let enrollment = members
+        .iter_mut()
+        .find(|(k, _)| k == "enrollment")
+        .expect("fixture has enrollment");
+    let Json::Object(ref mut enrollment_members) = enrollment.1 else {
+        unreachable!()
+    };
+    match enrollment_members.iter_mut().find(|(k, _)| k == "mobileBindings") {
+        Some(slot) => slot.1 = bindings,
+        None => enrollment_members.push(("mobileBindings".into(), bindings)),
+    }
+    json::canonicalise(&Json::Object(members))
+}
+
+fn web_binding(origin: &str) -> Json {
+    Json::obj([
+        ("id", Json::text(format!("web:{origin}"))),
+        ("platform", Json::text("web")),
+        ("origin", Json::text(origin)),
+    ])
+}
+
+#[test]
+fn recognises_a_profile_declaring_one_web_binding() {
+    let octets = with_bindings(Json::arr([web_binding("https://photos.example")]));
+    let profile = accept(&octets);
+    assert_eq!(profile.mobile_bindings.len(), 1);
+    assert_eq!(profile.mobile_bindings[0].id(), "web:https://photos.example");
+}
+
+#[test]
+fn rejects_a_web_binding_on_a_foreign_origin() {
+    for origin in [
+        "https://other.example",
+        "http://photos.example",
+        "https://photos.example:8443",
+        "https://photos.example/",
+    ] {
+        let octets = with_bindings(Json::arr([web_binding(origin)]));
+        assert!(
+            matches!(reject(&octets), ProfileError::BadValue { path, .. } if path.contains("mobileBindings")),
+            "{origin} must refuse the whole profile"
+        );
+    }
+}
+
+#[test]
+fn rejects_a_web_binding_with_a_wrong_id_or_member_set() {
+    // id not equal to `web:` + origin.
+    let wrong_id = Json::obj([
+        ("id", Json::text("web:https://other.example")),
+        ("platform", Json::text("web")),
+        ("origin", Json::text("https://photos.example")),
+    ]);
+    assert!(matches!(
+        reject(&with_bindings(Json::arr([wrong_id]))),
+        ProfileError::BadValue { path, .. } if path.contains("mobileBindings")
+    ));
+    // extra member — refused as an unknown member of the closed set.
+    let extra = Json::obj([
+        ("id", Json::text("web:https://photos.example")),
+        ("platform", Json::text("web")),
+        ("origin", Json::text("https://photos.example")),
+        ("note", Json::text("x")),
+    ]);
+    assert!(reject(&with_bindings(Json::arr([extra])))
+        .to_string()
+        .contains("mobileBindings"));
+    // missing member — refused as a missing member of the closed set.
+    let missing = Json::obj([
+        ("id", Json::text("web:https://photos.example")),
+        ("platform", Json::text("web")),
+    ]);
+    assert!(reject(&with_bindings(Json::arr([missing])))
+        .to_string()
+        .contains("mobileBindings"));
+}
+
+#[test]
+fn rejects_two_web_bindings() {
+    let octets = with_bindings(Json::arr([
+        web_binding("https://photos.example"),
+        web_binding("https://photos.example"),
+    ]));
+    assert!(matches!(
+        reject(&octets),
+        ProfileError::BadValue { path, .. } if path.contains("mobileBindings")
+    ));
+}
+
+#[test]
+fn still_rejects_an_unknown_platform() {
+    // The closed language stays closed: `web` is a member of the enum now, and
+    // anything else remains a whole-profile refusal.
+    let unknown = Json::obj([
+        ("id", Json::text("webx:https://photos.example")),
+        ("platform", Json::text("webx")),
+        ("origin", Json::text("https://photos.example")),
+    ]);
+    assert!(matches!(
+        reject(&with_bindings(Json::arr([unknown]))),
+        ProfileError::BadValue { path, .. } if path.contains("platform")
+    ));
+}

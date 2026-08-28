@@ -24,6 +24,7 @@ selfsame-core = { workspace = true }
 selfsame-app-identity = { workspace = true }
 selfsame-app-identity-net = { path = "../crates/selfsame-app-identity-net" }
 selfsame-pairing = { path = "../crates/selfsame-pairing" }
+cbcl-pairing = { workspace = true }
 # CON-409 record envelopes travel as base64url.
 base64ct = { workspace = true }
 did-crdt = { workspace = true }
@@ -38,6 +39,8 @@ argon2 = "0.5"
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
 rand = "0.8"
 zeroize = { version = "1", features = ["alloc"] }
+hkdf = "0.12"
+sha2 = { version = "0.10", default-features = false }
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
 tokio = { workspace = true }
 # SPEC-008 ADR-901/ADR-911: the claimant speaks wss:// through rustls with

@@ -45,7 +45,7 @@ use selfsame_app_identity::{
 const CORPUS_PATH: &str = "../../test-vectors/spec-004-v1.json";
 
 /// The `did:crdt` revision SPEC-001 ADR-010 pins.
-const DID_CRDT_REVISION: &str = "fbccfd5885cd0c0136218f809ea0e183bc7e49f3";
+const DID_CRDT_REVISION: &str = include_str!("../../../did-crdt.sha");
 
 // ── the completeness rule ──────────────────────────────────────────────────
 
@@ -246,7 +246,7 @@ fn reject(reason: &str) -> Json {
 fn build_corpus() -> Json {
     Json::obj([
         ("spec", Json::text("SPEC-004")),
-        ("did_crdt_revision", Json::text(DID_CRDT_REVISION)),
+        ("did_crdt_revision", Json::text(DID_CRDT_REVISION.trim())),
         ("con_201_application_profile", con_201()),
         ("con_202_key_hierarchy", con_202()),
         ("con_203_account_alias", con_203()),
@@ -261,6 +261,7 @@ fn build_corpus() -> Json {
         ("con_214_enrollment_evidence", con_214()),
         ("con_222_android_binding", con_222()),
         ("con_223_apple_binding", con_223()),
+        ("con_227_web_binding", con_227()),
         ("con_219_ceremony_payloads", con_219()),
         ("con_220_profile_discovery", con_220()),
         ("con_221_first_enrollment", con_221()),
@@ -314,6 +315,23 @@ fn con_201() -> Json {
             "con_201_account_scope_in_profile",
             "an accountScopeId smuggled into the profile",
             "UnknownMember",
+        ),
+        // CON-227 recognition negatives file here — CON-226 group 2, per its
+        // own filing note — not with the web-manual traces.
+        (
+            "con_201_web_binding_foreign_origin",
+            "a web binding whose origin is not the applicationId origin refuses the whole profile",
+            "BadValue",
+        ),
+        (
+            "con_201_web_binding_wrong_id",
+            "a web binding whose id is not `web:` plus the applicationId origin",
+            "BadValue",
+        ),
+        (
+            "con_201_two_web_bindings",
+            "a second web binding can differ only by violating the origin rule",
+            "BadValue",
         ),
     ] {
         cases.push(case(id, description, Json::obj([]), reject(reason)));
@@ -902,6 +920,95 @@ fn con_223() -> Json {
                 ("platformClosesGap", Json::Bool(false)),
                 ("closedBy", Json::arr([Json::text("CON-214"), Json::text("CON-221")])),
             ])),
+        ),
+    ])
+}
+
+// The `web-manual` traces (CON-226 group 3): cross-device by construction,
+// filed with the platform traces for the caller-evidence dimension they share.
+fn con_227() -> Json {
+    let web_id = "web:https://photos.example";
+    Json::Array(vec![
+        case(
+            "con_227_unattributed_manual_accepts",
+            "the conforming manual case: a declared web binding with no platform attribution reaches consent",
+            Json::obj([
+                ("platform", Json::text("web")),
+                ("bindingId", Json::text(web_id)),
+                ("callerEvidence", Json::text("Unattributed")),
+            ]),
+            accept(Json::obj([
+                ("platformClosesGap", Json::Bool(false)),
+                (
+                    "closedBy",
+                    Json::arr([
+                        Json::text("CON-214"),
+                        Json::text("CON-219"),
+                        Json::text("CON-221"),
+                    ]),
+                ),
+            ])),
+        ),
+        case(
+            "con_227_attributed_package_refused",
+            "an OS-attributed calling package against a web binding is a contradiction",
+            Json::obj([
+                ("platform", Json::text("web")),
+                ("bindingId", Json::text(web_id)),
+                ("callingPackage", Json::text("com.android.chrome")),
+            ]),
+            reject("PlatformBindingMismatch"),
+        ),
+        case(
+            "con_227_associated_origin_refused",
+            "an associated-origin attribution against a web binding is likewise refused",
+            Json::obj([
+                ("platform", Json::text("web")),
+                ("bindingId", Json::text(web_id)),
+                ("associatedOrigin", Json::text("https://photos.example")),
+            ]),
+            reject("PlatformBindingMismatch"),
+        ),
+        case(
+            "con_227_mixed_profile_downgrade_refused",
+            "profile declares android and web; statement names web; caller is exactly the declared android package — matching a declared binding is not matching the named one",
+            Json::obj([
+                ("platform", Json::text("web")),
+                ("bindingId", Json::text(web_id)),
+                ("declaredBindings", Json::arr([Json::text("android"), Json::text("web")])),
+                ("callingPackage", Json::text("com.example.photos")),
+            ]),
+            reject("PlatformBindingMismatch"),
+        ),
+        case(
+            "con_227_undeclared_web_binding_refused",
+            "a statement naming a web binding the profile does not declare",
+            Json::obj([
+                ("platform", Json::text("web")),
+                ("bindingId", Json::text(web_id)),
+                ("declaredBindings", Json::arr([Json::text("android")])),
+            ]),
+            reject("PlatformBindingMismatch"),
+        ),
+        case(
+            "con_227_attributed_observation_refused",
+            "an OS handoff observation naming the web binding id itself: an OS-mediated handoff claiming a manual binding",
+            Json::obj([
+                ("platform", Json::text("web")),
+                ("bindingId", Json::text(web_id)),
+                ("observedBindingId", Json::text(web_id)),
+            ]),
+            reject("PlatformBindingMismatch"),
+        ),
+        case(
+            "con_227_foreign_return_uri_refused",
+            "a web statement whose returnUri names a foreign origin",
+            Json::obj([
+                ("platform", Json::text("web")),
+                ("bindingId", Json::text(web_id)),
+                ("returnUri", Json::text("https://other.example/x")),
+            ]),
+            reject("EnrollmentMalformed"),
         ),
     ])
 }

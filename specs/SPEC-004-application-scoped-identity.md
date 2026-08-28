@@ -3,10 +3,10 @@ id: SPEC-004
 title: Application- and Account-Scoped Identity — deterministic home keys, acct aliases, portable device grants, and provider discovery
 status: draft
 tier: 1
-version: 0.15.0-draft
+version: 0.16.0-draft
 audience: agent, human, application developer, infrastructure provider
 author: Anuna Research (drafted with Codex, 2026-07-30; amended with Claude, 2026-07-31; hierarchy re-rooted with Claude, 2026-08-10)
-last-updated: 2026-08-17
+last-updated: 2026-08-21
 owner-repo: selfsame
 affects-repos: selfsame, anuna-ssi, did-crdt, adopting applications
 prototype-authorised: 2026-08-10 by the repository owner for hierarchy version 2; widened 2026-08-13 to cover the contracts SPEC-053 adopts — see Tier-1 Gate
@@ -152,7 +152,10 @@ from a controlled origin and make its digest the authority ·
 identifier with a doubly signed, unpublished statement ·
 [[SPEC-004-application-scoped-identity#ADR-223]] root the hierarchy at its own
 sibling of the SPEC-001 persona root, so a wallet that seals only that root can
-derive without the recovery phrase.
+derive without the recovery phrase ·
+[[SPEC-004-application-scoped-identity#ADR-224]] let a web-only application
+declare the manual cross-device path as its platform binding instead of
+renting an unverifiable native one.
 
 **Load-bearing.**
 [[SPEC-004-application-scoped-identity#REQ-201]] one secret produces a different
@@ -270,6 +273,14 @@ and reconciling SPEC-001 with this document.
 - Selfsame does not disclose branch existence, derive an existing branch, sign,
   publish, or write a grant until application enrollment evidence, the offer
   transcript, and available platform identity all agree.
+  [[SPEC-004-application-scoped-identity#CON-214]] owns that agreement — its
+  statement's `platformBindingId` must select a binding the authenticated
+  profile declares, and the OS-observed caller must satisfy that binding's own
+  contract ([[SPEC-004-application-scoped-identity#CON-222]] Android,
+  [[SPEC-004-application-scoped-identity#CON-223]] Apple,
+  [[SPEC-004-application-scoped-identity#CON-227]] web manual); any
+  disagreement — including an OS-attributed caller against a web binding — is
+  `PlatformBindingMismatch`.
 - A mobile completion callback is advisory and contains no grant, DID, account
   scope, key, pairing bootstrap/code, provider secret, or verifier acceptance
   decision.
@@ -935,7 +946,8 @@ needs only:
 4. for a production wallet-exposed integration, origin-authenticated profile
    publication and a backend enrollment-signing key conforming to CON-214;
 5. for same-device mobile, the Android and/or Apple application bindings in
-   CON-201 and CON-215;
+   CON-201 and CON-215; for a web-only application, the web manual binding in
+   [[SPEC-004-application-scoped-identity#CON-227]];
 6. one or more providers conforming to both
    [[PROTO-003-selfsame-pairing-v1]] and
    [[PROTO-002-selfsame-rendezvous-v1]];
@@ -2233,6 +2245,97 @@ re-pinning event for every peer whatever else is true, and CON-221 confirms only
 shown a fingerprint. Fail-closed rejection, not human comparison, is the control
 that operates here.
 
+### ADR-224: Web-only applications enrol through a declared web manual binding
+
+**Status:** PROPOSED (2026-08-21).
+
+**Context.** This document contradicts itself about platform bindings, and the
+contradiction makes a whole class of conforming applications unable to enrol.
+The adoption checklist scopes bindings to one path — *"for same-device mobile,
+the Android and/or Apple application bindings"* — while
+[[SPEC-004-application-scoped-identity#CON-214]]'s closed statement grammar
+requires `platformBindingId` unconditionally and requires it to select a
+binding from the authenticated profile. A **web-only application** — one with
+no native app on any platform, whose ceremony reaches the wallet by the
+cross-device path (the person scans the application's displayed QR from
+another device, or pastes the code) — has no honest binding to declare:
+an `apple:` entry requires a real Team ID bound by an
+`apple-app-site-association` file that can never exist without a notarised
+build, and an `android:` entry names a package whose calling-package
+comparison ([[SPEC-004-application-scoped-identity#CON-222]]) refuses the
+unattributed manual handoff by design.
+
+The conflict is not hypothetical. The first adopting application,
+[[cbcl-bus|cbcl-chat]] at `chat.anuna.io`, is web-only; its operator holds no
+Apple Developer team (owner-confirmed 2026-08-21). Because no CON-214
+statement can be constructed for it, no enrolment completes, no
+[[IMPL-008-production-pairing-claimant#ADR-912]] pairing-trust record is ever
+written, and every [[SPEC-008-production-pairing-claimant]] production pairing
+attempt refuses at the origin gate. The failure a person sees is a pairing
+refusal; the mechanism is an enrolment grammar that cannot be satisfied
+honestly.
+
+**Decision.** Add a third `enrollment.mobileBindings` form,
+`platform: "web"`, defined by
+[[SPEC-004-application-scoped-identity#CON-227]]: a profile-declared statement
+that this application's ceremonies reach the wallet with no OS-mediated
+handoff at all. The CON-214 statement grammar is **unchanged** —
+`platformBindingId` remains required and still selects one declared binding.
+The wallet accepts unattributed caller evidence against a web binding and
+refuses any attributed caller against it.
+
+**Rationale — alternatives considered.**
+
+*Make `platformBindingId` conditional on the handoff mode.* Rejected. It
+splits one closed statement shape into two at a trust boundary
+(Constitutional Principle 14 argues for one recognised language), and absence
+cannot be distinguished from a constructor that forgot the member — an
+explicit declaration can be checked, an omission can only be excused.
+
+*A sentinel value not anchored in the profile* (for example
+`none:cross-device`). Rejected. It breaks the one uniform rule doing the
+authenticating — that the statement selects a binding the
+[[SPEC-004-application-scoped-identity#CON-220]]-authenticated profile
+declares — leaving nothing for profile authentication to bite on.
+
+*Declare an `apple:` binding with a placeholder team.* Rejected outright. It
+publishes a fabricated authenticated fact; an iOS wallet would attempt a
+Universal-Link association that can never verify, and the profile generator's
+own refusal discipline exists to prevent exactly this artefact.
+
+*Require the operator to obtain an Apple team first.* Rejected as the general
+rule (any operator MAY still do it): it makes a US$99 external enrolment a
+protocol precondition for a web application that ships no Apple binary, and
+the binding it buys authenticates nothing on the paths such an application
+actually uses — the unattributed carve-out in
+[[SPEC-004-application-scoped-identity#CON-223]] is what would do the work,
+and CON-227 states that same carve-out honestly instead of renting it from a
+platform the application is absent from.
+
+**Why this amends profile version 1 rather than minting version 2.** CON-201's
+recognised language is closed, so an unamended recogniser refuses a profile
+carrying a `web` binding — fail-closed, never misinterpreted. A version bump
+exists to protect deployed recognisers from deployed documents, and there are
+none of either: this specification was `0.15.0-draft` at the time of this
+decision, its review gate is not-approved, and no ratified production profile
+has ever been published by any origin. The recogniser and the first ratified profile ship together from
+pinned builds in this repository and [[cbcl-bus]]. Amending version 1 before
+first ratification is therefore a draft correction with zero compatibility
+surface; minting version 2 would carry the conflict forward as permanent
+dead grammar.
+
+**Consequences.** The security delta is confined to what CON-227 states: a
+web binding provides strictly less caller evidence than
+[[SPEC-004-application-scoped-identity#CON-222]] and exactly as much as
+[[SPEC-004-application-scoped-identity#CON-223]]'s unattributed case, and the
+residual is closed by the same three controls that close it there — the
+CON-214 backend signature, [[SPEC-004-application-scoped-identity#CON-221]]
+first-enrollment confirmation, and the sealed offer under the PAKE. New
+vectors are owed ([[SPEC-004-application-scoped-identity#TEST-246]], corpus
+group 3), and this is a Tier-1 normative amendment under
+[[SPEC-004-application-scoped-identity#Amendment Channels]]: it does not take
+effect until the required reviews and the human owner's approval land.
+
 ## Contracts
 
 ### CON-201: Canonical application profile
@@ -2275,6 +2378,11 @@ shape:
         "bundleId": "com.example.photos",
         "returnUri":
           "https://photos.example/.well-known/selfsame/return"
+      },
+      {
+        "id": "web:https://photos.example",
+        "platform": "web",
+        "origin": "https://photos.example"
       }
     ]
   },
@@ -2418,11 +2526,15 @@ are backend credentials and MUST NOT be embedded in a native application.
 Every `enrollment.mobileBindings` entry has a unique `id`. Android package
 names and signing-certificate rotation sets use the platform's canonical
 spellings. Apple entries bind an exact Team ID and bundle ID to a claimed HTTPS
-return URI on the `applicationId` origin. The wallet accepts a binding only
-after [[SPEC-004-application-scoped-identity#CON-220]] authenticates the
-profile and the platform-specific verification in
-[[SPEC-004-application-scoped-identity#CON-222]] or
-[[SPEC-004-application-scoped-identity#CON-223]] authenticates the binding;
+return URI on the `applicationId` origin. Web entries carry exactly `id`,
+`platform`, and `origin`; `origin` MUST equal the `applicationId` origin
+byte for byte, and `id` is exactly `web:` followed by that origin
+([[SPEC-004-application-scoped-identity#CON-227]]). The wallet accepts a
+binding only after [[SPEC-004-application-scoped-identity#CON-220]]
+authenticates the profile and the platform-specific verification in
+[[SPEC-004-application-scoped-identity#CON-222]],
+[[SPEC-004-application-scoped-identity#CON-223]], or
+[[SPEC-004-application-scoped-identity#CON-227]] authenticates the binding;
 field presence is not proof.
 
 Every provider ID MUST match `[a-z0-9][a-z0-9-]{0,62}` and be unique within its
@@ -3554,12 +3666,16 @@ equal the SHA-256 of the canonical `deviceKeyJwk` in `offer_core`.
   rotation set.
 - Apple platforms use `apple:` followed by the Team ID, bundle ID, and the
   origin of an associated HTTPS return URI.
+- Web-only applications use `web:` followed by the `applicationId` origin,
+  declaring the manual cross-device path defined by
+  [[SPEC-004-application-scoped-identity#CON-227]].
 
 This contract fixes the values that must be authenticated;
 [[SPEC-004-application-scoped-identity#CON-220]] fixes how the profile and its
 signing key are obtained, and
-[[SPEC-004-application-scoped-identity#CON-222]] and
-[[SPEC-004-application-scoped-identity#CON-223]] fix the platform evidence. A
+[[SPEC-004-application-scoped-identity#CON-222]],
+[[SPEC-004-application-scoped-identity#CON-223]], and
+[[SPEC-004-application-scoped-identity#CON-227]] fix the platform evidence. A
 production wallet cannot treat a profile and key delivered only by the caller
 as authenticated.
 
@@ -4545,7 +4661,11 @@ username — and the seven OQ-207 item 5 groups:
 
 1. canonical JWS, positive and the TEST-208 negative corpus;
 2. profile recognition under CON-201 and discovery under CON-220;
-3. same-device handoff traces, labelled per platform for CON-222 and CON-223;
+3. handoff traces, labelled per platform for CON-222 and CON-223, and
+   `web-manual` traces for CON-227 — the web-manual traces are cross-device
+   by construction, filed here for the caller-evidence dimension they share
+   with the platform traces; web profile-recognition negatives belong to
+   group 2, not here;
 4. MITM substitution at each layer of the authorization chain;
 5. replay of every one-time value;
 6. application substitution, including a hostile sibling and a copied public
@@ -4564,6 +4684,84 @@ Implements: [[SPEC-004-application-scoped-identity#REQ-222]],
 [[SPEC-004-application-scoped-identity#REQ-227]].
 
 Verified by: [[SPEC-004-application-scoped-identity#TEST-243]].
+
+### CON-227: Web manual binding
+
+This contract closes the conflict named by
+[[SPEC-004-application-scoped-identity#ADR-224]]. It is the third instance of
+the platform-evidence family beside
+[[SPEC-004-application-scoped-identity#CON-222]] and
+[[SPEC-004-application-scoped-identity#CON-223]], for applications with no
+native app on the enrolling person's platform.
+
+**Declaration.** A web binding is the closed three-member object shown in
+[[SPEC-004-application-scoped-identity#CON-201]]: `id`, `platform: "web"`, and
+`origin`. `origin` MUST equal the profile's `applicationId` origin byte for
+byte, and `id` MUST be exactly `web:` followed by that origin. A web binding
+whose origin names anything else is a recognition failure of the whole
+profile, not a skipped entry. At most one web binding may appear in a profile,
+because a second could differ only by violating the origin rule.
+
+**What it declares.** The ceremony reaches the wallet with **no OS-mediated
+handoff at all**: the person scans the application's displayed QR from
+another device or manually enters the code — the cross-device path this
+document already defines. The binding is a profile-authenticated admission
+that no platform will attribute a caller, made checkable instead of left
+implicit.
+
+**Caller identity is absent here, and the contract says so.** The wallet
+accepts exactly unattributed caller evidence against a web binding, and SHALL
+NOT treat any payload-supplied identifier as caller evidence. **Any**
+platform-attributed caller — a calling package, an associated origin —
+presented against a web binding is `PlatformBindingMismatch`: an OS-mediated
+handoff claiming a manual binding is a contradiction, and refusing it keeps
+every same-device dispatch on the strictly stronger
+[[SPEC-004-application-scoped-identity#CON-222]] and
+[[SPEC-004-application-scoped-identity#CON-223]] forms.
+
+**The CON-215 adapter never selects a web binding.** Same-device handoff
+requires an installed, verified wallet target; a web binding names none. An
+adapter that can resolve only a web binding reports `WalletUnavailable`
+exactly as it does when no binding resolves. Consequently
+[[SPEC-004-application-scoped-identity#REQ-220]]'s no-self-scan promise is
+scoped to applications that declare a native binding for the person's
+platform; a web-only application's ceremonies are cross-device by
+construction.
+
+**The residual gap, and what closes it.** A web binding authenticates
+strictly less than CON-222 and exactly as much as CON-223's unattributed
+case: nothing about the carrier of the code. What closes the gap is what
+closes it there — the [[SPEC-004-application-scoped-identity#CON-214]]
+backend signature proves which application backend constructed the ceremony;
+[[SPEC-004-application-scoped-identity#CON-221]] first-enrollment
+confirmation puts a human comparison between a relayed code and an issued
+grant; and the [[SPEC-004-application-scoped-identity#CON-219]] sealed offer
+under the PAKE denies the code's carrier every ceremony secret. A deployment
+whose threat model requires platform attribution declares native bindings and
+omits the web form; the wallet enforces whatever the authenticated profile
+declares.
+
+**Delivery prohibitions are unchanged.**
+[[SPEC-004-application-scoped-identity#REQ-223]] binds the manual path in
+full: displaying the QR and accepting a paste introduce no new channel, and
+nothing in this contract licenses clipboard, notification, log, or analytics
+carriage of ceremony material.
+
+**`returnUri` under a web binding.** The
+[[SPEC-004-application-scoped-identity#CON-214]] statement's `returnUri`
+member remains required, and this contract fixes its meaning here: it MUST be
+an HTTPS URI on the `applicationId` origin, the wallet MUST NOT dispatch,
+dereference, or navigate to it, and it carries no authority — there is no
+OS return path on a manual ceremony, so the member exists only to keep the
+statement grammar closed and to bind the origin one more time. A web-binding
+statement whose `returnUri` names any other origin is
+`EnrollmentMalformed`.
+
+Implements: [[SPEC-004-application-scoped-identity#REQ-222]],
+[[SPEC-004-application-scoped-identity#REQ-223]],
+[[SPEC-004-application-scoped-identity#REQ-225]].
+
+Verified by: [[SPEC-004-application-scoped-identity#TEST-246]].
 
 ## Test specifications
 
@@ -5423,6 +5621,59 @@ this clause must be about the type rather than the width. A behavioural check
 ("run it with the seed absent and require success") is weaker still: a function
 that never takes the seed succeeds without it by construction, so it cannot
 fail.
+
+### TEST-246: Web manual binding conformance
+
+**Validates:** [[SPEC-004-application-scoped-identity#REQ-220]],
+[[SPEC-004-application-scoped-identity#REQ-222]],
+[[SPEC-004-application-scoped-identity#REQ-223]],
+[[SPEC-004-application-scoped-identity#CON-214]],
+[[SPEC-004-application-scoped-identity#CON-215]],
+[[SPEC-004-application-scoped-identity#CON-227]].
+
+**Core** (writable in one sitting, no rig):
+
+- *Positive.* A profile declaring one web binding recognises; a CON-214
+  statement whose `platformBindingId` names it, observed with unattributed
+  caller evidence, reaches consent.
+- *Negative input.* A web binding whose `origin` differs from the
+  `applicationId` origin — scheme, host, port, or a single trailing character —
+  refuses the **whole profile** at
+  [[SPEC-004-application-scoped-identity#CON-201]] recognition. A web binding
+  with an extra member, a missing member, or an `id` not equal to `web:` plus
+  the origin likewise refuses. A profile declaring two web bindings refuses.
+- *Attributed caller refused.* The same statement observed with a calling
+  package, and again with an associated origin, returns
+  `PlatformBindingMismatch`; home state, grant state, and the bundle slot are
+  unchanged.
+- *Undeclared binding refused.* A statement naming a web binding the profile
+  does not declare returns `PlatformBindingMismatch`.
+- *Foreign `returnUri` refused.* A web-binding statement whose `returnUri`
+  names any origin other than the `applicationId` origin returns
+  `EnrollmentMalformed` ([[SPEC-004-application-scoped-identity#CON-227]]'s
+  `returnUri` rule).
+- *Mixed-profile downgrade refused.* A profile declaring **both** an android
+  binding and a web binding; the statement names the web binding; the caller
+  is attributed as **exactly the declared android package**. The result is
+  `PlatformBindingMismatch` — matching *a* declared binding is not matching
+  *the named* binding, and this is the one row where a lazy implementation
+  silently reopens the route around
+  [[SPEC-004-application-scoped-identity#CON-222]].
+- *Mutation gate.* Make the verifier accept an attributed caller against a
+  web binding and require a red test; make the recogniser accept a
+  foreign-origin web binding and require a red test; make the verifier match
+  the caller against any declared binding instead of the named one and
+  require the mixed-profile row to go red.
+
+**Depth** (needs a platform rig; owner: wallet maintainer, before Tier-1
+production sign-off):
+
+- A CON-215 adapter resolving only a web binding reports `WalletUnavailable`
+  and dispatches nothing, on each platform.
+
+**Corpus.** [[SPEC-004-application-scoped-identity#CON-226]] group 3 gains
+`web-manual`-labelled cases covering each core row above; the corpus SHA-256
+moves with this amendment's changelog entry when the cases land.
 
 ## Security and threat model
 
@@ -6444,6 +6695,45 @@ component precedents but no surveyed system with the complete Selfsame
 combination; that is an engineering conclusion, not a legal novelty claim.
 
 ## Changelog
+
+- **0.16.0-draft — 2026-08-21 — web manual binding (Tier-1 amendment, PROPOSED).**
+  Repairs the internal conflict named by
+  [[SPEC-004-application-scoped-identity#ADR-224]]: the adoption checklist
+  scoped platform bindings to same-device mobile while
+  [[SPEC-004-application-scoped-identity#CON-214]] required one
+  unconditionally, leaving a web-only application unable to construct any
+  enrolment statement honestly. Adds the `platform: "web"` binding form to
+  [[SPEC-004-application-scoped-identity#CON-201]], the contract
+  [[SPEC-004-application-scoped-identity#CON-227]], and
+  [[SPEC-004-application-scoped-identity#TEST-246]]; extends the CON-214
+  binding-form list and the [[SPEC-004-application-scoped-identity#CON-226]]
+  group-3 corpus obligation. The CON-214 statement grammar is unchanged.
+  Amends profile version 1 in place: no ratified profile and no deployed
+  recogniser exist outside this repository's pinned builds (rationale in
+  ADR-224). **Affected downstream artefacts** (Amendment Channels step 1,
+  beyond this document's own): cbcl-bus `SPEC-053` CON-002's mobileBindings
+  row — *"empty is a statement… a browser cannot claim a platform binding"* —
+  mandates the opposite disposition and owes a follow-up amendment, and
+  cbcl-bus `scripts/gen-production-profile.mjs` makes the Apple blanks
+  mandatory and owes the web-binding form. The TEST-246 corpus cases have
+  landed: `con_227_web_binding` (seven `web-manual` traces in group 3) and
+  three group-2 recognition negatives in `con_201_application_profile`;
+  the corpus SHA-256 is
+  `723f75b9296e55f988f21f9d11451111910eda1c8a6b2082cdc29376befe7853`.
+  Owner approval SHALL NOT be recorded in this entry before the reviews
+  required by the risk tier are — Amendment Channels made the vectors part
+  of the amendment, and they now are. This is a Tier-1 normative amendment (enrollment evidence,
+  mobile caller identity): it grants nothing until cross-model adversarial
+  review and the human owner's approval are recorded here.
+  Fresh-context adversarial review 2026-08-21: APPROVE-WITH-CHANGES, all
+  findings folded — record at
+  `specs/trajectory/SPEC-004/adr-224-adversarial-review-2026-08-21.md`.
+  **Owner approval recorded 2026-08-22** (interactive session direction:
+  "Approve both, keep driving" — this amendment and
+  [[IMPL-008-production-pairing-claimant#ADR-913]] together), with the
+  review state named honestly: the same-model fresh-context adversarial
+  review above and the corpus vectors are in; a cross-model review remains
+  an open Tier-1 gate box and this approval does not close it.
 
 - **0.15.0-draft — 2026-08-17 — pairing cutover disposition.**
   Records the owner-approved [[SPEC-007-cbcl-pairing-cutover]] development cutover.

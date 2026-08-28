@@ -15,7 +15,7 @@
  */
 import puppeteer from 'puppeteer';
 import { createServer } from 'node:http';
-import { readFileSync, mkdirSync } from 'node:fs';
+import { readFileSync, mkdirSync, readdirSync } from 'node:fs';
 import { extname, join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -251,13 +251,35 @@ const bridge = (state) => `
           // CON-606. Never confirmed without a resolved, verified closure.
           case 'revocation_status': return { confirmed: ${JSON.stringify(state)}.revocation_settled === true };
 
-          // SPEC-007: the shell receives only the relay origin and an opaque
-          // status. Cryptographic state and frames remain behind the bridge.
-          case 'cbcl_pairing_start': return {
-            relayOrigin: 'wss://pairing-relay.example',
-            status: 'Waiting for the application.',
+          // SPEC-008 credential/v2: the shell receives display-only views.
+          // Cryptographic state, presence-code recognition, CPace frames and
+          // both decisions remain behind the bridge.
+          case 'cbcl_pairing_capability': return {
+            demoRelay: false,
+            productionClaimant: true,
           };
-          case 'cbcl_pairing_cancel': return null;
+          case 'cbcl_v2_recognise':
+            if (${JSON.stringify(state)}.pairing_recognise_pending) {
+              return new Promise(() => {});
+            }
+            return {
+              applicationId: 'https://chat.example/selfsame/application',
+              relayOrigin: 'wss://pairing-relay.example',
+              requiresApproval: ${JSON.stringify(state)}.pairing_requires_relay_approval !== false,
+            };
+          case 'cbcl_v2_relay_decide': return {
+            outcome: 'continued',
+            intent: {
+              applicationId: 'https://chat.example/selfsame/application',
+              httpsOrigin: 'https://chat.example',
+              relayOrigin: 'wss://pairing-relay.example',
+              deviceDid: 'did:key:z6Mkfixture',
+              accountPrincipalDigest: 'sha256:fixture-account-principal',
+              permissions: ['https://chat.example/selfsame/application#chat'],
+              transition: null,
+            },
+          };
+          case 'cbcl_v2_cancel': return null;
 
           default: return null;
         }
@@ -310,7 +332,9 @@ const shots = [
 
   // SPEC-007: one invitation enters the single CBCL pairing path.
   { name: '30-pairing-enter', expect: 'pairing-enter', state: STATE_APPS, steps: ['to-applications', 'to-pairing'] },
-  { name: '31-pairing-wait', expect: 'pairing-wait', state: STATE_APPS, steps: ['to-applications', 'to-pairing', 'fill-cbcl-invitation', 'start-cbcl-pairing'] },
+  { name: '31-pairing-wait', expect: 'pairing-wait', state: { ...STATE_APPS, pairing_recognise_pending: true }, steps: ['to-applications', 'to-pairing', 'fill-cbcl-invitation', 'fill-cbcl-presence-code', 'start-cbcl-pairing'] },
+  { name: '32-pairing-relay-consent', expect: 'pairing-consent', state: STATE_APPS, steps: ['to-applications', 'to-pairing', 'fill-cbcl-invitation', 'fill-cbcl-presence-code', 'start-cbcl-pairing'] },
+  { name: '33-pairing-intent-consent', expect: 'pairing-consent', state: { ...STATE_APPS, pairing_requires_relay_approval: false }, steps: ['to-applications', 'to-pairing', 'fill-cbcl-invitation', 'fill-cbcl-presence-code', 'start-cbcl-pairing'] },
 ];
 
 // ── Negative-output assertions (IMPL-004 TEST-605 / 611 / 613) ───────────
@@ -418,13 +442,33 @@ const SCREEN_RULES = {
   '31-pairing-wait': {
     requiredTextAll: [
       'Secure pairing started',
-      'wss://pairing-relay.example',
+      'No relay connection yet',
+      'Checking the invitation and its declared relay before any socket opens.',
       'Nothing is authorised until you see and approve the verified request.',
     ],
     forbidden: [
       ['[data-protocol-selector]', 'SPEC-007 has no protocol selector'],
       ['[data-action="pairing-approve"]', 'approval is unavailable before a verified request'],
     ],
+  },
+  '32-pairing-relay-consent': {
+    requiredTextAll: [
+      'Trust this new relay?',
+      'https://chat.example/selfsame/application',
+      'wss://pairing-relay.example',
+      'Your approval adds only this exact pair to your own relay policy.',
+    ],
+    forbidden: [['[data-protocol-selector]', 'SPEC-007 has no protocol selector']],
+  },
+  '33-pairing-intent-consent': {
+    requiredTextAll: [
+      'Review the exact request',
+      'Authenticated application',
+      'https://chat.example/selfsame/application',
+      'wss://pairing-relay.example',
+      'https://chat.example/selfsame/application#chat',
+    ],
+    forbidden: [['[data-protocol-selector]', 'SPEC-007 has no protocol selector']],
   },
   '24-binding-mismatch': {
     // Both evidence fields must actually carry values. The sibling defect on
@@ -584,6 +628,12 @@ for (const shot of shots) {
       await page.evaluate(() => {
         const el = document.querySelector('#pairing-input');
         el.value = 'cbcl-pairing-invitation-for-render-check';
+        el.dispatchEvent(new Event('input'));
+      });
+    } else if (step === 'fill-cbcl-presence-code') {
+      await page.evaluate(() => {
+        const el = document.querySelector('#pairing-presence-code');
+        el.value = 'PAIR1-00000-00000-00000-00000-00000-00000-00000-00000-00000-00000-00000';
         el.dispatchEvent(new Event('input'));
       });
     } else if (step === 'fill-unlink-passcode') {
@@ -984,22 +1034,51 @@ for (const [name, outcome] of [['denied', 'denied'], ['granted', 'granted']]) {
 // worth knowing about and is not always a defect (CON-603 is stubbed and has no
 // screen yet).
 //
-// It is a text scan of two files, which is the right weight for what it decides.
-// It reads the generated-handler block rather than a hand-kept list, so a
-// command added without a caller — or a caller added without a command — is
-// visible the same day.
+// It reads the generated-handler block and discovers every JavaScript source
+// module rather than keeping either side as a hand-written file list. The
+// caller-count ratchet makes a broken discovery filter fail closed: silently
+// dropping one current invoke caller cannot make the comparison smaller and
+// green.
 {
   const src = (p) => readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', p), 'utf8');
+  const javascriptModules = [];
+  const discoverJavascriptModules = (directory, relativeDirectory) => {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const relativePath = join(relativeDirectory, entry.name);
+      if (entry.isDirectory()) {
+        discoverJavascriptModules(join(directory, entry.name), relativePath);
+      } else if (entry.isFile() && extname(entry.name) === '.js') {
+        javascriptModules.push(relativePath);
+      }
+    }
+  };
+  discoverJavascriptModules(ROOT, 'src');
+
   const handler = src('src-tauri/src/lib.rs');
   const open = handler.indexOf('generate_handler![');
   const block = handler.slice(open, handler.indexOf('])', open));
-  const registered = new Set([...block.matchAll(/(?:commands|app_identity)::(\w+)/g)].map((m) => m[1]));
+  const registered = new Set([...block.matchAll(/\b[A-Za-z_]\w*::([A-Za-z_]\w*)\b/g)].map((m) => m[1]));
+
+  const invokeCallerFiles = javascriptModules
+    .filter((file) => /\binvoke\s*\(/.test(src(file)))
+    .sort();
+  const EXPECTED_INVOKE_CALLER_COUNT = 3;
+  if (invokeCallerFiles.length !== EXPECTED_INVOKE_CALLER_COUNT) {
+    errors.push(`invoke-surface: discovered ${invokeCallerFiles.length} JavaScript invoke callers, expected ${EXPECTED_INVOKE_CALLER_COUNT} (${invokeCallerFiles.join(', ')}) — caller discovery changed and must be reviewed`);
+  }
 
   const called = new Map();
-  for (const file of ['src/app.js', 'src/app-identity.js']) {
+  const scannedInvokeCallers = new Set();
+  for (const file of invokeCallerFiles) {
+    scannedInvokeCallers.add(file);
     for (const m of src(file).matchAll(/invoke\(\s*["'](\w+)["']/g)) {
       called.set(m[1], (called.get(m[1]) ?? []).concat(file));
     }
+  }
+
+  const skippedInvokeCallers = invokeCallerFiles.filter((file) => !scannedInvokeCallers.has(file));
+  if (skippedInvokeCallers.length) {
+    errors.push(`invoke-surface: discovered but did not scan ${skippedInvokeCallers.join(', ')}`);
   }
 
   if (!registered.size) {

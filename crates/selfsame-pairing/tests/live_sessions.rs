@@ -118,7 +118,7 @@ fn drive(decision: Decision, mutate_signature: bool) -> RunResult {
                     submit(&mut relay, &mut queue, &mut tick, CLAIMANT, start);
                 }
                 LiveEffect::DisplayIntent(intent) => {
-                    assert_eq!(intent.application, "anuna.io/credential/v1");
+                    assert_eq!(intent.application(), "anuna.io/credential/v1");
                     result.displayed = true;
                     let decision = claimant.as_mut().unwrap().decide(decision).unwrap();
                     for effect in decision {

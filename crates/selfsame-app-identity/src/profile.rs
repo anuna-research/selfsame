@@ -222,13 +222,24 @@ pub enum MobileBinding {
         /// A claimed HTTPS return URI on the `applicationId` origin.
         return_uri: String,
     },
+    /// `web:<applicationId origin>` — the manual cross-device path
+    /// (`CON-227`): the profile's authenticated admission that no platform
+    /// will attribute a caller.
+    Web {
+        /// The binding identifier, unique within the profile.
+        id: String,
+        /// Exactly the `applicationId` origin.
+        origin: String,
+    },
 }
 
 impl MobileBinding {
     /// The binding identifier, whatever the platform.
     pub fn id(&self) -> &str {
         match self {
-            MobileBinding::Android { id, .. } | MobileBinding::Apple { id, .. } => id,
+            MobileBinding::Android { id, .. }
+            | MobileBinding::Apple { id, .. }
+            | MobileBinding::Web { id, .. } => id,
         }
     }
 }
@@ -755,9 +766,35 @@ fn mobile_binding(
                 return_uri,
             })
         }
+        "web" => {
+            closed_members(
+                value,
+                "enrollment.mobileBindings[]",
+                &["id", "platform", "origin"],
+                &[],
+            )?;
+            let origin = string(value, "origin")?.to_string();
+            // `CON-227`: "`origin` MUST equal the profile's `applicationId`
+            // origin byte for byte" — a web binding whose origin names
+            // anything else refuses the whole profile.
+            if origin != application_id.origin() {
+                return Err(bad(
+                    "enrollment.mobileBindings[].origin",
+                    "is not the applicationId origin",
+                ));
+            }
+            let id = string(value, "id")?.to_string();
+            if id != format!("web:{origin}") {
+                return Err(bad(
+                    "enrollment.mobileBindings[].id",
+                    "does not spell `web:<applicationId origin>`",
+                ));
+            }
+            Ok(MobileBinding::Web { id, origin })
+        }
         _ => Err(bad(
             "enrollment.mobileBindings[].platform",
-            "is neither `android` nor `apple`",
+            "is neither `android`, `apple`, nor `web`",
         )),
     }
 }

@@ -106,4 +106,4 @@ pub mod uri;
 pub type UnixSeconds = i64;
 
 /// The profile version this build speaks (`CON-201`).
-pub const PROFILE_VERSION: i64 = 1;
+pub use profile::PROFILE_VERSION;
