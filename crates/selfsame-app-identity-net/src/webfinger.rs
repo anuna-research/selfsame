@@ -113,19 +113,87 @@ pub async fn fetch_and_verify(
 pub async fn fetch_and_verify_bytes(
     acct: &AcctUri, home_did: &str, also_known_as: &[String],
 ) -> Result<Vec<u8>, NetError> {
+    fetch_reciprocal_bytes(acct, home_did, also_known_as, false)
+        .await
+        .map(Option::unwrap_or_default)
+}
+
+/// As [`fetch_and_verify_bytes`], but a resource the authority does not host
+/// yet answers `Ok(None)` instead of refusing.
+///
+/// FIRST CONTACT is the one moment where no reciprocal JRD can exist: the
+/// application publishes its half of CON-204's binding only once it accepts
+/// the credential, and it accepts only after this resolution. A pairing with
+/// a never-before-seen account therefore cannot present a JRD, and treating
+/// that as a refusal deadlocks the ceremony permanently — the account is never
+/// bound, so the JRD is never published, so the account is never bound.
+///
+/// Exactly one condition is tolerated: a `404`, which is the authority
+/// answering that it hosts no such resource. EVERY other outcome refuses as
+/// before — any other status, a content encoding, a wrong media type, an
+/// unrecognisable JRD, or a JRD whose binding does not match. A published
+/// binding is still proof, and a WRONG published binding is still a refusal;
+/// only its absence is now a distinguishable state rather than an error.
+pub async fn fetch_reciprocal_or_absent(
+    acct: &AcctUri, home_did: &str, also_known_as: &[String],
+) -> Result<Option<Vec<u8>>, NetError> {
+    fetch_reciprocal_bytes(acct, home_did, also_known_as, true).await
+}
+
+async fn fetch_reciprocal_bytes(
+    acct: &AcctUri,
+    home_did: &str,
+    also_known_as: &[String],
+    absence_is_answerable: bool,
+) -> Result<Option<Vec<u8>>, NetError> {
     let http = reqwest::Client::builder().redirect(reqwest::redirect::Policy::limited(MAX_REDIRECTS)).timeout(FETCH_DEADLINE).https_only(true).build().map_err(|e| NetError::Transport(e.to_string()))?;
     let url = format!("https://{}{}", acct.authority(), alias::webfinger_query(acct));
     let response = http.get(&url).header(reqwest::header::ACCEPT, JRD_MEDIA_TYPE).header(reqwest::header::ACCEPT_ENCODING, "identity").send().await.map_err(|e| if e.is_timeout() { NetError::Timeout } else { NetError::Transport(e.to_string()) })?;
+    if absence_is_answerable && absence_is_an_answer(response.status()) {
+        return Ok(None);
+    }
     if !response.status().is_success() || has_content_encoding(&response) || (media_type(&response) != JRD_MEDIA_TYPE && media_type(&response) != "application/json") { return Err(NetError::Refused("the JRD response was not acceptable")); }
     let body = bounded_body(response, MAX_JRD_OCTETS).await?;
     let jrd = alias::recognise_jrd(&body).map_err(|e| NetError::Recognition(e.to_string()))?;
     alias::verify_reciprocal_binding(&jrd, acct, home_did, also_known_as).map_err(|e| NetError::Recognition(e.to_string()))?;
-    Ok(body)
+    Ok(Some(body))
+}
+
+/// `404` — and only `404` — is the authority saying it hosts no such account.
+///
+/// Kept a pure function of the status so the tolerance boundary is testable:
+/// every other status, including `410 Gone` (the resource existed and was
+/// withdrawn) and any server-side failure, must still refuse.
+fn absence_is_an_answer(status: reqwest::StatusCode) -> bool {
+    status == reqwest::StatusCode::NOT_FOUND
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Only a `404` may be read as "this authority hosts no such account".
+    /// Everything else — a withdrawn resource, a refusal, a server fault, or a
+    /// success — keeps its meaning, so first-contact tolerance can never widen
+    /// into ignoring a reciprocal binding that exists or a resolver that broke.
+    #[test]
+    fn only_a_404_answers_that_no_reciprocal_binding_exists() {
+        use reqwest::StatusCode;
+        assert!(absence_is_an_answer(StatusCode::NOT_FOUND));
+        for refused in [
+            StatusCode::OK,
+            StatusCode::NO_CONTENT,
+            StatusCode::MOVED_PERMANENTLY,
+            StatusCode::UNAUTHORIZED,
+            StatusCode::FORBIDDEN,
+            StatusCode::GONE,
+            StatusCode::TOO_MANY_REQUESTS,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            StatusCode::SERVICE_UNAVAILABLE,
+        ] {
+            assert!(!absence_is_an_answer(refused), "{refused} must not read as absence");
+        }
+    }
 
     #[test]
     fn the_query_is_the_rfc_7033_one_with_upper_case_percent_encoding() {
