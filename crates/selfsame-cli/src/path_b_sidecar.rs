@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use selfsame_app_identity::profile::ApplicationProfile;
 use selfsame_app_identity::alias::{stable_acct_uri, AcctUri};
 use selfsame_app_identity_net::state::resolve_path_b_quorum;
-use selfsame_app_identity_net::webfinger::fetch_and_verify_bytes;
+use selfsame_app_identity_net::webfinger::fetch_reciprocal_or_absent;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -36,7 +36,12 @@ pub fn run() -> Result<()> {
     // inside would have stamped two different times into one answer.
     let resolver_closures = quorum.nif_closures(fetched_at_seconds)?;
     let aka = resolver_closures.first().map(|c| c.also_known_as.clone()).unwrap_or_default();
-    let jrd = runtime.block_on(fetch_and_verify_bytes(&acct, &request.did, &aka))?;
+    // First contact publishes no reciprocal JRD yet (the application binds the
+    // account only when it accepts this very credential), so absence is an
+    // answer — an empty `jrd` — while a wrong or malformed one still refuses.
+    let jrd = runtime
+        .block_on(fetch_reciprocal_or_absent(&acct, &request.did, &aka))?
+        .unwrap_or_default();
     serde_json::to_writer(std::io::stdout(), &Response { resolver_closures, account, jrd })?;
     std::io::stdout().write_all(b"\n")?;
     Ok(())
