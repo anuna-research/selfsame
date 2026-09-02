@@ -313,6 +313,21 @@ impl Custody {
         passcode: &str,
         f: impl FnOnce(&selfsame_app_identity::hierarchy::HierarchyRoot) -> T,
     ) -> Result<T, CustodyError> {
+        let root = Self::unlock_hierarchy_root(passcode)?;
+        Ok(f(&root))
+    }
+
+    /// Authorise one bounded in-memory operation sequence over the application
+    /// hierarchy root.  The caller owns the returned zeroising root and must
+    /// keep it private, unpersisted, and short-lived.
+    ///
+    /// This is deliberately narrower than a general session cache: it exists
+    /// for ceremonies which contain several durable checkpoints under one
+    /// already-confirmed person decision.  Ordinary root use remains one
+    /// presence check per call through [`Self::use_hierarchy_root`].
+    pub fn unlock_hierarchy_root(
+        passcode: &str,
+    ) -> Result<selfsame_app_identity::hierarchy::HierarchyRoot, CustodyError> {
         let record = Self::read()?.ok_or(CustodyError::NoIdentity)?;
         if record.sealed_hierarchy_root.is_empty() {
             return Err(CustodyError::NoHierarchyRoot);
@@ -324,9 +339,8 @@ impl Custody {
             .map_err(|_| CustodyError::BadPasscode)?;
         let array: [u8; 64] = octets.as_slice().try_into().map_err(|_| CustodyError::Corrupt)?;
         let root = selfsame_app_identity::hierarchy::HierarchyRoot::from_octets(array);
-        let out = f(&root);
         octets.zeroize();
-        Ok(out)
+        Ok(root)
     }
 
     /// REQ-002 gate — refuse a link or revoke until the backup is confirmed.

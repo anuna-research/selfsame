@@ -348,7 +348,10 @@ export function initPairing(d) {
         show("pairing-consent");
         $('[data-action="approve-cbcl-pairing"]').textContent = "Retry final verification";
         $('[data-action="decline-cbcl-pairing"]').hidden = true;
-        fail("pairing-consent", `The final verification did not complete (${token}). The durable pending link is safe to retry.`);
+        const detail = token === "PairingRelayTimedOut"
+          ? "The relay stayed connected but the final receipt did not arrive before the local wait deadline. The durable pending link is safe to retry."
+          : `The final verification did not complete (${token}). The durable pending link is safe to retry.`;
+        fail("pairing-consent", detail);
       } else {
         show("pairing-enter");
         fail("pairing", startFailureText(token));

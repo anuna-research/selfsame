@@ -7,7 +7,10 @@ use cbcl_pairing::{
 use rand::RngCore as _;
 use serde::Serialize;
 use sha2::Digest as _;
-use std::net::TcpStream;
+use std::{
+    net::TcpStream,
+    time::{Duration, Instant},
+};
 use tauri::State;
 use tungstenite::{stream::MaybeTlsStream, Message, WebSocket};
 use zeroize::Zeroizing;
@@ -34,6 +37,42 @@ pub struct PendingCredentialV2Pairing {
     preview_did: Option<String>,
     comparison: Option<cbcl_pairing::credential_v2::CredentialV2Object>,
     recovered_receipt: Option<cbcl_pairing::credential_v2::CredentialV2ClaimantRecoveredReceipt>,
+    /// One final-consent authorization.  It is never persisted or exposed to
+    /// the web view, and is zeroised when this live pairing is dropped.
+    ceremony_custody: Option<CeremonyCustody>,
+}
+
+/// A deliberately short, single-ceremony authorization.  Final pairing has
+/// several durable checkpoints but only one person decision; re-prompting for
+/// every checkpoint makes the biometric prompt an accidental protocol loop.
+const CEREMONY_CUSTODY_LIFETIME: Duration = Duration::from_secs(120);
+
+struct CeremonyCustody {
+    root: selfsame_app_identity::hierarchy::HierarchyRoot,
+    authorized_at: Instant,
+}
+
+impl PendingCredentialV2Pairing {
+    fn ensure_ceremony_custody(&mut self, passcode: &str) -> Result<()> {
+        if self
+            .ceremony_custody
+            .as_ref()
+            .is_some_and(|custody| custody.authorized_at.elapsed() >= CEREMONY_CUSTODY_LIFETIME)
+        {
+            self.ceremony_custody = None;
+        }
+        if self.ceremony_custody.is_none() {
+            self.ceremony_custody = Some(CeremonyCustody {
+                root: crate::custody::Custody::unlock_hierarchy_root(passcode)?,
+                authorized_at: Instant::now(),
+            });
+        }
+        Ok(())
+    }
+
+    fn clear_ceremony_custody(&mut self) {
+        self.ceremony_custody = None;
+    }
 }
 
 /// Authenticated preliminary consent values; no peer string is display authority.
@@ -386,55 +425,60 @@ async fn cbcl_v2_final_decide_with_faults(
     let preview_fingerprint: [u8; 32] = sha2::Sha256::digest(preview_did.as_bytes()).into();
     let mut checkpoint_nonce = [0_u8; 12];
     rand::rngs::OsRng.fill_bytes(&mut checkpoint_nonce);
+    // One final decision authorises this ceremony's internal checkpoint work.
+    // The zeroising root remains private to this command and is transferred to
+    // the live pending session only after the payload has been released.
+    let ceremony_custody = CeremonyCustody {
+        root: crate::custody::Custody::unlock_hierarchy_root(&passcode)?,
+        authorized_at: Instant::now(),
+    };
 
-    let (generation, checkpoint) =
-        crate::custody::Custody::use_hierarchy_root(&passcode, |root| -> Result<_> {
-            let claims = recognised.claims.account_provenance();
-            let scope = selfsame_app_identity::scope::AccountScopeId::from_octets(
-                *claims.account_scope_id(),
-            );
-            let home = selfsame_app_identity::hierarchy::derive(
-                root,
-                &pending.claimant.profile().application_id,
-                &scope,
-            );
-            let final_did = home
-                .home_did()
-                .map_err(|_| UiError::from("PairingIdentityUnavailable"))?;
-            let final_fingerprint: [u8; 32] = sha2::Sha256::digest(final_did.as_bytes()).into();
-            if final_did != preview_did || final_fingerprint != preview_fingerprint {
-                return Err(UiError::from("PairingPreviewChanged"));
-            }
-            let wrapping_key = crate::cbcl_v2_completion::checkpoint_wrapping_key(
-                root,
-                &application_id,
-                carrier.carrier_ceremony_id(),
-            )?;
-            let effects = pending
-                .claimant
-                .core_mut()
-                .prepare_final_approval(
-                    &final_decision,
-                    &wrapping_key,
-                    cbcl_pairing::credential_v2::CredentialV2CheckpointNonce::from_csprng(
-                        checkpoint_nonce,
-                    ),
-                    now,
-                )
-                .map_err(|_| UiError::from("PairingFailed"))?;
-            let mut effects = effects.into_iter();
-            let Some(CredentialV2ClaimantEffect::Checkpoint {
-                generation,
-                checkpoint,
-            }) = effects.next()
-            else {
-                return Err(UiError::from("PairingFailed"));
-            };
-            if effects.next().is_some() {
-                return Err(UiError::from("PairingFailed"));
-            }
-            Ok((generation, checkpoint))
-        })??;
+    let (generation, checkpoint) = (|root| -> Result<_> {
+        let claims = recognised.claims.account_provenance();
+        let scope =
+            selfsame_app_identity::scope::AccountScopeId::from_octets(*claims.account_scope_id());
+        let home = selfsame_app_identity::hierarchy::derive(
+            root,
+            &pending.claimant.profile().application_id,
+            &scope,
+        );
+        let final_did = home
+            .home_did()
+            .map_err(|_| UiError::from("PairingIdentityUnavailable"))?;
+        let final_fingerprint: [u8; 32] = sha2::Sha256::digest(final_did.as_bytes()).into();
+        if final_did != preview_did || final_fingerprint != preview_fingerprint {
+            return Err(UiError::from("PairingPreviewChanged"));
+        }
+        let wrapping_key = crate::cbcl_v2_completion::checkpoint_wrapping_key(
+            root,
+            &application_id,
+            carrier.carrier_ceremony_id(),
+        )?;
+        let effects = pending
+            .claimant
+            .core_mut()
+            .prepare_final_approval(
+                &final_decision,
+                &wrapping_key,
+                cbcl_pairing::credential_v2::CredentialV2CheckpointNonce::from_csprng(
+                    checkpoint_nonce,
+                ),
+                now,
+            )
+            .map_err(|_| UiError::from("PairingFailed"))?;
+        let mut effects = effects.into_iter();
+        let Some(CredentialV2ClaimantEffect::Checkpoint {
+            generation,
+            checkpoint,
+        }) = effects.next()
+        else {
+            return Err(UiError::from("PairingFailed"));
+        };
+        if effects.next().is_some() {
+            return Err(UiError::from("PairingFailed"));
+        }
+        Ok((generation, checkpoint))
+    })(&ceremony_custody.root)?;
 
     let durable = crate::cbcl_v2_completion::PendingCredentialV2Completion::new(
         crate::cbcl_v2_completion::PendingCredentialV2Input {
@@ -476,26 +520,25 @@ async fn cbcl_v2_final_decide_with_faults(
         faults,
         PrePayloadBoundary::AcknowledgementRecognition,
         || {
-            let acknowledgement_effects =
-                crate::custody::Custody::use_hierarchy_root(&passcode, |root| -> Result<_> {
-                    let wrapping_key = crate::cbcl_v2_completion::checkpoint_wrapping_key(
-                        root,
-                        &application_id,
-                        carrier.carrier_ceremony_id(),
-                    )?;
-                    pending
-                        .claimant
-                        .core_mut()
-                        .receive_durable(
-                            &acknowledgement,
-                            acknowledgement_now,
-                            &wrapping_key,
-                            cbcl_pairing::credential_v2::CredentialV2CheckpointNonce::from_csprng(
-                                acknowledgement_nonce,
-                            ),
-                        )
-                        .map_err(|_| UiError::from("PairingFailed"))
-                })??;
+            let acknowledgement_effects = (|root| -> Result<_> {
+                let wrapping_key = crate::cbcl_v2_completion::checkpoint_wrapping_key(
+                    root,
+                    &application_id,
+                    carrier.carrier_ceremony_id(),
+                )?;
+                pending
+                    .claimant
+                    .core_mut()
+                    .receive_durable(
+                        &acknowledgement,
+                        acknowledgement_now,
+                        &wrapping_key,
+                        cbcl_pairing::credential_v2::CredentialV2CheckpointNonce::from_csprng(
+                            acknowledgement_nonce,
+                        ),
+                    )
+                    .map_err(|_| UiError::from("PairingFailed"))
+            })(&ceremony_custody.root)?;
             one_checkpoint(acknowledgement_effects)
         },
     )?;
@@ -545,12 +588,14 @@ async fn cbcl_v2_final_decide_with_faults(
     transaction.replace_at(faults, PrePayloadBoundary::PlannedStageReplacement, planned)?;
 
     // First final signature: issuer creation only. The deterministic plan was
-    // durable before this custody call, and the preview is re-derived before
-    // issuer construction inside the call.
+    // durable before this ceremony authorization, and the preview is
+    // re-derived before issuer construction.
     let issuer = transaction.try_step(faults, PrePayloadBoundary::IssuerCustody, || {
-        crate::custody::Custody::use_hierarchy_root(&passcode, |root| {
-            crate::cbcl_v2_completion::build_issuer_artifacts(root, &plan, effect_time)
-        })?
+        crate::cbcl_v2_completion::build_issuer_artifacts(
+            &ceremony_custody.root,
+            &plan,
+            effect_time,
+        )
     })?;
     let issuer_created = transaction.current().issuer_created(&issuer)?;
     transaction.replace_at(
@@ -592,16 +637,14 @@ async fn cbcl_v2_final_decide_with_faults(
     // finalizer provisions it atomically, and wallet installation verifies it
     // from the authenticated receipt before granting capability.
     let grant = transaction.try_step(faults, PrePayloadBoundary::GrantConstruction, || {
-        crate::custody::Custody::use_hierarchy_root(&passcode, |root| {
-            crate::cbcl_v2_completion::build_grant_artifacts(
-                root,
-                &plan,
-                &issuer,
-                grant_id,
-                effect_time,
-                profile.revocation.max_grant_lifetime_seconds,
-            )
-        })?
+        crate::cbcl_v2_completion::build_grant_artifacts(
+            &ceremony_custody.root,
+            &plan,
+            &issuer,
+            grant_id,
+            effect_time,
+            profile.revocation.max_grant_lifetime_seconds,
+        )
     })?;
     let provisioned = transaction.current().provisioned(&grant)?;
     transaction.replace_at(
@@ -633,26 +676,25 @@ async fn cbcl_v2_final_decide_with_faults(
             }
             let mut payload_nonce = [0_u8; 12];
             rand::rngs::OsRng.fill_bytes(&mut payload_nonce);
-            let payload_effects =
-                crate::custody::Custody::use_hierarchy_root(&passcode, |root| -> Result<_> {
-                    let wrapping_key = crate::cbcl_v2_completion::checkpoint_wrapping_key(
-                        root,
-                        &application_id,
-                        carrier.carrier_ceremony_id(),
-                    )?;
-                    pending
-                        .claimant
-                        .core_mut()
-                        .prepare_payload(
-                            &payload,
-                            &wrapping_key,
-                            cbcl_pairing::credential_v2::CredentialV2CheckpointNonce::from_csprng(
-                                payload_nonce,
-                            ),
-                            payload_now,
-                        )
-                        .map_err(|_| UiError::from("PairingFailed"))
-                })??;
+            let payload_effects = (|root| -> Result<_> {
+                let wrapping_key = crate::cbcl_v2_completion::checkpoint_wrapping_key(
+                    root,
+                    &application_id,
+                    carrier.carrier_ceremony_id(),
+                )?;
+                pending
+                    .claimant
+                    .core_mut()
+                    .prepare_payload(
+                        &payload,
+                        &wrapping_key,
+                        cbcl_pairing::credential_v2::CredentialV2CheckpointNonce::from_csprng(
+                            payload_nonce,
+                        ),
+                        payload_now,
+                    )
+                    .map_err(|_| UiError::from("PairingFailed"))
+            })(&ceremony_custody.root)?;
             one_checkpoint(payload_effects)
         },
     )?;
@@ -667,6 +709,7 @@ async fn cbcl_v2_final_decide_with_faults(
         .checkpoint_persisted(payload_generation)
         .map_err(|_| UiError::from("PairingFailed"))?;
     send_effects(&mut pending.socket, payload_release)?;
+    pending.ceremony_custody = Some(ceremony_custody);
     session
         .0
         .lock()
@@ -696,6 +739,7 @@ pub async fn cbcl_v2_finish(
     let (durable, receipt_recovery_commitment) = match prepared {
         Ok(value) => value,
         Err(error) => {
+            pending.clear_ceremony_custody();
             put_pending(&session, pending);
             return Err(error);
         }
@@ -713,6 +757,7 @@ pub async fn cbcl_v2_finish(
         ) {
             Ok(value) => value,
             Err(error) => {
+                pending.clear_ceremony_custody();
                 put_pending(&session, pending);
                 return Err(error);
             }
@@ -721,6 +766,7 @@ pub async fn cbcl_v2_finish(
     let live_account = match installed.account() {
         Ok(value) => value,
         Err(error) => {
+            pending.clear_ceremony_custody();
             put_pending(&session, pending);
             return Err(error);
         }
@@ -729,11 +775,13 @@ pub async fn cbcl_v2_finish(
     let jrd = match verify_live_installation(live_profile, live_account, live_issuer_did).await {
         Ok(value) => value,
         Err(error) => {
+            pending.clear_ceremony_custody();
             put_pending(&session, pending);
             return Err(error);
         }
     };
     if let Err(error) = crate::cbcl_v2_completion::install(&durable, &installed, &jrd) {
+        pending.clear_ceremony_custody();
         put_pending(&session, pending);
         return Err(error);
     }
@@ -1476,6 +1524,7 @@ fn pump_to_offer(
                             preview_did: None,
                             comparison: None,
                             recovered_receipt: None,
+                            ceremony_custody: None,
                         },
                         view,
                     ));
@@ -1516,19 +1565,30 @@ fn prepare_received_receipt(
             .as_str()
             .to_owned();
         let carrier = pending.claimant.carrier().clone();
+        // The normal path reuses final consent.  A stalled ceremony requires
+        // one fresh presence check rather than retaining an authorization.
+        pending.ensure_ceremony_custody(passcode)?;
+        let (claimant, socket, ceremony_custody) = (
+            &mut pending.claimant,
+            &mut pending.socket,
+            &pending.ceremony_custody,
+        );
+        let root = &ceremony_custody
+            .as_ref()
+            .expect("ceremony custody was installed")
+            .root;
         let mut durable = crate::cbcl_v2_completion::load_pending(&application_id)?;
-        while pending.claimant.core_mut().has_cached_outbound_frame() {
-            let acknowledgement = read_binary(&mut pending.socket)?;
+        while claimant.core_mut().has_cached_outbound_frame() {
+            let acknowledgement = read_binary(socket)?;
             let mut nonce = [0_u8; 12];
             rand::rngs::OsRng.fill_bytes(&mut nonce);
-            let effects = crate::custody::Custody::use_hierarchy_root(passcode, |root| {
+            let effects = (|root| {
                 let wrapping_key = crate::cbcl_v2_completion::checkpoint_wrapping_key(
                     root,
                     &application_id,
                     carrier.carrier_ceremony_id(),
                 )?;
-                pending
-                    .claimant
+                claimant
                     .core_mut()
                     .receive_durable(
                         &acknowledgement,
@@ -1539,12 +1599,11 @@ fn prepare_received_receipt(
                         ),
                     )
                     .map_err(|_| UiError::from("PairingFailed"))
-            })??;
+            })(root)?;
             let (generation, checkpoint) = one_checkpoint(effects)?;
             let acknowledged = durable.with_checkpoint(generation, &checkpoint)?;
             crate::cbcl_v2_completion::replace_pending(&durable, &acknowledged)?;
-            let after = pending
-                .claimant
+            let after = claimant
                 .core_mut()
                 .checkpoint_persisted(generation)
                 .map_err(|_| UiError::from("PairingFailed"))?;
@@ -1775,6 +1834,14 @@ fn read_binary(socket: &mut WebSocket<MaybeTlsStream<TcpStream>>) -> Result<Vec<
         match socket.read() {
             Ok(Message::Binary(bytes)) => return Ok(bytes.to_vec()),
             Ok(Message::Ping(_) | Message::Pong(_) | Message::Frame(_)) => {}
+            Err(tungstenite::Error::Io(error))
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                ) =>
+            {
+                return Err(UiError::from("PairingRelayTimedOut"));
+            }
             Ok(Message::Close(_)) | Err(_) => {
                 return Err(UiError::from("PairingRelayUnavailable"));
             }
