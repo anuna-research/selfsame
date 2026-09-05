@@ -52,6 +52,10 @@ pub mod replay;
 pub mod session;
 pub mod store;
 
+#[cfg(test)]
+#[path = "../../crates/selfsame-app-identity/tests/common/mod.rs"]
+mod fixture;
+
 /// Build and run the application.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {

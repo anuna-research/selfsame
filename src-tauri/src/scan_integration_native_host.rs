@@ -360,12 +360,11 @@ impl Host {
             }
             Op::CancelLink => {
                 let binding: jobs::StartContinueLink = args(request.args)?;
-                let result =
-                    single_link::cbcl_v2_cancel_link(args(request.args)?, self.app.state()).await?;
+                single_link::cbcl_v2_cancel_link(args(request.args)?, self.app.state()).await?;
                 if self.jobs.occupied() {
                     self.jobs.mark_cancelled(&binding.attempt_tag)?;
                 }
-                view(result)
+                view(())
             }
             Op::FinishLink => {
                 let application = self
@@ -876,10 +875,9 @@ async fn native_host_reservation_contact_failure(manual: bool) {
             .to_string(),
         "HostRequestRefused"
     );
-    let wrong_job = if job_id.starts_with('0') {
-        format!("1{}", &job_id[1..])
-    } else {
-        format!("0{}", &job_id[1..])
+    let wrong_job = match job_id.split_at(1) {
+        ("0", rest) => format!("1{rest}"),
+        (_, rest) => format!("0{rest}"),
     };
     assert_eq!(
         call(

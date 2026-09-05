@@ -4268,7 +4268,7 @@ mod scan_handoff_tests {
             serde_json::from_str(&handoff_qr_modules_json(text).unwrap()).unwrap();
         let size = modules["size"].as_u64().unwrap() as usize;
         let dark = modules["dark"].as_array().unwrap();
-        assert!(size >= 21 && size <= 177);
+        assert!((21..=177).contains(&size));
         assert_eq!(dark.len(), size * size);
         assert!(dark
             .iter()

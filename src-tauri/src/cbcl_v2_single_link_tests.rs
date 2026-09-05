@@ -1,7 +1,9 @@
 //! SPEC079 TEST001..009: native commands, real signed offers and authenticated
 //! CPace/Finished/object exchange over an explicitly local in-process peer.
 use super::*;
-use crate::{cbcl_v2_completion as completion, custody::Custody, session::Session};
+use crate::{
+    cbcl_v2_completion as completion, custody::Custody, fixture, session::Session,
+};
 use cbcl_pairing::{cpace, credential_v2::*, wire::*};
 use ed25519_dalek::{Signer as _, SigningKey};
 use selfsame_app_identity::{
@@ -17,9 +19,6 @@ use tauri::{
     test::{mock_builder, mock_context, noop_assets, MockRuntime},
     Manager,
 };
-#[path = "../../crates/selfsame-app-identity/tests/common/mod.rs"]
-mod fixture;
-
 const RELAY: &str = "https://photos.example:9443";
 const KID: &str = "https://photos.example/selfsame/application#credential-v2-test";
 const PASS: &str = "native fixture passcode";

@@ -368,7 +368,7 @@ fn constructor_and_restore_lengths_and_mode_are_strict_and_redacted() {
         }
         for field in 0..4 {
             for bad in [0, 31, 33] {
-                let mut a = vec![
+                let mut a = [
                     vec![0x21; 32],
                     vec![0x22; 32],
                     vec![0x19; 32],
