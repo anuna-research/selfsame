@@ -1,0 +1,393 @@
+{
+  "scope": "Independent bounded native tests; no remote CI or depth claim",
+  "base": "db2888cf28b781274668d95f0ea8977371fe9e7b",
+  "sourceHashes": {
+    "src-tauri/src/cbcl_v2_commands.rs": "a155642f3ee780ab50d104f412069df8bff78700f2c6d6a72866e8db072cb51d",
+    "src-tauri/src/cbcl_v2_consent_coverage_tests.rs": "936ed01ed672a4a3f25e83e5bb5853c9349c0f8e6be78f94928514d24b89b06c",
+    "src-tauri/src/cbcl_v2_consent_test_resolver.rs": "916461187bd12bf79a9b98bacfb4fc61d9f9901574bfe9d26c99abd55eeb2169",
+    "src-tauri/src/session.rs": "36d7761f0221f965801901f5d5fa63507306c6b0e4730d458553c68fba6cf40c",
+    "src-tauri/src/test_memkeyring.rs": "9e8a1311a0255bf10684b931cf1884e93f3ef6644904011b65a0cb5b97db8691",
+    "src-tauri/src/cbcl_v2_single_link_tests.rs": "d6ead20f833882ec8dff3388ca0777fcef711cf4e7535ce67fe5766aaf030ebe",
+    ".forgejo/workflows/ci.yml": "30479abfd389054d5baeb3846ab257c6806821889e0d7f5db88ed960453a060c"
+  },
+  "environment": {
+    "CARGO_TARGET_DIR": "/Volumes/anuna-03/codex-selfsame-reconcile-target",
+    "TMPDIR": "/Volumes/anuna-03/codex-scan-native-preview-1/tmp",
+    "CARGO_BUILD_JOBS": "4"
+  },
+  "rustc": "rustc 1.96.0 (ac68faa20 2026-05-25)",
+  "rows": [
+    {
+      "name": "ordinary-native-lib",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "-p",
+        "selfsame",
+        "--lib"
+      ],
+      "startedUtc": "2026-09-05T12:47:18.248657+00:00",
+      "elapsedSeconds": 13.69,
+      "exit": 0,
+      "resultCounts": [
+        [
+          "89",
+          "0",
+          "18"
+        ]
+      ],
+      "passed": true,
+      "log": "logs/independent-operations-ordinary-native-lib.log",
+      "logSha256": "541179d46030e34810b95539f93dd557158f6fbf628df78990d8c4fd791dd7ac",
+      "originalLog": "/tmp/spec079-native-coverage-independent-final/ordinary-native-lib.log",
+      "rawLogSha256": "541179d46030e34810b95539f93dd557158f6fbf628df78990d8c4fd791dd7ac",
+      "storedLogSha256": "9530d91482ba213659a679b99fccbbb5e7676972ceaaf2db9d2fee040f4fabc3"
+    },
+    {
+      "name": "single_link_actual_executor_expiry_and_revocation_at_every_boundary",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "-p",
+        "selfsame",
+        "--lib",
+        "cbcl_v2_commands::single_link::tests::coverage::single_link_actual_executor_expiry_and_revocation_at_every_boundary",
+        "--",
+        "--exact",
+        "--ignored",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "startedUtc": "2026-09-05T12:47:31.939956+00:00",
+      "elapsedSeconds": 82.628,
+      "exit": 0,
+      "resultCounts": [
+        [
+          "1",
+          "0",
+          "0"
+        ]
+      ],
+      "passed": true,
+      "log": "logs/independent-operations-single_link_actual_executor_expiry_and_revocation_at_every_boundary.log",
+      "logSha256": "ba47e3fa97bafd02c565e0fdfd4f8893132dea9f38bc3affe4a49a7b8cac0824",
+      "originalLog": "/tmp/spec079-native-coverage-independent-final/single_link_actual_executor_expiry_and_revocation_at_every_boundary.log",
+      "rawLogSha256": "ba47e3fa97bafd02c565e0fdfd4f8893132dea9f38bc3affe4a49a7b8cac0824",
+      "storedLogSha256": "dde5fab55f0fdcb15471486dd4223bfbd99c5e42eaf7b5f53b3f2ce8ed806f92"
+    },
+    {
+      "name": "single_link_owned_binding_preservation_and_closed_substitutions",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "-p",
+        "selfsame",
+        "--lib",
+        "cbcl_v2_commands::single_link::tests::coverage::single_link_owned_binding_preservation_and_closed_substitutions",
+        "--",
+        "--exact",
+        "--ignored",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "startedUtc": "2026-09-05T12:48:54.568841+00:00",
+      "elapsedSeconds": 6.372,
+      "exit": 0,
+      "resultCounts": [
+        [
+          "1",
+          "0",
+          "0"
+        ]
+      ],
+      "passed": true,
+      "log": "logs/independent-operations-single_link_owned_binding_preservation_and_closed_substitutions.log",
+      "logSha256": "c0be2d175d9eca87cc35d634533070d01908daa07d4875b3f3694e1aba80620a",
+      "originalLog": "/tmp/spec079-native-coverage-independent-final/single_link_owned_binding_preservation_and_closed_substitutions.log",
+      "rawLogSha256": "c0be2d175d9eca87cc35d634533070d01908daa07d4875b3f3694e1aba80620a",
+      "storedLogSha256": "055f5f38d0286613854227d5344ac2f2ea2ec1e7eaf8d942110e9c2b13bb8538"
+    },
+    {
+      "name": "single_link_actual_held_publication_and_resolver_results_are_revoked",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "-p",
+        "selfsame",
+        "--lib",
+        "cbcl_v2_commands::single_link::tests::coverage::single_link_actual_held_publication_and_resolver_results_are_revoked",
+        "--",
+        "--exact",
+        "--ignored",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "startedUtc": "2026-09-05T12:49:00.941528+00:00",
+      "elapsedSeconds": 14.756,
+      "exit": 0,
+      "resultCounts": [
+        [
+          "1",
+          "0",
+          "0"
+        ]
+      ],
+      "passed": true,
+      "log": "logs/independent-operations-single_link_actual_held_publication_and_resolver_results_are_revoked.log",
+      "logSha256": "17273d45ee7aaa273972e300a6e28072b65c2dffbba487844f519e748e816eb1",
+      "originalLog": "/tmp/spec079-native-coverage-independent-final/single_link_actual_held_publication_and_resolver_results_are_revoked.log",
+      "rawLogSha256": "17273d45ee7aaa273972e300a6e28072b65c2dffbba487844f519e748e816eb1",
+      "storedLogSha256": "136d39b33cf7608421b626808cfe046d8b84399844146a071883afb9beff3482"
+    },
+    {
+      "name": "single_link_ready_io_and_sync_results_cannot_cross_revocation",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "-p",
+        "selfsame",
+        "--lib",
+        "cbcl_v2_commands::single_link::tests::coverage::single_link_ready_io_and_sync_results_cannot_cross_revocation",
+        "--",
+        "--exact",
+        "--ignored",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "startedUtc": "2026-09-05T12:49:15.698312+00:00",
+      "elapsedSeconds": 3.708,
+      "exit": 0,
+      "resultCounts": [
+        [
+          "1",
+          "0",
+          "0"
+        ]
+      ],
+      "passed": true,
+      "log": "logs/independent-operations-single_link_ready_io_and_sync_results_cannot_cross_revocation.log",
+      "logSha256": "1e12c4995976dd0628e066b9ef3dde250153f39bc59d6315888d57f5f96480f0",
+      "originalLog": "/tmp/spec079-native-coverage-independent-final/single_link_ready_io_and_sync_results_cannot_cross_revocation.log",
+      "rawLogSha256": "1e12c4995976dd0628e066b9ef3dde250153f39bc59d6315888d57f5f96480f0",
+      "storedLogSha256": "a299c11484771d45a0d9f120947ce1fd9d09224e801346cc3644387c00fe09c6"
+    },
+    {
+      "name": "single_link_actual_commit_boundaries_compensate_or_preserve_payload",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "-p",
+        "selfsame",
+        "--lib",
+        "cbcl_v2_commands::single_link::tests::coverage::single_link_actual_commit_boundaries_compensate_or_preserve_payload",
+        "--",
+        "--exact",
+        "--ignored",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "startedUtc": "2026-09-05T12:49:19.406800+00:00",
+      "elapsedSeconds": 15.198,
+      "exit": 0,
+      "resultCounts": [
+        [
+          "1",
+          "0",
+          "0"
+        ]
+      ],
+      "passed": true,
+      "log": "logs/independent-operations-single_link_actual_commit_boundaries_compensate_or_preserve_payload.log",
+      "logSha256": "0e5af8644640d7974f8b6e4830c94dbd0444674a9b6650798d40e9cc0d71471b",
+      "originalLog": "/tmp/spec079-native-coverage-independent-final/single_link_actual_commit_boundaries_compensate_or_preserve_payload.log",
+      "rawLogSha256": "0e5af8644640d7974f8b6e4830c94dbd0444674a9b6650798d40e9cc0d71471b",
+      "storedLogSha256": "321cb310f13ad65e10cbddfbc092c736fa498e8550833511240eb4388d9282c0"
+    },
+    {
+      "name": "single_link_actual_live_installation_responses_are_revoked",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "-p",
+        "selfsame",
+        "--lib",
+        "cbcl_v2_commands::single_link::tests::coverage::single_link_actual_live_installation_responses_are_revoked",
+        "--",
+        "--exact",
+        "--ignored",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "startedUtc": "2026-09-05T12:49:34.605355+00:00",
+      "elapsedSeconds": 5.173,
+      "exit": 0,
+      "resultCounts": [
+        [
+          "1",
+          "0",
+          "0"
+        ]
+      ],
+      "passed": true,
+      "log": "logs/independent-operations-single_link_actual_live_installation_responses_are_revoked.log",
+      "logSha256": "c9b2527ecdbb0b04e89f1074d9fa855b8febcfffc8dd72fcc3effc116b605633",
+      "originalLog": "/tmp/spec079-native-coverage-independent-final/single_link_actual_live_installation_responses_are_revoked.log",
+      "rawLogSha256": "c9b2527ecdbb0b04e89f1074d9fa855b8febcfffc8dd72fcc3effc116b605633",
+      "storedLogSha256": "d7ff461616183612f4423f7868c8f6b3e33ae7ac4f3749d0dbaeec2fd904e9ed"
+    },
+    {
+      "name": "single_link_actual_install_operation_requires_live_authority",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "-p",
+        "selfsame",
+        "--lib",
+        "cbcl_v2_commands::single_link::tests::coverage::single_link_actual_install_operation_requires_live_authority",
+        "--",
+        "--exact",
+        "--ignored",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "startedUtc": "2026-09-05T12:49:39.778798+00:00",
+      "elapsedSeconds": 14.683,
+      "exit": 0,
+      "resultCounts": [
+        [
+          "1",
+          "0",
+          "0"
+        ]
+      ],
+      "passed": true,
+      "log": "logs/independent-operations-single_link_actual_install_operation_requires_live_authority.log",
+      "logSha256": "ec06de1afb259dfb88e9c1ce2969db9f2c601cee6b63a3667440aa0d99cf2c7d",
+      "originalLog": "/tmp/spec079-native-coverage-independent-final/single_link_actual_install_operation_requires_live_authority.log",
+      "rawLogSha256": "ec06de1afb259dfb88e9c1ce2969db9f2c601cee6b63a3667440aa0d99cf2c7d",
+      "storedLogSha256": "94baefe27412bc973725df2c4f796c7b053a175546039e9b5b5122091fdfbd52"
+    },
+    {
+      "name": "single_link_native_commands_render_mode_comparison_cancel_and_expiry",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "-p",
+        "selfsame",
+        "--lib",
+        "cbcl_v2_commands::single_link::tests::single_link_native_commands_render_mode_comparison_cancel_and_expiry",
+        "--",
+        "--exact",
+        "--ignored",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "startedUtc": "2026-09-05T12:49:54.462184+00:00",
+      "elapsedSeconds": 25.157,
+      "exit": 0,
+      "resultCounts": [
+        [
+          "1",
+          "0",
+          "0"
+        ]
+      ],
+      "passed": true,
+      "log": "logs/independent-operations-single_link_native_commands_render_mode_comparison_cancel_and_expiry.log",
+      "logSha256": "75f53297a957f1c17c00dd81faf6f2832a57ca295ecb6a59f6230ad93a65d0f5",
+      "originalLog": "/tmp/spec079-native-coverage-independent-final/single_link_native_commands_render_mode_comparison_cancel_and_expiry.log",
+      "rawLogSha256": "75f53297a957f1c17c00dd81faf6f2832a57ca295ecb6a59f6230ad93a65d0f5",
+      "storedLogSha256": "4fb0d79439adc192618adbf0ff42e483e2e3192846e35715aa4e5bd5c8878a3b"
+    },
+    {
+      "name": "manual_single_link_native_commands_render_mode_comparison_cancel_and_expiry",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "-p",
+        "selfsame",
+        "--lib",
+        "cbcl_v2_commands::single_link::tests::manual_single_link_native_commands_render_mode_comparison_cancel_and_expiry",
+        "--",
+        "--exact",
+        "--ignored",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "startedUtc": "2026-09-05T12:50:19.620519+00:00",
+      "elapsedSeconds": 25.144,
+      "exit": 0,
+      "resultCounts": [
+        [
+          "1",
+          "0",
+          "0"
+        ]
+      ],
+      "passed": true,
+      "log": "logs/independent-operations-manual_single_link_native_commands_render_mode_comparison_cancel_and_expiry.log",
+      "logSha256": "0bbb94ee26de08bb7e91d1245c9b473f2c5f6f98f6f44c8ac57628c313e60bad",
+      "originalLog": "/tmp/spec079-native-coverage-independent-final/manual_single_link_native_commands_render_mode_comparison_cancel_and_expiry.log",
+      "rawLogSha256": "0bbb94ee26de08bb7e91d1245c9b473f2c5f6f98f6f44c8ac57628c313e60bad",
+      "storedLogSha256": "f71bf70dd1759cb3c014c6481bcff628fe1fcb429e1767fcacf0c78c4e4d39de"
+    },
+    {
+      "name": "test_1162_pre_payload_failure_and_person_abandonment_release_the_exact_slot",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "-p",
+        "selfsame",
+        "--lib",
+        "cbcl_v2_completion::tests::test_1162_pre_payload_failure_and_person_abandonment_release_the_exact_slot",
+        "--",
+        "--exact",
+        "--ignored",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "startedUtc": "2026-09-05T12:50:44.765776+00:00",
+      "elapsedSeconds": 5.111,
+      "exit": 0,
+      "resultCounts": [
+        [
+          "1",
+          "0",
+          "0"
+        ]
+      ],
+      "passed": true,
+      "log": "logs/independent-operations-test_1162_pre_payload_failure_and_person_abandonment_release_the_exact_slot.log",
+      "logSha256": "89a38c213baab4d2592fd3d2a09f1cd9ce10915dc21ce94eb92db65ae2e44715",
+      "originalLog": "/tmp/spec079-native-coverage-independent-final/test_1162_pre_payload_failure_and_person_abandonment_release_the_exact_slot.log",
+      "rawLogSha256": "89a38c213baab4d2592fd3d2a09f1cd9ce10915dc21ce94eb92db65ae2e44715",
+      "storedLogSha256": "19bbd5125f4c84340c1fcde270ab18df89c9f2cc6659ddb847e5b1f55a05819b"
+    }
+  ],
+  "allPassed": true,
+  "sourceHashesUnchangedAfter": true,
+  "originalReceiptSha256": "f83f6a343eada2cb792a9731145cec5c6e3243f6fae6243f9997f8d91b89fabd",
+  "attribution": "independent-operations"
+}

@@ -1,0 +1,23 @@
+    Checking futures-task v0.3.33
+    Checking futures-sink v0.3.33
+    Checking slab v0.4.12
+    Checking bip39 v2.2.2
+    Checking sha1 v0.10.7
+    Checking utf-8 v0.7.6
+   Compiling selfsame v0.1.0 (/Volumes/anuna-03/codex-successor-consent-coverage-closure/selfsame/src-tauri)
+    Checking tungstenite v0.24.0
+    Checking futures-util v0.3.33
+    Checking selfsame-core v0.1.0 (/Volumes/anuna-03/codex-successor-consent-coverage-closure/selfsame/crates/selfsame-core)
+    Checking cbcl-pairing v0.1.0 (/Volumes/anuna-03/codex-successor-consent-coverage-closure/cbcl-pairing)
+    Checking selfsame-app-identity v0.1.0 (/Volumes/anuna-03/codex-successor-consent-coverage-closure/selfsame/crates/selfsame-app-identity)
+    Checking tower v0.5.3
+    Checking hyper-util v0.1.20
+    Checking axum-core v0.4.5
+    Checking tokio-tungstenite v0.24.0
+    Checking tower-http v0.6.11
+    Checking selfsame-pairing v0.1.0 (/Volumes/anuna-03/codex-successor-consent-coverage-closure/selfsame/crates/selfsame-pairing)
+    Checking hyper-rustls v0.27.9
+    Checking reqwest v0.12.28
+    Checking axum v0.7.9
+    Checking selfsame-app-identity-net v0.1.0 (/Volumes/anuna-03/codex-successor-consent-coverage-closure/selfsame/crates/selfsame-app-identity-net)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 6.55s

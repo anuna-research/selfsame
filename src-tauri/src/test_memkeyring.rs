@@ -40,6 +40,29 @@ fn next_set_failure() -> &'static Mutex<Option<(String, SetFailure)>> {
     FAILURE.get_or_init(|| Mutex::new(None))
 }
 
+type SetPredicate = dyn Fn(&str, &[u8]) -> bool + Send;
+struct SetObserver {
+    matches: Box<SetPredicate>,
+    action: Box<dyn FnOnce() + Send>,
+}
+fn next_set_observer() -> &'static Mutex<Option<SetObserver>> {
+    static OBSERVER: OnceLock<Mutex<Option<SetObserver>>> = OnceLock::new();
+    OBSERVER.get_or_init(|| Mutex::new(None))
+}
+/// One isolated test observes a real committed write, outside every backend
+/// lock. No secret bytes leave the predicate or enter an evidence log.
+pub fn on_next_matching_set(
+    matches: impl Fn(&str, &[u8]) -> bool + Send + 'static,
+    action: impl FnOnce() + Send + 'static,
+) {
+    let mut observer = next_set_observer().lock().unwrap();
+    assert!(observer.is_none(), "only one owned commit observation");
+    *observer = Some(SetObserver {
+        matches: Box::new(matches),
+        action: Box::new(action),
+    });
+}
+
 #[derive(Debug)]
 struct SharedCredential {
     key: String,
@@ -68,6 +91,20 @@ impl CredentialApi for SharedCredential {
             .lock()
             .unwrap()
             .insert(self.key.clone(), Zeroizing::new(secret.to_vec()));
+        let observer = {
+            let mut observer = next_set_observer().lock().unwrap();
+            if observer
+                .as_ref()
+                .is_some_and(|o| (o.matches)(&self.key, secret))
+            {
+                observer.take()
+            } else {
+                None
+            }
+        };
+        if let Some(observer) = observer {
+            (observer.action)();
+        }
         if matches!(failure, Some(SetFailure::AfterCommit)) {
             return Err(keyring::Error::PlatformFailure(Box::new(
                 std::io::Error::other("injected post-commit set failure"),
@@ -120,6 +157,7 @@ impl CredentialBuilderApi for Builder {
 pub fn install() {
     values().lock().unwrap().clear();
     *next_set_failure().lock().unwrap() = None;
+    *next_set_observer().lock().unwrap() = None;
     keyring::set_default_credential_builder(Box::new(Builder));
     assert_active();
 }
@@ -141,6 +179,7 @@ pub fn clear() {
     }
     stored.clear();
     *next_set_failure().lock().unwrap() = None;
+    *next_set_observer().lock().unwrap() = None;
 }
 
 pub fn fail_next_set_for_user(user: &str, mode: SetFailure) {

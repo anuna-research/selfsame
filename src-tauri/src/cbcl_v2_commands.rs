@@ -1043,9 +1043,7 @@ async fn finish_pending(
             return Err(error);
         }
     };
-    if let Err(error) =
-        attempt.run(|| crate::cbcl_v2_completion::install(&durable, &installed, &jrd))
-    {
+    if let Err(error) = install_guarded(&attempt, &durable, &installed, &jrd) {
         pending.clear_ceremony_custody();
         put_pending(session, pending, operation)?;
         return Err(error);
@@ -1939,6 +1937,15 @@ fn prepare_received_receipt(
         Ok((durable, receipt_recovery_commitment))
     })();
     (pending, result)
+}
+
+fn install_guarded(
+    attempt: &CredentialV2Attempt,
+    durable: &crate::cbcl_v2_completion::PendingCredentialV2Completion,
+    installed: &crate::cbcl_v2_completion::InstalledCredentialV2Link,
+    jrd: &selfsame_app_identity::alias::Jrd,
+) -> Result<()> {
+    attempt.run(|| crate::cbcl_v2_completion::install(durable, installed, jrd))
 }
 
 async fn verify_live_installation_guarded(

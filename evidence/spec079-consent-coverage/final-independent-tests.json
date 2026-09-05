@@ -1,0 +1,139 @@
+{
+  "scope": "Independent affected native transition/endpoint rerun only; prior unchanged operation receipt retained",
+  "startedUtc": "2026-09-05T13:25:51.849412+00:00",
+  "sourceSha256": {
+    "src-tauri/src/cbcl_v2_commands.rs": "a155642f3ee780ab50d104f412069df8bff78700f2c6d6a72866e8db072cb51d",
+    "src-tauri/src/cbcl_v2_single_link.rs": "e60369191f9add2f58932fea424ada5f4f2625e63159fc04dd649940d27dac20",
+    "src-tauri/src/cbcl_v2_single_link_tests.rs": "7571426945015e5f47cbfb10c3fd951792ab92e3952ffefd9332e3de329d8f6d",
+    "src-tauri/src/cbcl_v2_comparison_test_inputs.rs": "7ab63ad6ccc59d9feefed40af217a1e7fd0c3cc5c4f21c7819d7d04ccf0bb752",
+    "src-tauri/src/cbcl_v2_consent_coverage_tests.rs": "59e037c4c1cc106d922418b7ad6f105dc6af8beb205ea1fac74f84aa761e6a71",
+    "src-tauri/src/cbcl_v2_consent_test_resolver.rs": "916461187bd12bf79a9b98bacfb4fc61d9f9901574bfe9d26c99abd55eeb2169",
+    "src-tauri/src/session.rs": "36d7761f0221f965801901f5d5fa63507306c6b0e4730d458553c68fba6cf40c",
+    "src-tauri/src/test_memkeyring.rs": "9e8a1311a0255bf10684b931cf1884e93f3ef6644904011b65a0cb5b97db8691",
+    "src-tauri/Cargo.toml": "e94d1b7e24edf2ece793d81f874ae1fe4c10b16f433e8d4c994f3386723a96bc",
+    "Cargo.lock": "46e6a4ac0c5ea00bdc722369bacc59b6c5f2e436a273c39e98c6561c5d8a3d7b",
+    ".forgejo/workflows/ci.yml": "194eb2f8d88de4d3c0cf34068ce0dbf663faf96ec21406b17bd00a55c7c90322",
+    "crates/selfsame-pairing/tests/credential_v2_offer.rs": "1a111c8360e3e40cfeed636971530b41deb46d0cea7053fecb9d3305a40742a1",
+    "crates/selfsame-pairing/src/credential_v2.rs": "6b4139ff11ee4e1ddc5f4a1a2177301e0680030a666a4ccf344cb1a5d14e672e",
+    "crates/selfsame-pairing/src/credential_v2/bodies.rs": "d4a35f78003975597621f755372798cb5ec205a979ab0b04dfeb03ba9f388aca"
+  },
+  "base": "db2888cf28b781274668d95f0ea8977371fe9e7b",
+  "environment": {
+    "CARGO_TARGET_DIR": "/Volumes/anuna-03/codex-selfsame-reconcile-target",
+    "TMPDIR": "/Volumes/anuna-03/codex-scan-native-preview-1/tmp",
+    "CARGO_BUILD_JOBS": "4"
+  },
+  "tests": [
+    {
+      "name": "native-comparison",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "-p",
+        "selfsame",
+        "--lib",
+        "cbcl_v2_commands::single_link::tests::coverage::single_link_valid_mutable_comparison_bindings_refuse_before_effects",
+        "--",
+        "--exact",
+        "--ignored",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "exit": 0,
+      "passed": true,
+      "log": "logs/independent-transition-native-comparison.log",
+      "logSha256": "8b0b415c7b0d23b413d7045299a9119f92a7f5d10f6a54ed5734c450d801be58",
+      "summaries": [
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 107 filtered out; finished in 33.32s"
+      ],
+      "originalLog": "/tmp/spec079-native-transition-independent/native-comparison.log",
+      "rawLogSha256": "8b0b415c7b0d23b413d7045299a9119f92a7f5d10f6a54ed5734c450d801be58",
+      "storedLogSha256": "54a3d92d7f2cae5c7bfa9c8df61fd91bf863cba58bdc14ea4bc742022c1f537a"
+    },
+    {
+      "name": "native-full",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "-p",
+        "selfsame",
+        "--lib",
+        "cbcl_v2_commands::single_link::tests::single_link_native_commands_render_mode_comparison_cancel_and_expiry",
+        "--",
+        "--exact",
+        "--ignored",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "exit": 0,
+      "passed": true,
+      "log": "logs/independent-transition-native-full.log",
+      "logSha256": "bb76f65d27e7d19616628055d5f0256af8e4c0c32c48cb1aa06551ba9fe408e6",
+      "summaries": [
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 107 filtered out; finished in 21.82s"
+      ],
+      "originalLog": "/tmp/spec079-native-transition-independent/native-full.log",
+      "rawLogSha256": "bb76f65d27e7d19616628055d5f0256af8e4c0c32c48cb1aa06551ba9fe408e6",
+      "storedLogSha256": "e7edab7f36530ac8dbab93f4b6ad26532893c1ca77b69e43db92da21dfb49af5"
+    },
+    {
+      "name": "native-manual",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "-p",
+        "selfsame",
+        "--lib",
+        "cbcl_v2_commands::single_link::tests::manual_single_link_native_commands_render_mode_comparison_cancel_and_expiry",
+        "--",
+        "--exact",
+        "--ignored",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "exit": 0,
+      "passed": true,
+      "log": "logs/independent-transition-native-manual.log",
+      "logSha256": "763f31b85891befdbd679064eaaa65ff5b1bcb685352a3c5c9e14b6427fe708a",
+      "summaries": [
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 107 filtered out; finished in 22.55s"
+      ],
+      "originalLog": "/tmp/spec079-native-transition-independent/native-manual.log",
+      "rawLogSha256": "763f31b85891befdbd679064eaaa65ff5b1bcb685352a3c5c9e14b6427fe708a",
+      "storedLogSha256": "c33fadb61845a4e613484c236cf7ae11c58f9cde2ad4aa6fa4aa085e1197fa0d"
+    },
+    {
+      "name": "endpoint",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "-p",
+        "selfsame-pairing",
+        "--test",
+        "credential_v2_offer"
+      ],
+      "exit": 0,
+      "passed": true,
+      "log": "logs/independent-transition-endpoint.log",
+      "logSha256": "19554600c02a89da8470e621e83e4634e6ec825dd6f70717a7e89d07e7f36081",
+      "summaries": [
+        "test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s"
+      ],
+      "originalLog": "/tmp/spec079-native-transition-independent/endpoint.log",
+      "rawLogSha256": "19554600c02a89da8470e621e83e4634e6ec825dd6f70717a7e89d07e7f36081",
+      "storedLogSha256": "bc1f38778bcea6d26c550ad445bde47cee495c788f35b87dd53e7020894524ee"
+    }
+  ],
+  "finishedUtc": "2026-09-05T13:27:23.121350+00:00",
+  "sourceUnchanged": true,
+  "originalReceiptSha256": "cb65fa2d61a144626fe12fc1979a31c3b742ea09342b7a188a3e5027ce638892",
+  "attribution": "independent-transition"
+}

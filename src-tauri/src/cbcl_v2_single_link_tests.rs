@@ -1,9 +1,7 @@
 //! SPEC079 TEST001..009: native commands, real signed offers and authenticated
 //! CPace/Finished/object exchange over an explicitly local in-process peer.
 use super::*;
-use crate::{
-    cbcl_v2_completion as completion, custody::Custody, fixture, session::Session,
-};
+use crate::{cbcl_v2_completion as completion, custody::Custody, fixture, session::Session};
 use cbcl_pairing::{cpace, credential_v2::*, wire::*};
 use ed25519_dalek::{Signer as _, SigningKey};
 use selfsame_app_identity::{
@@ -149,6 +147,10 @@ impl Rig {
 }
 
 async fn rig(manual: bool) -> Rig {
+    rig_with_resolver(manual, false).await
+}
+
+async fn rig_with_resolver(manual: bool, local_resolver: bool) -> Rig {
     let words = CredentialV2ManualWords::from_csprng([0x35; 4]);
     let secret = if manual {
         *words.cpace_secret()
@@ -158,7 +160,29 @@ async fn rig(manual: bool) -> Rig {
     let now = crate::commands::now();
     let signing = SigningKey::from_bytes(&[0x21; 32]);
     let device = SigningKey::from_bytes(&[0x22; 32]);
-    let (profile, octets) = profile(&signing);
+    let (mut profile, mut octets) = profile(&signing);
+    if local_resolver {
+        let Json::Object(mut members) = json::recognise(
+            &octets,
+            json::Limits {
+                max_bytes: 65536,
+                max_depth: 8,
+            },
+        )
+        .unwrap() else {
+            unreachable!()
+        };
+        members
+            .iter_mut()
+            .find(|(k, _)| k == "stateResolvers")
+            .unwrap()
+            .1 = Json::arr([fixture::resolver(
+            "local-state",
+            "https://state.photos.example",
+        )]);
+        octets = json::canonicalise(&Json::Object(members));
+        profile = ApplicationProfile::recognise(&octets).unwrap();
+    }
     let carrier = CredentialV2Carrier::new(CredentialV2CarrierInput {
         application_context: profile.application_id.as_str().into(),
         relay_origin: RELAY.into(),
@@ -430,26 +454,15 @@ async fn rig(manual: bool) -> Rig {
                         .unwrap(),
                 };
                 if let ComparisonCase::Alter(field) = case {
-                    let mut body = compared.body().to_vec();
-                    let at = body
-                        .windows(field.len())
-                        .position(|bytes| bytes == field.as_bytes())
-                        .unwrap()
-                        + field.len();
-                    // Keep the field's canonical CBOR type/length and change one
-                    // byte of its value. AEAD authenticates these altered bytes.
-                    let header = body[at];
-                    let offset = if header & 31 < 24 {
-                        1
-                    } else if header & 31 == 24 {
-                        2
-                    } else {
-                        3
-                    };
-                    body[at + offset] ^= 1;
-                    compared =
-                        CredentialV2Object::new(compared.kind(), *compared.intent_digest(), body)
-                            .unwrap();
+                    compared = comparison_inputs::alter(
+                        compared,
+                        field,
+                        &profile,
+                        &carrier,
+                        built.offer_core_digest,
+                        offer.content_hash(),
+                        &signing,
+                    );
                 }
                 let frame = channel.seal(compared.as_bytes()).unwrap();
                 let _ = socket.send(Message::Binary(
@@ -952,3 +965,9 @@ async fn native_consent_cases(manual: bool) {
     );
     completion::shared_memkeyring::clear();
 }
+
+#[path = "cbcl_v2_consent_coverage_tests.rs"]
+mod coverage;
+
+#[path = "cbcl_v2_comparison_test_inputs.rs"]
+mod comparison_inputs;

@@ -1,0 +1,68 @@
+   Compiling selfsame v0.1.0 (/Volumes/anuna-03/codex-successor-consent-coverage-closure/selfsame/src-tauri)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.20s
+     Running unittests src/lib.rs (/Volumes/anuna-03/codex-selfsame-reconcile-target/debug/deps/selfsame_lib-6c74a308fa24404a)
+
+running 1 test
+test cbcl_v2_commands::single_link::tests::coverage::single_link_actual_executor_expiry_and_revocation_at_every_boundary ... executor mode=full reason=Expire boundary=FinalApprovalRelease reached=1 next_effects=0
+executor mode=full reason=Expire boundary=AcknowledgementRead reached=2 next_effects=0
+executor mode=full reason=Expire boundary=AcknowledgementRecognition reached=3 next_effects=0
+executor mode=full reason=Expire boundary=AcknowledgementCheckpointReplacement reached=4 next_effects=0
+executor mode=full reason=Expire boundary=AcknowledgementCheckpointCommit reached=5 next_effects=0
+executor mode=full reason=Expire boundary=PlanConstruction reached=6 next_effects=0
+executor mode=full reason=Expire boundary=PlannedStageReplacement reached=7 next_effects=0
+executor mode=full reason=Expire boundary=IssuerCustody reached=8 next_effects=0
+executor mode=full reason=Expire boundary=IssuerStageReplacement reached=9 next_effects=0
+executor mode=full reason=Expire boundary=IssuerPublication reached=10 next_effects=0
+executor mode=full reason=Expire boundary=ResolverVerification reached=11 next_effects=0
+executor mode=full reason=Expire boundary=GrantConstruction reached=12 next_effects=0
+executor mode=full reason=Expire boundary=ProvisionedStageReplacement reached=13 next_effects=0
+executor mode=full reason=Expire boundary=PayloadConstruction reached=14 next_effects=0
+executor mode=full reason=Expire boundary=PayloadCheckpointPreparation reached=15 next_effects=0
+executor mode=full reason=Cancel boundary=FinalApprovalRelease reached=1 next_effects=0
+executor mode=full reason=Cancel boundary=AcknowledgementRead reached=2 next_effects=0
+executor mode=full reason=Cancel boundary=AcknowledgementRecognition reached=3 next_effects=0
+executor mode=full reason=Cancel boundary=AcknowledgementCheckpointReplacement reached=4 next_effects=0
+executor mode=full reason=Cancel boundary=AcknowledgementCheckpointCommit reached=5 next_effects=0
+executor mode=full reason=Cancel boundary=PlanConstruction reached=6 next_effects=0
+executor mode=full reason=Cancel boundary=PlannedStageReplacement reached=7 next_effects=0
+executor mode=full reason=Cancel boundary=IssuerCustody reached=8 next_effects=0
+executor mode=full reason=Cancel boundary=IssuerStageReplacement reached=9 next_effects=0
+executor mode=full reason=Cancel boundary=IssuerPublication reached=10 next_effects=0
+executor mode=full reason=Cancel boundary=ResolverVerification reached=11 next_effects=0
+executor mode=full reason=Cancel boundary=GrantConstruction reached=12 next_effects=0
+executor mode=full reason=Cancel boundary=ProvisionedStageReplacement reached=13 next_effects=0
+executor mode=full reason=Cancel boundary=PayloadConstruction reached=14 next_effects=0
+executor mode=full reason=Cancel boundary=PayloadCheckpointPreparation reached=15 next_effects=0
+executor mode=manual reason=Expire boundary=FinalApprovalRelease reached=1 next_effects=0
+executor mode=manual reason=Expire boundary=AcknowledgementRead reached=2 next_effects=0
+executor mode=manual reason=Expire boundary=AcknowledgementRecognition reached=3 next_effects=0
+executor mode=manual reason=Expire boundary=AcknowledgementCheckpointReplacement reached=4 next_effects=0
+executor mode=manual reason=Expire boundary=AcknowledgementCheckpointCommit reached=5 next_effects=0
+executor mode=manual reason=Expire boundary=PlanConstruction reached=6 next_effects=0
+executor mode=manual reason=Expire boundary=PlannedStageReplacement reached=7 next_effects=0
+executor mode=manual reason=Expire boundary=IssuerCustody reached=8 next_effects=0
+executor mode=manual reason=Expire boundary=IssuerStageReplacement reached=9 next_effects=0
+executor mode=manual reason=Expire boundary=IssuerPublication reached=10 next_effects=0
+executor mode=manual reason=Expire boundary=ResolverVerification reached=11 next_effects=0
+executor mode=manual reason=Expire boundary=GrantConstruction reached=12 next_effects=0
+executor mode=manual reason=Expire boundary=ProvisionedStageReplacement reached=13 next_effects=0
+executor mode=manual reason=Expire boundary=PayloadConstruction reached=14 next_effects=0
+executor mode=manual reason=Expire boundary=PayloadCheckpointPreparation reached=15 next_effects=0
+executor mode=manual reason=Cancel boundary=FinalApprovalRelease reached=1 next_effects=0
+executor mode=manual reason=Cancel boundary=AcknowledgementRead reached=2 next_effects=0
+executor mode=manual reason=Cancel boundary=AcknowledgementRecognition reached=3 next_effects=0
+executor mode=manual reason=Cancel boundary=AcknowledgementCheckpointReplacement reached=4 next_effects=0
+executor mode=manual reason=Cancel boundary=AcknowledgementCheckpointCommit reached=5 next_effects=0
+executor mode=manual reason=Cancel boundary=PlanConstruction reached=6 next_effects=0
+executor mode=manual reason=Cancel boundary=PlannedStageReplacement reached=7 next_effects=0
+executor mode=manual reason=Cancel boundary=IssuerCustody reached=8 next_effects=0
+executor mode=manual reason=Cancel boundary=IssuerStageReplacement reached=9 next_effects=0
+executor mode=manual reason=Cancel boundary=IssuerPublication reached=10 next_effects=0
+executor mode=manual reason=Cancel boundary=ResolverVerification reached=11 next_effects=0
+executor mode=manual reason=Cancel boundary=GrantConstruction reached=12 next_effects=0
+executor mode=manual reason=Cancel boundary=ProvisionedStageReplacement reached=13 next_effects=0
+executor mode=manual reason=Cancel boundary=PayloadConstruction reached=14 next_effects=0
+executor mode=manual reason=Cancel boundary=PayloadCheckpointPreparation reached=15 next_effects=0
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 106 filtered out; finished in 79.72s

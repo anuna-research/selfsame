@@ -1,0 +1,36 @@
+   Compiling selfsame v0.1.0 (/Volumes/anuna-03/codex-successor-consent-coverage-closure/selfsame/src-tauri)
+warning: unused variable: `final_fingerprint`
+   --> src-tauri/src/cbcl_v2_commands.rs:676:13
+    |
+676 |         let final_fingerprint: [u8; 32] = sha2::Sha256::digest(final_did.as_bytes()).into();
+    |             ^^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_final_fingerprint`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `preview_fingerprint`
+   --> src-tauri/src/cbcl_v2_commands.rs:660:9
+    |
+660 |     let preview_fingerprint: [u8; 32] = sha2::Sha256::digest(preview_did.as_bytes()).into();
+    |         ^^^^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_preview_fingerprint`
+
+warning: `selfsame` (lib test) generated 2 warnings (run `cargo fix --lib -p selfsame --tests` to apply 2 suggestions)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.68s
+     Running unittests src/lib.rs (/Volumes/anuna-03/codex-selfsame-reconcile-target/debug/deps/selfsame_lib-6c74a308fa24404a)
+
+running 1 test
+test cbcl_v2_commands::single_link::tests::single_link_native_commands_render_mode_comparison_cancel_and_expiry ...
+thread 'cbcl_v2_commands::single_link::tests::single_link_native_commands_render_mode_comparison_cancel_and_expiry' (9655308) panicked at src-tauri/src/cbcl_v2_single_link_tests.rs:837:9:
+assertion `left == right` failed
+  left: "UnexpectedIdentityBoundary"
+ right: "PairingPreviewChanged"
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    cbcl_v2_commands::single_link::tests::single_link_native_commands_render_mode_comparison_cancel_and_expiry
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 106 filtered out; finished in 16.63s
+
+error: test failed, to rerun pass `-p selfsame --lib`

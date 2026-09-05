@@ -1,0 +1,21 @@
+   Compiling selfsame v0.1.0 (/Volumes/anuna-03/codex-successor-consent-coverage-closure/selfsame/src-tauri)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 5.84s
+     Running unittests src/lib.rs (/Volumes/anuna-03/codex-selfsame-reconcile-target/debug/deps/selfsame_lib-6c74a308fa24404a)
+
+running 1 test
+test cbcl_v2_commands::single_link::tests::coverage::single_link_ready_io_and_sync_results_cannot_cross_revocation ... blocking-read reason=None reply_delivered=true
+blocking-read reason=Some(Expire) reply_delivered=true
+
+thread 'cbcl_v2_commands::single_link::tests::coverage::single_link_ready_io_and_sync_results_cannot_cross_revocation' (9723821) panicked at src-tauri/src/cbcl_v2_consent_coverage_tests.rs:530:24:
+late valid reply refused: [162, 99, 115, 101, 113, 0, 100, 116, 121, 112, 101, 108, 97, 99, 107, 110, 111, 119, 108, 101, 100, 103, 101, 100]
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    cbcl_v2_commands::single_link::tests::coverage::single_link_ready_io_and_sync_results_cannot_cross_revocation
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 106 filtered out; finished in 1.13s
+
+error: test failed, to rerun pass `-p selfsame --lib`

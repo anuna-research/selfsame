@@ -1,0 +1,14 @@
+   Compiling cbcl-core v0.1.0 (/Volumes/anuna-03/codex-consent-comparison-mutation-final/cbcl-rs/crates/cbcl-core)
+   Compiling did-crdt v0.1.0 (/Volumes/anuna-03/codex-consent-comparison-mutation-final/did-crdt)
+   Compiling selfsame-pairing v0.1.0 (/Volumes/anuna-03/codex-consent-comparison-mutation-final/selfsame/crates/selfsame-pairing)
+   Compiling cbcl-pairing v0.1.0 (/Volumes/anuna-03/codex-consent-comparison-mutation-final/cbcl-pairing)
+   Compiling cbcl-parser v0.1.0 (/Volumes/anuna-03/codex-consent-comparison-mutation-final/cbcl-rs/crates/cbcl-parser)
+   Compiling selfsame-core v0.1.0 (/Volumes/anuna-03/codex-consent-comparison-mutation-final/selfsame/crates/selfsame-core)
+   Compiling selfsame-app-identity v0.1.0 (/Volumes/anuna-03/codex-consent-comparison-mutation-final/selfsame/crates/selfsame-app-identity)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 5.25s
+     Running tests/credential_v2_offer.rs (/Volumes/anuna-03/codex-selfsame-reconcile-target/debug/deps/credential_v2_offer-30ebe6511f1de268)
+
+running 1 test
+test spec079_valid_comparison_transition_guards ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.04s

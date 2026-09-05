@@ -74,6 +74,9 @@ tauri-plugin-selfsame-store = { path = "../crates/tauri-plugin-selfsame-store" }
 libc = "0.2"
 
 [dev-dependencies]
+# Reuse the existing canonical codec for typed comparison fixture substitutions.
+ciborium = "=0.2.2"
+cbor2 = "=1.1.0"
 # SPEC-077 TEST-008: feature unification applies only to native test builds.
 selfsame-app-identity-net = { path = "../crates/selfsame-app-identity-net", features = ["native-test-support"] }
 tauri = { version = "2", features = ["test"] }

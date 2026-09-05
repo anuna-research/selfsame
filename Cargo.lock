@@ -4191,6 +4191,8 @@ dependencies = [
  "bip39",
  "blake3",
  "cbcl-pairing",
+ "cbor2",
+ "ciborium",
  "did-crdt",
  "ed25519-dalek",
  "hkdf 0.12.4",

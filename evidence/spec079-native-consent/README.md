@@ -124,3 +124,14 @@ No production endpoint, real wallet, system keychain, deployment, push, source
 pin, sibling checkout, reviewed specification, release WASM or generated browser
 asset was changed. This is local implementation evidence, not production or
 independent human approval.
+
+## Subsequent coverage closure
+
+The later [[SPEC-079-selfsame-single-link-consent#TEST-005]],
+[[SPEC-079-selfsame-single-link-consent#TEST-006]] and
+[[SPEC-079-selfsame-single-link-consent#TEST-007]] coverage work is recorded in
+`../spec079-consent-coverage/README.md` and its exact source/command receipts.
+It adds component-specific ownership proof, actual executor and held-result
+tests, guarded real installation, and fixed isolated CI invocations. This
+section links that later work; the historical source identities, results and
+limits above remain unchanged.

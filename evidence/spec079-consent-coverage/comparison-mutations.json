@@ -1,0 +1,322 @@
+{
+  "scope": "Actual signed mode-free endpoint/body operation; no complete native ceremony claim for mutations",
+  "command": [
+    "cargo",
+    "test",
+    "--locked",
+    "--offline",
+    "-p",
+    "selfsame-pairing",
+    "--test",
+    "credential_v2_offer",
+    "spec079_valid_comparison_transition_guards",
+    "--",
+    "--exact",
+    "--nocapture"
+  ],
+  "sourceHeads": {
+    "selfsame": "db2888cf28b781274668d95f0ea8977371fe9e7b",
+    "cbcl-pairing": "fbae887b3e1d5051a9028d3f8516af37d7bb2b2c"
+  },
+  "positiveLogSha256": "e73436246a8ec7bfa9a110d931f99e9b89b42502cc039b8d450095030a268488",
+  "fixtureSha256": {
+    "src-tauri/src/cbcl_v2_comparison_test_inputs.rs": "7ab63ad6ccc59d9feefed40af217a1e7fd0c3cc5c4f21c7819d7d04ccf0bb752",
+    "crates/selfsame-pairing/tests/credential_v2_offer.rs": "1a111c8360e3e40cfeed636971530b41deb46d0cea7053fecb9d3305a40742a1"
+  },
+  "rows": [
+    {
+      "name": "T1-intent",
+      "edits": [
+        {
+          "source": "../cbcl-pairing/src/credential_v2/endpoint.rs",
+          "before": "if object.intent_digest() != &expected_intent {\n            return self.fail(CredentialV2Error::Profile);\n        }",
+          "after": "// mutation: expected object intent removed",
+          "sourceSha256": "1d6b8f2e09283c42966f61f8eb3939958d082617c844457f38e4a14f753854b1",
+          "mutantSha256": "5ac5c814163bff87cb7a0ac34601e474ff60cb0f136f012a31c0355f24d9b671"
+        }
+      ],
+      "expectedKilled": true,
+      "killed": true,
+      "exit": 101,
+      "log": "logs/transition-T1-intent.log",
+      "rawLogSha256": "3ec1fc7c531f846eb2ef9b06c291e26af6bcb088e00d141de8fbea0da7a62207",
+      "classification": "behavioral kill",
+      "storedLogSha256": "3ec1fc7c531f846eb2ef9b06c291e26af6bcb088e00d141de8fbea0da7a62207"
+    },
+    {
+      "name": "T2-phase",
+      "edits": [
+        {
+          "source": "../cbcl-pairing/src/credential_v2/endpoint.rs",
+          "before": "            CredentialV2Phase::Prepared,\n            CredentialV2Kind::ComparisonConfirmed | CredentialV2Kind::BindingConfirmed,",
+          "after": "            CredentialV2Phase::Prepared | CredentialV2Phase::IntentApproved,\n            CredentialV2Kind::ComparisonConfirmed | CredentialV2Kind::BindingConfirmed,",
+          "sourceSha256": "1d6b8f2e09283c42966f61f8eb3939958d082617c844457f38e4a14f753854b1",
+          "mutantSha256": "d89fedc0dff8ebbeec86e54bf761f5849b3f4420965417ae2ed6a4640e7152c1"
+        }
+      ],
+      "expectedKilled": true,
+      "killed": true,
+      "exit": 101,
+      "log": "logs/transition-T2-phase.log",
+      "rawLogSha256": "deaf36fadfbe4f2d36ea3ab9f79420a69c5cd778d3e1582e955b7e9c0ac40f75",
+      "classification": "behavioral kill",
+      "storedLogSha256": "deaf36fadfbe4f2d36ea3ab9f79420a69c5cd778d3e1582e955b7e9c0ac40f75"
+    },
+    {
+      "name": "T3-endpoint-only",
+      "edits": [
+        {
+          "source": "../cbcl-pairing/src/credential_v2/endpoint.rs",
+          "before": "if &logical.carrier_ceremony_id != self.carrier.carrier_ceremony_id() {\n            return self.fail(CredentialV2Error::Profile);\n        }",
+          "after": "// mutation: endpoint ceremony equality removed",
+          "sourceSha256": "1d6b8f2e09283c42966f61f8eb3939958d082617c844457f38e4a14f753854b1",
+          "mutantSha256": "3b43e4d2e199b31d96208f36ff968257384c30efe03bbfa88e30ad8bc9df45e0"
+        }
+      ],
+      "expectedKilled": false,
+      "killed": false,
+      "exit": 0,
+      "log": "logs/transition-T3-endpoint-only.log",
+      "rawLogSha256": "5329d21cebb9d1b6722a642876e06f15ab752e6d98ab4b85892d30eb1b0e2748",
+      "classification": "redundant ceremony equality survivor; the other exact ceremony guard still refuses before advance",
+      "storedLogSha256": "64d43fed3ec7f359e578268681c138fcefecb2b3a3c57739e8b3fc14808a9eaa"
+    },
+    {
+      "name": "T3-body-only",
+      "edits": [
+        {
+          "source": "crates/selfsame-pairing/src/credential_v2/bodies.rs",
+          "before": "if body.carrier_ceremony_id() != &bound.ceremony {\n            return Err(CredentialV2Error::Profile);\n        }",
+          "after": "// mutation: body authority ceremony equality removed",
+          "sourceSha256": "d4a35f78003975597621f755372798cb5ec205a979ab0b04dfeb03ba9f388aca",
+          "mutantSha256": "312788c0895f20744eaa90a042c9cc1547a3edd0a2206e158a0023c1d2ff846e"
+        }
+      ],
+      "expectedKilled": false,
+      "killed": false,
+      "exit": 0,
+      "log": "logs/transition-T3-body-only.log",
+      "rawLogSha256": "328305d9c2472752dceb35c6cbcf6554f6c1e101e7b569011390b3940ea73140",
+      "classification": "redundant ceremony equality survivor; the other exact ceremony guard still refuses before advance",
+      "storedLogSha256": "6a8edbadebf001a66b5f46d017ad4c8c90544a9168b9964c7868e48b43d7e530"
+    },
+    {
+      "name": "T3-combined",
+      "edits": [
+        {
+          "source": "../cbcl-pairing/src/credential_v2/endpoint.rs",
+          "before": "if &logical.carrier_ceremony_id != self.carrier.carrier_ceremony_id() {\n            return self.fail(CredentialV2Error::Profile);\n        }",
+          "after": "// mutation: endpoint ceremony equality removed",
+          "sourceSha256": "1d6b8f2e09283c42966f61f8eb3939958d082617c844457f38e4a14f753854b1",
+          "mutantSha256": "3b43e4d2e199b31d96208f36ff968257384c30efe03bbfa88e30ad8bc9df45e0"
+        },
+        {
+          "source": "crates/selfsame-pairing/src/credential_v2/bodies.rs",
+          "before": "if body.carrier_ceremony_id() != &bound.ceremony {\n            return Err(CredentialV2Error::Profile);\n        }",
+          "after": "// mutation: body authority ceremony equality removed",
+          "sourceSha256": "d4a35f78003975597621f755372798cb5ec205a979ab0b04dfeb03ba9f388aca",
+          "mutantSha256": "312788c0895f20744eaa90a042c9cc1547a3edd0a2206e158a0023c1d2ff846e"
+        }
+      ],
+      "expectedKilled": true,
+      "killed": true,
+      "exit": 101,
+      "log": "logs/transition-T3-combined.log",
+      "rawLogSha256": "2bd382d1ae58697e45a2d83ea97a3054be0cf45c09f7dc5a34deeaa0747c5283",
+      "classification": "behavioral kill",
+      "storedLogSha256": "2bd382d1ae58697e45a2d83ea97a3054be0cf45c09f7dc5a34deeaa0747c5283"
+    },
+    {
+      "name": "T4-predecessor",
+      "edits": [
+        {
+          "source": "../cbcl-pairing/src/credential_v2/endpoint.rs",
+          "before": "if !bool::from(logical.predecessor_digest.ct_eq(&last.content_hash)) {\n            return self.fail(CredentialV2Error::Predecessor);\n        }",
+          "after": "// mutation: exact current predecessor removed",
+          "sourceSha256": "1d6b8f2e09283c42966f61f8eb3939958d082617c844457f38e4a14f753854b1",
+          "mutantSha256": "1d09a6138eafdbd330247068e2c7ee30d538df15dff347493c04baaf40007626"
+        }
+      ],
+      "expectedKilled": true,
+      "killed": true,
+      "exit": 101,
+      "log": "logs/transition-T4-predecessor.log",
+      "rawLogSha256": "54d8f674a543bbfa8f718b649b5095278501b83bc2b291e41cb325a60d2c5b38",
+      "classification": "behavioral kill",
+      "storedLogSha256": "54d8f674a543bbfa8f718b649b5095278501b83bc2b291e41cb325a60d2c5b38"
+    },
+    {
+      "name": "T5-retained-preview",
+      "edits": [
+        {
+          "source": "crates/selfsame-pairing/src/credential_v2/bodies.rs",
+          "before": "if &found != retained {\n        return Err(CredentialV2Error::Profile);\n    }",
+          "after": "// mutation: coherent retained preview equality removed",
+          "sourceSha256": "d4a35f78003975597621f755372798cb5ec205a979ab0b04dfeb03ba9f388aca",
+          "mutantSha256": "0608bcb91037057ac1a476535e5de33bcc973145172df265d117fb873c0f57ed"
+        }
+      ],
+      "expectedKilled": true,
+      "killed": true,
+      "exit": 101,
+      "log": "logs/transition-T5-retained-preview.log",
+      "rawLogSha256": "c608f0c37180fd180e7b1cab7b408255250ae761782d4fa89b028565e91ad89d",
+      "classification": "behavioral kill",
+      "storedLogSha256": "c608f0c37180fd180e7b1cab7b408255250ae761782d4fa89b028565e91ad89d"
+    },
+    {
+      "name": "T6-derived-fingerprint",
+      "edits": [
+        {
+          "source": "crates/selfsame-pairing/src/credential_v2/bodies.rs",
+          "before": "if claimed_digest.is_some_and(|claimed| claimed != fingerprint_digest) {\n        return Err(CredentialV2Error::Profile);\n    }",
+          "after": "// mutation: claimed fingerprint equality removed",
+          "sourceSha256": "d4a35f78003975597621f755372798cb5ec205a979ab0b04dfeb03ba9f388aca",
+          "mutantSha256": "1ea90077fdfa008ddb8bb2891a2d491e906bbf6f1be020fe795dcf84daf3333b"
+        }
+      ],
+      "expectedKilled": true,
+      "killed": true,
+      "exit": 101,
+      "log": "logs/transition-T6-derived-fingerprint.log",
+      "rawLogSha256": "94b8edc5f51807891bbdde3a771371708751fe26d3c9ab6bad9d4977e219e964",
+      "classification": "behavioral kill",
+      "storedLogSha256": "94b8edc5f51807891bbdde3a771371708751fe26d3c9ab6bad9d4977e219e964"
+    },
+    {
+      "name": "T7-response-digest",
+      "edits": [
+        {
+          "source": "crates/selfsame-pairing/src/credential_v2/bodies.rs",
+          "before": "expect_fixed(entries, \"authorityStatusDigest\", &digest)?;",
+          "after": "// mutation: response commitment removed",
+          "sourceSha256": "d4a35f78003975597621f755372798cb5ec205a979ab0b04dfeb03ba9f388aca",
+          "mutantSha256": "0d02a8c25b749c213195666f26fb5899bb29eeb65672e36e2d4aa80f5406a6ee"
+        }
+      ],
+      "expectedKilled": true,
+      "killed": true,
+      "exit": 101,
+      "log": "logs/transition-T7-response-digest.log",
+      "rawLogSha256": "02081a9ee3632f052306d93ae44b50406cfa89127b33b75c265834347ca723fc",
+      "classification": "behavioral kill",
+      "storedLogSha256": "02081a9ee3632f052306d93ae44b50406cfa89127b33b75c265834347ca723fc"
+    },
+    {
+      "name": "T8-status-signature",
+      "edits": [
+        {
+          "source": "crates/selfsame-pairing/src/credential_v2.rs",
+          "before": "    VerifyingKey::from_bytes(&declared.jwk.public_key)\n        .map_err(|_| CredentialV2OfferError::Refused)?\n        .verify(\n            &labelled_hash(AUTHORITY_SIGNATURE_DOMAIN, &unsigned_bytes),\n            &Signature::from_bytes(&signature),\n        )\n        .map_err(|_| CredentialV2OfferError::Refused)?;",
+          "after": "    // mutation: authority status signature verification removed",
+          "sourceSha256": "6b4139ff11ee4e1ddc5f4a1a2177301e0680030a666a4ccf344cb1a5d14e672e",
+          "mutantSha256": "d0e2e791ae93505102250137e77577c4b2f03c6e3438369ceaea9a77475cd4a8"
+        }
+      ],
+      "expectedKilled": true,
+      "killed": true,
+      "exit": 101,
+      "log": "logs/transition-T8-status-signature.log",
+      "rawLogSha256": "eb89c5ea005cf4f533da0fc661d95ecdafae2a3968a439fbe546d59847fa8ca8",
+      "classification": "behavioral kill",
+      "storedLogSha256": "eb89c5ea005cf4f533da0fc661d95ecdafae2a3968a439fbe546d59847fa8ca8"
+    },
+    {
+      "name": "T9-status-ceremony",
+      "edits": [
+        {
+          "source": "crates/selfsame-pairing/src/credential_v2.rs",
+          "before": "\n        || ceremony.as_bytes().map(Vec::as_slice) != Some(expected_ceremony_id.as_slice())",
+          "after": "",
+          "sourceSha256": "6b4139ff11ee4e1ddc5f4a1a2177301e0680030a666a4ccf344cb1a5d14e672e",
+          "mutantSha256": "ab26f92369fc2ffb19fe0eb7f82220713dd15ad4ded41ce272835bb4abf53c0b"
+        }
+      ],
+      "expectedKilled": true,
+      "killed": true,
+      "exit": 101,
+      "log": "logs/transition-T9-status-ceremony.log",
+      "rawLogSha256": "b7bffa55824d09c2ad98a2606ea9019cc3b5fc7cc94f8f53f1b6b45b7f887eb9",
+      "classification": "behavioral kill",
+      "storedLogSha256": "b7bffa55824d09c2ad98a2606ea9019cc3b5fc7cc94f8f53f1b6b45b7f887eb9"
+    },
+    {
+      "name": "T10-status-offer",
+      "edits": [
+        {
+          "source": "crates/selfsame-pairing/src/credential_v2.rs",
+          "before": "\n        || offer_digest.as_bytes().map(Vec::as_slice) != Some(expected_offer_core_digest.as_slice())",
+          "after": "",
+          "sourceSha256": "6b4139ff11ee4e1ddc5f4a1a2177301e0680030a666a4ccf344cb1a5d14e672e",
+          "mutantSha256": "bb79d5583f57dad454dd29066c566731504503d4d4a4f1756e4e6e3f038a01f5"
+        }
+      ],
+      "expectedKilled": true,
+      "killed": true,
+      "exit": 101,
+      "log": "logs/transition-T10-status-offer.log",
+      "rawLogSha256": "1ac92fc51780d973613e78f997d99cb021638a7d18d94249ec7feeaef900399d",
+      "classification": "behavioral kill",
+      "storedLogSha256": "1ac92fc51780d973613e78f997d99cb021638a7d18d94249ec7feeaef900399d"
+    },
+    {
+      "name": "T11-bound-did",
+      "edits": [
+        {
+          "source": "crates/selfsame-pairing/src/credential_v2/bodies.rs",
+          "before": "CredentialV2AuthorityStatus::Bound(did) if did == preview.did => {",
+          "after": "CredentialV2AuthorityStatus::Bound(did) => {",
+          "sourceSha256": "d4a35f78003975597621f755372798cb5ec205a979ab0b04dfeb03ba9f388aca",
+          "mutantSha256": "6824012c1a29518ce2a8e766c03d54352fe2d4442fafae47b9ff2b51dc803597"
+        }
+      ],
+      "expectedKilled": true,
+      "killed": true,
+      "exit": 101,
+      "log": "logs/transition-T11-bound-did.log",
+      "rawLogSha256": "7d846dd2ce14bbcf08647bd7387a059f69e67c68db2341f282ffcdf013a76d12",
+      "classification": "behavioral kill",
+      "storedLogSha256": "7d846dd2ce14bbcf08647bd7387a059f69e67c68db2341f282ffcdf013a76d12"
+    },
+    {
+      "name": "T12-status-kind",
+      "edits": [
+        {
+          "source": "crates/selfsame-pairing/src/credential_v2/bodies.rs",
+          "before": "if expected_kind != kind {\n        return Err(CredentialV2Error::Profile);\n    }",
+          "after": "// mutation: expected comparison kind removed",
+          "sourceSha256": "d4a35f78003975597621f755372798cb5ec205a979ab0b04dfeb03ba9f388aca",
+          "mutantSha256": "9f67df6c69a7640fc661343a07d885fb00b22be09511f9d08d37e5889a28228d"
+        }
+      ],
+      "expectedKilled": true,
+      "killed": true,
+      "exit": 101,
+      "log": "logs/transition-T12-status-kind.log",
+      "rawLogSha256": "ac637fb29d58054abc049f00f380ce2f3ec8cbddef992c90bbc9e3be24cddcb7",
+      "classification": "behavioral kill",
+      "storedLogSha256": "ac637fb29d58054abc049f00f380ce2f3ec8cbddef992c90bbc9e3be24cddcb7"
+    },
+    {
+      "name": "T13-result",
+      "edits": [
+        {
+          "source": "crates/selfsame-pairing/src/credential_v2/bodies.rs",
+          "before": "    expect_text(entries, \"result\", result)",
+          "after": "    Ok(()) // mutation: expected result relation removed",
+          "sourceSha256": "d4a35f78003975597621f755372798cb5ec205a979ab0b04dfeb03ba9f388aca",
+          "mutantSha256": "a9b3dd148fcf9d9777e02f0af01c673c0d85600aae6771765fee3611645c47d6"
+        }
+      ],
+      "expectedKilled": true,
+      "killed": true,
+      "exit": 101,
+      "log": "logs/transition-T13-result.log",
+      "rawLogSha256": "7d8b8f6d409f9adfc083bec2a7e2c3a8c6f266ca9b98b902d2a589c7b32bd6b2",
+      "classification": "behavioral kill",
+      "storedLogSha256": "7d8b8f6d409f9adfc083bec2a7e2c3a8c6f266ca9b98b902d2a589c7b32bd6b2"
+    }
+  ],
+  "storedPositiveLog": "logs/transition-positive.log",
+  "storedPositiveLogSha256": "e1c78298a336c19ba357ef8b270c71e77d0802cbb467ffcf38c96fa02bd4dddf"
+}

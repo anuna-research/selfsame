@@ -1,0 +1,16 @@
+   Compiling selfsame v0.1.0 (/Volumes/anuna-03/codex-successor-consent-coverage-closure/selfsame/src-tauri)
+error[E0599]: no method named `clone` found for struct `LinkAuthorization` in the current scope
+   --> src-tauri/src/cbcl_v2_single_link.rs:450:56
+    |
+299 | struct LinkAuthorization {
+    | ------------------------ method `clone` not found for this struct
+...
+450 | fn forbidden(value: LinkAuthorization) { let _ = value.clone(); }
+    |                                                        ^^^^^ method not found in `LinkAuthorization`
+    |
+    = help: items from traits can only be used if the trait is implemented and in scope
+    = note: the following trait defines an item `clone`, perhaps you need to implement it:
+            candidate #1: `Clone`
+
+For more information about this error, try `rustc --explain E0599`.
+error: could not compile `selfsame` (lib test) due to 1 previous error

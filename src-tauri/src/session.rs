@@ -185,6 +185,10 @@ impl CredentialV2Attempt {
         self.0.lock().unwrap_or_else(|p| p.into_inner()).clock = Some(now);
     }
     #[cfg(test)]
+    pub(crate) fn test_entered_effects(&self) -> usize {
+        self.0.lock().unwrap_or_else(|p| p.into_inner()).entered
+    }
+    #[cfg(test)]
     pub(crate) fn test_has_custody(&self) -> bool {
         self.0
             .lock()

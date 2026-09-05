@@ -1,0 +1,9 @@
+   Compiling cbcl-pairing v0.1.0 (/Volumes/anuna-03/codex-consent-comparison-mutation-final/cbcl-pairing)
+   Compiling selfsame-pairing v0.1.0 (/Volumes/anuna-03/codex-consent-comparison-mutation-final/selfsame/crates/selfsame-pairing)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.90s
+     Running tests/credential_v2_offer.rs (/Volumes/anuna-03/codex-selfsame-reconcile-target/debug/deps/credential_v2_offer-30ebe6511f1de268)
+
+running 1 test
+test spec079_valid_comparison_transition_guards ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.04s
