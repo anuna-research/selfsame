@@ -195,6 +195,8 @@ fn wasm_surface_restores_the_exact_allocator_membership_after_process_restart() 
         &[0x29; 32],
         &[0x2a; 32],
         1_800_000_000,
+        "full".into(),
+        &[0x2f; 32],
     )
     .unwrap();
     assert_eq!(restored.restored_phase(), "allocated");

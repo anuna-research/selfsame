@@ -1,0 +1,24 @@
+
+running 1 test
+test credential_v2_manual_tests::manual_qr_encodes_exact_complete_input_at_q_level_and_refuses_capacity ... FAILED
+
+failures:
+
+---- credential_v2_manual_tests::manual_qr_encodes_exact_complete_input_at_q_level_and_refuses_capacity stdout ----
+
+thread 'credential_v2_manual_tests::manual_qr_encodes_exact_complete_input_at_q_level_and_refuses_capacity' (7996995) panicked at crates/selfsame-web-device/src/credential_v2_manual_tests.rs:723:9:
+assertion `left == right` failed
+  left: Number(101)
+ right: 109
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    credential_v2_manual_tests::manual_qr_encodes_exact_complete_input_at_q_level_and_refuses_capacity
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 50 filtered out; finished in 0.08s
+
+   Compiling selfsame-web-device v0.1.0 (/Volumes/anuna-03/codex-successor-closure/selfsame-wasm-manual-1/crates/selfsame-web-device)
+    Finished `test` profile [unoptimized] target(s) in 0.79s
+     Running unittests src/lib.rs (/Volumes/anuna-03/codex-successor-wasm-native-target/debug/deps/selfsame_web_device-a698fa6cb7ff8cd0)
+error: test failed, to rerun pass `-p selfsame-web-device --lib`

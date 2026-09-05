@@ -1,0 +1,22 @@
+
+running 1 test
+test credential_v2_manual_tests::constructor_and_restore_lengths_and_mode_are_strict_and_redacted ... FAILED
+
+failures:
+
+---- credential_v2_manual_tests::constructor_and_restore_lengths_and_mode_are_strict_and_redacted stdout ----
+
+thread 'credential_v2_manual_tests::constructor_and_restore_lengths_and_mode_are_strict_and_redacted' (7994064) panicked at crates/selfsame-web-device/src/credential_v2_manual_tests.rs:352:22:
+called `Option::unwrap()` on a `None` value
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    credential_v2_manual_tests::constructor_and_restore_lengths_and_mode_are_strict_and_redacted
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 50 filtered out; finished in 0.03s
+
+   Compiling selfsame-web-device v0.1.0 (/Volumes/anuna-03/codex-successor-closure/selfsame-wasm-manual-1/crates/selfsame-web-device)
+    Finished `test` profile [unoptimized] target(s) in 0.78s
+     Running unittests src/lib.rs (/Volumes/anuna-03/codex-successor-wasm-native-target/debug/deps/selfsame_web_device-a698fa6cb7ff8cd0)
+error: test failed, to rerun pass `-p selfsame-web-device --lib`

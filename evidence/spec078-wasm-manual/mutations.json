@@ -1,0 +1,261 @@
+{
+  "source_sha256": "a8fb68d08079a11d16466d6d46f44bca785d914301ac48904e1d4984eed52f8c",
+  "restored_sha256": "a8fb68d08079a11d16466d6d46f44bca785d914301ac48904e1d4984eed52f8c",
+  "results": [
+    {
+      "mutant": "manual-byte-order",
+      "test": "actual_manual_constructor_matches_independent_words_and_bootstrap",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "selfsame-web-device",
+        "--lib",
+        "credential_v2_manual_tests::actual_manual_constructor_matches_independent_words_and_bootstrap",
+        "--",
+        "--exact"
+      ],
+      "exit_code": 101,
+      "behavioral_failure": true
+    },
+    {
+      "mutant": "full-c-t-swap",
+      "test": "full_default_keeps_independent_c16_t16_even_with_manual_prefix",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "selfsame-web-device",
+        "--lib",
+        "credential_v2_manual_tests::full_default_keeps_independent_c16_t16_even_with_manual_prefix",
+        "--",
+        "--exact"
+      ],
+      "exit_code": 101,
+      "behavioral_failure": true
+    },
+    {
+      "mutant": "prefix-infers-manual",
+      "test": "full_default_keeps_independent_c16_t16_even_with_manual_prefix",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "selfsame-web-device",
+        "--lib",
+        "credential_v2_manual_tests::full_default_keeps_independent_c16_t16_even_with_manual_prefix",
+        "--",
+        "--exact"
+      ],
+      "exit_code": 101,
+      "behavioral_failure": true
+    },
+    {
+      "mutant": "restore-constant-scalar",
+      "test": "actual_restore_uses_fresh_scalar_before_peer_in_both_modes",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "selfsame-web-device",
+        "--lib",
+        "credential_v2_manual_tests::actual_restore_uses_fresh_scalar_before_peer_in_both_modes",
+        "--",
+        "--exact"
+      ],
+      "exit_code": 101,
+      "behavioral_failure": true
+    },
+    {
+      "mutant": "mode-case-fallback",
+      "test": "constructor_and_restore_lengths_and_mode_are_strict_and_redacted",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "selfsame-web-device",
+        "--lib",
+        "credential_v2_manual_tests::constructor_and_restore_lengths_and_mode_are_strict_and_redacted",
+        "--",
+        "--exact"
+      ],
+      "exit_code": 101,
+      "behavioral_failure": true
+    },
+    {
+      "mutant": "length-truncation",
+      "test": "constructor_and_restore_lengths_and_mode_are_strict_and_redacted",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "selfsame-web-device",
+        "--lib",
+        "credential_v2_manual_tests::constructor_and_restore_lengths_and_mode_are_strict_and_redacted",
+        "--",
+        "--exact"
+      ],
+      "exit_code": 101,
+      "behavioral_failure": true
+    },
+    {
+      "mutant": "private-fields-swapped",
+      "test": "actual_manual_constructor_matches_independent_words_and_bootstrap",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "selfsame-web-device",
+        "--lib",
+        "credential_v2_manual_tests::actual_manual_constructor_matches_independent_words_and_bootstrap",
+        "--",
+        "--exact"
+      ],
+      "exit_code": 101,
+      "behavioral_failure": true
+    },
+    {
+      "mutant": "private-text-in-public-effect",
+      "test": "actual_manual_constructor_matches_independent_words_and_bootstrap",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "selfsame-web-device",
+        "--lib",
+        "credential_v2_manual_tests::actual_manual_constructor_matches_independent_words_and_bootstrap",
+        "--",
+        "--exact"
+      ],
+      "exit_code": 101,
+      "behavioral_failure": true
+    },
+    {
+      "mutant": "early-peer-checkpoint-ack",
+      "test": "actual_restore_uses_fresh_scalar_before_peer_in_both_modes",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "selfsame-web-device",
+        "--lib",
+        "credential_v2_manual_tests::actual_restore_uses_fresh_scalar_before_peer_in_both_modes",
+        "--",
+        "--exact"
+      ],
+      "exit_code": 101,
+      "behavioral_failure": true
+    },
+    {
+      "mutant": "cancel-retains-core",
+      "test": "terminal_cancel_failure_and_exclusive_expiry_clear_private_core_values",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "selfsame-web-device",
+        "--lib",
+        "credential_v2_manual_tests::terminal_cancel_failure_and_exclusive_expiry_clear_private_core_values",
+        "--",
+        "--exact"
+      ],
+      "exit_code": 101,
+      "behavioral_failure": true
+    },
+    {
+      "mutant": "established-mode-capability",
+      "test": "manual_finished_and_established_restore_grant_no_bootstrap_capability",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "selfsame-web-device",
+        "--lib",
+        "credential_v2_manual_tests::manual_finished_and_established_restore_grant_no_bootstrap_capability",
+        "--",
+        "--exact"
+      ],
+      "exit_code": 101,
+      "behavioral_failure": true
+    },
+    {
+      "mutant": "qr-skips-recognizer",
+      "test": "manual_qr_shared_recognizer_runs_before_rendering_or_capacity",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "selfsame-web-device",
+        "--lib",
+        "credential_v2_manual_tests::manual_qr_shared_recognizer_runs_before_rendering_or_capacity",
+        "--",
+        "--exact"
+      ],
+      "exit_code": 101,
+      "behavioral_failure": true
+    },
+    {
+      "mutant": "qr-skips-expiry",
+      "test": "manual_qr_shared_recognizer_runs_before_rendering_or_capacity",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "selfsame-web-device",
+        "--lib",
+        "credential_v2_manual_tests::manual_qr_shared_recognizer_runs_before_rendering_or_capacity",
+        "--",
+        "--exact"
+      ],
+      "exit_code": 101,
+      "behavioral_failure": true
+    },
+    {
+      "mutant": "qr-l-level",
+      "test": "manual_qr_encodes_exact_complete_input_at_q_level_and_refuses_capacity",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "selfsame-web-device",
+        "--lib",
+        "credential_v2_manual_tests::manual_qr_encodes_exact_complete_input_at_q_level_and_refuses_capacity",
+        "--",
+        "--exact"
+      ],
+      "exit_code": 101,
+      "behavioral_failure": true
+    },
+    {
+      "mutant": "qr-truncates-complete-text",
+      "test": "manual_qr_encodes_exact_complete_input_at_q_level_and_refuses_capacity",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "selfsame-web-device",
+        "--lib",
+        "credential_v2_manual_tests::manual_qr_encodes_exact_complete_input_at_q_level_and_refuses_capacity",
+        "--",
+        "--exact"
+      ],
+      "exit_code": 101,
+      "behavioral_failure": true
+    }
+  ]
+}
