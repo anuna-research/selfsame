@@ -100,6 +100,7 @@ pub fn run() {
             cbcl_v2_commands::cbcl_v2_recognise,
             cbcl_v2_commands::cbcl_v2_relay_decide,
             cbcl_v2_commands::cbcl_v2_preliminary_decide,
+            cbcl_v2_commands::cbcl_v2_compare,
             cbcl_v2_commands::cbcl_v2_final_decide,
             cbcl_v2_commands::cbcl_v2_finish,
             cbcl_v2_commands::cbcl_v2_pending_recoveries,
