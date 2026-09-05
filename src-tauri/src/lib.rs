@@ -110,6 +110,7 @@ pub fn run() {
             commands::flush_publications,
             commands::forget_identity,
             commands::service_endpoint,
+            commands::build_info,
             app_identity::alias_preview,
             app_identity::home_fingerprint,
             app_identity::app_identity_derive,

@@ -649,7 +649,10 @@ function refuseCode(code, note) {
     : "That code isn't valid";
   $("[data-refused-body]").textContent = expired
     ? "Codes last five minutes. Ask the device to show a new one — the old one can't be used, even by you."
-    : "Check it against the device again, or scan it instead.";
+    : "Check it against the device again, or scan it instead. If this came " +
+      "from an application inviting you to connect — a QR on its website — " +
+      "it isn't a device code: use Connect an application on the " +
+      "Applications screen.";
   show("refused-code");
 }
 
@@ -971,3 +974,13 @@ refresh()
   .catch((e) => {
     document.body.textContent = `Selfsame could not start: ${message(e)}`;
   });
+
+// Which build is this, exactly — asked of the binary, not of this page, so a
+// stale webview asset cannot misreport the build it rides in. Best-effort:
+// harnesses that stub unknown commands as null render nothing.
+invoke("build_info")
+  .then((sha) => {
+    const el = $("[data-build-id]");
+    if (el && typeof sha === "string") el.textContent = sha;
+  })
+  .catch(() => {});

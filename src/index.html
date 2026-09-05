@@ -117,6 +117,10 @@
         <header class="home-head">
           <div class="mark" aria-hidden="true"></div>
           <span class="brand">Selfsame</span>
+          <!-- The binary's short git sha (build_info). Dev builds all say
+               version 0.1.0 and install over each other silently, so this
+               line is the only visible fact about what is actually running. -->
+          <span class="build" data-build-id></span>
         </header>
 
         <div class="card card--root">

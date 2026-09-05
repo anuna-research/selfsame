@@ -178,7 +178,20 @@ export function initPairing(d) {
       return "The application's final receipt or reciprocal account binding could not be verified. The grant was not installed.";
     if (token === "AuthorityUnreachable" || token === "PairingIssuerUnavailable" || token === "PairingIdentityUnavailable")
       return "Your account's authority could not be reached to verify this pairing. Nothing was shared.";
-    return "That invitation could not be recognised. Nothing was shared.";
+    if (token === "PairingApplicationAlreadyLinked")
+      return "This application already has a link on this device. Finish or close it from the Applications screen before pairing again. Nothing was shared.";
+    if (token === "PairingResolverUnavailable")
+      return "Your new identity could not be published to the application's declared resolver. Check your connection and try again.";
+    if (token === "PairingOfferExpired")
+      return "The application's offer expired before approval finished. Ask the application for a fresh invitation.";
+    if (token === "PairingPreviewChanged")
+      return "The identity being linked changed since it was shown to you, so Selfsame refused. Nothing was shared.";
+    // Custody refusals arrive as person-readable sentences ("finish writing
+    // down your recovery phrase first") rather than closed tokens; show them
+    // as they stand. Any other unlisted token names itself, because a hidden
+    // token makes unrelated failures indistinguishable at the screen.
+    if (typeof token === "string" && token.includes(" ")) return token;
+    return `That invitation could not be recognised${token ? ` (${token})` : ""}. Nothing was shared.`;
   }
 
   function paintConsent({ title, authority, application, action, fields: fieldList, approve = "Approve request", decline = "Decline" }) {

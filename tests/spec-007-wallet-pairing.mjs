@@ -11,6 +11,13 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "src");
 const TAURI_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "src-tauri", "src");
 const MIME = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css" };
 
+function launchBrowser() {
+  return puppeteer.launch({
+    headless: true,
+    args: process.env.CI ? ["--no-sandbox", "--disable-dev-shm-usage"] : [],
+  });
+}
+
 test("TEST-1161 pending completion retains the authenticated offer profile for restart recovery", () => {
   const completion = readFileSync(join(TAURI_ROOT, "cbcl_v2_completion.rs"), "utf8");
   const commands = readFileSync(join(TAURI_ROOT, "cbcl_v2_commands.rs"), "utf8");
@@ -33,10 +40,7 @@ test("TEST-814 CBCL wallet states are keyboard complete and WCAG-clean", async (
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   t.after(() => server.close());
   const origin = `http://127.0.0.1:${server.address().port}`;
-  const browser = await puppeteer.launch({
-    headless: true,
-    args: process.env.CI ? ["--no-sandbox", "--disable-dev-shm-usage"] : [],
-  });
+  const browser = await launchBrowser();
   t.after(() => browser.close());
 
   for (const width of [1200, 320]) {
@@ -93,7 +97,11 @@ test("TEST-814 CBCL wallet states are keyboard complete and WCAG-clean", async (
     await visible(page, "applications");
 
     await page.click('[data-action="to-pairing"]');
+    await page.$eval('[data-pairing-legacy]', el => { el.open = true; });
+    await page.waitForFunction(() => !document.querySelector('[data-pairing-passcode-field]').hidden);
+    await page.type("#pairing-presence-code", "PAIR1-" + Array(11).fill("00000").join("-"));
     await page.type("#pairing-input", "selfsame-pairing-v2:obsolete");
+    await page.type("#pairing-passcode", "correct horse battery staple");
     await page.click('[data-action="start-cbcl-pairing"]');
     await page.waitForFunction(() => !document.querySelector('[data-error="pairing"]').hidden);
     assert.match(
@@ -118,7 +126,7 @@ test("TEST-1161 restart recovery preserves pending through rotation consent", as
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   t.after(() => server.close());
-  const browser = await puppeteer.launch({ headless: true });
+  const browser = await launchBrowser();
   t.after(() => browser.close());
   const page = await browser.newPage();
   await page.evaluateOnNewDocument(recoveryBridge);
@@ -176,7 +184,7 @@ test("TEST-1159 installed links reload, prompt on rotation, and unlink locally",
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   t.after(() => server.close());
-  const browser = await puppeteer.launch({ headless: true });
+  const browser = await launchBrowser();
   t.after(() => browser.close());
   const page = await browser.newPage();
   await page.evaluateOnNewDocument(installedBridge);
@@ -239,7 +247,7 @@ test("TEST-1162 interrupted pre-payload links are visible and locally abandonabl
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   t.after(() => server.close());
-  const browser = await puppeteer.launch({ headless: true });
+  const browser = await launchBrowser();
   t.after(() => browser.close());
   const page = await browser.newPage();
   await page.evaluateOnNewDocument(pendingLinkBridge);

@@ -652,6 +652,17 @@ pub fn service_endpoint() -> String {
     net::endpoint(APP)
 }
 
+/// The build's own identity: the short git sha stamped by `build.rs`.
+///
+/// Answered from the binary rather than a page asset, so a stale webview
+/// bundle cannot misreport which build it rides in. The home screen shows it
+/// in one muted line — the difference between "which build is this phone
+/// running" being a glance and being an afternoon.
+#[tauri::command]
+pub fn build_info() -> &'static str {
+    env!("SELFSAME_BUILD_SHA")
+}
+
 /// Wire the commands into a Tauri builder.
 ///
 /// The store is adopted and proven **first**. `store::init` writes a probe value
