@@ -70,6 +70,10 @@ tauri-plugin-biometric = "2"
 tauri-plugin-selfsame-store = { path = "../crates/tauri-plugin-selfsame-store" }
 
 [dev-dependencies]
+# SPEC-077 TEST-008: feature unification applies only to native test builds.
+selfsame-app-identity-net = { path = "../crates/selfsame-app-identity-net", features = ["native-test-support"] }
+tauri = { version = "2", features = ["test"] }
+zeroize = { version = "1", features = ["serde"] }
 # TEST-901/TEST-902's loopback TLS relay: a self-signed root minted per test
 # run, injected only through the test-only connector constructor.
 rcgen = "0.13"
@@ -80,6 +84,6 @@ axum = "0.7"
 base64ct = { workspace = true }
 tempfile = "3"
 tokio = { workspace = true }
-serde_json = { workspace = true }
+serde_json = { workspace = true, features = ["raw_value"] }
 ed25519-dalek = { workspace = true, features = ["std"] }
 blake3 = { workspace = true, features = ["std"] }
