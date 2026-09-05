@@ -41,6 +41,7 @@ pub mod cbcl_pairing;
 pub mod cbcl_registry;
 pub mod cbcl_transport;
 pub mod cbcl_v2_claimant;
+mod cbcl_v2_clock;
 pub mod cbcl_v2_commands;
 pub mod cbcl_v2_completion;
 pub mod cbcl_v2_policy;
@@ -73,6 +74,26 @@ pub fn run() {
     let builder = builder.plugin(tauri_plugin_selfsame_store::init());
 
     builder
+        .on_window_event(|window, event| {
+            use tauri::Manager as _;
+            let foreground = match event {
+                tauri::WindowEvent::Focused(foreground) => Some(*foreground),
+                #[cfg(mobile)]
+                tauri::WindowEvent::Suspended => Some(false),
+                #[cfg(mobile)]
+                tauri::WindowEvent::Resumed => Some(true),
+                _ => None,
+            };
+            if let Some(foreground) = foreground {
+                if let Some(session) = window.try_state::<commands::AppSession>() {
+                    let mut state = session.0.lock().unwrap_or_else(|p| p.into_inner());
+                    state.cbcl_v2_attempts.foreground(foreground);
+                    if !foreground {
+                        state.revoke_cbcl_v2();
+                    }
+                }
+            }
+        })
         .setup(|app| {
             commands::init(app)?;
             Ok(())
@@ -97,6 +118,14 @@ pub fn run() {
             cbcl_pairing::cbcl_pairing_approve,
             cbcl_pairing::cbcl_pairing_decline,
             cbcl_pairing::cbcl_pairing_cancel,
+            cbcl_v2_commands::single_link::cbcl_v2_begin_handoff,
+            cbcl_v2_commands::single_link::cbcl_v2_contact,
+            cbcl_v2_commands::single_link::cbcl_v2_unlock_preview,
+            cbcl_v2_commands::single_link::cbcl_v2_preview_rendered,
+            cbcl_v2_commands::single_link::cbcl_v2_link,
+            cbcl_v2_commands::single_link::cbcl_v2_continue_link,
+            cbcl_v2_commands::single_link::cbcl_v2_finish_link,
+            cbcl_v2_commands::single_link::cbcl_v2_cancel_link,
             cbcl_v2_commands::cbcl_v2_recognise,
             cbcl_v2_commands::cbcl_v2_recognise_handoff,
             cbcl_v2_commands::cbcl_v2_relay_decide,

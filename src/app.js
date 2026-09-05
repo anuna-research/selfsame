@@ -82,7 +82,9 @@ const ui = {
 
 // ── routing ────────────────────────────────────────────────────────────
 
+let pairingNavigation = null;
 function show(name) {
+  pairingNavigation?.(name);
   $$(".screen").forEach((s) => {
     s.hidden = s.dataset.screen !== name;
   });
@@ -925,6 +927,7 @@ const appIdentity = initAppIdentity({
 const pairing = initPairing({
   $, show, invoke, fail, message, renderLifehash, actions, busy, idle, refresh,
 });
+pairingNavigation = pairing.leaving;
 
 // The CON-219 enrolment reuses three screens the same-device path (IMPL-004)
 // also owns: consent-application, presence, and fingerprint-compare. Their

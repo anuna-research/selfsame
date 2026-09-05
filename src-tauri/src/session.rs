@@ -24,10 +24,7 @@
 
 use std::{
     path::PathBuf,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc, Weak,
-    },
+    sync::{Arc, Mutex, Weak},
 };
 
 use crate::commands::UiError;
@@ -36,28 +33,240 @@ use did_crdt::core::document::Document;
 use selfsame_core::{identity, profile, record::Offer};
 use serde::{Deserialize, Serialize};
 
-/// Memory-only attempt identity. Arc identity is the generation: it cannot wrap
-/// or accidentally identify a later ceremony as the cancelled one.
-#[derive(Clone, Default)]
-pub(crate) struct CredentialV2Attempt(Arc<AtomicBool>);
+/// Fixed entry mode. Persisting this provenance grants no live execution authority.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum CredentialV2Flow {
+    SingleLink,
+    #[default]
+    LegacyTwoDecision,
+}
+impl CredentialV2Flow {
+    pub(crate) fn is_legacy(&self) -> bool {
+        *self == Self::LegacyTwoDecision
+    }
+}
+
+struct AttemptState {
+    terminal: Option<&'static str>,
+    mode: CredentialV2Flow,
+    tag: String,
+    root_generation: Option<[u8; 32]>,
+    deadline: Option<crate::cbcl_v2_clock::Deadline>,
+    entered: usize,
+    custody: Option<selfsame_app_identity::hierarchy::HierarchyRoot>,
+    #[cfg(test)]
+    clock: Option<Option<crate::cbcl_v2_clock::Snapshot>>,
+}
+
+/// Arc identity is the non-wrapping native generation. Revocation and effect
+/// entry share this mutex even while a blocking worker owns the socket/root.
+#[derive(Clone)]
+pub(crate) struct CredentialV2Attempt(Arc<Mutex<AttemptState>>);
+
+impl Default for CredentialV2Attempt {
+    fn default() -> Self {
+        use rand::RngCore as _;
+        let mut bytes = [0; 16];
+        rand::rngs::OsRng.fill_bytes(&mut bytes);
+        Self(Arc::new(Mutex::new(AttemptState {
+            terminal: None,
+            mode: CredentialV2Flow::LegacyTwoDecision,
+            tag: bytes.iter().map(|b| format!("{b:02x}")).collect(),
+            root_generation: None,
+            deadline: None,
+            entered: 0,
+            custody: None,
+            #[cfg(test)]
+            clock: None,
+        })))
+    }
+}
+
+/// An entered effect is owned by its worker/transaction, never a permission to
+/// start another effect. Dropping it cannot clear the revocation fence.
+pub(crate) struct CredentialV2Effect(CredentialV2Attempt);
+impl Drop for CredentialV2Effect {
+    fn drop(&mut self) {
+        self.0 .0.lock().unwrap_or_else(|p| p.into_inner()).entered -= 1;
+    }
+}
 
 impl CredentialV2Attempt {
-    pub(crate) fn check(&self) -> Result<(), UiError> {
-        if self.0.load(Ordering::Acquire) {
-            return Err(UiError::from("PairingCancelled"));
+    fn check_locked(state: &mut AttemptState) -> Result<(), UiError> {
+        if let Some(error) = state.terminal {
+            return Err(UiError::from(error));
         }
-        Ok(())
+        let checked = (|| {
+            if let Some(expected) = state.root_generation {
+                let key = crate::custody::Custody::root_public_key()
+                    .map_err(|_| UiError::from("PairingRootChanged"))?;
+                if crate::cbcl_v2_completion::root_generation(&key) != expected {
+                    return Err(UiError::from("PairingRootChanged"));
+                }
+            }
+            if state.mode == CredentialV2Flow::SingleLink {
+                #[cfg(not(test))]
+                let now = crate::cbcl_v2_clock::snapshot()?;
+                #[cfg(test)]
+                let now = match state.clock {
+                    None => crate::cbcl_v2_clock::snapshot()?,
+                    Some(Some(now)) => now,
+                    Some(None) => return Err(UiError::from("PairingClockUnavailable")),
+                };
+                if let Some(bound) = state.deadline.as_mut() {
+                    bound.check(now)?;
+                }
+            }
+            Ok(())
+        })();
+        if let Err(ref error) = checked {
+            state.custody = None;
+            state.terminal = Some(match error.to_string().as_str() {
+                "PairingExpired" => "PairingExpired",
+                "PairingRootChanged" => "PairingRootChanged",
+                _ => "PairingClockUnavailable",
+            });
+        }
+        checked
     }
-
+    pub(crate) fn check(&self) -> Result<(), UiError> {
+        Self::check_locked(&mut self.0.lock().unwrap_or_else(|p| p.into_inner()))
+    }
+    pub(crate) fn enter(&self) -> Result<CredentialV2Effect, UiError> {
+        let mut state = self.0.lock().unwrap_or_else(|p| p.into_inner());
+        Self::check_locked(&mut state)?;
+        state.entered = state
+            .entered
+            .checked_add(1)
+            .ok_or_else(|| UiError::from("PairingFailed"))?;
+        Ok(CredentialV2Effect(self.clone()))
+    }
     pub(crate) fn run<T>(&self, action: impl FnOnce() -> Result<T, UiError>) -> Result<T, UiError> {
-        self.check()?;
+        let _entry = self.enter()?;
         let value = action()?;
         self.check()?;
         Ok(value)
     }
-
+    /// Register I/O before polling it, and refuse every resumed poll after the
+    /// fence. A completed future is checked before its result can enable work.
+    pub(crate) async fn io<T>(
+        &self,
+        future: impl std::future::Future<Output = Result<T, UiError>>,
+    ) -> Result<T, UiError> {
+        let _entry = self.enter()?;
+        let mut future = std::pin::pin!(future);
+        let mut pulse = Box::pin(tokio::time::sleep(std::time::Duration::from_millis(50)));
+        let value = std::future::poll_fn(|cx| {
+            if let Err(error) = self.check() {
+                return std::task::Poll::Ready(Err(error));
+            }
+            use std::future::Future as _;
+            if pulse.as_mut().poll(cx).is_ready() {
+                pulse
+                    .as_mut()
+                    .reset(tokio::time::Instant::now() + std::time::Duration::from_millis(50));
+                let _ = pulse.as_mut().poll(cx);
+            }
+            future.as_mut().poll(cx)
+        })
+        .await?;
+        self.check()?;
+        Ok(value)
+    }
+    pub(crate) fn mode(&self) -> CredentialV2Flow {
+        self.0.lock().unwrap_or_else(|p| p.into_inner()).mode
+    }
+    pub(crate) fn tag(&self) -> String {
+        self.0.lock().unwrap_or_else(|p| p.into_inner()).tag.clone()
+    }
+    #[cfg(test)]
+    pub(crate) fn test_clock(&self, now: Option<crate::cbcl_v2_clock::Snapshot>) {
+        self.0.lock().unwrap_or_else(|p| p.into_inner()).clock = Some(now);
+    }
+    #[cfg(test)]
+    pub(crate) fn test_has_custody(&self) -> bool {
+        self.0
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .custody
+            .is_some()
+    }
+    pub(crate) fn clear_custody(&self) {
+        self.0.lock().unwrap_or_else(|p| p.into_inner()).custody = None;
+    }
+    pub(crate) fn require_mode(&self, mode: CredentialV2Flow) -> Result<(), UiError> {
+        if self.mode() != mode {
+            return Err(UiError::from("PairingWrongMode"));
+        }
+        Ok(())
+    }
+    pub(crate) fn bind_deadline(
+        &self,
+        start: crate::cbcl_v2_clock::Snapshot,
+        offer: u64,
+        relay: u64,
+    ) -> Result<(), UiError> {
+        let mut state = self.0.lock().unwrap_or_else(|p| p.into_inner());
+        Self::check_locked(&mut state)?;
+        if state.mode != CredentialV2Flow::SingleLink || state.deadline.is_some() {
+            return Err(UiError::from("PairingWrongPhase"));
+        }
+        state.deadline = Some(crate::cbcl_v2_clock::Deadline::new(start, offer, relay)?);
+        Self::check_locked(&mut state)
+    }
     fn cancel(&self) {
-        self.0.store(true, Ordering::Release);
+        let mut state = self.0.lock().unwrap_or_else(|p| p.into_inner());
+        state.terminal = Some("PairingCancelled");
+        state.custody = None;
+    }
+    pub(crate) fn retain_custody(
+        &self,
+        root: selfsame_app_identity::hierarchy::HierarchyRoot,
+    ) -> Result<(), UiError> {
+        {
+            let mut state = self.0.lock().unwrap_or_else(|p| p.into_inner());
+            Self::check_locked(&mut state)?;
+            if state.deadline.is_none() || state.custody.is_some() {
+                return Err(UiError::from("PairingWrongPhase"));
+            }
+            state.custody = Some(root);
+        }
+        let weak = Arc::downgrade(&self.0);
+        // This watchdog owns no worker lease or root. Continuous-time checks
+        // also run on every effect and wake after OS suspension.
+        std::thread::Builder::new()
+            .name("pairing-custody-expiry".into())
+            .spawn(move || loop {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                let Some(inner) = weak.upgrade() else {
+                    break;
+                };
+                let mut state = inner.lock().unwrap_or_else(|p| p.into_inner());
+                if Self::check_locked(&mut state).is_err() || state.custody.is_none() {
+                    break;
+                }
+            })
+            .map_err(|_| {
+                self.cancel();
+                UiError::from("PairingFailed")
+            })?;
+        Ok(())
+    }
+    pub(crate) fn with_custody<T>(
+        &self,
+        action: impl FnOnce(&selfsame_app_identity::hierarchy::HierarchyRoot) -> Result<T, UiError>,
+    ) -> Result<T, UiError> {
+        let mut state = self.0.lock().unwrap_or_else(|p| p.into_inner());
+        Self::check_locked(&mut state)?;
+        // Synchronous root access and its entry are indivisible with revocation.
+        let root = state
+            .custody
+            .as_ref()
+            .ok_or_else(|| UiError::from("PairingExpired"))?;
+        let result = action(root)?;
+        Self::check_locked(&mut state)?;
+        Ok(result)
     }
 }
 
@@ -67,6 +276,17 @@ impl CredentialV2Attempt {
 pub(crate) struct CredentialV2Attempts {
     current: Option<CredentialV2Attempt>,
     worker: Weak<()>,
+    background: bool,
+    root_change: Arc<std::sync::atomic::AtomicBool>,
+}
+
+/// Shared with a root-writing blocking worker so dropping its caller cannot
+/// admit a new ceremony while the old root is being replaced.
+pub(crate) struct CredentialV2RootChange(Arc<std::sync::atomic::AtomicBool>);
+impl Drop for CredentialV2RootChange {
+    fn drop(&mut self) {
+        self.0.store(false, std::sync::atomic::Ordering::SeqCst);
+    }
 }
 
 pub(crate) struct CredentialV2Operation {
@@ -95,16 +315,97 @@ impl Drop for CredentialV2Operation {
 
 impl CredentialV2Attempts {
     pub(crate) fn begin(&mut self) -> Result<CredentialV2Operation, UiError> {
+        self.require_stable_root()?;
+        if self.background {
+            return Err(UiError::from("PairingCancelled"));
+        }
         if self.worker.upgrade().is_some()
-            || self
-                .current
-                .as_ref()
-                .is_some_and(|attempt| !attempt.0.load(Ordering::Acquire))
+            || self.current.as_ref().is_some_and(|attempt| {
+                attempt
+                    .0
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .terminal
+                    .is_none()
+            })
         {
             return Err(UiError::from("PairingAlreadyActive"));
         }
         self.current = Some(CredentialV2Attempt::default());
         self.start_work()
+    }
+
+    pub(crate) fn require_entry_mode(&self, mode: CredentialV2Flow) -> Result<(), UiError> {
+        if let Some(current) = &self.current {
+            if current
+                .0
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .terminal
+                .is_none()
+                || self.worker.upgrade().is_some()
+            {
+                current.require_mode(mode)?;
+            }
+        }
+        Ok(())
+    }
+    pub(crate) fn begin_single_link(&mut self) -> Result<CredentialV2Operation, UiError> {
+        self.require_entry_mode(CredentialV2Flow::SingleLink)?;
+        self.require_stable_root()?;
+        crate::cbcl_v2_clock::snapshot()?;
+        let root = crate::custody::Custody::root_public_key()?;
+        let operation = self.begin()?;
+        {
+            let mut state = operation
+                .attempt
+                .0
+                .lock()
+                .unwrap_or_else(|p| p.into_inner());
+            state.mode = CredentialV2Flow::SingleLink;
+            state.root_generation = Some(crate::cbcl_v2_completion::root_generation(&root));
+        }
+        operation.attempt.check()?;
+        Ok(operation)
+    }
+    pub(crate) fn require_mode(&self, mode: CredentialV2Flow) -> Result<(), UiError> {
+        if let Some(current) = &self.current {
+            current.require_mode(mode)?;
+        }
+        Ok(())
+    }
+    pub(crate) fn tagged(&self, tag: &str) -> Result<CredentialV2Attempt, UiError> {
+        let current = self
+            .current
+            .as_ref()
+            .ok_or_else(|| UiError::from("PairingStaleAttempt"))?;
+        current.require_mode(CredentialV2Flow::SingleLink)?;
+        if current.tag() != tag {
+            return Err(UiError::from("PairingStaleAttempt"));
+        }
+        Ok(current.clone())
+    }
+    pub(crate) fn foreground(&mut self, foreground: bool) {
+        self.background = !foreground;
+        if !foreground {
+            self.cancel();
+        }
+    }
+
+    fn require_stable_root(&self) -> Result<(), UiError> {
+        if self.root_change.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(UiError::from("PairingRootChanged"));
+        }
+        Ok(())
+    }
+
+    fn begin_root_change(&mut self) -> Result<Arc<CredentialV2RootChange>, UiError> {
+        use std::sync::atomic::Ordering::SeqCst;
+        self.root_change
+            .compare_exchange(false, true, SeqCst, SeqCst)
+            .map_err(|_| UiError::from("PairingRootChanged"))?;
+        self.cancel();
+        Ok(Arc::new(CredentialV2RootChange(self.root_change.clone())))
     }
 
     pub(crate) fn start_work(&mut self) -> Result<CredentialV2Operation, UiError> {
@@ -190,6 +491,9 @@ pub struct Session {
     /// Live standalone credential/v2 claimant after the exact relay decision.
     pub pending_cbcl_v2: Option<crate::cbcl_v2_commands::PendingCredentialV2Pairing>,
     pub(crate) cbcl_v2_attempts: CredentialV2Attempts,
+    pub(crate) pending_cbcl_v2_entry: Option<crate::cbcl_v2_claimant::RecognisedCredentialV2Entry>,
+    pub(crate) pending_cbcl_v2_execution:
+        Option<crate::cbcl_v2_commands::single_link::LinkExecution>,
     /// A first-contact CON-219 enrolment fetched from the rendezvous and
     /// reviewed, held between the consent screen and the person's decision
     /// (`IMPL-008` `ADR-913`). Never exposed to the page: the offer plaintext
@@ -208,6 +512,21 @@ pub struct PendingOffer {
 }
 
 impl Session {
+    pub(crate) fn begin_cbcl_v2_root_change(
+        &mut self,
+    ) -> Result<Arc<CredentialV2RootChange>, UiError> {
+        let guard = self.cbcl_v2_attempts.begin_root_change()?;
+        self.revoke_cbcl_v2();
+        Ok(guard)
+    }
+    pub(crate) fn revoke_cbcl_v2(&mut self) {
+        self.cbcl_v2_attempts.cancel();
+        self.pending_cbcl_v2_entry = None;
+        self.pending_cbcl_v2_execution = None;
+        self.pending_cbcl_v2_relay = None;
+        self.pending_cbcl_v2 = None;
+    }
+
     /// The caller owns the Session mutex through both generation validation
     /// and the update. Used for profile results and live-socket reinsertion.
     pub(crate) fn update_cbcl_v2_attempt<T>(
@@ -235,6 +554,8 @@ impl Session {
             pending_cbcl_v2_relay: None,
             pending_cbcl_v2: None,
             cbcl_v2_attempts: CredentialV2Attempts::default(),
+            pending_cbcl_v2_entry: None,
+            pending_cbcl_v2_execution: None,
             pending_enrolment: None,
         }
     }

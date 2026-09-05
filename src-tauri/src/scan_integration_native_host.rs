@@ -30,7 +30,16 @@ struct Request<'a> {
 #[serde(rename_all = "kebab-case")]
 enum Op {
     Initialize,
+    BeginHandoff,
+    Contact,
+    UnlockPreview,
+    PreviewRendered,
+    Link,
+    ContinueLink,
+    FinishLink,
+    CancelLink,
     RecogniseHandoff,
+    RecogniseLegacy,
     RelayDecide,
     PreliminaryDecide,
     Compare,
@@ -55,6 +64,13 @@ struct Initialize {
 #[serde(deny_unknown_fields)]
 struct Handoff {
     handoff: Zeroizing<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct LegacyEntry {
+    invitation: Zeroizing<String>,
+    presence_code: Zeroizing<String>,
 }
 
 #[derive(Deserialize)]
@@ -176,16 +192,78 @@ impl Host {
         }
         if matches!(request.op, Op::Cancel | Op::Shutdown) {
             let _: Empty = args(request.args)?;
-            return view(cbcl_v2_cancel(self.app.state()).await?);
+            self.app
+                .state::<AppSession>()
+                .0
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .revoke_cbcl_v2();
+            return Ok(Value::Null);
         }
         if !self.initialized {
             return Err(UiError::from("HostNotInitialized"));
         }
         completion::shared_memkeyring::assert_active();
         match request.op {
+            Op::BeginHandoff => view(
+                single_link::cbcl_v2_begin_handoff(args(request.args)?, self.app.state()).await?,
+            ),
+            Op::Contact => {
+                view(single_link::cbcl_v2_contact(args(request.args)?, self.app.state()).await?)
+            }
+            Op::UnlockPreview => view(
+                single_link::cbcl_v2_unlock_preview(args(request.args)?, self.app.state()).await?,
+            ),
+            Op::PreviewRendered => view(
+                single_link::cbcl_v2_preview_rendered(args(request.args)?, self.app.state())
+                    .await?,
+            ),
+            Op::Link => {
+                view(single_link::cbcl_v2_link(args(request.args)?, self.app.state()).await?)
+            }
+            Op::ContinueLink => view(
+                single_link::cbcl_v2_continue_link(args(request.args)?, self.app.state()).await?,
+            ),
+            Op::CancelLink => {
+                view(single_link::cbcl_v2_cancel_link(args(request.args)?, self.app.state()).await?)
+            }
+            Op::FinishLink => {
+                let application = self
+                    .app
+                    .state::<AppSession>()
+                    .0
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .pending_cbcl_v2
+                    .as_ref()
+                    .map(|p| p.claimant.profile().application_id.as_str().to_owned())
+                    .ok_or_else(|| UiError::from("PairingNotStarted"))?;
+                let result =
+                    single_link::cbcl_v2_finish_link(args(request.args)?, self.app.state()).await?;
+                let installed = self.installed().await?;
+                if result.outcome != "installed"
+                    || !installed
+                        .iter()
+                        .any(|row| row["applicationId"] == application)
+                {
+                    return Err(UiError::from("HostInstalledRecordMissing"));
+                }
+                Ok(json!({"outcome": result.outcome, "installedLinks": installed}))
+            }
             Op::RecogniseHandoff => {
                 let args: Handoff = args(request.args)?;
                 view(cbcl_v2_recognise_handoff(args.handoff.to_string(), self.app.state()).await?)
+            }
+            Op::RecogniseLegacy => {
+                let args: LegacyEntry = args(request.args)?;
+                view(
+                    cbcl_v2_recognise(
+                        args.invitation.to_string(),
+                        args.presence_code.to_string(),
+                        self.app.state(),
+                    )
+                    .await?,
+                )
             }
             Op::RelayDecide => {
                 let args: RelayDecision = args(request.args)?;
@@ -268,6 +346,10 @@ impl Drop for Host {
 // this allowlist is closed even if a future command adds dynamic error text.
 fn error_category(error: &UiError) -> &'static str {
     match error.to_string().as_str() {
+        "PairingWrongMode" => "PairingWrongMode",
+        "PairingStaleAttempt" => "PairingStaleAttempt",
+        "PairingExpired" => "PairingExpired",
+        "PairingClockUnavailable" => "PairingClockUnavailable",
         "HostRequestRefused" => "HostRequestRefused",
         "HostNotInitialized" => "HostNotInitialized",
         "HostAlreadyInitialized" => "HostAlreadyInitialized",
@@ -360,7 +442,12 @@ fn run(input: &mut impl BufRead, output: &mut impl Write) -> std::io::Result<()>
         }
         Ok(())
     })();
-    let _ = tauri::async_runtime::block_on(cbcl_v2_cancel(host.app.state()));
+    host.app
+        .state::<AppSession>()
+        .0
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .revoke_cbcl_v2();
     result
 }
 
@@ -405,7 +492,7 @@ fn native_host_memory_init_cancel_shutdown_regression() {
         "{}\n{}\n{}\n{}\n{}\n{}\n{}\n",
         json!({"id":1,"op":"initialize","args":{"mnemonic":mnemonic.to_string(),"passcode":"test-only-913","rootPem":cert.cert.pem(),"proxyUrl":"http://127.0.0.1:1","relayAddress":"127.0.0.1:1"}}),
         json!({"id":2,"op":"installed-links","args":{}}),
-        json!({"id":3,"op":"recognise-handoff","args":{"handoff":"SSPAIR2:invalid"}}),
+        json!({"id":3,"op":"begin-handoff","args":{"handoff":"SSPAIR2:invalid"}}),
         json!({"id":4,"op":"final-decide","args":{"approve":true,"passcode":"test-only-913"}}),
         json!({"id":5,"op":"cancel","args":{}}),
         json!({"id":6,"op":"installed-links","args":{}}),
@@ -434,4 +521,115 @@ fn native_host_memory_init_cancel_shutdown_regression() {
     assert_eq!(responses[6]["ok"], true);
     completion::shared_memkeyring::assert_active();
     assert!(!Custody::exists().unwrap());
+}
+
+#[tokio::test]
+#[ignore = "installs global memory custody/configuration; run alone"]
+async fn native_host_single_link_reserves_before_contact_and_refuses_profile_failure() {
+    use cbcl_pairing::credential_v2::*;
+    use std::net::TcpListener;
+    async fn call(host: &mut Host, op: &str, args: Value) -> Result<Value> {
+        let line = Zeroizing::new(json!({"id":1,"op":op,"args":args}).to_string());
+        let request: Request<'_> = serde_json::from_str(&line).unwrap();
+        host.dispatch(&request).await
+    }
+    let mut host = Host::new();
+    let cert = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
+    let mnemonic = bip39::Mnemonic::from_entropy(&[19; 16]).unwrap();
+    let proxy = TcpListener::bind("127.0.0.1:0").unwrap();
+    let relay = TcpListener::bind("127.0.0.1:0").unwrap();
+    proxy.set_nonblocking(true).unwrap();
+    relay.set_nonblocking(true).unwrap();
+    call(
+        &mut host,
+        "initialize",
+        json!({"mnemonic":mnemonic.to_string(),"passcode":"test-only-913",
+        "rootPem":cert.cert.pem(),"proxyUrl":format!("http://{}",proxy.local_addr().unwrap()),
+        "relayAddress":relay.local_addr().unwrap().to_string()}),
+    )
+    .await
+    .unwrap();
+    let now = crate::commands::now();
+    let carrier = CredentialV2Carrier::new(CredentialV2CarrierInput {
+        application_context: "https://photos.example/selfsame/v2".into(),
+        relay_origin: "https://relay.example:9443".into(),
+        mailbox_id: [1; 32],
+        carrier_ceremony_id: [2; 32],
+        carrier_nonce: [3; 32],
+        claim_commitment: cbcl_pairing::wire::claim_commitment(
+            [1; 32],
+            &cbcl_pairing::wire::ClaimToken::new([4; 16]),
+        ),
+        relay_expires_at: now + 300,
+        expected_allocator_key: Some(
+            ed25519_dalek::SigningKey::from_bytes(&[6; 32])
+                .verifying_key()
+                .to_bytes(),
+        ),
+    })
+    .unwrap();
+    let handoff =
+        CredentialV2Handoff::new(carrier, CredentialV2PresenceCode::new([5; 16], [4; 16]))
+            .unwrap()
+            .encode()
+            .unwrap();
+    let writes = completion::shared_memkeyring::write_count();
+    let policy = completion::shared_memkeyring::policy_operations();
+    let reserved = call(
+        &mut host,
+        "begin-handoff",
+        json!({"handoff":handoff.as_str()}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(reserved["phase"], "reserved");
+    assert_eq!(
+        proxy.accept().err().unwrap().kind(),
+        std::io::ErrorKind::WouldBlock
+    );
+    assert_eq!(
+        relay.accept().err().unwrap().kind(),
+        std::io::ErrorKind::WouldBlock
+    );
+    assert_eq!(completion::shared_memkeyring::write_count(), writes);
+    let tagged = json!({"attemptTag":reserved["attemptTag"]});
+    for op in ["preview-rendered", "link", "continue-link", "finish-link"] {
+        assert!(call(&mut host, op, tagged.clone()).await.is_err());
+    }
+    assert_eq!(
+        call(
+            &mut host,
+            "unlock-preview",
+            json!({"attemptTag":reserved["attemptTag"],"passcode":false})
+        )
+        .await
+        .err()
+        .unwrap()
+        .to_string(),
+        "HostRequestRefused"
+    );
+    // This explicit local proxy accepts then closes before TLS/profile success.
+    // No request can reach the canonical public origin or selected relay.
+    proxy.set_nonblocking(false).unwrap();
+    let peer = std::thread::spawn(move || {
+        let (stream, _) = proxy.accept().unwrap();
+        drop(stream);
+    });
+    assert_eq!(
+        call(&mut host, "contact", tagged.clone())
+            .await
+            .err()
+            .unwrap()
+            .to_string(),
+        "PairingProfileUnavailable"
+    );
+    peer.join().unwrap();
+    assert_eq!(
+        relay.accept().err().unwrap().kind(),
+        std::io::ErrorKind::WouldBlock
+    );
+    assert_eq!(completion::shared_memkeyring::write_count(), writes);
+    assert_eq!(completion::shared_memkeyring::policy_operations(), policy);
+    assert!(call(&mut host, "cancel-link", tagged).await.is_ok());
+    assert!(call(&mut host, "shutdown", json!({})).await.is_ok());
 }

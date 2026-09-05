@@ -577,8 +577,9 @@
         <h1>Connect an application</h1>
         <p class="lede">
           Scan the application’s QR code, or paste the single-use invitation.
-          Selfsame will show who is asking and what it wants only after the
-          secure channel is established.
+          This invitation permits Selfsame to contact the application’s HTTPS origin
+          and its declared relay for this link only. Unlock to review your local
+          identity, then select Link to share it after checking the request.
         </p>
         <button class="btn btn--primary" data-action="scan-cbcl-pairing">Scan the QR code</button>
         <p class="code-state" data-pairing-scanner-note aria-live="polite" hidden></p>
@@ -597,9 +598,7 @@
         </label>
         </details>
         <p class="code-state" data-pairing-state aria-live="polite">Paste one invitation</p>
-        <!-- SPEC-008 credential/v2 sends this value to Rust only after the
-             authenticated intent is approved. No identity is derived before
-             relay consent and exact-intent consent have both completed. -->
+        <!-- SingleLink requests presence only after authenticating the request. -->
         <div data-pairing-entry-unlock>
         <label class="field" data-pairing-passcode-field hidden>
           <span class="field__label">Your Selfsame passcode</span>
@@ -636,7 +635,7 @@
           <div class="evidence__row">
             <p class="evidence__key">Protocol</p>
             <p class="evidence__val">cbcl-pairing</p>
-            <p class="evidence__note" data-cbcl-channel-status>Checking the connection</p>
+            <p class="evidence__note" data-cbcl-channel-status role="status" aria-live="polite">Checking the connection</p>
           </div>
           <div class="evidence__row">
             <p class="evidence__key">Request profile</p>
@@ -647,8 +646,8 @@
         <dl class="intent-fields" data-cbcl-intent-fields></dl>
         <div data-pairing-consent-unlock></div>
         <p class="caution">
-          Approve only if these exact fields match the application in front of you.
-          Approval releases one credential; decline releases none.
+          Check the complete request and identity before linking. You can cancel
+          while waiting for desktop comparison or final verification.
         </p>
         <p class="error" data-error="pairing-consent" hidden></p>
         <div class="spacer"></div>

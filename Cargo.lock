@@ -4195,6 +4195,7 @@ dependencies = [
  "ed25519-dalek",
  "hkdf 0.12.4",
  "keyring",
+ "libc",
  "rand 0.8.7",
  "rcgen",
  "reqwest 0.12.28",

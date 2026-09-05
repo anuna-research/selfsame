@@ -24,7 +24,7 @@ use crate::{
     },
     cbcl_v2_policy::ExactPairState,
     commands::{AppSession, UiError},
-    session::{CredentialV2Attempt, CredentialV2Operation},
+    session::{CredentialV2Attempt, CredentialV2Effect, CredentialV2Flow, CredentialV2Operation},
 };
 
 type Result<T> = std::result::Result<T, UiError>;
@@ -33,6 +33,8 @@ type Result<T> = std::result::Result<T, UiError>;
 enum CredentialV2Phase {
     Intent,
     PreviewReady,
+    PreviewUnpainted,
+    ReviewReady,
     Comparing,
     FinalReview,
     PayloadSent,
@@ -80,23 +82,51 @@ pub struct PendingCredentialV2Pairing {
 /// every checkpoint makes the biometric prompt an accidental protocol loop.
 const CEREMONY_CUSTODY_LIFETIME: Duration = Duration::from_secs(120);
 
-struct CeremonyCustody {
-    root: selfsame_app_identity::hierarchy::HierarchyRoot,
-    authorized_at: Instant,
+enum CeremonyCustody {
+    Legacy {
+        root: selfsame_app_identity::hierarchy::HierarchyRoot,
+        authorized_at: Instant,
+    },
+    Bounded(CredentialV2Attempt),
+}
+impl Drop for CeremonyCustody {
+    fn drop(&mut self) {
+        if let Self::Bounded(attempt) = self {
+            attempt.clear_custody();
+        }
+    }
+}
+impl CeremonyCustody {
+    fn with_root<T>(
+        &self,
+        action: impl FnOnce(&selfsame_app_identity::hierarchy::HierarchyRoot) -> Result<T>,
+    ) -> Result<T> {
+        match self {
+            Self::Legacy { root, .. } => action(root),
+            Self::Bounded(attempt) => attempt.with_custody(action),
+        }
+    }
 }
 
 impl PendingCredentialV2Pairing {
     fn ensure_ceremony_custody(&mut self, passcode: &str) -> Result<()> {
         self.attempt.check()?;
+        if self.attempt.mode() == CredentialV2Flow::SingleLink {
+            return if self.ceremony_custody.is_some() {
+                Ok(())
+            } else {
+                Err(UiError::from("PairingExpired"))
+            };
+        }
         if self
             .ceremony_custody
             .as_ref()
-            .is_some_and(|custody| custody.authorized_at.elapsed() >= CEREMONY_CUSTODY_LIFETIME)
+            .is_some_and(|custody| matches!(custody, CeremonyCustody::Legacy { authorized_at, .. } if authorized_at.elapsed() >= CEREMONY_CUSTODY_LIFETIME))
         {
             self.ceremony_custody = None;
         }
         if self.ceremony_custody.is_none() {
-            self.ceremony_custody = Some(CeremonyCustody {
+            self.ceremony_custody = Some(CeremonyCustody::Legacy {
                 root: crate::custody::Custody::unlock_hierarchy_root(passcode)?,
                 authorized_at: Instant::now(),
             });
@@ -227,11 +257,9 @@ pub async fn cbcl_v2_recognise_handoff(
     handoff: String,
     session: State<'_, AppSession>,
 ) -> Result<RelayConsentView> {
-    recognise_v2_entry(
-        CredentialV2Entry::Handoff(Zeroizing::new(handoff)),
-        &session,
-    )
-    .await
+    let _input = Zeroizing::new(handoff);
+    let _ = session;
+    Err(UiError::from("PairingWrongMode"))
 }
 
 /// Explicit legacy carrier and presence entry shares the same attempt and policy gate.
@@ -252,7 +280,6 @@ pub async fn cbcl_v2_recognise(
 }
 
 enum CredentialV2Entry {
-    Handoff(Zeroizing<String>),
     Legacy {
         invitation: String,
         presence_code: Zeroizing<String>,
@@ -268,6 +295,9 @@ async fn recognise_v2_entry(
             .0
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
+        guard
+            .cbcl_v2_attempts
+            .require_entry_mode(CredentialV2Flow::LegacyTwoDecision)?;
         let operation = guard.cbcl_v2_attempts.begin()?;
         guard.pending_cbcl_v2_relay = None;
         guard.pending_cbcl_v2 = None;
@@ -276,9 +306,6 @@ async fn recognise_v2_entry(
     operation.attempt.check()?;
     let now = crate::commands::now() as i64;
     let plan = match input {
-        CredentialV2Entry::Handoff(handoff) => {
-            cbcl_v2_claimant::recognise_claimant_handoff(&handoff, now).await?
-        }
         CredentialV2Entry::Legacy {
             invitation,
             presence_code,
@@ -498,13 +525,18 @@ fn final_review_view(
 struct CancellationFaults<'a, F> {
     attempt: &'a CredentialV2Attempt,
     inner: &'a mut F,
+    entry: Option<CredentialV2Effect>,
 }
 
 impl<F: PrePayloadFaultSink> PrePayloadFaultSink for CancellationFaults<'_, F> {
+    fn after(&mut self) -> Result<()> {
+        self.attempt.check()
+    }
     fn before(&mut self, boundary: PrePayloadBoundary) -> Result<()> {
         self.attempt.check()?;
         self.inner.before(boundary)?;
-        self.attempt.check()
+        self.entry = Some(self.attempt.enter()?);
+        Ok(())
     }
 }
 
@@ -527,18 +559,8 @@ async fn cbcl_v2_final_decide_with_faults(
     faults: &mut impl PrePayloadFaultSink,
 ) -> Result<CredentialV2FinalDecisionView> {
     let (mut pending, operation) = take_pending(&session, CredentialV2Phase::FinalReview)?;
-    let attempt = pending.attempt.clone();
-    let mut cancellation_faults = CancellationFaults {
-        attempt: &attempt,
-        inner: faults,
-    };
-    let faults = &mut cancellation_faults;
     let comparison = pending
         .comparison
-        .clone()
-        .ok_or_else(|| UiError::from("PairingFailed"))?;
-    let preview_did = pending
-        .preview_did
         .clone()
         .ok_or_else(|| UiError::from("PairingFailed"))?;
     let final_decision = pending
@@ -564,6 +586,48 @@ async fn cbcl_v2_final_decide_with_faults(
     let passcode = passcode
         .filter(|value| !value.is_empty())
         .ok_or_else(|| UiError::from("PresenceRequired"))?;
+    let ceremony_custody = CeremonyCustody::Legacy {
+        root: pending
+            .attempt
+            .run(|| Ok(crate::custody::Custody::unlock_hierarchy_root(&passcode)?))?,
+        authorized_at: Instant::now(),
+    };
+    complete_approved(
+        pending,
+        operation,
+        final_decision,
+        ceremony_custody,
+        &session,
+        faults,
+    )
+    .await
+}
+
+/// Shared transaction executor: its caller already owns the distinct protocol
+/// final approval and native custody. It is not a command or a consent source.
+async fn complete_approved(
+    mut pending: PendingCredentialV2Pairing,
+    operation: CredentialV2Operation,
+    final_decision: cbcl_pairing::credential_v2::CredentialV2Object,
+    ceremony_custody: CeremonyCustody,
+    session: &AppSession,
+    faults: &mut impl PrePayloadFaultSink,
+) -> Result<CredentialV2FinalDecisionView> {
+    let attempt = pending.attempt.clone();
+    let mut cancellation_faults = CancellationFaults {
+        attempt: &attempt,
+        inner: faults,
+        entry: None,
+    };
+    let faults = &mut cancellation_faults;
+    let comparison = pending
+        .comparison
+        .clone()
+        .ok_or_else(|| UiError::from("PairingFailed"))?;
+    let preview_did = pending
+        .preview_did
+        .clone()
+        .ok_or_else(|| UiError::from("PairingFailed"))?;
     attempt.run(|| Ok(crate::custody::Custody::require_backup_confirmed()?))?;
     let offer_object = pending
         .claimant
@@ -596,15 +660,8 @@ async fn cbcl_v2_final_decide_with_faults(
     let preview_fingerprint: [u8; 32] = sha2::Sha256::digest(preview_did.as_bytes()).into();
     let mut checkpoint_nonce = [0_u8; 12];
     rand::rngs::OsRng.fill_bytes(&mut checkpoint_nonce);
-    // One final decision authorises this ceremony's internal checkpoint work.
-    // The zeroising root remains private to this command and is transferred to
-    // the live pending session only after the payload has been released.
-    let ceremony_custody = CeremonyCustody {
-        root: attempt.run(|| Ok(crate::custody::Custody::unlock_hierarchy_root(&passcode)?))?,
-        authorized_at: Instant::now(),
-    };
-
-    let (generation, checkpoint) = (|root| -> Result<_> {
+    attempt.check()?;
+    let (generation, checkpoint) = ceremony_custody.with_root(|root| -> Result<_> {
         let claims = recognised.claims.account_provenance();
         let scope =
             selfsame_app_identity::scope::AccountScopeId::from_octets(*claims.account_scope_id());
@@ -649,7 +706,7 @@ async fn cbcl_v2_final_decide_with_faults(
             return Err(UiError::from("PairingFailed"));
         }
         Ok((generation, checkpoint))
-    })(&ceremony_custody.root)?;
+    })?;
 
     let durable = crate::cbcl_v2_completion::PendingCredentialV2Completion::new(
         crate::cbcl_v2_completion::PendingCredentialV2Input {
@@ -668,6 +725,7 @@ async fn cbcl_v2_final_decide_with_faults(
             checkpoint: &checkpoint,
         },
     )?;
+    let durable = durable.with_flow(attempt.mode());
     let mut transaction = attempt.run(|| PrePayloadPendingTransaction::begin(durable))?;
     transaction.try_step(faults, PrePayloadBoundary::FinalApprovalRelease, || {
         let effects = pending
@@ -691,7 +749,7 @@ async fn cbcl_v2_final_decide_with_faults(
         faults,
         PrePayloadBoundary::AcknowledgementRecognition,
         || {
-            let acknowledgement_effects = (|root| -> Result<_> {
+            let acknowledgement_effects = ceremony_custody.with_root(|root| -> Result<_> {
                 let wrapping_key = crate::cbcl_v2_completion::checkpoint_wrapping_key(
                     root,
                     &application_id,
@@ -709,7 +767,7 @@ async fn cbcl_v2_final_decide_with_faults(
                         ),
                     )
                     .map_err(|_| UiError::from("PairingFailed"))
-            })(&ceremony_custody.root)?;
+            })?;
             one_checkpoint(acknowledgement_effects)
         },
     )?;
@@ -762,11 +820,9 @@ async fn cbcl_v2_final_decide_with_faults(
     // durable before this ceremony authorization, and the preview is
     // re-derived before issuer construction.
     let issuer = transaction.try_step(faults, PrePayloadBoundary::IssuerCustody, || {
-        crate::cbcl_v2_completion::build_issuer_artifacts(
-            &ceremony_custody.root,
-            &plan,
-            effect_time,
-        )
+        ceremony_custody.with_root(|root| {
+            crate::cbcl_v2_completion::build_issuer_artifacts(root, &plan, effect_time)
+        })
     })?;
     let issuer_created = transaction.current().issuer_created(&issuer)?;
     transaction.replace_at(
@@ -776,23 +832,30 @@ async fn cbcl_v2_final_decide_with_faults(
     )?;
 
     transaction.before_async(faults, PrePayloadBoundary::IssuerPublication)?;
-    let publication =
-        selfsame_app_identity_net::state::publish_issuer_identity(&profile, &issuer.identity)
-            .await
-            .map_err(|_| UiError::from("PairingResolverUnavailable"))?;
+    let publication = attempt
+        .io(async {
+            selfsame_app_identity_net::state::publish_issuer_identity(&profile, &issuer.identity)
+                .await
+                .map_err(|_| UiError::from("PairingResolverUnavailable"))
+        })
+        .await?;
     attempt.check()?;
     if publication.acknowledged.is_empty() {
         return Err(UiError::from("PairingResolverUnavailable"));
     }
     transaction.before_async(faults, PrePayloadBoundary::ResolverVerification)?;
-    let resolved = selfsame_app_identity_net::state::resolve_closure(
-        &profile,
-        &issuer.identity.did,
-        None,
-        selfsame_app_identity_net::state::Acceptance::Repeat,
-    )
-    .await
-    .map_err(|_| UiError::from("PairingResolverUnavailable"))?;
+    let resolved = attempt
+        .io(async {
+            selfsame_app_identity_net::state::resolve_closure(
+                &profile,
+                &issuer.identity.did,
+                None,
+                selfsame_app_identity_net::state::Acceptance::Repeat,
+            )
+            .await
+            .map_err(|_| UiError::from("PairingResolverUnavailable"))
+        })
+        .await?;
     attempt.check()?;
     if resolved.document.did.as_str() != issuer.identity.did
         || resolved.document.is_deactivated()
@@ -810,14 +873,16 @@ async fn cbcl_v2_final_decide_with_faults(
     // finalizer provisions it atomically, and wallet installation verifies it
     // from the authenticated receipt before granting capability.
     let grant = transaction.try_step(faults, PrePayloadBoundary::GrantConstruction, || {
-        crate::cbcl_v2_completion::build_grant_artifacts(
-            &ceremony_custody.root,
-            &plan,
-            &issuer,
-            grant_id,
-            effect_time,
-            profile.revocation.max_grant_lifetime_seconds,
-        )
+        ceremony_custody.with_root(|root| {
+            crate::cbcl_v2_completion::build_grant_artifacts(
+                root,
+                &plan,
+                &issuer,
+                grant_id,
+                effect_time,
+                profile.revocation.max_grant_lifetime_seconds,
+            )
+        })
     })?;
     let provisioned = transaction.current().provisioned(&grant)?;
     transaction.replace_at(
@@ -849,7 +914,7 @@ async fn cbcl_v2_final_decide_with_faults(
             }
             let mut payload_nonce = [0_u8; 12];
             rand::rngs::OsRng.fill_bytes(&mut payload_nonce);
-            let payload_effects = (|root| -> Result<_> {
+            let payload_effects = ceremony_custody.with_root(|root| -> Result<_> {
                 let wrapping_key = crate::cbcl_v2_completion::checkpoint_wrapping_key(
                     root,
                     &application_id,
@@ -867,7 +932,7 @@ async fn cbcl_v2_final_decide_with_faults(
                         payload_now,
                     )
                     .map_err(|_| UiError::from("PairingFailed"))
-            })(&ceremony_custody.root)?;
+            })?;
             one_checkpoint(payload_effects)
         },
     )?;
@@ -876,15 +941,17 @@ async fn cbcl_v2_final_decide_with_faults(
         .payload_prepared(payload.content_hash())?
         .with_checkpoint(payload_generation, &payload_checkpoint)?;
     let _payload_prepared = attempt.run(|| transaction.commit_payload(payload_prepared))?;
-    let payload_release = pending
-        .claimant
-        .core_mut()
-        .checkpoint_persisted(payload_generation)
-        .map_err(|_| UiError::from("PairingFailed"))?;
+    let payload_release = attempt.run(|| {
+        pending
+            .claimant
+            .core_mut()
+            .checkpoint_persisted(payload_generation)
+            .map_err(|_| UiError::from("PairingFailed"))
+    })?;
     send_effects(&mut pending.socket, &pending.attempt, payload_release)?;
     pending.ceremony_custody = Some(ceremony_custody);
     pending.phase = CredentialV2Phase::PayloadSent;
-    put_pending(&session, pending, operation)?;
+    put_pending(session, pending, operation)?;
     Ok(CredentialV2FinalDecisionView {
         outcome: "payload-sent",
     })
@@ -898,10 +965,27 @@ pub async fn cbcl_v2_finish(
     passcode: Option<String>,
     session: State<'_, AppSession>,
 ) -> Result<CredentialV2FinishView> {
+    // Mode refusal precedes even the legacy presence requirement, while a
+    // missing presence value must not take and cancel the live pending worker.
+    session
+        .0
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .cbcl_v2_attempts
+        .require_mode(CredentialV2Flow::LegacyTwoDecision)?;
     let passcode = passcode
         .filter(|value| !value.is_empty())
         .ok_or_else(|| UiError::from("PresenceRequired"))?;
     let (pending, operation) = take_pending(&session, CredentialV2Phase::PayloadSent)?;
+    finish_pending(pending, operation, Zeroizing::new(passcode), &session).await
+}
+
+async fn finish_pending(
+    pending: PendingCredentialV2Pairing,
+    operation: CredentialV2Operation,
+    passcode: Zeroizing<String>,
+    session: &AppSession,
+) -> Result<CredentialV2FinishView> {
     let attempt = operation.attempt.clone();
     let (mut pending, prepared) = pairing_blocking(&operation, move || {
         Ok(prepare_received_receipt(pending, &passcode))
@@ -911,7 +995,7 @@ pub async fn cbcl_v2_finish(
         Ok(value) => value,
         Err(error) => {
             pending.clear_ceremony_custody();
-            put_pending(&session, pending, operation)?;
+            put_pending(session, pending, operation)?;
             return Err(error);
         }
     };
@@ -929,7 +1013,7 @@ pub async fn cbcl_v2_finish(
             Ok(value) => value,
             Err(error) => {
                 pending.clear_ceremony_custody();
-                put_pending(&session, pending, operation)?;
+                put_pending(session, pending, operation)?;
                 return Err(error);
             }
         };
@@ -938,17 +1022,24 @@ pub async fn cbcl_v2_finish(
         Ok(value) => value,
         Err(error) => {
             pending.clear_ceremony_custody();
-            put_pending(&session, pending, operation)?;
+            put_pending(session, pending, operation)?;
             return Err(error);
         }
     };
     let live_issuer_did = installed.issuer_did().to_owned();
     attempt.check()?;
-    let jrd = match verify_live_installation(live_profile, live_account, live_issuer_did).await {
+    let jrd = match verify_live_installation_guarded(
+        live_profile,
+        live_account,
+        live_issuer_did,
+        &attempt,
+    )
+    .await
+    {
         Ok(value) => value,
         Err(error) => {
             pending.clear_ceremony_custody();
-            put_pending(&session, pending, operation)?;
+            put_pending(session, pending, operation)?;
             return Err(error);
         }
     };
@@ -956,7 +1047,7 @@ pub async fn cbcl_v2_finish(
         attempt.run(|| crate::cbcl_v2_completion::install(&durable, &installed, &jrd))
     {
         pending.clear_ceremony_custody();
-        put_pending(&session, pending, operation)?;
+        put_pending(session, pending, operation)?;
         return Err(error);
     }
 
@@ -974,7 +1065,7 @@ pub async fn cbcl_v2_finish(
             .await;
         }
     }
-    ensure_current(&session, &attempt)?;
+    ensure_current(session, &attempt)?;
     Ok(CredentialV2FinishView {
         outcome: "installed",
     })
@@ -1641,9 +1732,10 @@ pub async fn cbcl_v2_cancel(session: State<'_, AppSession>) -> Result<()> {
         .0
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    guard.cbcl_v2_attempts.cancel();
-    guard.pending_cbcl_v2_relay = None;
-    guard.pending_cbcl_v2 = None;
+    guard
+        .cbcl_v2_attempts
+        .require_mode(CredentialV2Flow::LegacyTwoDecision)?;
+    guard.revoke_cbcl_v2();
     Ok(())
 }
 
@@ -1652,6 +1744,9 @@ fn take_relay_plan(session: &AppSession) -> Result<(RelayConsentPlan, Credential
         .0
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
+    guard
+        .cbcl_v2_attempts
+        .require_mode(CredentialV2Flow::LegacyTwoDecision)?;
     if guard.pending_cbcl_v2_relay.is_none() {
         return Err(UiError::from("PairingNotStarted"));
     }
@@ -1786,16 +1881,15 @@ fn prepare_received_receipt(
             &mut pending.socket,
             &pending.ceremony_custody,
         );
-        let root = &ceremony_custody
+        let custody = ceremony_custody
             .as_ref()
-            .expect("ceremony custody was installed")
-            .root;
+            .expect("ceremony custody was installed");
         let mut durable = crate::cbcl_v2_completion::load_pending(&application_id)?;
         while claimant.core_mut().has_cached_outbound_frame() {
             let acknowledgement = read_binary(socket, &pending.attempt)?;
             let mut nonce = [0_u8; 12];
             rand::rngs::OsRng.fill_bytes(&mut nonce);
-            let effects = (|root| {
+            let effects = custody.with_root(|root| {
                 let wrapping_key = crate::cbcl_v2_completion::checkpoint_wrapping_key(
                     root,
                     &application_id,
@@ -1812,7 +1906,7 @@ fn prepare_received_receipt(
                         ),
                     )
                     .map_err(|_| UiError::from("PairingFailed"))
-            })(root)?;
+            })?;
             let (generation, checkpoint) = one_checkpoint(effects)?;
             let acknowledged = durable.with_checkpoint(generation, &checkpoint)?;
             pending
@@ -1845,6 +1939,48 @@ fn prepare_received_receipt(
         Ok((durable, receipt_recovery_commitment))
     })();
     (pending, result)
+}
+
+async fn verify_live_installation_guarded(
+    profile: selfsame_app_identity::profile::ApplicationProfile,
+    account: selfsame_app_identity::alias::AcctUri,
+    issuer_did: String,
+    attempt: &CredentialV2Attempt,
+) -> Result<selfsame_app_identity::alias::Jrd> {
+    let account_text = account.as_str().to_owned();
+    let resolved = attempt
+        .io(async {
+            selfsame_app_identity_net::state::resolve_closure(
+                &profile,
+                &issuer_did,
+                None,
+                selfsame_app_identity_net::state::Acceptance::Repeat,
+            )
+            .await
+            .map_err(|_| UiError::from("PairingResolverUnavailable"))
+        })
+        .await?;
+    if resolved.document.did.as_str() != issuer_did
+        || resolved.document.is_deactivated()
+        || !resolved
+            .document
+            .also_known_as()
+            .iter()
+            .any(|v| v == &account_text)
+    {
+        return Err(UiError::from("PairingResolverRefused"));
+    }
+    attempt
+        .io(async {
+            selfsame_app_identity_net::webfinger::fetch_and_verify(
+                &account,
+                &issuer_did,
+                &[account_text],
+            )
+            .await
+            .map_err(|_| UiError::from("PairingAuthorityRefused"))
+        })
+        .await
 }
 
 async fn verify_live_installation(
@@ -1884,6 +2020,9 @@ fn take_pending(
         .0
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
+    guard
+        .cbcl_v2_attempts
+        .require_mode(CredentialV2Flow::LegacyTwoDecision)?;
     let pending = guard
         .pending_cbcl_v2
         .as_ref()
@@ -1900,11 +2039,13 @@ fn send_claimant_object(
     object: &cbcl_pairing::credential_v2::CredentialV2Object,
 ) -> Result<()> {
     pending.attempt.check()?;
-    let effects = pending
-        .claimant
-        .core_mut()
-        .prepare_application_object(object)
-        .map_err(|_| UiError::from("PairingFailed"))?;
+    let effects = pending.attempt.run(|| {
+        pending
+            .claimant
+            .core_mut()
+            .prepare_application_object(object)
+            .map_err(|_| UiError::from("PairingFailed"))
+    })?;
     send_effects(&mut pending.socket, &pending.attempt, effects)
 }
 
@@ -2038,6 +2179,7 @@ fn intent_view(
     let tofu_state = match display.tofu_state() {
         CredentialV2TofuState::NewPair => "new-pair",
         CredentialV2TofuState::TrustedPair => "trusted-pair",
+        CredentialV2TofuState::CeremonyGesture => "ceremony-gesture",
         _ => "unknown",
     };
     CredentialV2IntentView {
@@ -2058,9 +2200,21 @@ fn read_binary(
     socket: &mut WebSocket<MaybeTlsStream<TcpStream>>,
     attempt: &CredentialV2Attempt,
 ) -> Result<Vec<u8>> {
+    let waiting_since = Instant::now();
+    if attempt.mode() == CredentialV2Flow::SingleLink {
+        let tcp = match socket.get_ref() {
+            MaybeTlsStream::Plain(tcp) => tcp,
+            MaybeTlsStream::Rustls(tls) => &tls.sock,
+            _ => return Err(UiError::from("PairingRelayUnavailable")),
+        };
+        tcp.set_read_timeout(Some(Duration::from_millis(50)))
+            .map_err(|_| UiError::from("PairingRelayUnavailable"))?;
+    }
     loop {
         attempt.check()?;
+        let entry = attempt.enter()?;
         let message = socket.read();
+        drop(entry);
         attempt.check()?;
         match message {
             Ok(Message::Binary(bytes)) => return Ok(bytes.to_vec()),
@@ -2071,7 +2225,11 @@ fn read_binary(
                     std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
                 ) =>
             {
-                return Err(UiError::from("PairingRelayTimedOut"));
+                if attempt.mode() != CredentialV2Flow::SingleLink
+                    || waiting_since.elapsed() >= cbcl_transport::IO_TIMEOUT
+                {
+                    return Err(UiError::from("PairingRelayTimedOut"));
+                }
             }
             Ok(Message::Close(_)) | Err(_) => {
                 return Err(UiError::from("PairingRelayUnavailable"));
@@ -2113,7 +2271,10 @@ fn classify_webfinger_failure(
     }
 }
 
-#[cfg(all(test, not(any(target_os = "android", target_os = "ios", target_arch = "wasm32"))))]
+#[cfg(all(
+    test,
+    not(any(target_os = "android", target_os = "ios", target_arch = "wasm32"))
+))]
 #[path = "scan_integration_native_host.rs"]
 mod scan_integration_host;
 
@@ -2247,6 +2408,7 @@ mod tests {
             let mut faults = CancellationFaults {
                 attempt: &work.attempt,
                 inner: &mut inner,
+                entry: None,
             };
             assert!(
                 faults.before(boundary).is_err(),
@@ -2374,3 +2536,6 @@ mod tests {
         );
     }
 }
+
+#[path = "cbcl_v2_single_link.rs"]
+pub mod single_link;

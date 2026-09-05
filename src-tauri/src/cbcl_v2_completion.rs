@@ -98,11 +98,20 @@ impl CredentialV2ProvisioningPlan {
     }
 }
 
+#[cfg(test)]
+static IDENTITY_EFFECTS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+#[cfg(test)]
+pub(crate) fn identity_effect_count() -> usize {
+    IDENTITY_EFFECTS.load(std::sync::atomic::Ordering::SeqCst)
+}
+
 pub(crate) fn build_issuer_artifacts(
     root: &HierarchyRoot,
     plan: &CredentialV2ProvisioningPlan,
     effect_time: i64,
 ) -> Result<CredentialV2IssuerArtifacts> {
+    #[cfg(test)]
+    IDENTITY_EFFECTS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     let now_ms = u64::try_from(effect_time)
         .ok()
         .and_then(|value| value.checked_mul(1_000))
@@ -143,6 +152,8 @@ pub(crate) fn build_grant_artifacts(
     effect_time: i64,
     max_grant_lifetime_seconds: i64,
 ) -> Result<CredentialV2GrantArtifacts> {
+    #[cfg(test)]
+    IDENTITY_EFFECTS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     let valid_until = effect_time
         .checked_add(max_grant_lifetime_seconds)
         .filter(|value| *value > effect_time)
@@ -212,6 +223,11 @@ pub struct PendingCredentialV2Input<'a> {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PendingCredentialV2Completion {
     version: u8,
+    #[serde(
+        default,
+        skip_serializing_if = "crate::session::CredentialV2Flow::is_legacy"
+    )]
+    flow: crate::session::CredentialV2Flow,
     root_generation: String,
     application_id: String,
     relay_origin: String,
@@ -270,6 +286,11 @@ enum PendingCredentialV2Stage {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct InstalledCredentialV2Link {
     version: u8,
+    #[serde(
+        default,
+        skip_serializing_if = "crate::session::CredentialV2Flow::is_legacy"
+    )]
+    flow: crate::session::CredentialV2Flow,
     root_generation: String,
     relay_origin: String,
     /// Immutable profile that authenticated the offer and final hub status.
@@ -437,7 +458,7 @@ enum CredentialV2LinkSlot {
 /// sampled with it for confirmed unlink.
 pub(crate) struct LocalCredentialV2Link {
     slot: CredentialV2LinkSlot,
-    exact_pair_state: crate::cbcl_v2_policy::ExactPairState,
+    exact_pair_state: Option<crate::cbcl_v2_policy::ExactPairState>,
 }
 
 impl LocalCredentialV2Link {
@@ -464,6 +485,11 @@ struct CredentialV2LinkIndex {
 }
 
 impl PendingCredentialV2Completion {
+    pub(crate) fn with_flow(mut self, flow: crate::session::CredentialV2Flow) -> Self {
+        self.flow = flow;
+        self
+    }
+
     /// Construct a closed pending record from typed ceremony objects.
     pub fn new(input: PendingCredentialV2Input<'_>) -> Result<Self> {
         validate_application_and_relay(input.application_id, input.carrier.relay_origin())?;
@@ -496,6 +522,7 @@ impl PendingCredentialV2Completion {
         }
         Ok(Self {
             version: SLOT_VERSION,
+            flow: crate::session::CredentialV2Flow::LegacyTwoDecision,
             root_generation: codec::b64url(&input.root_generation),
             application_id: input.application_id.into(),
             relay_origin: input.carrier.relay_origin().into(),
@@ -793,6 +820,9 @@ pub(crate) enum PrePayloadBoundary {
 
 pub(crate) trait PrePayloadFaultSink {
     fn before(&mut self, boundary: PrePayloadBoundary) -> Result<()>;
+    fn after(&mut self) -> Result<()> {
+        Ok(())
+    }
 }
 
 pub(crate) struct NoPrePayloadFaults;
@@ -869,7 +899,9 @@ impl PrePayloadPendingTransaction {
         step: impl FnOnce() -> Result<T>,
     ) -> Result<T> {
         faults.before(boundary)?;
-        step()
+        let value = step()?;
+        faults.after()?;
+        Ok(value)
     }
 
     pub(crate) fn before_async(
@@ -890,7 +922,7 @@ impl PrePayloadPendingTransaction {
         replace_pending(&self.current, &replacement)?;
         self.current = replacement.clone();
         self.cleanup.advance(replacement);
-        Ok(())
+        faults.after()
     }
 
     pub(crate) fn commit_payload(
@@ -1024,6 +1056,7 @@ impl InstalledCredentialV2Link {
         }
         let installed = Self {
             version: SLOT_VERSION,
+            flow: pending.flow,
             root_generation: pending.root_generation.clone(),
             relay_origin: carrier.relay_origin().into(),
             profile: codec::b64url(profile_octets),
@@ -1578,7 +1611,16 @@ pub(crate) fn load_local_link(application_id: &str) -> Result<LocalCredentialV2L
     if slot_application_id != application_id {
         return Err(UiError::from("PairingApplicationNotLinked"));
     }
-    let exact_pair_state = crate::cbcl_v2_policy::state(application_id, relay_origin)?;
+    let flow = match &slot {
+        CredentialV2LinkSlot::Pending(v) => v.flow,
+        CredentialV2LinkSlot::Installed(v) => v.flow,
+    };
+    let exact_pair_state = match flow {
+        crate::session::CredentialV2Flow::SingleLink => None,
+        crate::session::CredentialV2Flow::LegacyTwoDecision => {
+            Some(crate::cbcl_v2_policy::state(application_id, relay_origin)?)
+        }
+    };
     Ok(LocalCredentialV2Link {
         slot,
         exact_pair_state,
@@ -1664,11 +1706,15 @@ pub(crate) fn unlink_local(expected: &LocalCredentialV2Link) -> Result<()> {
     if recognise_slot(&encoded)? != expected.slot {
         return Err(UiError::from("PairingApplicationNotLinked"));
     }
-    let current_pair_state = crate::cbcl_v2_policy::state(application_id, relay_origin)?;
-    if current_pair_state != expected.exact_pair_state {
-        return Err(UiError::from("PairingCheckpointRefused"));
-    }
-    let removed_policy = current_pair_state == crate::cbcl_v2_policy::ExactPairState::TrustedPair;
+    let removed_policy = if let Some(selected) = expected.exact_pair_state {
+        let current = crate::cbcl_v2_policy::state(application_id, relay_origin)?;
+        if current != selected {
+            return Err(UiError::from("PairingCheckpointRefused"));
+        }
+        current == crate::cbcl_v2_policy::ExactPairState::TrustedPair
+    } else {
+        false
+    };
     if removed_policy {
         crate::cbcl_v2_policy::remove(application_id, relay_origin)?;
     }
@@ -1733,7 +1779,8 @@ fn remove_pre_payload_attempt(anchor: &PendingCredentialV2Completion) -> Result<
         return Err(UiError::from("PairingCheckpointRefused"));
     };
     current.validate()?;
-    let same_attempt = current.root_generation == anchor.root_generation
+    let same_attempt = current.flow == anchor.flow
+        && current.root_generation == anchor.root_generation
         && current.application_id == anchor.application_id
         && current.relay_origin == anchor.relay_origin
         && current.profile_digest == anchor.profile_digest
@@ -2195,6 +2242,7 @@ mod tests {
             selfsame_app_identity::alias::stable_acct_uri(&issuer_did, &profile.account_authority);
         let installed = InstalledCredentialV2Link {
             version: SLOT_VERSION,
+            flow: crate::session::CredentialV2Flow::LegacyTwoDecision,
             root_generation: codec::b64url(&root_generation(&[0x42; 32])),
             relay_origin: "https://photos.example:9443".into(),
             profile: codec::b64url(&profile_octets),
@@ -2251,6 +2299,7 @@ mod tests {
         let object = |kind| CredentialV2Object::new(kind, intent_digest, vec![0xa0]).unwrap();
         let pending = PendingCredentialV2Completion {
             version: SLOT_VERSION,
+            flow: crate::session::CredentialV2Flow::LegacyTwoDecision,
             root_generation: codec::b64url(&root_generation(&[0x87; 32])),
             application_id: profile.application_id.as_str().into(),
             relay_origin: carrier.relay_origin().into(),
@@ -2319,7 +2368,6 @@ mod tests {
         (acknowledged, planned, issuer_created, provisioned)
     }
 
-
     struct InjectAt(PrePayloadBoundary);
 
     impl PrePayloadFaultSink for InjectAt {
@@ -2330,6 +2378,88 @@ mod tests {
                 Ok(())
             }
         }
+    }
+
+    #[test]
+    #[ignore = "installs the process-global in-memory keyring; run alone"]
+    fn single_link_transaction_faults_ambiguous_payload_and_policy_free_unlink() {
+        use crate::session::CredentialV2Flow::SingleLink;
+        shared_memkeyring::install();
+        let pending = pending_abandonment_fixture().with_flow(SingleLink);
+        let (acknowledged, planned, issuer, provisioned) = pending_stage_fixtures(&pending);
+        let baseline_policy = shared_memkeyring::policy_operations();
+        let baseline_identity = identity_effect_count();
+        for boundary in [
+            PrePayloadBoundary::FinalApprovalRelease,
+            PrePayloadBoundary::AcknowledgementRead,
+            PrePayloadBoundary::AcknowledgementRecognition,
+            PrePayloadBoundary::AcknowledgementCheckpointReplacement,
+            PrePayloadBoundary::AcknowledgementCheckpointCommit,
+            PrePayloadBoundary::PlanConstruction,
+            PrePayloadBoundary::PlannedStageReplacement,
+            PrePayloadBoundary::IssuerCustody,
+            PrePayloadBoundary::IssuerStageReplacement,
+            PrePayloadBoundary::IssuerPublication,
+            PrePayloadBoundary::ResolverVerification,
+            PrePayloadBoundary::GrantConstruction,
+            PrePayloadBoundary::ProvisionedStageReplacement,
+            PrePayloadBoundary::PayloadConstruction,
+            PrePayloadBoundary::PayloadCheckpointPreparation,
+        ] {
+            let mut transaction = PrePayloadPendingTransaction::begin(pending.clone()).unwrap();
+            let error = transaction
+                .try_step(&mut InjectAt(boundary), boundary, || Ok(()))
+                .unwrap_err();
+            assert_eq!(error.to_string(), "InjectedPrePayloadFailure");
+            drop(transaction);
+            assert!(pending_links().unwrap().is_empty(), "{boundary:?}");
+        }
+        let prepared = provisioned.payload_prepared([0x3a; 32]).unwrap();
+        for after in [false, true] {
+            let mut transaction = PrePayloadPendingTransaction::begin(pending.clone()).unwrap();
+            for replacement in [&acknowledged, &planned, &issuer, &provisioned] {
+                transaction
+                    .replace_at(
+                        &mut NoPrePayloadFaults,
+                        PrePayloadBoundary::PlannedStageReplacement,
+                        replacement.clone(),
+                    )
+                    .unwrap();
+            }
+            shared_memkeyring::fail_next_set_for_user(
+                &slot_name(pending.application_id()).unwrap(),
+                if after {
+                    shared_memkeyring::SetFailure::AfterCommit
+                } else {
+                    shared_memkeyring::SetFailure::BeforeCommit
+                },
+            );
+            assert!(transaction.commit_payload(prepared.clone()).is_err());
+            if after {
+                assert_eq!(load_pending(pending.application_id()).unwrap(), prepared);
+                assert_eq!(identity_effect_count(), baseline_identity);
+                let selected = load_local_link(pending.application_id()).unwrap();
+                assert!(selected.exact_pair_state.is_none());
+                unlink_local(&selected).unwrap();
+            }
+            assert!(pending_links().unwrap().is_empty());
+        }
+        assert_eq!(shared_memkeyring::policy_operations(), baseline_policy);
+        // An independently existing legacy row is untouched even by SingleLink unlink.
+        crate::cbcl_v2_policy::insert(pending.application_id(), &pending.relay_origin).unwrap();
+        let existing_policy = shared_memkeyring::policy_operations();
+        let mut installed = installed_reload_fixture();
+        installed.flow = SingleLink;
+        overwrite_test_slot(&CredentialV2LinkSlot::Installed(installed.clone()));
+        let selected = load_local_link(installed.application_id()).unwrap();
+        assert!(selected.exact_pair_state.is_none());
+        unlink_local(&selected).unwrap();
+        assert_eq!(shared_memkeyring::policy_operations(), existing_policy);
+        assert_eq!(
+            crate::cbcl_v2_policy::state(pending.application_id(), &pending.relay_origin).unwrap(),
+            crate::cbcl_v2_policy::ExactPairState::TrustedPair
+        );
+        shared_memkeyring::clear();
     }
 
     #[test]
@@ -2632,6 +2762,7 @@ mod tests {
     fn the_slot_is_a_canonical_exclusive_tagged_union() {
         let installed = CredentialV2LinkSlot::Installed(InstalledCredentialV2Link {
             version: 1,
+            flow: crate::session::CredentialV2Flow::LegacyTwoDecision,
             root_generation: codec::b64url(&[1; 32]),
             relay_origin: "https://chat.anuna.io:9443".into(),
             profile: codec::b64url(b"{}"),
@@ -2661,6 +2792,20 @@ mod tests {
             finalized_at: 1_800_000_000,
         });
         let encoded = encode_slot(&installed).unwrap();
+        // Existing legacy slots remain byte-for-byte canonical without a mode
+        // field. Only the successor writes explicit SingleLink provenance.
+        assert!(!encoded.contains("\"flow\""));
+        let CredentialV2LinkSlot::Installed(mut successor) = installed.clone() else {
+            unreachable!()
+        };
+        successor.flow = crate::session::CredentialV2Flow::SingleLink;
+        let successor = CredentialV2LinkSlot::Installed(successor);
+        let encoded_successor = encode_slot(&successor).unwrap();
+        assert!(encoded_successor.contains("\"flow\":\"single-link\""));
+        assert_eq!(
+            serde_json::from_str::<CredentialV2LinkSlot>(&encoded_successor).unwrap(),
+            successor
+        );
         assert_eq!(
             serde_json::from_str::<CredentialV2LinkSlot>(&encoded).unwrap(),
             installed
