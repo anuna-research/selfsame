@@ -11,17 +11,17 @@ Root owns the signed ceremony, browser, local authority, clean pin closure, and 
 
 The implementation composes the existing [[Tauri]] mock builder, managed `AppSession`, native commands, and completion recognizer.
 Only custody storage and transport routing differ in the host process.
-Normal identity verification and consent remain authoritative under [[SPEC-077-selfsame-scan-pairing#REQ-002]].
-The separate preview and comparison requests preserve [[SPEC-077-selfsame-scan-pairing#REQ-003]].
-Only the complete-handoff command is exposed, under [[SPEC-077-selfsame-scan-pairing#REQ-005]].
+Normal identity verification remains authoritative. Default complete-input consent follows
+[[SPEC-079-selfsame-single-link-consent#CON-001]] through [[SPEC-079-selfsame-single-link-consent#CON-004]].
+Explicit legacy entry retains its separate relay, preliminary and final decisions.
 
 ## Invocation and isolation
 
 ```sh
-CARGO_TARGET_DIR=/Volumes/anuna-03/codex-scan-native-preview-1/target \
+CARGO_TARGET_DIR=/Volumes/anuna-03/codex-scan-clean-native-target \
 TMPDIR=/Volumes/anuna-03/codex-scan-native-preview-1/tmp \
-CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 CARGO_INCREMENTAL=0 \
-cargo test -p selfsame --lib scan_integration_native_host -- --ignored --nocapture --test-threads=1
+CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 CARGO_INCREMENTAL=0 CARGO_BUILD_JOBS=4 \
+cargo test --locked --offline -p selfsame --lib scan_integration_native_host -- --ignored --nocapture --test-threads=1
 ```
 
 The host runs alone because the keyring builder and explicit network configuration are process-global.
@@ -47,7 +47,9 @@ Every request is a UTF-8 JSON object:
 ```
 
 `id` is an unsigned 64-bit integer. `op` is one of the names below. `args` is the corresponding object.
-The `serde` recognizers reject unknown fields, missing required fields, duplicate fields, and wrong types.
+The host's raw JSON `serde` recognizers reject unknown fields, missing required fields, duplicate fields, and wrong types.
+The production Tauri commands receive nested normalized objects: `{request: args}` for the new operations below.
+They deny unknown members and wrong types; they cannot reject duplicate keys already lost in Tauri's transport parsing.
 The input limit is 65,536 bytes per line, including its newline.
 An oversized line produces `HostRequestOversize` with `id:null`, then closes the host.
 Malformed envelopes produce `HostRequestRefused` with `id:null`; malformed arguments retain the recognized request ID.
@@ -83,14 +85,23 @@ Field names in this table are exact. Optional passcodes accept omission or `null
 | Operation | `args` | `result` |
 |---|---|---|
 | `initialize` | `{mnemonic:string,passcode:string,rootPem:string,proxyUrl:string,relayAddress:string}` | `{outcome:"initialized",custody:"memory",backupConfirmed:true,installedLinks:[]}` |
-| `recognise-handoff` | `{handoff:string}` | `{applicationId,relayOrigin,requiresApproval}` from `cbcl_v2_recognise_handoff` |
+| `begin-handoff` | `{handoff:string}` | `{attemptTag,phase:"reserved",applicationId,relayOrigin}`; local recognition only |
+| `contact` | `{attemptTag}` | `{phase:"authenticated-request",intent:Intent}` |
+| `unlock-preview` | `{attemptTag,passcode:string}` | `{phase:"preview-unpainted",review:Review}`; no protocol decision or disclosure |
+| `preview-rendered` | `{attemptTag}` | `{phase:"review-ready"}`; renderer acknowledgement grants no disclosure |
+| `link` | `{attemptTag}` | `{phase:"comparing"}`; consumes person Link and sends intent approval/preparation |
+| `continue-link` | `{attemptTag}` | `{phase:"await-receipt"}`; authenticated matching comparison precedes distinct final approval/payload |
+| `finish-link` | `{attemptTag}` | `{outcome:"installed",installedLinks:[InstalledEvidence]}`; verifies receipt/live binding with retained bounded custody |
+| `cancel-link` | `{attemptTag}` | `null`; wrong tag refuses without cancelling a newer attempt |
+| `recognise-legacy` | `{invitation:string,presenceCode:string}` | `{applicationId,relayOrigin,requiresApproval}` from explicit carrier/PAIR1 entry |
+| `recognise-handoff` | `{handoff:string}` | obsolete default entry refuses `PairingWrongMode` |
 | `relay-decide` | `{approve:boolean}` | `{outcome:"declined"|"intent",intent:null|Intent}` |
 | `preliminary-decide` | `{approve:boolean,passcode?:string|null}` | `{outcome:"declined"|"preview",finalReview:null|Review}` |
 | `compare` | `{}` | `Review`, after authenticated comparison |
 | `final-decide` | `{approve:boolean,passcode?:string|null}` | `{outcome:"declined"|"payload-sent"}` |
 | `finish` | `{passcode?:string|null}` | `{outcome:"installed",installedLinks:[InstalledEvidence]}` |
 | `installed-links` | `{}` | `[InstalledEvidence]` |
-| `cancel` | `{}` | `null` from the actual cancel command |
+| `cancel` | `{}` | `null` after native session revocation in either mode |
 | `shutdown` | `{}` | `null` after cancel; process exits |
 
 `Intent` is the existing authenticated command projection:
@@ -101,7 +112,7 @@ Field names in this table are exact. Optional passcodes accept omission or `null
  transition: {kind, legacyHandle: string|null, migrationRooms: string[]}}
 ```
 
-`tofuState` is `"new-pair"`, `"trusted-pair"`, or the command's defensive `"unknown"` value.
+`tofuState` is `"ceremony-gesture"` for SingleLink, `"new-pair"` or `"trusted-pair"` for explicit legacy, or the command's defensive `"unknown"` value.
 `transition.kind` is `"none"` or `"path-a-to-b"`.
 
 `Review` is the existing preview/comparison projection:
@@ -111,9 +122,12 @@ Field names in this table are exact. Optional passcodes accept omission or `null
  previewFingerprint: {hex, label, lifehash}, comparison}
 ```
 
-Preliminary approval returns `comparison:"waiting"` before preparation disclosure.
-The later `compare` request returns `"no-binding-person-compared"` or `"bound-same-did"`.
-Explicit final approval remains a separate request. The host never approves automatically.
+Default unlock returns `comparison:"waiting"`. The real UI acknowledges after paint and calls `link` only for the person's Link gesture.
+The host exposes these same separate operations for orchestration; it does not synthesize gestures.
+Default finish has no passcode argument. Custody expires exclusively at the earliest of 120 suspend-inclusive seconds from unlock, offer expiry, and relay expiry.
+Expired post-payload recovery needs fresh explicit presence through the existing wallet recovery API; the host has no extra recovery authority.
+For explicit legacy, preliminary approval returns `comparison:"waiting"` before preparation disclosure;
+`compare` returns `"no-binding-person-compared"` or `"bound-same-did"`, and final approval remains a separate request.
 Wrong phases, duplicate continuation, decline, and cancellation retain the commands' existing refusal behavior.
 
 `InstalledEvidence` contains only these fields:
@@ -183,10 +197,7 @@ All cargo invocations use the target, temporary directory, and debug/incremental
 | Normal/WASM feature isolation | pass | `tree -p selfsame --edges normal,build,features`; same for `selfsame-web-device --target wasm32-unknown-unknown` | `native-host-normal-feature-tree.log`, `native-host-wasm-feature-tree.log`: no test-support, Tauri test, or cookie feature |
 | Existing boundaries/rollback/hold | boundaries/rollback/hold pass; shell baseline fails | `test -p selfsame-pairing --test shell_cutover --test spec008_hold_invariance --test rollback_hold --test boundaries`; separate `test -p selfsame-pairing --test spec008_hold_invariance` after the baseline failure | `native-host-default-guards.log`, `native-host-production-hold.log` |
 
-The broader `shell_cutover` guard is red on its legacy UI source assertion, `ui.contains("{ invitation, presenceCode }")`.
-The same unchanged test and included sources from `729dd0f` reproduce that failure with `rustc --test`.
-Evidence: `native-host-shell-cutover-baseline.log`. This pre-existing failure remains outside the owned changes; root owns its disposition.
-Normal trust guards are green; no claim that every repository test passes is made.
+At the earlier SPEC-077 base, `shell_cutover` was red on an obsolete legacy UI source assertion, `ui.contains("{ invitation, presenceCode }")`; `native-host-shell-cutover-baseline.log` preserves that historical receipt. The SPEC-079 successor updates the assertion for default nested complete-handoff entry and explicit nested legacy carrier/PAIR1 entry. The current full `selfsame-pairing` suite passes; see `evidence/spec079-native-consent/README.md` for the bounded successor receipt. Normal trust guards remain green.
 
 The complete signed browser/native ceremony and successful installation are unexecuted here.
 The completion fixture regression is storage/verification evidence only, not a browser/native installation ceremony.

@@ -69,6 +69,10 @@ tauri-plugin-biometric = "2"
 [target.'cfg(target_os = "android")'.dependencies]
 tauri-plugin-selfsame-store = { path = "../crates/tauri-plugin-selfsame-store" }
 
+# Suspend-inclusive CLOCK_BOOTTIME uses the platform ABI from the existing lock pin.
+[target.'cfg(any(target_os = "linux", target_os = "android"))'.dependencies]
+libc = "0.2"
+
 [dev-dependencies]
 # SPEC-077 TEST-008: feature unification applies only to native test builds.
 selfsame-app-identity-net = { path = "../crates/selfsame-app-identity-net", features = ["native-test-support"] }

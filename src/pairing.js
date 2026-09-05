@@ -11,6 +11,8 @@ export function initPairing(d) {
   const presencePattern = /^PAIR1-(?:[0-9A-HJKMNP-TV-Z]{5}-){10}[0-9A-HJKMNP-TV-Z]{5}$/;
   let credentialV2Stage = "idle";
   let attemptEpoch = 0;
+  let flow = "single";
+  let attemptTag = null;
   let decisionPending = false;
   let intentFields = [];
   let recoveryApplication = null;
@@ -22,10 +24,10 @@ export function initPairing(d) {
   // shows no demo copy — the fail-safe direction.
   let capability = { demoRelay: false, productionClaimant: true };
   const passcodeField = $("[data-pairing-passcode-field]");
-  // Fail-safe default (review finding m-5): the production shape shows the
-  // field; only a build that ANSWERS demo hides it. A failed capability call
-  // leaves the production surface intact.
-  if (passcodeField) passcodeField.hidden = false;
+  // SingleLink asks for presence only after the request is authenticated.
+  // Explicit legacy entry reveals this production field from `onInput`; a
+  // build that identifies itself as demo keeps the field hidden there too.
+  if (passcodeField) passcodeField.hidden = true;
   invoke("cbcl_pairing_capability")
     .then((view) => {
       // A bridge that answers with anything but the capability shape leaves
@@ -34,7 +36,7 @@ export function initPairing(d) {
       if (view && typeof view.productionClaimant === "boolean") {
         capability = view;
       }
-      if (passcodeField) passcodeField.hidden = !capability.productionClaimant;
+      if (passcodeField) passcodeField.hidden = flow === "single" || !capability.productionClaimant;
     })
     .catch(() => {});
 
@@ -42,6 +44,7 @@ export function initPairing(d) {
     const value = $("#pairing-input")?.value ?? "";
     const legacy = $("[data-pairing-legacy]")?.open === true;
     const presence = $("#pairing-presence-code")?.value.trim().toUpperCase() ?? "";
+    if (credentialV2Stage === "idle" && passcodeField) passcodeField.hidden = !legacy || !capability.productionClaimant;
     const ready = value.length > 0 && (!legacy || presencePattern.test(presence));
     $("[data-pairing-state]").textContent = ready
       ? "Invitation ready"
@@ -52,10 +55,14 @@ export function initPairing(d) {
   }
 
   async function start(presented) {
+    if (credentialV2Stage !== "idle") return;
     const epoch = ++attemptEpoch;
     const input = $("#pairing-input");
     const handoff = typeof presented === "string" ? presented : input.value;
     const legacy = typeof presented !== "string" && $("[data-pairing-legacy]")?.open === true;
+    flow = legacy ? "legacy" : "single";
+    attemptTag = null;
+    credentialV2Stage = "entry";
     const presenceInput = $("#pairing-presence-code");
     const presenceCode = (presenceInput?.value ?? "").trim().toUpperCase();
     input.value = "";
@@ -69,16 +76,31 @@ export function initPairing(d) {
     $("[data-screen='pairing-wait']").focus();
     idle(); // The wait screen keeps cancellation reachable.
     try {
-      const view = legacy
-        ? await invoke("cbcl_v2_recognise", { invitation: handoff.trim(), presenceCode })
-        : await invoke("cbcl_v2_recognise_handoff", { handoff });
-      if (epoch !== attemptEpoch) return;
-      if (view.requiresApproval) showRelayConsent(view);
-      else await advanceRelay(true, epoch);
+      if (legacy) {
+        const view = await invoke("cbcl_v2_recognise", { invitation: handoff.trim(), presenceCode });
+        if (epoch !== attemptEpoch) return;
+        if (view.requiresApproval) showRelayConsent(view);
+        else await advanceRelay(true, epoch);
+      } else {
+        const reservation = await invoke("cbcl_v2_begin_handoff", { request: { handoff } });
+        if (epoch !== attemptEpoch) {
+          await invoke("cbcl_v2_cancel_link", { request: { attemptTag: reservation.attemptTag } }).catch(() => {});
+          return;
+        }
+        attemptTag = reservation.attemptTag;
+        credentialV2Stage = "contact";
+        $("[data-cbcl-relay]").textContent = reservation.relayOrigin;
+        $("[data-cbcl-status]").textContent = `This invitation permits contact with ${reservation.applicationId} and its displayed relay for this link only.`;
+        const result = await invoke("cbcl_v2_contact", { request: { attemptTag } });
+        if (epoch !== attemptEpoch) return;
+        showIntent(result.intent);
+      }
     } catch (error) {
       if (epoch !== attemptEpoch) return;
-      await invoke("cbcl_v2_cancel").catch(() => {});
+      await revokeNative();
       if (epoch !== attemptEpoch) return;
+      credentialV2Stage = "idle";
+      attemptTag = null;
       restoreEntryUnlock();
       show("pairing-enter");
       fail("pairing", startFailureText(message(error)));
@@ -93,7 +115,7 @@ export function initPairing(d) {
   function startFailureText(token) {
     if (token === "PairingVersionUnsupported")
       return "Update Selfsame and the application, then create a new invitation.";
-    if (token === "PairingInvitationExpired" || token === "PairingOfferExpired")
+    if (token === "PairingInvitationExpired" || token === "PairingOfferExpired" || token === "PairingExpired")
       return "That invitation expired. Create a new one in the application and scan it again.";
     if (token === "PairingRelayUnavailable")
       return capability.demoRelay
@@ -139,7 +161,7 @@ export function initPairing(d) {
     const approveButton = $('[data-action="approve-cbcl-pairing"]');
     const declineButton = $('[data-action="decline-cbcl-pairing"]');
     approveButton.textContent = approve;
-    approveButton.disabled = credentialV2Stage === "comparison";
+    approveButton.disabled = actionDisabled();
     const channel = $("[data-cbcl-channel-status]");
     if (channel) channel.textContent = credentialV2Stage === "relay"
       ? "Application profile checked; secure connection follows your approval"
@@ -149,7 +171,8 @@ export function initPairing(d) {
     const unlockSlot = $("[data-pairing-consent-unlock]");
     if (unlockSlot && passcodeField) {
       unlockSlot.append(passcodeField);
-      passcodeField.hidden = !capability.productionClaimant || credentialV2Stage === "relay" || credentialV2Stage === "comparison";
+      passcodeField.hidden = !capability.productionClaimant ||
+        (flow === "single" && !credentialV2Stage.startsWith("recovery") ? credentialV2Stage !== "single-unlock" : credentialV2Stage === "relay" || credentialV2Stage === "comparison");
     }
     declineButton.textContent = decline;
     declineButton.hidden = false;
@@ -175,13 +198,15 @@ export function initPairing(d) {
   }
 
   function showIntent(intent) {
-    credentialV2Stage = "intent";
+    credentialV2Stage = flow === "single" ? "single-unlock" : "intent";
     const fields = [
       { label: "Authenticated application", value: intent.applicationId },
       { label: "HTTPS origin", value: intent.httpsOrigin },
       { label: "Blind relay", value: intent.relayOrigin },
       { label: "Installation device", value: intent.deviceDid },
       { label: "Account principal", value: intent.accountPrincipalDigest },
+      { label: "Contact permission", value: intent.tofuState === "ceremony-gesture" ? "This ceremony only" : intent.tofuState === "trusted-pair" ? "Previously approved exact application–relay pair" : "New exact application–relay approval" },
+      { label: "Transition", value: intent.transition?.kind ?? "none" },
       ...intent.permissions.map((value) => ({ label: "Permission", value })),
     ];
     if (intent.transition?.kind === "path-a-to-b") {
@@ -195,10 +220,104 @@ export function initPairing(d) {
       title: "Review the exact request",
       authority: "CPace and both Finished values authenticated this request under the live application profile.",
       application: intent.applicationId,
-      action: "Approval permits a pure account-identity preview; it does not issue or publish anything.",
+      action: flow === "single" ? "Unlock to show your local identity for this request." : "Approval permits a pure account-identity preview; it does not issue or publish anything.",
       fields,
-      approve: "Preview identity",
+      approve: flow === "single" ? "Unlock to show identity" : "Preview identity",
     });
+  }
+
+  const linkWording = "Share this identity with this application and link this device if the desktop comparison succeeds.";
+  function actionDisabled() {
+    return decisionPending || ["comparison", "single-preview", "single-link", "single-comparison", "single-finish", "cancelling"].includes(credentialV2Stage);
+  }
+  function showSinglePreview(review) {
+    credentialV2Stage = "single-preview";
+    paintConsent({
+      title: "Review and link this device",
+      authority: "Your identity is shown locally. Nothing has been shared with the application.",
+      application: review.applicationId,
+      action: linkWording,
+      fields: [...intentFields,
+        { label: "Account issuer DID", value: review.previewIssuerDid },
+        { label: "Comparison fingerprint", value: review.previewFingerprint.hex },
+        { label: "Recognition aid", value: review.previewFingerprint.label }],
+      approve: "Link", decline: "Cancel linking",
+    });
+    idle();
+  }
+  async function revokeNative(tag = attemptTag, mode = flow) {
+    if (mode === "single") {
+      if (tag) await invoke("cbcl_v2_cancel_link", { request: { attemptTag: tag } }).catch(() => {});
+    } else await invoke("cbcl_v2_cancel").catch(() => {});
+  }
+  async function decideSingle(approve) {
+    if (!approve) { await cancel(); return; }
+    if (decisionPending || !["single-unlock", "single-ready"].includes(credentialV2Stage)) return;
+    const epoch = attemptEpoch;
+    const tag = attemptTag;
+    const request = { attemptTag: tag };
+    decisionPending = true;
+    $('[data-action="approve-cbcl-pairing"]').disabled = true;
+    idle();
+    try {
+      if (credentialV2Stage === "single-unlock") {
+        const input = $("#pairing-passcode");
+        let result;
+        try {
+          result = await invoke("cbcl_v2_unlock_preview", { request: { ...request, passcode: input?.value ?? "" } });
+        } finally {
+          if (input) input.value = "";
+        }
+        if (epoch !== attemptEpoch) return;
+        showSinglePreview(result.review);
+        await previewRendered();
+        if (epoch !== attemptEpoch) return;
+        await invoke("cbcl_v2_preview_rendered", { request });
+        if (epoch !== attemptEpoch) return;
+        credentialV2Stage = "single-ready";
+        $("[data-cbcl-channel-status]").textContent = "Review is ready. Select Link when you are ready to share this identity.";
+        // Preserve the review and move keyboard focus to its now-available action.
+        $('[data-action="approve-cbcl-pairing"]').disabled = false;
+        $('[data-action="approve-cbcl-pairing"]').focus();
+        return;
+      }
+      credentialV2Stage = "single-link";
+      $("[data-cbcl-authority]").textContent = "Sharing the reviewed identity for this request.";
+      $("[data-cbcl-channel-status]").textContent = "Waiting for the desktop comparison. Cancel remains available.";
+      await invoke("cbcl_v2_link", { request });
+      if (epoch !== attemptEpoch) return;
+      credentialV2Stage = "single-comparison";
+      await invoke("cbcl_v2_continue_link", { request });
+      if (epoch !== attemptEpoch) return;
+      credentialV2Stage = "single-finish";
+      $("[data-cbcl-channel-status]").textContent = "Verifying the signed hub receipt and live reciprocal account binding.";
+      const result = await invoke("cbcl_v2_finish_link", { request });
+      if (epoch !== attemptEpoch) return;
+      if (result.outcome !== "installed") throw new Error("PairingReceiptRefused");
+      credentialV2Stage = "idle";
+      attemptTag = null;
+      showResult("accepted", "Application connected", "The signed hub receipt and live reciprocal account binding were verified before the grant was installed.", "The invitation permitted contact for this ceremony only.");
+    } catch (error) {
+      if (epoch !== attemptEpoch) return;
+      const postPayload = credentialV2Stage === "single-finish";
+      await revokeNative(tag, "single");
+      if (epoch !== attemptEpoch) return;
+      credentialV2Stage = "idle";
+      attemptTag = null;
+      if (postPayload) {
+        showResult("failed", "Link verification incomplete", "The grant was not installed. The sealed pending link remains available for explicit recovery with fresh presence.", "No new identity work is authorized by the saved checkpoint.");
+      } else {
+        restoreEntryUnlock();
+        show("pairing-enter");
+        fail("pairing", startFailureText(message(error)));
+      }
+    } finally {
+      if (epoch === attemptEpoch) {
+        decisionPending = false;
+        $('[data-action="approve-cbcl-pairing"]').disabled = actionDisabled();
+        idle();
+      }
+    }
   }
 
   function showFinalReview(review) {
@@ -244,6 +363,7 @@ export function initPairing(d) {
     requestAnimationFrame(() => requestAnimationFrame(resolve)));
 
   function showRecovery(applicationId) {
+    flow = "legacy";
     recoveryApplication = applicationId;
     credentialV2Stage = "recovery";
     paintConsent({
@@ -306,6 +426,7 @@ export function initPairing(d) {
   }
 
   async function decide(approve) {
+    if (flow === "single" && !credentialV2Stage.startsWith("recovery")) return decideSingle(approve);
     if (credentialV2Stage === "comparison") {
       if (!approve) await cancel();
       return;
@@ -442,25 +563,38 @@ export function initPairing(d) {
     }
   }
 
-  async function cancel() {
+  async function cancel(navigate = true) {
+    const tag = attemptTag;
+    const mode = flow;
     const epoch = ++attemptEpoch;
+    attemptTag = null;
     credentialV2Stage = "cancelling";
     decisionPending = true;
     $('[data-action="approve-cbcl-pairing"]').disabled = true;
     $('[data-action="decline-cbcl-pairing"]').disabled = true;
     intentFields = [];
+    const passcode = $("#pairing-passcode");
+    if (passcode) passcode.value = "";
     idle();
-    try {
-      await invoke("cbcl_v2_cancel");
-    } finally {
+    try { await revokeNative(tag, mode); }
+    finally {
       if (epoch !== attemptEpoch) return;
       credentialV2Stage = "idle";
       decisionPending = false;
-      const passcode = $("#pairing-passcode");
-      if (passcode) passcode.value = "";
-      show("applications");
+      if (navigate) show("applications");
     }
   }
+
+  function leaving(name) {
+    if (!["idle", "cancelling"].includes(credentialV2Stage) &&
+        !["pairing-enter", "pairing-wait", "pairing-consent"].includes(name)) {
+      void cancel(false);
+    }
+  }
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden && credentialV2Stage !== "idle") void cancel(false);
+  });
+  window.addEventListener("pagehide", () => { if (credentialV2Stage !== "idle") void cancel(false); });
 
   // The confidential QR payload IS the paste payload. Scan and paste recognise
   // identical input and everything after this line is the one ordinary
@@ -525,11 +659,14 @@ export function initPairing(d) {
     const unlockSlot = $("[data-pairing-entry-unlock]");
     if (unlockSlot && passcodeField) {
       unlockSlot.append(passcodeField);
-      passcodeField.hidden = !capability.productionClaimant;
+      passcodeField.hidden = flow === "single" || !capability.productionClaimant;
     }
   }
 
   function forget() {
+    if (credentialV2Stage !== "idle") void revokeNative();
+    attemptTag = null;
+    flow = "single";
     ++attemptEpoch;
     decisionPending = false;
     intentFields = [];
@@ -754,5 +891,5 @@ export function initPairing(d) {
     const scanButton = $('[data-action="scan-cbcl-pairing"]');
     if (scanButton) scanButton.hidden = true;
   }
-  return { forget, resumePending, refreshInstalledLinks };
+  return { forget, resumePending, refreshInstalledLinks, leaving };
 }

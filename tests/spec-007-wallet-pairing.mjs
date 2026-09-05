@@ -49,7 +49,9 @@ test("TEST-814 CBCL wallet states are keyboard complete and WCAG-clean", async (
     await visible(page, "pairing-enter");
     await audit(page, `invitation entry at ${width}px`);
 
-    await page.type("#pairing-input", "SSPAIR1:fixture");
+    await page.$eval('[data-pairing-legacy]', el => { el.open = true; });
+    await page.type("#pairing-presence-code", "PAIR1-" + Array(11).fill("00000").join("-"));
+    await page.type("#pairing-input", "fixture-carrier");
     await page.type("#pairing-passcode", "correct horse battery staple");
     assert.equal(await page.$eval('[data-action="start-cbcl-pairing"]', (node) => node.disabled), false);
     await page.click('[data-action="start-cbcl-pairing"]');
@@ -284,8 +286,8 @@ function bridge() {
         if (command === "get_state") return state;
         if (command === "flush_publications") return 0;
         if (command === "cbcl_v2_cancel") return null;
-        if (command === "cbcl_v2_recognise_handoff") {
-          if (args.handoff.startsWith("selfsame-pairing-v2:")) {
+        if (command === "cbcl_v2_recognise") {
+          if (args.invitation.startsWith("selfsame-pairing-v2:")) {
             throw "RecognitionFailed";
           }
           return new Promise((resolve) => {

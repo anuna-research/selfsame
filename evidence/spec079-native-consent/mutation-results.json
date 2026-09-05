@@ -1,0 +1,222 @@
+[
+  {
+    "name": "root-change-worker",
+    "requirement": "REQ-006",
+    "kind": "behavioral",
+    "killed": true,
+    "exit": 101,
+    "source_sha256": "cddc8d680510ab387e1b835c3ff4350ecb6590d32a2a32ad5e4dda62c6492468",
+    "log": "root-change-worker.log"
+  },
+  {
+    "name": "legacy-record-encoding",
+    "requirement": "REQ-007",
+    "kind": "behavioral",
+    "killed": true,
+    "exit": 101,
+    "source_sha256": "cddc8d680510ab387e1b835c3ff4350ecb6590d32a2a32ad5e4dda62c6492468",
+    "log": "legacy-record-encoding.log"
+  },
+  {
+    "name": "exact-relay-candidate",
+    "requirement": "REQ-001",
+    "kind": "behavioral",
+    "killed": true,
+    "exit": 101,
+    "source_sha256": "9542a44b7ec0a930a78680a731ff5c88ac6bcc09e1ffaf7a568c65739ca6fcf1",
+    "log": "exact-relay-candidate.log"
+  },
+  {
+    "name": "exact-application-candidate",
+    "requirement": "REQ-001",
+    "kind": "behavioral",
+    "killed": true,
+    "exit": 101,
+    "source_sha256": "9542a44b7ec0a930a78680a731ff5c88ac6bcc09e1ffaf7a568c65739ca6fcf1",
+    "log": "exact-application-candidate.log"
+  },
+  {
+    "name": "ceremony-policy",
+    "requirement": "REQ-001",
+    "kind": "behavioral",
+    "killed": true,
+    "exit": 101,
+    "source_sha256": "9542a44b7ec0a930a78680a731ff5c88ac6bcc09e1ffaf7a568c65739ca6fcf1",
+    "log": "ceremony-policy.log"
+  },
+  {
+    "name": "unlock-decision",
+    "requirement": "REQ-002",
+    "kind": "behavioral",
+    "killed": true,
+    "exit": 101,
+    "source_sha256": "7670dc7f75ff3e8d7453b1fe17528994f0ea673d012bc7017a92f08b0cf103b2",
+    "log": "unlock-decision.log"
+  },
+  {
+    "name": "render-phase",
+    "requirement": "REQ-003",
+    "kind": "behavioral",
+    "killed": true,
+    "exit": 101,
+    "source_sha256": "7670dc7f75ff3e8d7453b1fe17528994f0ea673d012bc7017a92f08b0cf103b2",
+    "log": "render-phase.log"
+  },
+  {
+    "name": "comparison-hold",
+    "requirement": "REQ-004",
+    "kind": "behavioral",
+    "killed": true,
+    "exit": 101,
+    "source_sha256": "7670dc7f75ff3e8d7453b1fe17528994f0ea673d012bc7017a92f08b0cf103b2",
+    "log": "comparison-hold.log"
+  },
+  {
+    "name": "preview-equality",
+    "requirement": "REQ-004",
+    "kind": "behavioral",
+    "killed": true,
+    "exit": 101,
+    "source_sha256": "a4112a0163397405aeaecdbe43b2fa3d8155d5f4edcafa73b6727877a1fc8b31",
+    "log": "preview-equality.log"
+  },
+  {
+    "name": "deadline-equality",
+    "requirement": "REQ-005",
+    "kind": "behavioral",
+    "killed": true,
+    "exit": 101,
+    "source_sha256": "156751593c80dae9a2ad85a05d21589c46dff2e7ecce841938d809b80ec2c150",
+    "log": "deadline-equality.log"
+  },
+  {
+    "name": "deadline-enforcement",
+    "requirement": "REQ-005",
+    "kind": "behavioral",
+    "killed": true,
+    "exit": 101,
+    "source_sha256": "cddc8d680510ab387e1b835c3ff4350ecb6590d32a2a32ad5e4dda62c6492468",
+    "log": "deadline-enforcement.log"
+  },
+  {
+    "name": "effect-entry-fence",
+    "requirement": "REQ-006",
+    "kind": "behavioral",
+    "killed": true,
+    "exit": 101,
+    "source_sha256": "cddc8d680510ab387e1b835c3ff4350ecb6590d32a2a32ad5e4dda62c6492468",
+    "log": "effect-entry-fence.log"
+  },
+  {
+    "name": "guarded-pause-fence",
+    "requirement": "REQ-006",
+    "kind": "behavioral",
+    "killed": true,
+    "exit": 101,
+    "source_sha256": "a4112a0163397405aeaecdbe43b2fa3d8155d5f4edcafa73b6727877a1fc8b31",
+    "log": "guarded-pause-fence.log"
+  },
+  {
+    "name": "payload-recovery-barrier",
+    "requirement": "REQ-007",
+    "kind": "behavioral",
+    "killed": true,
+    "exit": 101,
+    "source_sha256": "287a9d84d6b4be8c555de9b1d570d02b266046cb54c825e954a5fdc59cacce90",
+    "log": "payload-recovery-barrier.log"
+  },
+  {
+    "name": "cross-mode",
+    "requirement": "REQ-008",
+    "kind": "behavioral",
+    "killed": true,
+    "exit": 101,
+    "source_sha256": "cddc8d680510ab387e1b835c3ff4350ecb6590d32a2a32ad5e4dda62c6492468",
+    "log": "cross-mode.log"
+  },
+  {
+    "name": "normalized-request",
+    "requirement": "REQ-008",
+    "kind": "behavioral",
+    "killed": true,
+    "exit": 101,
+    "source_sha256": "7670dc7f75ff3e8d7453b1fe17528994f0ea673d012bc7017a92f08b0cf103b2",
+    "log": "normalized-request.log"
+  },
+  {
+    "name": "phone-render",
+    "requirement": "REQ-003",
+    "kind": "behavioral",
+    "killed": true,
+    "exit": 1,
+    "source_sha256": "abae249481dff8772fb5cbc7220590e0886a1adc4895ef2f776dc610b9a4e0fd",
+    "log": "phone-render.log"
+  },
+  {
+    "name": "phone-passcode",
+    "requirement": "REQ-009",
+    "kind": "behavioral",
+    "killed": true,
+    "exit": 1,
+    "source_sha256": "abae249481dff8772fb5cbc7220590e0886a1adc4895ef2f776dc610b9a4e0fd",
+    "log": "phone-passcode.log"
+  },
+  {
+    "name": "phone-installed",
+    "requirement": "REQ-009",
+    "kind": "behavioral",
+    "killed": true,
+    "exit": 1,
+    "source_sha256": "abae249481dff8772fb5cbc7220590e0886a1adc4895ef2f776dc610b9a4e0fd",
+    "log": "phone-installed.log"
+  },
+  {
+    "name": "late-tag",
+    "requirement": "REQ-006",
+    "kind": "behavioral",
+    "killed": true,
+    "exit": 1,
+    "source_sha256": "abae249481dff8772fb5cbc7220590e0886a1adc4895ef2f776dc610b9a4e0fd",
+    "log": "late-tag.log"
+  },
+  {
+    "name": "private-construction",
+    "requirement": "REQ-004",
+    "kind": "compile-fail",
+    "killed": true,
+    "diagnostic": "E0603",
+    "exit": 101,
+    "source_sha256": "9f34dd133af8f99e85846ace068ab935da102b5163240137793e168bb00c931f",
+    "log": "private-construction.log"
+  },
+  {
+    "name": "noncloneable",
+    "requirement": "REQ-004",
+    "kind": "compile-fail",
+    "killed": true,
+    "diagnostic": "E0599",
+    "exit": 101,
+    "source_sha256": "7670dc7f75ff3e8d7453b1fe17528994f0ea673d012bc7017a92f08b0cf103b2",
+    "log": "noncloneable.log"
+  },
+  {
+    "name": "nonserializable",
+    "requirement": "REQ-004",
+    "kind": "compile-fail",
+    "killed": true,
+    "diagnostic": "E0277",
+    "exit": 101,
+    "source_sha256": "7670dc7f75ff3e8d7453b1fe17528994f0ea673d012bc7017a92f08b0cf103b2",
+    "log": "nonserializable.log"
+  },
+  {
+    "name": "single-use",
+    "requirement": "REQ-004",
+    "kind": "compile-fail",
+    "killed": true,
+    "diagnostic": "E0382",
+    "exit": 101,
+    "source_sha256": "7670dc7f75ff3e8d7453b1fe17528994f0ea673d012bc7017a92f08b0cf103b2",
+    "log": "single-use.log"
+  }
+]
