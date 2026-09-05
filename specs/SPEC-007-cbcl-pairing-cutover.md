@@ -3,20 +3,20 @@ id: SPEC-007
 title: cbcl-pairing Protocol Cutover
 status: draft
 tier: 1
-version: 0.3.8-draft
-last-updated: 2026-08-25
+version: 0.3.9-draft
+last-updated: 2026-09-05
 previous-approved-version: 0.2.1
 owner-repo: selfsame
 review-gate: test-first-implementation-owner-authorized; release-prohibited-pending-cross-model-pass
 authority-form: direct-current-safety-authority
 implementation-baseline: 0220cec2dec44cd95d4f411ea4814d790b6716d2
-coordinated-claimant-design: selfsame SPEC-008 0.5.17-draft
-coordinated-hub-design: cbcl-bus SPEC-053 0.17.13-draft
-coordinated-pairing-design: cbcl-pairing SPEC-001 0.5.8-draft
+coordinated-claimant-design: selfsame SPEC-008 0.5.18-draft
+coordinated-hub-design: cbcl-bus SPEC-053 0.17.14-draft
+coordinated-pairing-design: cbcl-pairing SPEC-001 0.5.9-draft
 generation-model-family: OpenAI GPT-5
 generation-model-version: gpt-5.6-sol
 generation-session: 01a029aa-9127-7c42-ad28-81512b91ded6
-generation-synthesis-trajectory: "approved 0.2.1 cutover -> standalone credential/v2 ordering conflict -> rejected reviews through 0.5.7 -> direct 0.3.8 proof-input closure"
+generation-synthesis-trajectory: "approved 0.2.1 cutover -> standalone credential/v2 ordering conflict -> rejected reviews through 0.5.7 -> direct 0.3.9 proof-input closure"
 candidate-successor-to: SPEC-006
 depends-on: cbcl-pairing SPEC-001; SPEC-004; SCREEN-001
 ---
@@ -1249,8 +1249,8 @@ Production invitation allocation remains prohibited until all items have durable
 - the repository owner approves the recorded no-users finding and no-migration disposition;
 - coordinated SPEC-004, SPEC-006, and PROTO-002 through PROTO-004 amendments pass their own channels;
 - the upstream credential-profile disposition passes the `cbcl-pairing` amendment channel;
-- Selfsame SPEC-008 0.5.17-draft, cbcl-bus SPEC-053 0.17.13-draft,
-  and cbcl-pairing SPEC-001 0.5.8-draft pass one coordinated Tier-1 review;
+- Selfsame SPEC-008 0.5.18-draft, cbcl-bus SPEC-053 0.17.14-draft,
+  and cbcl-pairing SPEC-001 0.5.9-draft pass one coordinated Tier-1 review;
 - every SPEC-004 Tier-1 row has the exact disposition in the inherited gate ledger;
 - every retained or replaced SPEC-004 ledger row reaches pass through its exact disposition;
 - the exact upstream `cbcl-pairing` production gates pass without local reinterpretation;
@@ -1277,6 +1277,18 @@ or agent-authored report substitutes for these approvals.
 - Stakeholder: [[SPEC-007-cbcl-pairing-cutover#Intent source]] →
   [[SPEC-007-cbcl-pairing-cutover#Compatibility disposition]] →
   [[SPEC-007-cbcl-pairing-cutover#Requirements]].
+
+## Scan-handoff Gate Evidence Record — 0.3.9-draft
+
+The 2026-09-05 owner instruction authorizes local implementation of the
+confidential scan handoff and preview ordering in Selfsame SPEC-008 0.5.18,
+cbcl-pairing SPEC-001 0.5.9, bus SPEC-053 0.17.14 and bus SPEC-077 0.1.1.
+This is an explicit local exception to earlier exclusions of carrier-format
+work: the new wrapper is confidential and the public relay carrier is unchanged.
+No Finished, grant, final-effect or installation binding is relaxed.
+Shared codec vectors, pre-network rejection, preview render ordering, cancellation,
+and exact pinned native/WASM integration are required; results are pending.
+Existing production gates and independent human review remain unverified.
 
 ## Amendment Channels
 
@@ -1305,6 +1317,8 @@ No channel can waive a hard stop without a new specification version and require
 
 <details>
 <summary>Revision history</summary>
+
+- 0.3.9-draft — coordinates the locally authorized confidential handoff and preview continuation; existing safety and production gates remain effective.
 
 - 0.3.8-draft — reissues the unchanged safety boundary against Selfsame
   SPEC-008 0.5.17, cbcl-pairing SPEC-001 0.5.8, and cbcl-bus SPEC-053 0.17.13.

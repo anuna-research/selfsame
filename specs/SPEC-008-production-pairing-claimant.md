@@ -2,7 +2,7 @@
 id: SPEC-008
 title: Production Pairing Claimant — Transport, Real Credential, and Origin Trust
 status: draft
-version: 0.5.17-draft
+version: 0.5.18-draft
 tier: 1
 review-gate: test-first-implementation-owner-authorized; release-and-deployment-prohibited-pending-cross-model-pass
 authority-form: consolidated-direct-current-authority
@@ -12,7 +12,7 @@ generation-model-version: gpt-5.6-sol
 generation-session: 01a029aa-9127-7c42-ad28-81512b91ded6
 generation-synthesis-trajectory: "owner-authorized standalone architecture -> F-A through F-E code traces -> rejected reviews through 0.5.13 -> continuously reachable Rust, browser, and relay-source gates"
 depends-on: "[[SPEC-007-cbcl-pairing-cutover]]; [[SPEC-004-application-scoped-identity]]; [[SPEC-003-android-apk-distribution]]; cbcl-pairing SPEC-001"
-last-updated: 2026-08-25
+last-updated: 2026-09-05
 ---
 
 # SPEC-008 — Production Pairing Claimant: Transport, Real Credential, and Origin Trust
@@ -185,12 +185,14 @@ Trace: [[SPEC-008-production-pairing-claimant#TEST-906]] [[SPEC-008-production-p
 
 ### REQ-905 — Carrier binding
 
-The QR payload SHALL equal the unpadded base64url cbcl invitation carrier. It has no
-URL scheme, prefix, or wrapper. It is identical to the paste payload. The wallet SHALL
-NOT treat it as an OS-navigable URL. The upstream invitation recogniser SHALL fully
-recognise it before any state change
-(LangSec: recognition precedes action; the grammar is upstream
-cbcl-pairing SPEC-001 CON-001's carrier plus base64url transport encoding).
+Credential/v1 and explicitly selected legacy credential/v2 input retain the
+unpadded base64url public carrier. New credential/v2 scan and paste use the
+shared cbcl-pairing SPEC-001 0.5.9 confidential `SSPAIR1:` handoff recognizer.
+The complete handoff contains the unchanged public carrier and independent C/T.
+Neither input is an OS-navigable URL. Recognition, commitment matching, required
+allocator key and exclusive relay-expiry checks precede profile/relay effects.
+Unsupported prefixes never fall back to another input path. New scan starts
+recognition automatically. A complete handoff requires no presence keystrokes.
 
 Trace: [[SPEC-008-production-pairing-claimant#TEST-908]] [[SPEC-008-production-pairing-claimant#CON-901]]
 
@@ -488,7 +490,7 @@ depth case.
 ### TEST-908 — Carrier wrappers refuse before state
 
 Negative input for [[SPEC-008-production-pairing-claimant#REQ-905]]. Wrap a
-carrier in a URL scheme, padding, or a legacy prefix. Recognition refuses it
+legacy carrier in a URL scheme, padding, or a legacy prefix. For complete handoffs, test unsupported versions, malformed/oversize/noncanonical wrappers and claim mismatch. Recognition refuses it
 before any state change.
 
 ### TEST-909 — A new exact pair prompts once
@@ -600,7 +602,7 @@ terminal boundaries.
 This parent specification is the sole current Selfsame authority for this
 increment. Trajectory documents provide evidence and no normative precedence.
 
-Credential/v2 SHALL conform to cbcl-pairing SPEC-001 0.5.8-draft. The
+Credential/v2 SHALL conform to cbcl-pairing SPEC-001 0.5.9-draft. The
 cbcl-pairing parent records this document as its consumer.
 
 The wallet and browser use separate typed machine-carrier and PAIR1
@@ -701,17 +703,14 @@ blocking follows [[SPEC-008-production-pairing-claimant#CON-985]].
 
 ### REQ-1006 — V2 presence, authenticated display, and installed state are direct
 
-The public machine carrier and human presence input SHALL remain separate typed
-values. The carrier SHALL contain no `PAIR1-` text, CPace secret, or claim
-bearer. The presence input SHALL contain exactly one recognised `PAIR1-` value
-that yields independent raw sixteen-octet CPace and claim tokens under
-cbcl-pairing SPEC-001 0.5.8-draft.
-
-The scan and paste carrier paths SHALL never populate the presence input. The
-type-only presence component SHALL have no paste, autofill, password-manager,
-accessibility injection, deep-link, notification, QR, or peer-data path. It
-SHALL never populate the carrier input. One input cannot be serialized into,
-inferred from, or used as a fallback for the other.
+The public machine carrier and presence remain separate typed values inside
+the protocol. The public carrier contains no C, T, or PAIR1 text. The shared
+confidential handoff yields those two typed inputs after full recognition.
+Possession of the complete QR can authenticate bootstrap possession during the
+attempt lifetime. It authorizes neither identity effects nor installation.
+The default scan/paste entry accepts the complete handoff. An explicitly
+selected legacy entry MAY accept a public carrier and separate PAIR1 value;
+there is no automatic format or protocol downgrade. The legacy encoding follows.
 
 The canonical code is `PAIR1-` followed by eleven hyphen-separated groups of
 five Crockford Base32 characters. The decoded big-endian bits are
@@ -1125,8 +1124,8 @@ The exact coordinated hub test set is TEST-115 through TEST-121. The hub's
 base-parent tests remain current outside this coordinated increment set.
 
 The coordinated review set contains this parent,
-[[SPEC-007-cbcl-pairing-cutover]] 0.3.8-draft, cbcl-pairing SPEC-001
-0.5.8-draft, and cbcl-bus SPEC-053 0.17.13-draft.
+[[SPEC-007-cbcl-pairing-cutover]] 0.3.9-draft, cbcl-pairing SPEC-001
+0.5.9-draft, and cbcl-bus SPEC-053 0.17.14-draft.
 
 The `anuna-ssi` namespace reference is outside that set. It is pinned at
 `c7d462029841ea1884bb6f089732058d8838728d` only to resolve
@@ -1163,8 +1162,9 @@ the already verified pin files rather than retaining caller-edited stale SHAs.
 
 ### CON-986 — Standalone claimant decisions, effects, and recovery
 
-`recognise_claimant_invitation` SHALL recognise the machine carrier and PAIR1
-input. It SHALL perform [[SPEC-008-production-pairing-claimant#CON-988]]'s
+`recognise_claimant_handoff` SHALL recognize the shared complete handoff.
+`recognise_claimant_invitation` MAY retain explicit legacy carrier and PAIR1 input.
+Both SHALL use the same authenticated profile and relay-policy gate. It SHALL perform [[SPEC-008-production-pairing-claimant#CON-988]]'s
 pre-socket origin recognition and exact declared-relay check before returning
 `RelayConsentPlan`. It opens no relay socket.
 
@@ -1199,6 +1199,13 @@ publication, alias operation, bundle construction, or durable identity write.
 
 The wallet SHALL disclose the preview DID and fingerprint only to the
 [[SPEC-008-production-pairing-claimant#CON-988]]-bound application inside the established cbcl-pairing channel.
+Before preparation disclosure, preliminary approval SHALL return the local
+preview to the UI. The UI SHALL await a render boundary before invoking a
+single-use continuation to send preparation and await comparison. Final
+approval stays unavailable until comparison is authenticated. A shared native
+attempt generation and UI epoch invalidate in-flight results on cancellation;
+stale operations cannot restore pending state, send preparation, or authorize
+effects after observing cancellation.
 The browser SHALL return the authenticated comparison or binding result. Any
 mismatch, terminal, decline, cancellation, timeout, or relay failure erases the
 preview and authorizes no later effect.
@@ -1325,12 +1332,12 @@ Verified by: [[SPEC-008-production-pairing-claimant#TEST-1158]], [[SPEC-008-prod
 Every logical body below is exact deterministic CBOR. The map is closed: an
 unknown, missing, duplicate, reordered, non-canonical, or trailing member
 refuses before display, decision, or effect. Every `predecessorDigest` is the
-raw `objectContentHash` from cbcl-pairing SPEC-001 0.5.8-draft CON-031. The
+raw `objectContentHash` from cbcl-pairing SPEC-001 0.5.9-draft CON-031. The
 envelope field 2 carries the one retained `intentDigest`; no body can replace it.
 
-The offer body is exactly cbcl-bus SPEC-053 0.17.13-draft CON-012's
+The offer body is exactly cbcl-bus SPEC-053 0.17.14-draft CON-012's
 `signed-offer-v2`. The receipt body is exactly cbcl-pairing SPEC-001
-0.5.8-draft CON-028's `credential-v2-receipt-body`. The remaining nine bodies
+0.5.9-draft CON-028's `credential-v2-receipt-body`. The remaining nine bodies
 are:
 
 ```cddl
@@ -1426,7 +1433,7 @@ ASCII. `previewFingerprintDigest` is
 those exact bytes. Every later occurrence is byte-identical to preparation.
 
 `authorityStatusResponse` is the exact deterministic-CBOR
-`authority-status-response-v2` from cbcl-bus SPEC-053 0.17.13-draft CON-012.
+`authority-status-response-v2` from cbcl-bus SPEC-053 0.17.14-draft CON-012.
 `authorityStatusDigest` is SHA-256 over those exact response bytes. The wallet
 SHALL recompute that digest and verify the response signature under the same
 profile `kid` and key that signed the offer. It SHALL require exact carrier
@@ -1440,7 +1447,7 @@ produce only refusal. The browser cannot replace the signed response with an
 outcome token or digest.
 
 `migrationConfirmationDigest` is the exact raw digest defined by cbcl-bus
-SPEC-053 0.17.13-draft CON-012. The wallet recomputes it from the authenticated
+SPEC-053 0.17.14-draft CON-012. The wallet recomputes it from the authenticated
 offer and its local `previewIssuerDid`. It copies no browser-supplied digest.
 
 The payload grant is one verbatim compact JWS in ASCII. It contains exactly
@@ -1530,7 +1537,7 @@ receiptRecoveryCommitment = SHA-256(
 )
 ```
 
-`EXPORTER` and `TH` are the raw cbcl-pairing SPEC-001 0.5.8-draft CON-031
+`EXPORTER` and `TH` are the raw cbcl-pairing SPEC-001 0.5.9-draft CON-031
 values. Both results contain 32 octets. The token is secret and zeroizable. It
 is sealed inside the endpoint checkpoint. It never enters an offer, profile,
 log, error, metric, URL, hub record, or JavaScript. The browser sends
@@ -1539,7 +1546,7 @@ only the commitment in the authenticated finalization command.
 The hub includes that exact commitment in its signed immutable final status
 and indexes the status under the carrier ceremony. After ordinary relay
 receipt loss, `recover_claimant_completion` POSTs the token and ceremony. It
-uses cbcl-bus SPEC-053 0.17.13-draft CON-036's closed CBOR request to the
+uses cbcl-bus SPEC-053 0.17.14-draft CON-036's closed CBOR request to the
 exact application origin retained from
 [[SPEC-008-production-pairing-claimant#CON-988]]. The wallet repeats
 [[SPEC-004-application-scoped-identity#CON-220]] steps 1 through 5 against that
@@ -1851,7 +1858,7 @@ Require credential/v2 to reach no classified credential-v1 site. Require
 frozen v1 bytes to remain byte-identical.
 
 Require this Selfsame parent and its open review gate. Require cbcl-bus
-SPEC-053 0.17.13-draft to name this coordinated review set.
+SPEC-053 0.17.14-draft to name this coordinated review set.
 
 Require the cbcl-pairing parent consumer pointer here. Require generation
 family, version, session, and synthesis trajectory in this parent,
@@ -2009,7 +2016,7 @@ turns TLS-only bytes into authenticated display authority.
 ### TEST-1161 — Final status recovery survives the relay window
 
 **Validates:** [[SPEC-008-production-pairing-claimant#CON-989]] and
-cbcl-pairing SPEC-001 0.5.8-draft TEST-067.
+cbcl-pairing SPEC-001 0.5.9-draft TEST-067.
 
 Lose the ordinary receipt and delete the expired relay mailbox. Restart the
 wallet, browser, relay, and hub in every order. Retain only their declared
@@ -2203,7 +2210,21 @@ ratchet. Require exit one and an `invoke-surface` error that reports two
 discovered callers where three are required. Restore the candidate and require
 the gate to pass again.
 
+## Scan-handoff local implementation evidence — 0.5.18-draft
+
+Owner authorization dated 2026-09-05 covers local complete-handoff and preview
+ordering work under cbcl-bus SPEC-077 0.1.1. Companion revisions are pairing
+SPEC-001 0.5.9, Selfsame SPEC-007 0.3.9 and bus SPEC-053 0.17.14.
+The new shared codec vectors plus scan/paste, render-order, wrong-phase and
+in-flight cancellation tests are required. Evidence is pending implementation.
+Old clients remain non-interoperable with new handoffs; explicit legacy input
+remains separate. The final Selfsame commit pins the exact pairing commit;
+browser integration pins that Selfsame commit and rebuilds WASM. Existing
+production, human cryptographic and release gates remain open and effective.
+
 ## Changelog
+
+- **0.5.18-draft — 2026-09-05 — confidential complete scan handoff.** Amends QR disclosure and typed entry policy, preserves the public carrier and authorization boundaries, and requires preview rendering before comparison continuation. Local implementation is authorized; production review is unchanged.
 
 - **0.5.17-draft — 2026-08-25 — four-parent authority alignment.** The
   standalone protocol and implementation remain unchanged. The coordinated
