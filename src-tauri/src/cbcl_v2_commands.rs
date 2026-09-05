@@ -2113,6 +2113,10 @@ fn classify_webfinger_failure(
     }
 }
 
+#[cfg(all(test, not(any(target_os = "android", target_os = "ios", target_arch = "wasm32"))))]
+#[path = "scan_integration_native_host.rs"]
+mod scan_integration_host;
+
 #[cfg(test)]
 mod tests {
     use super::*;

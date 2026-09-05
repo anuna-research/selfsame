@@ -66,7 +66,62 @@ pub fn relay_target(origin: &str) -> Result<RelayTarget, TransportError> {
 pub fn connect_wss(
     target: &RelayTarget,
 ) -> Result<WebSocket<MaybeTlsStream<TcpStream>>, TransportError> {
+    #[cfg(test)]
+    if let Some(config) = HOST_CONFIG.get() {
+        return connect_with_host_config(target, config);
+    }
     connect_with_config(target, client_config())
+}
+
+/// One explicit loopback route for the ignored native integration host.
+#[cfg(test)]
+pub(crate) struct HostConfig {
+    address: std::net::SocketAddr,
+    tls: Arc<rustls::ClientConfig>,
+}
+
+#[cfg(test)]
+impl HostConfig {
+    pub(crate) fn new(root_pem: &[u8], address: &str) -> Result<Self, &'static str> {
+        use rustls_pki_types::pem::PemObject;
+        let address: std::net::SocketAddr = address.parse().map_err(|_| "HostRelayAddressRefused")?;
+        if !address.ip().is_loopback() || address.port() == 0 {
+            return Err("HostRelayAddressRefused");
+        }
+        let mut certificates = rustls_pki_types::CertificateDer::pem_slice_iter(root_pem);
+        let root = certificates
+            .next()
+            .ok_or("HostRootRefused")?
+            .map_err(|_| "HostRootRefused")?;
+        if certificates.next().is_some() {
+            return Err("HostRootRefused");
+        }
+        rustls::RootCertStore::empty()
+            .add(root.clone())
+            .map_err(|_| "HostRootRefused")?;
+        Ok(Self {
+            address,
+            tls: client_config_with_extra_root(root),
+        })
+    }
+}
+
+#[cfg(test)]
+static HOST_CONFIG: std::sync::OnceLock<HostConfig> = std::sync::OnceLock::new();
+
+#[cfg(test)]
+pub(crate) fn install_host_config(config: HostConfig) -> Result<(), &'static str> {
+    HOST_CONFIG.set(config).map_err(|_| "HostAlreadyConfigured")
+}
+
+#[cfg(test)]
+fn connect_with_host_config(
+    target: &RelayTarget,
+    config: &HostConfig,
+) -> Result<WebSocket<MaybeTlsStream<TcpStream>>, TransportError> {
+    // Only TCP routing changes. The original URL, Host and TLS server name
+    // remain authoritative, and this path never performs DNS resolution.
+    connect_with_addrs(target, Arc::clone(&config.tls), [config.address])
 }
 
 /// The production rustls client configuration: bundled webpki roots, nothing
@@ -108,6 +163,14 @@ fn connect_with_config(
     let addrs = (target.host.as_str(), target.port)
         .to_socket_addrs()
         .map_err(|_| TransportError::Connect)?;
+    connect_with_addrs(target, config, addrs)
+}
+
+fn connect_with_addrs(
+    target: &RelayTarget,
+    config: Arc<rustls::ClientConfig>,
+    addrs: impl IntoIterator<Item = std::net::SocketAddr>,
+) -> Result<WebSocket<MaybeTlsStream<TcpStream>>, TransportError> {
     let mut stream = None;
     for addr in addrs {
         if let Ok(connected) = TcpStream::connect_timeout(&addr, IO_TIMEOUT) {
@@ -153,6 +216,59 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Mutex;
     use tungstenite::Message;
+
+    #[test]
+    fn native_host_relay_config_refuses_nonloopback_address_and_invalid_root() {
+        let pem = rcgen::generate_simple_self_signed(vec!["localhost".into()])
+            .unwrap().cert.pem();
+        for address in [
+            "192.0.2.1:4000", "localhost:4000", "127.0.0.1:0", "[2001:db8::1]:4000",
+        ] {
+            assert!(matches!(
+                HostConfig::new(pem.as_bytes(), address), Err("HostRelayAddressRefused")
+            ));
+        }
+        for pem in [b"".as_slice(), b"not PEM", b"-----BEGIN CERTIFICATE-----\nAQID\n-----END CERTIFICATE-----\n"] {
+            assert!(matches!(
+                HostConfig::new(pem, "127.0.0.1:4000"), Err("HostRootRefused")
+            ));
+        }
+        assert!(HostConfig::new(pem.as_bytes(), "[::1]:4000").is_ok());
+    }
+
+    #[test]
+    fn native_host_relay_route_retains_tls_hostname_and_canonical_url() {
+        let relay = spawn_tls_echo_relay();
+        let config = HostConfig {
+            address: ([127, 0, 0, 1], relay.port).into(),
+            tls: client_config_with_extra_root(relay.root.clone()),
+        };
+        let mut socket = connect_with_host_config(
+            &relay_target("https://localhost").unwrap(), &config,
+        ).unwrap();
+        socket.send(Message::Binary(vec![1, 2, 3].into())).unwrap();
+        assert_eq!(socket.read().unwrap().into_data(), vec![1, 2, 3]);
+        assert_eq!(
+            connect_with_host_config(
+                &relay_target("https://wrong.example.test").unwrap(), &config,
+            ).unwrap_err(),
+            TransportError::Tls,
+        );
+    }
+
+    #[test]
+    #[ignore = "installs process-global relay routing; run alone"]
+    fn native_host_explicit_relay_setter_routes_actual_connect_wss() {
+        let relay = spawn_tls_echo_relay();
+        let config = HostConfig {
+            address: ([127, 0, 0, 1], relay.port).into(),
+            tls: client_config_with_extra_root(relay.root.clone()),
+        };
+        install_host_config(config).unwrap();
+        let mut socket = connect_wss(&relay_target("https://localhost").unwrap()).unwrap();
+        socket.send(Message::Binary(vec![5, 6, 7].into())).unwrap();
+        assert_eq!(socket.read().unwrap().into_data(), vec![5, 6, 7]);
+    }
 
     /// A loopback TLS WebSocket echo relay with a per-run self-signed root.
     struct TlsEchoRelay {
