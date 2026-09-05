@@ -45,6 +45,15 @@ integration task under SPEC-079 TEST-011.
   controls and its two approvals while default complete input exposes one
   unlock and one Link.
 
+After independent review, the UI's post-Link failure path now queries the
+native installed and sealed-recovery projections. An ambiguous continuation
+reports the retained recovery checkpoint; an error after installation reports
+that a local installed record is present; an unavailable projection reports
+completion as unresolved. None of these paths asserts that disclosure or
+installation did not occur. Legacy `cbcl_v2_finish` checks mode and presence
+before taking `PayloadSent`, so a missing passcode leaves the attempt available
+for a corrected retry while SingleLink still refuses `PairingWrongMode` first.
+
 The exact command/result interface and the later manual adapter seam are in
 `/tmp/spec079-native-consent-api-handoff.md`. The test-only JSONL host documents
 matching operations in `docs/spec077-native-host.md` and retains memory custody,
@@ -61,9 +70,9 @@ explicit local CA routing and redacted responses.
 | TEST-005 | Authenticated peer substitutions cover ceremony, predecessor, preview DID/fingerprint, authority status and result bindings. Four compile-fail cases prove external construction, cloning, serialization and reuse-after-move of Link authority are unavailable. |
 | TEST-006 | Native clock tests cover equality, before/after bounds, wall-clock rollback, continuous-time advance, clock failure and overflow. The command test advances the continuous clock while ordinary task timing is idle and checks all pre-payload pause boundaries. Platform evidence is below. |
 | TEST-007 | Native and UI tests cancel held comparison, foreground/navigation transitions and late reservations; they reject stale tags, clear custody, prevent stale reinsertion, prevent starting while a worker lease remains, and emit no later final decision. |
-| TEST-008 | `single_link_transaction_faults_ambiguous_payload_and_policy_free_unlink` injects every transaction boundary, before/after-commit store failures, preserves ambiguous `PayloadPrepared`, and checks policy-free SingleLink unlink. The existing isolated TEST-1162 regression remains green. Receipt/live-binding checks remain in the production finish path and are covered by the native library verification fixtures. |
-| TEST-009 | Native tests call every legacy approval/comparison command from SingleLink and every SingleLink command from legacy, requiring `PairingWrongMode`; request grammar rejects extras/coercions/bad tags. Pairing shell and wallet UI regressions preserve explicit legacy carrier/PAIR1 and two decisions. |
-| TEST-010 | `tests/spec-077-scan-pairing.mjs` drives the actual phone UI bridge through default scan: one unlock, cleared passcode, painted complete review, one Link, visible cancellation/status, no legacy final auto-call, and verified installed-only success. Wallet legacy accessibility/recovery/reload/unlink tests remain green. Manual UI is intentionally owned by the next increment. |
+| TEST-008 | `single_link_transaction_faults_ambiguous_payload_and_policy_free_unlink` injects every transaction boundary, before/after-commit store failures, preserves ambiguous `PayloadPrepared`, and checks policy-free SingleLink unlink. UI regressions inject committed-then-error continuation and post-install finish failures, requiring sealed-recovery or completion-unknown guidance without an unverified negative claim. The existing isolated TEST-1162 regression remains green. Receipt/live-binding checks remain in the production finish path and are covered by the native library verification fixtures. |
+| TEST-009 | Native tests call every legacy approval/comparison command from SingleLink and every SingleLink command from legacy, requiring `PairingWrongMode`; request grammar rejects extras/coercions/bad tags. `legacy_finish_missing_presence_keeps_the_attempt_retryable` checks presence before taking pending state and then reaches the unchanged phase check with a corrected value. Pairing shell and wallet UI regressions preserve explicit legacy carrier/PAIR1 and two decisions. |
+| TEST-010 | `tests/spec-077-scan-pairing.mjs` drives the actual phone UI bridge through default scan: one unlock, cleared passcode, painted complete review, one Link, visible cancellation/status, no legacy final auto-call, verified installed-only success, and truthful failure states. Wallet legacy accessibility/recovery/reload/unlink tests remain green. Manual UI is intentionally owned by the next increment. |
 
 ## Green checks
 
@@ -72,12 +81,13 @@ task and ran locked/offline with the accepted clean siblings.
 
 | Check | Result |
 |---|---|
-| `cargo test --locked --offline -p selfsame --lib` | 82 passed, 0 failed, 7 ignored |
+| `cargo test --locked --offline -p selfsame --lib` | 83 passed, 0 failed, 7 ignored |
 | `cargo test ... -p selfsame --lib single_link -- --ignored --nocapture --test-threads=1` | 3 passed: native host reservation/contact, native SingleLink commands, and transaction/ambiguous-payload/policy-free-unlink |
+| `cargo test ... -p selfsame --lib single_link -- --nocapture` | 4 passed, including the legacy missing-presence retry regression; 3 isolated tests ignored as designed |
 | isolated `test_1162_pre_payload_failure_and_person_abandonment_release_the_exact_slot` | 1 passed |
 | isolated `native_host_memory_init_cancel_shutdown_regression` | 1 passed |
 | isolated `native_host_explicit_relay_setter_routes_actual_connect_wss` | 1 passed |
-| `PUPPETEER_SKIP_DOWNLOAD=1 npm run e2e:wallet-pairing` | 11 passed, 0 failed |
+| `PUPPETEER_SKIP_DOWNLOAD=1 npm run e2e:wallet-pairing` | 14 passed, 0 failed |
 | `cargo test --locked --offline -p selfsame-pairing` | all unit, integration and doc tests passed; one helper process test remained intentionally ignored |
 | `cargo clippy --locked --offline -p selfsame --lib -- -D warnings` | passed |
 | scoped `rustfmt --check` over every changed Rust file | passed |

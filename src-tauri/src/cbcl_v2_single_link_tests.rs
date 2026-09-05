@@ -500,6 +500,42 @@ fn single_link_nested_requests_refuse_extras_coercions_and_invalid_tags() {
 }
 
 #[tokio::test]
+async fn legacy_finish_missing_presence_keeps_the_attempt_retryable() {
+    let app = mock_builder()
+        .manage(AppSession(Mutex::new(Session::default())))
+        .build(mock_context(noop_assets()))
+        .unwrap();
+    let attempt = {
+        let session = app.state::<AppSession>();
+        let mut session = session.0.lock().unwrap();
+        let operation = session.cbcl_v2_attempts.begin().unwrap();
+        let attempt = operation.attempt.clone();
+        operation.retain();
+        attempt
+    };
+
+    let missing = match cbcl_v2_finish(None, app.state()).await {
+        Err(error) => error,
+        Ok(_) => panic!("missing presence must be refused"),
+    };
+    assert_eq!(missing.to_string(), "PresenceRequired");
+    assert!(
+        attempt.check().is_ok(),
+        "presence refusal cannot burn the attempt"
+    );
+
+    // A corrected value reaches the unchanged pending-phase check. Before the
+    // fix, the missing value reached this check first and could take a real
+    // PayloadSent pending session before reporting PresenceRequired.
+    let retry = match cbcl_v2_finish(Some(PASS.into()), app.state()).await {
+        Err(error) => error,
+        Ok(_) => panic!("the fixture intentionally has no pending receipt"),
+    };
+    assert_eq!(retry.to_string(), "PairingNotStarted");
+    assert!(attempt.check().is_ok());
+}
+
+#[tokio::test]
 #[ignore = "installs process-global memory custody; run alone"]
 async fn single_link_native_commands_render_mode_comparison_cancel_and_expiry() {
     completion::shared_memkeyring::install();

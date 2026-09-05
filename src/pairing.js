@@ -13,6 +13,7 @@ export function initPairing(d) {
   let attemptEpoch = 0;
   let flow = "single";
   let attemptTag = null;
+  let attemptApplication = null;
   let decisionPending = false;
   let intentFields = [];
   let recoveryApplication = null;
@@ -62,6 +63,7 @@ export function initPairing(d) {
     const legacy = typeof presented !== "string" && $("[data-pairing-legacy]")?.open === true;
     flow = legacy ? "legacy" : "single";
     attemptTag = null;
+    attemptApplication = null;
     credentialV2Stage = "entry";
     const presenceInput = $("#pairing-presence-code");
     const presenceCode = (presenceInput?.value ?? "").trim().toUpperCase();
@@ -88,6 +90,7 @@ export function initPairing(d) {
           return;
         }
         attemptTag = reservation.attemptTag;
+        attemptApplication = reservation.applicationId;
         credentialV2Stage = "contact";
         $("[data-cbcl-relay]").textContent = reservation.relayOrigin;
         $("[data-cbcl-status]").textContent = `This invitation permits contact with ${reservation.applicationId} and its displayed relay for this link only.`;
@@ -250,11 +253,37 @@ export function initPairing(d) {
       if (tag) await invoke("cbcl_v2_cancel_link", { request: { attemptTag: tag } }).catch(() => {});
     } else await invoke("cbcl_v2_cancel").catch(() => {});
   }
+  async function inspectSingleCompletion(applicationId) {
+    const [recoveries, installed] = await Promise.allSettled([
+      invoke("cbcl_v2_pending_recoveries"),
+      invoke("cbcl_v2_installed_links"),
+    ]);
+    return {
+      recoverable: recoveries.status === "fulfilled" &&
+        Array.isArray(recoveries.value) && recoveries.value.includes(applicationId),
+      installed: installed.status === "fulfilled" && Array.isArray(installed.value) &&
+        installed.value.some(link => link?.applicationId === applicationId),
+    };
+  }
+  function showUncertainSingleCompletion(state) {
+    const resultMessage = state.recoverable
+      ? "A sealed completion checkpoint is retained. After the relay window closes, use the pending link in Applications to check the signed final status with fresh presence."
+      : state.installed
+        ? "A local installed link is present, but this command did not return verified success. Check that link in Applications before taking another action."
+        : "Selfsame could not establish the final completion state. Check Applications for an installed link or pending recovery before starting another invitation.";
+    showResult(
+      "failed",
+      "Link completion needs checking",
+      resultMessage,
+      "Authenticated linking work may already have occurred, and installation status remains unresolved until checked.",
+    );
+  }
   async function decideSingle(approve) {
     if (!approve) { await cancel(); return; }
     if (decisionPending || !["single-unlock", "single-ready"].includes(credentialV2Stage)) return;
     const epoch = attemptEpoch;
     const tag = attemptTag;
+    const applicationId = attemptApplication;
     const request = { attemptTag: tag };
     decisionPending = true;
     $('[data-action="approve-cbcl-pairing"]').disabled = true;
@@ -296,16 +325,22 @@ export function initPairing(d) {
       if (result.outcome !== "installed") throw new Error("PairingReceiptRefused");
       credentialV2Stage = "idle";
       attemptTag = null;
+      attemptApplication = null;
       showResult("accepted", "Application connected", "The signed hub receipt and live reciprocal account binding were verified before the grant was installed.", "The invitation permitted contact for this ceremony only.");
     } catch (error) {
       if (epoch !== attemptEpoch) return;
-      const postPayload = credentialV2Stage === "single-finish";
+      const afterLink = ["single-link", "single-comparison", "single-finish"].includes(credentialV2Stage);
       await revokeNative(tag, "single");
+      if (epoch !== attemptEpoch) return;
+      const completion = afterLink
+        ? await inspectSingleCompletion(applicationId)
+        : null;
       if (epoch !== attemptEpoch) return;
       credentialV2Stage = "idle";
       attemptTag = null;
-      if (postPayload) {
-        showResult("failed", "Link verification incomplete", "The grant was not installed. The sealed pending link remains available for explicit recovery with fresh presence.", "No new identity work is authorized by the saved checkpoint.");
+      attemptApplication = null;
+      if (afterLink) {
+        showUncertainSingleCompletion(completion);
       } else {
         restoreEntryUnlock();
         show("pairing-enter");
@@ -568,6 +603,7 @@ export function initPairing(d) {
     const mode = flow;
     const epoch = ++attemptEpoch;
     attemptTag = null;
+    attemptApplication = null;
     credentialV2Stage = "cancelling";
     decisionPending = true;
     $('[data-action="approve-cbcl-pairing"]').disabled = true;
@@ -666,6 +702,7 @@ export function initPairing(d) {
   function forget() {
     if (credentialV2Stage !== "idle") void revokeNative();
     attemptTag = null;
+    attemptApplication = null;
     flow = "single";
     ++attemptEpoch;
     decisionPending = false;

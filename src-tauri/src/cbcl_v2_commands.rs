@@ -965,11 +965,18 @@ pub async fn cbcl_v2_finish(
     passcode: Option<String>,
     session: State<'_, AppSession>,
 ) -> Result<CredentialV2FinishView> {
-    // Mode refusal precedes even the legacy presence requirement.
-    let (pending, operation) = take_pending(&session, CredentialV2Phase::PayloadSent)?;
+    // Mode refusal precedes even the legacy presence requirement, while a
+    // missing presence value must not take and cancel the live pending worker.
+    session
+        .0
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .cbcl_v2_attempts
+        .require_mode(CredentialV2Flow::LegacyTwoDecision)?;
     let passcode = passcode
         .filter(|value| !value.is_empty())
         .ok_or_else(|| UiError::from("PresenceRequired"))?;
+    let (pending, operation) = take_pending(&session, CredentialV2Phase::PayloadSent)?;
     finish_pending(pending, operation, Zeroizing::new(passcode), &session).await
 }
 

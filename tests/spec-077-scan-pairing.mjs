@@ -130,7 +130,7 @@ test("SPEC079 TEST007 cancelling disables Link before cancellation returns", asy
   await visible(page, "applications");
 });
 
-test("SPEC079 TEST010 failed unlock clears passcode and failed receipt cannot show success", async t => {
+test("SPEC079 TEST010 failed unlock clears passcode", async t => {
   const page = await openWallet(t);
   await scanToIntent(page);
   await page.evaluate(() => { globalThis.__badUnlock = true; });
@@ -138,14 +138,48 @@ test("SPEC079 TEST010 failed unlock clears passcode and failed receipt cannot sh
   await visible(page, "pairing-enter");
   assert.equal(await page.$eval('#pairing-passcode', el => el.value), "");
   assert.equal(await count(page, "cbcl_v2_link"), 0);
-  await page.evaluate(() => { globalThis.__badUnlock = false; globalThis.__badReceipt = true; });
+});
+
+test("SPEC079 TEST008/010 a non-installed finish result cannot report success", async t => {
+  const page = await openWallet(t);
+  await page.evaluate(() => { globalThis.__badReceipt = true; });
   await ready(page);
   await page.click('[data-action="approve-cbcl-pairing"]');
   await page.waitForFunction(() => typeof __finishComparison === 'function');
   await page.evaluate(() => __finishComparison());
   await visible(page, "pairing-result");
   assert.doesNotMatch(await page.$eval('[data-cbcl-result-title]', el => el.textContent), /connected/i);
-  assert.match(await page.$eval('[data-cbcl-result-message]', el => el.textContent), /not installed/i);
+  assert.match(await page.$eval('[data-cbcl-result-title]', el => el.textContent), /needs checking/i);
+  assert.match(await page.$eval('[data-cbcl-result-message]', el => el.textContent), /could not establish/i);
+  assert.doesNotMatch(await page.$eval('[data-screen="pairing-result"]', el => el.textContent), /grant was not installed/i);
+});
+
+test("SPEC079 TEST007/008 ambiguous continuation exposes retained recovery without a negative claim", async t => {
+  const page = await openWallet(t);
+  await ready(page);
+  await page.evaluate(() => { globalThis.__badContinue = true; });
+  await page.click('[data-action="approve-cbcl-pairing"]');
+  await visible(page, "pairing-result");
+  assert.match(await page.$eval('[data-cbcl-result-title]', el => el.textContent), /needs checking/i);
+  assert.match(await page.$eval('[data-cbcl-result-message]', el => el.textContent), /sealed completion checkpoint/i);
+  assert.doesNotMatch(await page.$eval('[data-screen="pairing-result"]', el => el.textContent), /nothing (?:was )?shared|was not installed/i);
+  assert.equal(await count(page, "cbcl_v2_finish_link"), 0);
+  assert.ok(await count(page, "cbcl_v2_pending_recoveries") >= 1);
+});
+
+test("SPEC079 TEST008 finish committed-then-error reports unknown completion and checks local state", async t => {
+  const page = await openWallet(t);
+  await page.evaluate(() => { globalThis.__finishError = true; });
+  await ready(page);
+  await page.click('[data-action="approve-cbcl-pairing"]');
+  await page.waitForFunction(() => typeof __finishComparison === 'function');
+  await page.evaluate(() => __finishComparison());
+  await visible(page, "pairing-result");
+  assert.doesNotMatch(await page.$eval('[data-cbcl-result-title]', el => el.textContent), /connected/i);
+  assert.match(await page.$eval('[data-cbcl-result-title]', el => el.textContent), /needs checking/i);
+  assert.match(await page.$eval('[data-cbcl-result-message]', el => el.textContent), /installed link is present/i);
+  assert.doesNotMatch(await page.$eval('[data-screen="pairing-result"]', el => el.textContent), /grant was not installed/i);
+  assert.ok(await count(page, "cbcl_v2_installed_links") >= 1);
 });
 
 test("SPEC079 TEST007 background and navigation revoke tagged review before further actions", async t => {
@@ -194,11 +228,23 @@ function scanBridge() {
       }
       if (command === "cbcl_v2_preview_rendered") return { phase: "review-ready" };
       if (command === "cbcl_v2_link") return { phase: "comparing" };
-      if (command === "cbcl_v2_continue_link") return new Promise(resolve => { globalThis.__finishComparison = () => resolve({ phase: "await-receipt" }); });
+      if (command === "cbcl_v2_continue_link") {
+        if (globalThis.__badContinue) {
+          globalThis.__recoverable = true;
+          throw new Error("PairingCheckpointUnavailable");
+        }
+        return new Promise(resolve => { globalThis.__finishComparison = () => resolve({ phase: "await-receipt" }); });
+      }
       if (command === "cbcl_v2_finish_link") {
+        if (globalThis.__finishError) {
+          globalThis.__installed = true;
+          throw new Error("PairingExpired");
+        }
         if (globalThis.__badReceipt) return { outcome: "pending" };
         return { outcome: "installed" };
       }
+      if (command === "cbcl_v2_pending_recoveries") return globalThis.__recoverable ? [preview.applicationId] : [];
+      if (command === "cbcl_v2_installed_links") return globalThis.__installed ? [{ applicationId: preview.applicationId }] : [];
       return null;
     } },
   };
