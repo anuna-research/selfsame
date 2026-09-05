@@ -1,0 +1,50 @@
+{
+  "parents": {
+    "walletManual": "57e3f15a97162afec505a3512c7f0148f23a681c",
+    "nativeIntegrationHost": "7a0d4d38a724b1f758a45bc29755347a2bd954e9"
+  },
+  "rootSourceSha256": {
+    "src-tauri/src/scan_integration_native_host.rs": "3d38e84963230e2813a1b4cd9a8e3bd2a657840209f1d73c7807ec995d56acda",
+    "src-tauri/src/scan_integration_native_host_jobs.rs": "d6c9840594e75597abee04fd3c6447b631118957cbda87ed33d0a16416c0771d",
+    "src-tauri/src/session.rs": "d4ccf6c06d54b3ed299350cae8b222505ba3d1e39fa9413de1d02835070e9dc5",
+    "docs/spec077-native-host.md": "ecc9b5fee2f029ddda6afd753e6e1a59469d29e097c0cf1335288de2bf361122"
+  },
+  "logs": [
+    {
+      "originalLog": "/tmp/spec078079-native-merged-library.log",
+      "rawSha256": "ebaf6d8d1fe1a2f861113dde4a982d1134898897b7704e3bdf81135b1e8ecef8",
+      "storedLog": "spec078079-native-merged-library.log",
+      "storedSha256": "af8a74c8609433cffe9fa393ffb2cbeb1265206cd57e41427fd348a03a877f27"
+    },
+    {
+      "originalLog": "/tmp/spec078079-native-merged-metrics-full-host.log",
+      "rawSha256": "be9a566dd5c395d536cee2f49750cbb0c76ad4ec84776c41c9a771dc071fa69e",
+      "storedLog": "spec078079-native-merged-metrics-full-host.log",
+      "storedSha256": "5f3a015ac6693c4d8621a7797493c0440ac6f008512357e1691b4691b3e15a71"
+    },
+    {
+      "originalLog": "/tmp/spec078079-native-merged-metrics-host.log",
+      "rawSha256": "e874f873ce3a22fc35ab4f11b2ea1eab0b56ef3f05bfda0dbb2522c38ae125f5",
+      "storedLog": "spec078079-native-merged-metrics-host.log",
+      "storedSha256": "d9c3dc0bcf00fe614568e7dfedee3df134bc59e1afb4c5680c7b1e1b20c2bd8f"
+    },
+    {
+      "originalLog": "/tmp/spec078079-native-merged-metrics-manual-host.log",
+      "rawSha256": "e377b7e1c7b69e33f58df9cda9b831f7aa771b5cc4c0ad2f9449bcfe40a98307",
+      "storedLog": "spec078079-native-merged-metrics-manual-host.log",
+      "storedSha256": "7c6b28c87e23a8f75edcace56468ffbe428925815443b8c7ada2fed2ca0f2e3d"
+    }
+  ],
+  "combinedLibraryBeforeMetrics": {
+    "passed": 89,
+    "ignored": 11
+  },
+  "finalMetricsHost": {
+    "passed": 6,
+    "ignored": 4
+  },
+  "finalIsolatedHost": {
+    "fullPassed": 1,
+    "manualPassed": 1
+  }
+}

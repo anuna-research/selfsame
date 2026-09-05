@@ -314,6 +314,19 @@ impl Drop for CredentialV2Operation {
 }
 
 impl CredentialV2Attempts {
+    #[cfg(test)]
+    pub(crate) fn tagged_worker_active(&self, tag: &str) -> Result<bool, UiError> {
+        let current = self
+            .current
+            .as_ref()
+            .ok_or_else(|| UiError::from("PairingStaleAttempt"))?;
+        current.require_mode(CredentialV2Flow::SingleLink)?;
+        if current.tag() != tag {
+            return Err(UiError::from("PairingStaleAttempt"));
+        }
+        Ok(self.worker.upgrade().is_some())
+    }
+
     pub(crate) fn begin(&mut self) -> Result<CredentialV2Operation, UiError> {
         self.require_stable_root()?;
         if self.background {

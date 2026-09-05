@@ -30,6 +30,10 @@ The host installs and checks the extracted shared memory backend before any stor
 Init calls `Custody::restore` directly, avoiding the publication and discovery effects of UI creation/restoration commands.
 It runs the actual storage probe and checks sealed hierarchy unlocking and backup state using memory only.
 Shutdown and EOF cancel the native attempt and erase process-local storage.
+If a background continuation exists, teardown first revokes its actual native
+attempt, then boundedly drains or aborts the wrapper and observes the actual
+worker lease. A drain failure returns `HostJobDrainFailed` and leaves custody
+untouched until process exit rather than clearing storage under live work.
 The host does not reset a wallet or address operating-system credentials.
 
 The non-default `selfsame-app-identity-net/native-test-support` feature is enabled by a native dev dependency.
@@ -57,6 +61,8 @@ The response error is an allowlisted native command token or a closed host categ
 Other `UiError` messages become `HostCommandRefused`; backend details never cross this boundary.
 Host initialization categories are `HostAlreadyInitialized`, `HostAlreadyConfigured`, `HostRootRefused`, `HostProxyRefused`, `HostRelayAddressRefused`, `HostMnemonicRefused`, `HostPasscodeRefused`, and `HostCustodyRefused`.
 Premature operations return `HostNotInitialized`; a missing installed record after finish returns `HostInstalledRecordMissing`.
+Background ownership adds only `HostJobOccupied`, `HostJobMissing`,
+`HostJobRefused`, and `HostJobDrainFailed`.
 
 Each response is one flushed line:
 
@@ -72,10 +78,13 @@ No request data, handoff, mnemonic, seed, passcode, raw grant, or signed receipt
 Secret request buffers and decoded custody/handoff fields are zeroized on drop.
 Synthetic ceremony material belongs exclusively to private IPC.
 
-Requests execute sequentially. Peer-dependent commands block while the orchestrator drives the browser concurrently.
-`cancel` is processed between requests; it does not interrupt a blocked host request.
-Termination of the disposable process remains available to the orchestrator.
-The existing native cancellation regression suite covers in-flight cancellation independently.
+Requests execute sequentially except for the one explicitly started
+`continue-link` job. Its actual native command runs in the Tauri runtime so a
+later exact-tag `cancel-link` can revoke it while relay I/O is pending. The host
+retains at most one active or completed-undrained job. While occupied it refuses
+all ceremony mutations except exact-tag cancellation; read-only installed and
+pending projections, matching polling, and shutdown remain available. A wrong
+attempt tag or random job ID cannot poll, consume, replace, or cancel the job.
 
 ## Operations
 
@@ -91,6 +100,8 @@ Field names in this table are exact. Optional passcodes accept omission or `null
 | `preview-rendered` | `{attemptTag}` | `{phase:"review-ready"}`; renderer acknowledgement grants no disclosure |
 | `link` | `{attemptTag}` | `{phase:"comparing"}`; consumes person Link and sends intent approval/preparation |
 | `continue-link` | `{attemptTag}` | `{phase:"await-receipt"}`; authenticated matching comparison precedes distinct final approval/payload |
+| `start-continue-link` | `{attemptTag}` | `{state:"started",jobId}`; starts the actual native continuation without waiting |
+| `poll-continue-link` | `{attemptTag,jobId}` | `{state:"pending",workActive:boolean}` or `{state:"finished",ok:true,result}` or `{state:"finished",ok:false,error}`; after confirmed cancellation the latter also carries `{cancellation:"confirmed",command:{ok,result|error}}` |
 | `finish-link` | `{attemptTag}` | `{outcome:"installed",installedLinks:[InstalledEvidence]}`; verifies receipt/live binding with retained bounded custody |
 | `cancel-link` | `{attemptTag}` | `null`; wrong tag refuses without cancelling a newer attempt |
 | `recognise-legacy` | `{invitation:string,presenceCode:string}` | `{applicationId,relayOrigin,requiresApproval}` from explicit carrier/PAIR1 entry |
@@ -100,7 +111,11 @@ Field names in this table are exact. Optional passcodes accept omission or `null
 | `compare` | `{}` | `Review`, after authenticated comparison |
 | `final-decide` | `{approve:boolean,passcode?:string|null}` | `{outcome:"declined"|"payload-sent"}` |
 | `finish` | `{passcode?:string|null}` | `{outcome:"installed",installedLinks:[InstalledEvidence]}` |
+| `pending-recoveries` | `{}` | application IDs from the actual sealed pending-record index |
+| `pending-links` | `{}` | redacted pending-link summaries from the actual sealed index |
+| `recover` | `{applicationId,passcode,approveRotation:boolean}` | `{recovery:RecoveryView,installedLinks:[InstalledEvidence]}` |
 | `installed-links` | `{}` | `[InstalledEvidence]` |
+| `metrics` | `{}` | `{identityEffects,custodyWrites,policyOperations}` from existing test-only counters; read-only, including while a continuation job is retained |
 | `cancel` | `{}` | `null` after native session revocation in either mode |
 | `shutdown` | `{}` | `null` after cancel; process exits |
 
@@ -124,8 +139,22 @@ Field names in this table are exact. Optional passcodes accept omission or `null
 
 Default unlock returns `comparison:"waiting"`. The real UI acknowledges after paint and calls `link` only for the person's Link gesture.
 The host exposes these same separate operations for orchestration; it does not synthesize gestures.
+`jobId` is 16 fresh random bytes rendered as exactly 32 lowercase hexadecimal
+characters. It is an opaque test-host correlation value, not protocol or native
+authority. `workActive:true` comes from the exact tagged native worker lease,
+not from task creation. A finished result remains retained until both tags poll
+it once.
+After a successful tagged cancellation, the outer finished result is
+`PairingCancelled`, so an earlier continuation success cannot restore live
+authority. Its nested `command` member still preserves the actual command's
+success or closed error. The integration oracle can therefore detect and fail
+an erroneous native success after the cancellation fence rather than having the
+host hide it.
 Default finish has no passcode argument. Custody expires exclusively at the earliest of 120 suspend-inclusive seconds from unlock, offer expiry, and relay expiry.
-Expired post-payload recovery needs fresh explicit presence through the existing wallet recovery API; the host has no extra recovery authority.
+Expired post-payload recovery uses the existing wallet recovery API with fresh
+explicit presence. The host forwards its exact application ID, passcode and
+rotation decision; it adds no recovery authority and exposes no checkpoint or
+recovery token. The real 900-second relay gate remains unchanged.
 For explicit legacy, preliminary approval returns `comparison:"waiting"` before preparation disclosure;
 `compare` returns `"no-binding-person-compared"` or `"bound-same-did"`, and final approval remains a separate request.
 Wrong phases, duplicate continuation, decline, and cancellation retain the commands' existing refusal behavior.
