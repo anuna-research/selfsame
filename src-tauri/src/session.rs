@@ -22,12 +22,127 @@
 //! never the source of truth: [`Session::adopt_closure`] replaces it wholesale
 //! from the resolver, and every read resolves through the profile filter.
 
-use std::path::PathBuf;
+use std::{
+    path::PathBuf,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Weak,
+    },
+};
 
+use crate::commands::UiError;
 use did_crdt::core::delta::SignedDelta;
 use did_crdt::core::document::Document;
 use selfsame_core::{identity, profile, record::Offer};
 use serde::{Deserialize, Serialize};
+
+/// Memory-only attempt identity. Arc identity is the generation: it cannot wrap
+/// or accidentally identify a later ceremony as the cancelled one.
+#[derive(Clone, Default)]
+pub(crate) struct CredentialV2Attempt(Arc<AtomicBool>);
+
+impl CredentialV2Attempt {
+    pub(crate) fn check(&self) -> Result<(), UiError> {
+        if self.0.load(Ordering::Acquire) {
+            return Err(UiError::from("PairingCancelled"));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn run<T>(&self, action: impl FnOnce() -> Result<T, UiError>) -> Result<T, UiError> {
+        self.check()?;
+        let value = action()?;
+        self.check()?;
+        Ok(value)
+    }
+
+    fn cancel(&self) {
+        self.0.store(true, Ordering::Release);
+    }
+}
+
+/// Retained even while a command owns the socket. The weak lease bounds work
+/// across cancellation, including a spawn_blocking closure whose future died.
+#[derive(Default)]
+pub(crate) struct CredentialV2Attempts {
+    current: Option<CredentialV2Attempt>,
+    worker: Weak<()>,
+}
+
+pub(crate) struct CredentialV2Operation {
+    pub(crate) attempt: CredentialV2Attempt,
+    lease: Arc<()>,
+    retained: bool,
+}
+
+impl CredentialV2Operation {
+    pub(crate) fn lease(&self) -> Arc<()> {
+        self.lease.clone()
+    }
+
+    pub(crate) fn retain(mut self) {
+        self.retained = true;
+    }
+}
+
+impl Drop for CredentialV2Operation {
+    fn drop(&mut self) {
+        if !self.retained {
+            self.attempt.cancel();
+        }
+    }
+}
+
+impl CredentialV2Attempts {
+    pub(crate) fn begin(&mut self) -> Result<CredentialV2Operation, UiError> {
+        if self.worker.upgrade().is_some()
+            || self
+                .current
+                .as_ref()
+                .is_some_and(|attempt| !attempt.0.load(Ordering::Acquire))
+        {
+            return Err(UiError::from("PairingAlreadyActive"));
+        }
+        self.current = Some(CredentialV2Attempt::default());
+        self.start_work()
+    }
+
+    pub(crate) fn start_work(&mut self) -> Result<CredentialV2Operation, UiError> {
+        if self.worker.upgrade().is_some() {
+            return Err(UiError::from("PairingAlreadyActive"));
+        }
+        let attempt = self
+            .current
+            .clone()
+            .ok_or_else(|| UiError::from("PairingNotStarted"))?;
+        attempt.check()?;
+        let lease = Arc::new(());
+        self.worker = Arc::downgrade(&lease);
+        Ok(CredentialV2Operation {
+            attempt,
+            lease,
+            retained: false,
+        })
+    }
+
+    /// Caller holds the Session mutex through this check and state insertion.
+    pub(crate) fn ensure_current(&self, attempt: &CredentialV2Attempt) -> Result<(), UiError> {
+        if !self
+            .current
+            .as_ref()
+            .is_some_and(|current| Arc::ptr_eq(&current.0, &attempt.0))
+        {
+            return Err(UiError::from("PairingCancelled"));
+        }
+        attempt.check()
+    }
+
+    pub(crate) fn cancel(&mut self) {
+        if let Some(attempt) = &self.current {
+            attempt.cancel();
+        }
+    }
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum SessionError {
@@ -74,6 +189,7 @@ pub struct Session {
     pub pending_cbcl_v2_relay: Option<crate::cbcl_v2_claimant::RelayConsentPlan>,
     /// Live standalone credential/v2 claimant after the exact relay decision.
     pub pending_cbcl_v2: Option<crate::cbcl_v2_commands::PendingCredentialV2Pairing>,
+    pub(crate) cbcl_v2_attempts: CredentialV2Attempts,
     /// A first-contact CON-219 enrolment fetched from the rendezvous and
     /// reviewed, held between the consent screen and the person's decision
     /// (`IMPL-008` `ADR-913`). Never exposed to the page: the offer plaintext
@@ -92,6 +208,17 @@ pub struct PendingOffer {
 }
 
 impl Session {
+    /// The caller owns the Session mutex through both generation validation
+    /// and the update. Used for profile results and live-socket reinsertion.
+    pub(crate) fn update_cbcl_v2_attempt<T>(
+        &mut self,
+        attempt: &CredentialV2Attempt,
+        update: impl FnOnce(&mut Self) -> Result<T, UiError>,
+    ) -> Result<T, UiError> {
+        self.cbcl_v2_attempts.ensure_current(attempt)?;
+        update(self)
+    }
+
     /// Load persisted state from the app data directory.
     pub fn load(dir: PathBuf) -> Self {
         let path = dir.join("identity-state.json");
@@ -107,6 +234,7 @@ impl Session {
             pending_cbcl_pairing: None,
             pending_cbcl_v2_relay: None,
             pending_cbcl_v2: None,
+            cbcl_v2_attempts: CredentialV2Attempts::default(),
             pending_enrolment: None,
         }
     }
@@ -381,6 +509,66 @@ pub struct DeviceRow {
 mod tests {
     use super::*;
     use std::collections::HashSet;
+
+    #[test]
+    fn scan_preview_cancelled_generation_cannot_restore_or_replace_new_attempt() {
+        let mut session = Session::default();
+        let work = session.cbcl_v2_attempts.begin().unwrap();
+        let stale = work.attempt.clone();
+        session
+            .update_cbcl_v2_attempt(&stale, |session| {
+                session.state.last_seen.insert("test-view".into(), 1);
+                Ok(())
+            })
+            .unwrap();
+        session.cbcl_v2_attempts.cancel();
+        drop(work);
+        assert!(session
+            .update_cbcl_v2_attempt(&stale, |session| {
+                session.state.last_seen.insert("test-view".into(), 9);
+                Ok(())
+            })
+            .is_err());
+        let fresh = session.cbcl_v2_attempts.begin().unwrap();
+        session
+            .update_cbcl_v2_attempt(&fresh.attempt, |session| {
+                session.state.last_seen.insert("test-view".into(), 2);
+                Ok(())
+            })
+            .unwrap();
+        assert!(session
+            .update_cbcl_v2_attempt(&stale, |session| {
+                session.state.last_seen.insert("test-view".into(), 9);
+                Ok(())
+            })
+            .is_err());
+        assert_eq!(session.last_seen("test-view"), Some(2));
+        assert!(session
+            .cbcl_v2_attempts
+            .ensure_current(&CredentialV2Attempt::default())
+            .is_err());
+        session
+            .cbcl_v2_attempts
+            .ensure_current(&fresh.attempt)
+            .unwrap();
+        assert!(stale.run(|| Ok(())).is_err());
+    }
+
+    #[test]
+    fn scan_preview_profile_wait_and_aborted_worker_hold_one_attempt() {
+        let mut attempts = CredentialV2Attempts::default();
+        let recognition = attempts.begin().unwrap();
+        assert!(attempts.begin().is_err());
+        let worker_lease = recognition.lease();
+        let stale = recognition.attempt.clone();
+        attempts.cancel();
+        drop(recognition);
+        assert!(attempts.begin().is_err());
+        drop(worker_lease);
+        let current = attempts.begin().unwrap();
+        assert!(attempts.ensure_current(&stale).is_err());
+        attempts.ensure_current(&current.attempt).unwrap();
+    }
 
     /// A fragment is never reissued, so a revoked one can never come back.
     ///
