@@ -49,8 +49,7 @@ test("TEST-814 CBCL wallet states are keyboard complete and WCAG-clean", async (
     await visible(page, "pairing-enter");
     await audit(page, `invitation entry at ${width}px`);
 
-    await page.type("#pairing-input", "o2ZyZWxheXgaaHR0cHM6Ly9yZWxheS5leGFtcGxl");
-    await page.type("#pairing-presence-code", "PAIR1-22222-22222-22222-22222-22222-22222-22222-22222-22222-22222-22222");
+    await page.type("#pairing-input", "SSPAIR1:fixture");
     await page.type("#pairing-passcode", "correct horse battery staple");
     assert.equal(await page.$eval('[data-action="start-cbcl-pairing"]', (node) => node.disabled), false);
     await page.click('[data-action="start-cbcl-pairing"]');
@@ -93,7 +92,6 @@ test("TEST-814 CBCL wallet states are keyboard complete and WCAG-clean", async (
 
     await page.click('[data-action="to-pairing"]');
     await page.type("#pairing-input", "selfsame-pairing-v2:obsolete");
-    await page.type("#pairing-presence-code", "PAIR1-22222-22222-22222-22222-22222-22222-22222-22222-22222-22222-22222");
     await page.click('[data-action="start-cbcl-pairing"]');
     await page.waitForFunction(() => !document.querySelector('[data-error="pairing"]').hidden);
     assert.match(
@@ -286,8 +284,8 @@ function bridge() {
         if (command === "get_state") return state;
         if (command === "flush_publications") return 0;
         if (command === "cbcl_v2_cancel") return null;
-        if (command === "cbcl_v2_recognise") {
-          if (args.invitation.startsWith("selfsame-pairing-v2:")) {
+        if (command === "cbcl_v2_recognise_handoff") {
+          if (args.handoff.startsWith("selfsame-pairing-v2:")) {
             throw "RecognitionFailed";
           }
           return new Promise((resolve) => {
@@ -312,7 +310,7 @@ function bridge() {
           },
         } : { outcome: "declined", intent: null };
         if (command === "cbcl_v2_preliminary_decide") return args.approve ? {
-          outcome: "final-review",
+          outcome: "preview",
           finalReview: {
             applicationId: "https://photos.example/selfsame/application",
             previewIssuerDid: "did:crdt:fixture-account",
@@ -320,6 +318,12 @@ function bridge() {
             comparison: "no-binding-person-compared",
           },
         } : { outcome: "declined", finalReview: null };
+        if (command === "cbcl_v2_compare") return {
+          applicationId: "https://photos.example/selfsame/application",
+          previewIssuerDid: "did:crdt:fixture-account",
+          previewFingerprint: { hex: "AA BB CC DD EE FF", label: "copper-lynx-42", lifehash: "A".repeat(4096) },
+          comparison: "no-binding-person-compared",
+        };
         if (command === "cbcl_v2_final_decide") return { outcome: args.approve ? "payload-sent" : "declined" };
         if (command === "cbcl_v2_finish") return { outcome: "installed" };
         return null;

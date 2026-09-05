@@ -221,13 +221,47 @@ struct CredentialV2AuthorityRotationView {
     current_profile_digest: String,
 }
 
-/// Recognise carrier, PAIR1, live profile, declared relay, and exact-pair state.
-/// No relay socket is opened by this command.
+/// Recognise one complete confidential invitation before profile or relay effects.
+#[tauri::command]
+pub async fn cbcl_v2_recognise_handoff(
+    handoff: String,
+    session: State<'_, AppSession>,
+) -> Result<RelayConsentView> {
+    recognise_v2_entry(
+        CredentialV2Entry::Handoff(Zeroizing::new(handoff)),
+        &session,
+    )
+    .await
+}
+
+/// Explicit legacy carrier and presence entry shares the same attempt and policy gate.
 #[tauri::command]
 pub async fn cbcl_v2_recognise(
     invitation: String,
     presence_code: String,
     session: State<'_, AppSession>,
+) -> Result<RelayConsentView> {
+    recognise_v2_entry(
+        CredentialV2Entry::Legacy {
+            invitation,
+            presence_code: Zeroizing::new(presence_code),
+        },
+        &session,
+    )
+    .await
+}
+
+enum CredentialV2Entry {
+    Handoff(Zeroizing<String>),
+    Legacy {
+        invitation: String,
+        presence_code: Zeroizing<String>,
+    },
+}
+
+async fn recognise_v2_entry(
+    input: CredentialV2Entry,
+    session: &AppSession,
 ) -> Result<RelayConsentView> {
     let operation = {
         let mut guard = session
@@ -241,12 +275,22 @@ pub async fn cbcl_v2_recognise(
     };
     operation.attempt.check()?;
     let now = crate::commands::now() as i64;
-    let plan = cbcl_v2_claimant::recognise_claimant_invitation(
-        invitation.trim(),
-        presence_code.trim(),
-        now,
-    )
-    .await?;
+    let plan = match input {
+        CredentialV2Entry::Handoff(handoff) => {
+            cbcl_v2_claimant::recognise_claimant_handoff(&handoff, now).await?
+        }
+        CredentialV2Entry::Legacy {
+            invitation,
+            presence_code,
+        } => {
+            cbcl_v2_claimant::recognise_claimant_invitation(
+                invitation.trim(),
+                presence_code.trim(),
+                now,
+            )
+            .await?
+        }
+    };
     let view = plan.view();
     let mut guard = session
         .0

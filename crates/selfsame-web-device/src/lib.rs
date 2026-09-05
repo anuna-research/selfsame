@@ -350,7 +350,6 @@ pub struct CredentialV2BrowserAllocatorSession {
     authority_response: Option<Vec<u8>>,
     body_authority: selfsame_pairing::credential_v2::CredentialV2BodyAuthority,
     last_received_object: Option<cbcl_pairing::credential_v2::CredentialV2Object>,
-    presence_code: Option<Zeroizing<String>>,
 }
 
 #[wasm_bindgen]
@@ -388,9 +387,6 @@ impl CredentialV2BrowserAllocatorSession {
         let carrier_nonce = fixed_browser_bytes(carrier_nonce, "carrier nonce")?;
         let cpace_secret = fixed_browser_bytes(cpace_secret, "CPace presence secret")?;
         let claim_token = fixed_browser_bytes(claim_token, "relay claim token")?;
-        let presence_code =
-            cbcl_pairing::credential_v2::CredentialV2PresenceCode::new(cpace_secret, claim_token)
-                .to_string();
         let cpace_scalar = fixed_browser_bytes(cpace_scalar, "CPace scalar")?;
         let request_id = fixed_browser_bytes(request_id, "request ID")?;
         let intent_nonce = fixed_browser_bytes(intent_nonce, "intent nonce")?;
@@ -436,7 +432,6 @@ impl CredentialV2BrowserAllocatorSession {
             authority_response: None,
             body_authority,
             last_received_object: None,
-            presence_code: Some(Zeroizing::new(presence_code)),
         })
     }
 
@@ -499,7 +494,6 @@ impl CredentialV2BrowserAllocatorSession {
                 .restore_retained_received_object(object)
                 .map_err(|_| JsError::new("the credential/v2 retained body was refused"))?;
         }
-        let presence_code = session.presence_code().map(Zeroizing::new);
         Ok(Self {
             session: Some(session),
             profile,
@@ -515,7 +509,6 @@ impl CredentialV2BrowserAllocatorSession {
             authority_response: None,
             body_authority,
             last_received_object,
-            presence_code,
         })
     }
 
@@ -554,12 +547,25 @@ impl CredentialV2BrowserAllocatorSession {
         .into()
     }
 
+    /// Reconstruct confidential scan material from this exact live core session.
+    /// The caller releases it only after durable hub allocation and clears it at
+    /// the earlier hub/relay deadline. Consumed T cannot be reconstructed here.
+    pub fn handoff_text(&self) -> Result<Option<String>, JsError> {
+        let Some(session) = self.session.as_ref() else {
+            return Ok(None);
+        };
+        session
+            .handoff_text()
+            .map(|text| text.map(|value| value.as_str().to_owned()))
+            .map_err(|_| JsError::new("the pairing invitation was refused"))
+    }
+
     /// Return the restored one-use presence code while the claim token remains
     /// sealed in the allocator bootstrap checkpoint.
     pub fn restored_presence_code(&self) -> Option<String> {
-        self.presence_code
+        self.session
             .as_ref()
-            .map(|value| value.as_str().to_string())
+            .and_then(|session| session.presence_code())
     }
 
     /// Re-validate and retain public hub offer facts needed by the browser
@@ -642,7 +648,10 @@ impl CredentialV2BrowserAllocatorSession {
             &self.request_id,
             &self.intent_nonce,
             &self.carrier_ceremony_id,
-            self.presence_code.as_ref().map(|value| value.as_str()),
+            self.restored_presence_code()
+                .map(Zeroizing::new)
+                .as_deref()
+                .map(String::as_str),
         ))
     }
 
@@ -672,7 +681,10 @@ impl CredentialV2BrowserAllocatorSession {
             &self.request_id,
             &self.intent_nonce,
             &self.carrier_ceremony_id,
-            self.presence_code.as_ref().map(|value| value.as_str()),
+            self.restored_presence_code()
+                .map(Zeroizing::new)
+                .as_deref()
+                .map(String::as_str),
         ))
     }
 
@@ -692,7 +704,10 @@ impl CredentialV2BrowserAllocatorSession {
             &self.request_id,
             &self.intent_nonce,
             &self.carrier_ceremony_id,
-            self.presence_code.as_ref().map(|value| value.as_str()),
+            self.restored_presence_code()
+                .map(Zeroizing::new)
+                .as_deref()
+                .map(String::as_str),
         ))
     }
 
@@ -846,7 +861,10 @@ impl CredentialV2BrowserAllocatorSession {
             &self.request_id,
             &self.intent_nonce,
             &self.carrier_ceremony_id,
-            self.presence_code.as_ref().map(|value| value.as_str()),
+            self.restored_presence_code()
+                .map(Zeroizing::new)
+                .as_deref()
+                .map(String::as_str),
         ))
     }
 
@@ -891,7 +909,10 @@ impl CredentialV2BrowserAllocatorSession {
             &self.request_id,
             &self.intent_nonce,
             &self.carrier_ceremony_id,
-            self.presence_code.as_ref().map(|value| value.as_str()),
+            self.restored_presence_code()
+                .map(Zeroizing::new)
+                .as_deref()
+                .map(String::as_str),
         ))
     }
 
@@ -1079,14 +1100,16 @@ impl CredentialV2BrowserAllocatorSession {
             &self.request_id,
             &self.intent_nonce,
             &self.carrier_ceremony_id,
-            self.presence_code.as_ref().map(|value| value.as_str()),
+            self.restored_presence_code()
+                .map(Zeroizing::new)
+                .as_deref()
+                .map(String::as_str),
         ))
     }
 
     /// Burn the local attempt without releasing another protocol frame.
     pub fn cancel(&mut self) -> String {
         self.session = None;
-        self.presence_code = None;
         r#"[{"outcome":"cancelled","type":"terminal"}]"#.into()
     }
 
@@ -1104,7 +1127,6 @@ impl CredentialV2BrowserAllocatorSession {
                             "the credential/v2 transcript was established twice",
                         ));
                     }
-                    self.presence_code = None;
                 }
                 cbcl_pairing::credential_v2::CredentialV2AllocatorEffect::ReceivedObject {
                     object,
@@ -1217,6 +1239,38 @@ fn v2_allocator_effects_json(
         })
         .collect::<Vec<_>>();
     serde_json::Value::Array(values).to_string()
+}
+
+/// Read the public carrier's original deadline through the shared recognizer.
+/// Browser display uses this alongside the authenticated hub deadline.
+#[wasm_bindgen]
+pub fn cbcl_carrier_relay_expires_at(carrier: &[u8]) -> Result<u64, JsError> {
+    cbcl_pairing::credential_v2::decode_carrier(carrier)
+        .map(|carrier| carrier.relay_expires_at())
+        .map_err(|_| JsError::new("the pairing invitation was refused"))
+}
+
+// SPEC-077 TEST-005: a pure boundary keeps recognition/capacity errors testable
+// natively, without constructing a JavaScript exception outside WASM.
+fn handoff_qr_modules_json(handoff: &str) -> Result<String, &'static str> {
+    let _: cbcl_pairing::credential_v2::CredentialV2Handoff = handoff
+        .parse()
+        .map_err(|_| "the pairing invitation was refused")?;
+    let code = qrcode::QrCode::with_error_correction_level(handoff.as_bytes(), qrcode::EcLevel::Q)
+        .map_err(|_| "the pairing invitation does not fit a QR symbol")?;
+    let size = code.width();
+    let dark: Vec<u8> = (0..size)
+        .flat_map(|y| (0..size).map(move |x| (x, y)))
+        .map(|(x, y)| u8::from(code[(x, y)] == qrcode::Color::Dark))
+        .collect();
+    serde_json::to_string(&serde_json::json!({ "size": size, "dark": dark }))
+        .map_err(|_| "the pairing invitation was refused")
+}
+
+/// Render a fully recognized confidential handoff, without another encoding layer.
+#[wasm_bindgen]
+pub fn cbcl_handoff_qr_modules_json(handoff: &str) -> Result<String, JsError> {
+    handoff_qr_modules_json(handoff).map_err(JsError::new)
 }
 
 /// QR module matrix for one complete CBCL invitation carrier.
@@ -3835,5 +3889,145 @@ mod enrolment_allocator_tests {
         );
         // The offer digest the statement bound equals the offer's own.
         assert_eq!(statement.offer_digest, offer.core.digest());
+    }
+}
+
+#[cfg(test)]
+mod scan_handoff_tests {
+    use super::handoff_qr_modules_json;
+
+    fn allocated_session() -> super::CredentialV2BrowserAllocatorSession {
+        use cbcl_pairing::wire::{encode_server_message, ServerMessage};
+        let corpus: serde_json::Value =
+            serde_json::from_str(include_str!("../../../test-vectors/spec-004-v1.json")).unwrap();
+        let profile = corpus["con_201_application_profile"][0]["input"]["profile"]
+            .as_str()
+            .unwrap();
+        let mut session = super::CredentialV2BrowserAllocatorSession::new(
+            profile.as_bytes(),
+            "https://cbcl-au.provider.example".into(),
+            &[0x11; 32],
+            &[0x12; 32],
+            &[0x13; 32],
+            &[0x14; 16],
+            &[0x15; 16],
+            &[0x18; 32],
+            &[0x21; 32],
+            &[0x22; 32],
+            &[0x19; 32],
+            &[0x16; 32],
+        )
+        .unwrap();
+        session
+            .receive(
+                &encode_server_message(&ServerMessage::Welcome).unwrap(),
+                1_800_000_000,
+                &[0x31; 12],
+            )
+            .unwrap();
+        session
+            .receive(
+                &encode_server_message(&ServerMessage::AllocatedV2 {
+                    mailbox_id: [0x11; 32],
+                    membership_token: [0x20; 32],
+                    expires_at: 1_800_000_900,
+                })
+                .unwrap(),
+                1_800_000_000,
+                &[0x32; 12],
+            )
+            .unwrap();
+        session.checkpoint_persisted(1).unwrap();
+        assert!(session.handoff_text().unwrap().is_some());
+        assert!(session.restored_presence_code().is_some());
+        session
+    }
+
+    #[test]
+    fn scan_handoff_terminal_and_core_error_erase_every_secret_export() {
+        use cbcl_pairing::credential_v2::CredentialV2CheckpointNonce;
+        use cbcl_pairing::wire::{encode_server_message, CloseReason, ServerMessage};
+        for closed in [true, false] {
+            let mut session = allocated_session();
+            let frame = encode_server_message(&if closed {
+                ServerMessage::Closed(CloseReason::Closed)
+            } else {
+                ServerMessage::Welcome
+            })
+            .unwrap();
+            // Call the core directly for the error case: constructing JsError on
+            // a native target aborts. This also verifies export safety even when
+            // an adapter returns early before processing terminal effects.
+            let result = session.session.as_mut().unwrap().receive(
+                &frame,
+                1_800_000_000,
+                CredentialV2CheckpointNonce::from_csprng([0x33; 12]),
+            );
+            assert_eq!(result.is_ok(), closed);
+            assert!(session.handoff_text().unwrap().is_none());
+            assert!(
+                session.restored_presence_code().is_none(),
+                "legacy export must follow terminal core state even without effect capture"
+            );
+        }
+    }
+
+    fn vectors() -> serde_json::Value {
+        serde_json::from_str(include_str!("../../../test-vectors/spec-077-handoff.json")).unwrap()
+    }
+
+    #[test]
+    fn scan_handoff_public_deadline_preserves_the_exact_carrier_u64() {
+        let corpus = vectors();
+        for (index, expected) in [1_800_000_900, u64::MAX].into_iter().enumerate() {
+            let handoff: cbcl_pairing::credential_v2::CredentialV2Handoff =
+                corpus[index]["handoff"].as_str().unwrap().parse().unwrap();
+            let carrier = cbcl_pairing::credential_v2::encode_carrier(handoff.carrier()).unwrap();
+            assert_eq!(super::cbcl_carrier_relay_expires_at(&carrier).unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn scan_handoff_normal_invitation_fits_one_qr() {
+        let corpus = vectors();
+        let text = corpus[0]["handoff"].as_str().unwrap();
+        let modules: serde_json::Value =
+            serde_json::from_str(&handoff_qr_modules_json(text).unwrap()).unwrap();
+        let size = modules["size"].as_u64().unwrap() as usize;
+        let dark = modules["dark"].as_array().unwrap();
+        assert!(size >= 21 && size <= 177);
+        assert_eq!(dark.len(), size * size);
+        assert!(dark
+            .iter()
+            .all(|value| matches!(value.as_u64(), Some(0 | 1))));
+        assert!(dark.iter().any(|value| value.as_u64() == Some(1)));
+    }
+
+    #[test]
+    fn scan_handoff_capacity_refusal_keeps_the_complete_input_intact() {
+        let corpus = vectors();
+        let text = corpus[1]["handoff"].as_str().unwrap();
+        assert_eq!(text.len(), 3691);
+        assert_eq!(
+            handoff_qr_modules_json(text).unwrap_err(),
+            "the pairing invitation does not fit a QR symbol"
+        );
+        assert_eq!(text, corpus[1]["handoff"].as_str().unwrap());
+    }
+
+    #[test]
+    fn scan_handoff_qr_rejects_unrecognized_or_public_input() {
+        for text in [
+            "",
+            "SSPAIR9:invalid",
+            "SSPAIR1:invalid",
+            "https://example.org/",
+            "o2ZyZWxheQ",
+        ] {
+            assert_eq!(
+                handoff_qr_modules_json(text).unwrap_err(),
+                "the pairing invitation was refused"
+            );
+        }
     }
 }

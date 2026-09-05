@@ -258,7 +258,7 @@ const bridge = (state) => `
             demoRelay: false,
             productionClaimant: true,
           };
-          case 'cbcl_v2_recognise':
+          case 'cbcl_v2_recognise_handoff':
             if (${JSON.stringify(state)}.pairing_recognise_pending) {
               return new Promise(() => {});
             }
@@ -332,9 +332,9 @@ const shots = [
 
   // SPEC-007: one invitation enters the single CBCL pairing path.
   { name: '30-pairing-enter', expect: 'pairing-enter', state: STATE_APPS, steps: ['to-applications', 'to-pairing'] },
-  { name: '31-pairing-wait', expect: 'pairing-wait', state: { ...STATE_APPS, pairing_recognise_pending: true }, steps: ['to-applications', 'to-pairing', 'fill-cbcl-invitation', 'fill-cbcl-presence-code', 'start-cbcl-pairing'] },
-  { name: '32-pairing-relay-consent', expect: 'pairing-consent', state: STATE_APPS, steps: ['to-applications', 'to-pairing', 'fill-cbcl-invitation', 'fill-cbcl-presence-code', 'start-cbcl-pairing'] },
-  { name: '33-pairing-intent-consent', expect: 'pairing-consent', state: { ...STATE_APPS, pairing_requires_relay_approval: false }, steps: ['to-applications', 'to-pairing', 'fill-cbcl-invitation', 'fill-cbcl-presence-code', 'start-cbcl-pairing'] },
+  { name: '31-pairing-wait', expect: 'pairing-wait', state: { ...STATE_APPS, pairing_recognise_pending: true }, steps: ['to-applications', 'to-pairing', 'fill-cbcl-invitation', 'start-cbcl-pairing'] },
+  { name: '32-pairing-relay-consent', expect: 'pairing-consent', state: STATE_APPS, steps: ['to-applications', 'to-pairing', 'fill-cbcl-invitation', 'start-cbcl-pairing'] },
+  { name: '33-pairing-intent-consent', expect: 'pairing-consent', state: { ...STATE_APPS, pairing_requires_relay_approval: false }, steps: ['to-applications', 'to-pairing', 'fill-cbcl-invitation', 'start-cbcl-pairing'] },
 ];
 
 // ── Negative-output assertions (IMPL-004 TEST-605 / 611 / 613) ───────────
@@ -443,7 +443,7 @@ const SCREEN_RULES = {
     requiredTextAll: [
       'Secure pairing started',
       'No relay connection yet',
-      'Checking the invitation and its declared relay before any socket opens.',
+      'Checking the application and its relay.',
       'Nothing is authorised until you see and approve the verified request.',
     ],
     forbidden: [
@@ -627,7 +627,7 @@ for (const shot of shots) {
     } else if (step === 'fill-cbcl-invitation') {
       await page.evaluate(() => {
         const el = document.querySelector('#pairing-input');
-        el.value = 'cbcl-pairing-invitation-for-render-check';
+        el.value = 'SSPAIR1:fixture';
         el.dispatchEvent(new Event('input'));
       });
     } else if (step === 'fill-cbcl-presence-code') {

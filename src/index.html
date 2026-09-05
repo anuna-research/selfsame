@@ -571,9 +571,9 @@
         <button class="btn btn--danger" data-action="confirm-cbcl-v2-unlink">Unlink locally</button>
       </section>
 
-      <!-- SPEC-007: one CBCL invitation, no protocol selector or fallback. -->
+      <!-- SPEC-077: confidential scan/paste entry; legacy input requires explicit selection. -->
       <section class="screen" data-screen="pairing-enter" hidden>
-        <button class="back" data-action="to-applications">Back</button>
+        <button class="back" data-action="cancel-cbcl-pairing">Back</button>
         <h1>Connect an application</h1>
         <p class="lede">
           Scan the application’s QR code, or paste the single-use invitation.
@@ -583,24 +583,29 @@
         <button class="btn btn--primary" data-action="scan-cbcl-pairing">Scan the QR code</button>
         <p class="code-state" data-pairing-scanner-note aria-live="polite" hidden></p>
         <label class="field">
-          <span class="field__label">CBCL pairing invitation</span>
+          <span class="field__label">Pairing invitation</span>
           <textarea id="pairing-input" rows="4" autocomplete="off" spellcheck="false"
                     autocapitalize="none" inputmode="text"></textarea>
         </label>
+        <details data-pairing-legacy>
+          <summary>Enter an older invitation</summary>
         <label class="field">
           <span class="field__label">PAIR1 presence code</span>
           <input id="pairing-presence-code" autocomplete="off" spellcheck="false"
                  autocapitalize="characters" inputmode="text"
                  placeholder="PAIR1-…" />
         </label>
+        </details>
         <p class="code-state" data-pairing-state aria-live="polite">Paste one invitation</p>
         <!-- SPEC-008 credential/v2 sends this value to Rust only after the
              authenticated intent is approved. No identity is derived before
              relay consent and exact-intent consent have both completed. -->
+        <div data-pairing-entry-unlock>
         <label class="field" data-pairing-passcode-field hidden>
           <span class="field__label">Your Selfsame passcode</span>
           <input type="password" id="pairing-passcode" autocomplete="current-password" />
         </label>
+        </div>
         <p class="error" data-error="pairing" hidden></p>
         <div class="spacer"></div>
         <button class="btn btn--primary" data-action="start-cbcl-pairing" disabled>Start secure pairing</button>
@@ -631,7 +636,7 @@
           <div class="evidence__row">
             <p class="evidence__key">Protocol</p>
             <p class="evidence__val">cbcl-pairing</p>
-            <p class="evidence__note">CPace and both Finished values verified</p>
+            <p class="evidence__note" data-cbcl-channel-status>Checking the connection</p>
           </div>
           <div class="evidence__row">
             <p class="evidence__key">Request profile</p>
@@ -640,6 +645,7 @@
           </div>
         </div>
         <dl class="intent-fields" data-cbcl-intent-fields></dl>
+        <div data-pairing-consent-unlock></div>
         <p class="caution">
           Approve only if these exact fields match the application in front of you.
           Approval releases one credential; decline releases none.

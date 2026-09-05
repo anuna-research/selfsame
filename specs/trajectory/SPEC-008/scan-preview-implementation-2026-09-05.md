@@ -1,4 +1,5 @@
 ---
+id: scan-preview-implementation-2026-09-05
 title: Native preview continuation and cancellation implementation evidence
 date: 2026-09-05
 doc_mode: explanation

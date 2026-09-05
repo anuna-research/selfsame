@@ -98,6 +98,7 @@ pub fn run() {
             cbcl_pairing::cbcl_pairing_decline,
             cbcl_pairing::cbcl_pairing_cancel,
             cbcl_v2_commands::cbcl_v2_recognise,
+            cbcl_v2_commands::cbcl_v2_recognise_handoff,
             cbcl_v2_commands::cbcl_v2_relay_decide,
             cbcl_v2_commands::cbcl_v2_preliminary_decide,
             cbcl_v2_commands::cbcl_v2_compare,

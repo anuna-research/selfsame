@@ -162,7 +162,7 @@ fn wasm_surface_restores_the_exact_allocator_membership_after_process_restart() 
         &[0x2a; 32],
     )
     .unwrap();
-    let expected_presence = allocator.restored_presence_code().unwrap();
+    assert!(allocator.restored_presence_code().is_none());
     let welcome = encode_server_message(&ServerMessage::Welcome).unwrap();
     allocator
         .receive(&welcome, 1_800_000_000, &[0x2b; 12])
@@ -180,6 +180,7 @@ fn wasm_surface_restores_the_exact_allocator_membership_after_process_restart() 
     );
     assert_eq!(durable.len(), 1);
     assert_eq!(durable[0]["type"], "checkpoint");
+    let expected_presence = allocator.restored_presence_code().unwrap();
     let checkpoint = decode_b64u(durable[0]["checkpointB64u"].as_str().unwrap());
     let carrier = decode_b64u(durable[0]["rawCarrierB64u"].as_str().unwrap());
 

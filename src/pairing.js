@@ -10,6 +10,9 @@ export function initPairing(d) {
   const { $, show, invoke, fail, message, actions, busy, idle, refresh } = d;
   const presencePattern = /^PAIR1-(?:[0-9A-HJKMNP-TV-Z]{5}-){10}[0-9A-HJKMNP-TV-Z]{5}$/;
   let credentialV2Stage = "idle";
+  let attemptEpoch = 0;
+  let decisionPending = false;
+  let intentFields = [];
   let recoveryApplication = null;
   let installedLink = null;
   let pendingLink = null;
@@ -36,43 +39,51 @@ export function initPairing(d) {
     .catch(() => {});
 
   function onInput() {
-    const value = $("#pairing-input")?.value.trim() ?? "";
+    const value = $("#pairing-input")?.value ?? "";
+    const legacy = $("[data-pairing-legacy]")?.open === true;
     const presence = $("#pairing-presence-code")?.value.trim().toUpperCase() ?? "";
-    const ready = value.length > 0 && presencePattern.test(presence);
+    const ready = value.length > 0 && (!legacy || presencePattern.test(presence));
     $("[data-pairing-state]").textContent = ready
-      ? "Invitation and presence code ready"
-      : value.length > 0
-        ? "Enter the PAIR1 code shown by the application"
-        : "Paste one invitation";
+      ? "Invitation ready"
+      : legacy && value.length > 0
+        ? "Enter the older invitation’s PAIR1 code"
+        : "Scan a QR code or paste an invitation";
     $('[data-action="start-cbcl-pairing"]').disabled = !ready;
   }
 
   async function start(presented) {
+    const epoch = ++attemptEpoch;
     const input = $("#pairing-input");
-    const invitation = typeof presented === "string" ? presented.trim() : input.value.trim();
+    const handoff = typeof presented === "string" ? presented : input.value;
+    const legacy = typeof presented !== "string" && $("[data-pairing-legacy]")?.open === true;
     const presenceInput = $("#pairing-presence-code");
     const presenceCode = (presenceInput?.value ?? "").trim().toUpperCase();
-    busy("Authenticating the application profile…");
+    input.value = "";
+    if (presenceInput) presenceInput.value = "";
+    intentFields = [];
+    onInput();
+    busy("Checking the invitation…");
     $("[data-cbcl-relay]").textContent = "No relay connection yet";
-    $("[data-cbcl-status]").textContent = "Checking the invitation and its declared relay before any socket opens.";
+    $("[data-cbcl-status]").textContent = "Checking the application and its relay.";
     show("pairing-wait");
     $("[data-screen='pairing-wait']").focus();
+    idle(); // The wait screen keeps cancellation reachable.
     try {
-      const view = await invoke("cbcl_v2_recognise", { invitation, presenceCode });
-      input.value = "";
-      if (presenceInput) presenceInput.value = "";
-      onInput();
-      if (view.requiresApproval) {
-        showRelayConsent(view);
-      } else {
-        await advanceRelay(true);
-      }
+      const view = legacy
+        ? await invoke("cbcl_v2_recognise", { invitation: handoff.trim(), presenceCode })
+        : await invoke("cbcl_v2_recognise_handoff", { handoff });
+      if (epoch !== attemptEpoch) return;
+      if (view.requiresApproval) showRelayConsent(view);
+      else await advanceRelay(true, epoch);
     } catch (error) {
-      const token = message(error);
+      if (epoch !== attemptEpoch) return;
+      await invoke("cbcl_v2_cancel").catch(() => {});
+      if (epoch !== attemptEpoch) return;
+      restoreEntryUnlock();
       show("pairing-enter");
-      fail("pairing", startFailureText(token));
+      fail("pairing", startFailureText(message(error)));
     } finally {
-      idle();
+      if (epoch === attemptEpoch) idle();
     }
   }
 
@@ -81,7 +92,9 @@ export function initPairing(d) {
   // (REQ-908 / TEST-912).
   function startFailureText(token) {
     if (token === "PairingVersionUnsupported")
-      return "That invitation came from an obsolete development build. Ask the application for a new one.";
+      return "Update Selfsame and the application, then create a new invitation.";
+    if (token === "PairingInvitationExpired" || token === "PairingOfferExpired")
+      return "That invitation expired. Create a new one in the application and scan it again.";
     if (token === "PairingRelayUnavailable")
       return capability.demoRelay
         ? "The local relay could not be reached. Check the demo server and adb reverse, then create a fresh invitation."
@@ -126,8 +139,21 @@ export function initPairing(d) {
     const approveButton = $('[data-action="approve-cbcl-pairing"]');
     const declineButton = $('[data-action="decline-cbcl-pairing"]');
     approveButton.textContent = approve;
+    approveButton.disabled = credentialV2Stage === "comparison";
+    const channel = $("[data-cbcl-channel-status]");
+    if (channel) channel.textContent = credentialV2Stage === "relay"
+      ? "Application profile checked; secure connection follows your approval"
+      : credentialV2Stage.startsWith("recovery")
+        ? "Checking the saved link with the application"
+        : "Secure connection verified";
+    const unlockSlot = $("[data-pairing-consent-unlock]");
+    if (unlockSlot && passcodeField) {
+      unlockSlot.append(passcodeField);
+      passcodeField.hidden = !capability.productionClaimant || credentialV2Stage === "relay" || credentialV2Stage === "comparison";
+    }
     declineButton.textContent = decline;
     declineButton.hidden = false;
+    declineButton.disabled = false;
     show("pairing-consent");
     $("[data-screen='pairing-consent']").focus();
   }
@@ -164,6 +190,7 @@ export function initPairing(d) {
         fields.push({ label: "Room to migrate", value: room });
       }
     }
+    intentFields = fields;
     paintConsent({
       title: "Review the exact request",
       authority: "CPace and both Finished values authenticated this request under the live application profile.",
@@ -182,8 +209,9 @@ export function initPairing(d) {
       application: review.applicationId,
       action: review.comparison === "bound-same-did"
         ? "The application’s existing reciprocal binding matches this wallet identity."
-        : "No prior binding exists; compare this identity with the application in front of you.",
+        : "You confirmed that this identity matches on your desktop.",
       fields: [
+        ...intentFields,
         { label: "Account issuer DID", value: review.previewIssuerDid },
         { label: "Comparison fingerprint", value: review.previewFingerprint.hex },
         { label: "Recognition aid", value: review.previewFingerprint.label },
@@ -191,6 +219,29 @@ export function initPairing(d) {
       approve: "Approve and link",
     });
   }
+
+  function showPreview(review) {
+    credentialV2Stage = "comparison";
+    paintConsent({
+      title: "Compare with your desktop",
+      authority: "Check that this fingerprint matches the one shown in the application.",
+      application: review.applicationId,
+      action: "Confirm the match on your desktop to continue here.",
+      fields: [
+        { label: "Comparison fingerprint", value: review.previewFingerprint.hex },
+        { label: "Account issuer DID", value: review.previewIssuerDid },
+        { label: "Recognition aid", value: review.previewFingerprint.label },
+        ...intentFields,
+      ],
+      approve: "Waiting for comparison…",
+      decline: "Cancel linking",
+    });
+    // Let the preview become visible before the native continuation discloses it.
+    idle();
+  }
+
+  const previewRendered = () => new Promise(resolve =>
+    requestAnimationFrame(() => requestAnimationFrame(resolve)));
 
   function showRecovery(applicationId) {
     recoveryApplication = applicationId;
@@ -239,9 +290,12 @@ export function initPairing(d) {
     $("[data-screen='pairing-result']").focus();
   }
 
-  async function advanceRelay(approve) {
-    busy(approve ? "Opening the approved blind relay…" : "Rejecting the relay…");
+  async function advanceRelay(approve, epoch = attemptEpoch) {
+    $("[data-cbcl-status]").textContent = approve ? "Connecting to the application…" : "Declining the connection…";
+    show("pairing-wait");
+    idle();
     const result = await invoke("cbcl_v2_relay_decide", { approve });
+    if (epoch !== attemptEpoch) return;
     if (result.outcome === "declined") {
       credentialV2Stage = "idle";
       showResult("declined", "Relay rejected", "No relay socket was opened and no credential was shared.", "The invitation was not allowed to choose relay trust for you.");
@@ -252,7 +306,16 @@ export function initPairing(d) {
   }
 
   async function decide(approve) {
-    busy(approve ? "Applying explicit approval…" : "Recording decline…");
+    if (credentialV2Stage === "comparison") {
+      if (!approve) await cancel();
+      return;
+    }
+    if (decisionPending) return;
+    const epoch = attemptEpoch;
+    decisionPending = true;
+    $('[data-action="approve-cbcl-pairing"]').disabled = true;
+    // Keep the Cancel control reachable while native work is in flight.
+    idle();
     try {
       if (credentialV2Stage === "recovery" || credentialV2Stage === "recovery-rotation") {
         if (!approve) {
@@ -271,6 +334,7 @@ export function initPairing(d) {
           passcode,
           approveRotation,
         });
+        if (epoch !== attemptEpoch) return;
         if (result.outcome === "authority-rotation") {
           showRecoveryRotation(result);
           return;
@@ -307,24 +371,31 @@ export function initPairing(d) {
         return;
       }
       if (credentialV2Stage === "relay") {
-        await advanceRelay(approve);
+        await advanceRelay(approve, epoch);
         return;
       }
       const passcodeInput = $("#pairing-passcode");
       const passcode = approve ? (passcodeInput?.value ?? "") : null;
       if (credentialV2Stage === "intent") {
         const result = await invoke("cbcl_v2_preliminary_decide", { approve, passcode });
+        if (epoch !== attemptEpoch) return;
         if (result.outcome === "declined") {
           credentialV2Stage = "idle";
           if (passcodeInput) passcodeInput.value = "";
           showResult("declined", "Request declined", "No identity was issued, published, or shared.", "The authenticated request ended before any identity effect.");
         } else {
-          showFinalReview(result.finalReview);
+          showPreview(result.finalReview);
+          await previewRendered();
+          if (epoch !== attemptEpoch) return;
+          const review = await invoke("cbcl_v2_compare");
+          if (epoch !== attemptEpoch) return;
+          showFinalReview(review);
         }
         return;
       }
       if (credentialV2Stage === "final") {
         const result = await invoke("cbcl_v2_final_decide", { approve, passcode });
+        if (epoch !== attemptEpoch) return;
         if (result.outcome === "declined") {
           credentialV2Stage = "idle";
           if (passcodeInput) passcodeInput.value = "";
@@ -337,12 +408,14 @@ export function initPairing(d) {
         $("[data-cbcl-status]").textContent = "Waiting for the hub’s atomic acceptance and reciprocal account binding.";
         show("pairing-wait");
         const result = await invoke("cbcl_v2_finish", { passcode });
+        if (epoch !== attemptEpoch) return;
         if (result.outcome !== "installed") throw new Error("credential/v2 installation was refused");
         credentialV2Stage = "idle";
         if (passcodeInput) passcodeInput.value = "";
         showResult("accepted", "Application connected", "The signed hub receipt and live reciprocal account binding were verified before the grant was installed.", "The relay learned only opaque protocol frames; trust is scoped to this application–relay pair.");
       }
     } catch (error) {
+      if (epoch !== attemptEpoch) return;
       const token = message(error);
       if (credentialV2Stage === "finish") {
         show("pairing-consent");
@@ -353,33 +426,50 @@ export function initPairing(d) {
           : `The final verification did not complete (${token}). The durable pending link is safe to retry.`;
         fail("pairing-consent", detail);
       } else {
+        await invoke("cbcl_v2_cancel").catch(() => {});
+        if (epoch !== attemptEpoch) return;
+        credentialV2Stage = "idle";
+        restoreEntryUnlock();
         show("pairing-enter");
         fail("pairing", startFailureText(token));
       }
     } finally {
-      idle();
+      if (epoch === attemptEpoch) {
+        decisionPending = false;
+        $('[data-action="approve-cbcl-pairing"]').disabled = credentialV2Stage === "comparison";
+        idle();
+      }
     }
   }
 
   async function cancel() {
+    const epoch = ++attemptEpoch;
+    credentialV2Stage = "cancelling";
+    decisionPending = true;
+    $('[data-action="approve-cbcl-pairing"]').disabled = true;
+    $('[data-action="decline-cbcl-pairing"]').disabled = true;
+    intentFields = [];
+    idle();
     try {
       await invoke("cbcl_v2_cancel");
     } finally {
+      if (epoch !== attemptEpoch) return;
       credentialV2Stage = "idle";
+      decisionPending = false;
       const passcode = $("#pairing-passcode");
       if (passcode) passcode.value = "";
       show("applications");
     }
   }
 
-  // The QR payload IS the paste payload: the application encodes the unpadded
-  // base64url carrier into the symbol, so a scan and a paste recognise
+  // The confidential QR payload IS the paste payload. Scan and paste recognise
   // identical input and everything after this line is the one ordinary
   // `start` path. The camera choreography mirrors the linking screen's:
   // `scan` checks the permission and throws rather than requesting it, so the
   // asking is this caller's job; `windowed: true` renders the preview beneath
   // the webview, so the page must get out of its way for the duration.
   async function scan() {
+    const epoch = attemptEpoch;
     const note = $("[data-pairing-scanner-note]");
     const say = (text) => {
       if (note) {
@@ -394,8 +484,10 @@ export function initPairing(d) {
     }
     try {
       let access = await camera.checkPermissions();
+      if (epoch !== attemptEpoch) return;
       if (access !== "granted") {
         access = await camera.requestPermissions();
+        if (epoch !== attemptEpoch) return;
       }
       if (access !== "granted") {
         say(
@@ -411,14 +503,15 @@ export function initPairing(d) {
       } finally {
         document.body.classList.remove("scanning");
       }
+      if (epoch !== attemptEpoch) return;
       say("");
       const input = $("#pairing-input");
       if (input) input.value = scanned.content;
       onInput();
-      $("#pairing-presence-code")?.focus();
+      await start(scanned.content);
     } catch (error) {
+      if (epoch !== attemptEpoch) return;
       const reason = String(error?.message ?? error ?? "unknown");
-      console.error("pairing scan unavailable:", reason);
       say(
         /denied|permission|not allowed/i.test(reason)
           ? "Camera access is off for Selfsame — turn it on in Settings, " +
@@ -428,7 +521,21 @@ export function initPairing(d) {
     }
   }
 
+  function restoreEntryUnlock() {
+    const unlockSlot = $("[data-pairing-entry-unlock]");
+    if (unlockSlot && passcodeField) {
+      unlockSlot.append(passcodeField);
+      passcodeField.hidden = !capability.productionClaimant;
+    }
+  }
+
   function forget() {
+    ++attemptEpoch;
+    decisionPending = false;
+    intentFields = [];
+    restoreEntryUnlock();
+    const legacy = $("[data-pairing-legacy]");
+    if (legacy) legacy.open = false;
     const input = $("#pairing-input");
     if (input) input.value = "";
     const passcode = $("#pairing-passcode");
@@ -440,10 +547,12 @@ export function initPairing(d) {
   }
 
   async function resumePending() {
+    const epoch = attemptEpoch;
     if (credentialV2Stage !== "idle") return;
     const installedRefresh = refreshInstalledLinks().catch(() => {});
     const applications = await invoke("cbcl_v2_pending_recoveries");
     await installedRefresh;
+    if (epoch !== attemptEpoch) return;
     if (Array.isArray(applications) && applications.length > 0) {
       showRecovery(applications[0]);
     }
@@ -636,6 +745,7 @@ export function initPairing(d) {
 
   const input = $("#pairing-input");
   if (input) input.addEventListener("input", onInput);
+  $("[data-pairing-legacy]")?.addEventListener("toggle", onInput);
   const presence = $("#pairing-presence-code");
   if (presence) presence.addEventListener("input", onInput);
   // Desktop: the pasted route is the route. Hide the dead camera affordance
