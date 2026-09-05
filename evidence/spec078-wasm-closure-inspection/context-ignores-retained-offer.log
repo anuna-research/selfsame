@@ -1,0 +1,22 @@
+   Compiling selfsame-web-device v0.1.0 (/Volumes/anuna-03/codex-closure-inspection/selfsame/crates/selfsame-web-device)
+    Finished `test` profile [unoptimized] target(s) in 0.85s
+     Running unittests src/lib.rs (/Volumes/anuna-03/codex-successor-wasm-native-target/debug/deps/selfsame_web_device-3b2c09f4cecd7e70)
+
+running 1 test
+
+thread 'credential_v2_closure::tests::closure_cannot_replace_retained_offer_with_another_valid_signed_offer' (8407655) panicked at crates/selfsame-web-device/src/credential_v2_closure_tests.rs:924:5:
+assertion failed: view.restore_offer_context_inner(&encode_carrier(&saved.carrier).unwrap(),
+        &offer.offer_core, &offer.offer_core_digest, EXPIRY - 100,
+        &offer.signed_offer, &authority.response, &authority.digest,
+        EXPIRY).is_err()
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test credential_v2_closure::tests::closure_cannot_replace_retained_offer_with_another_valid_signed_offer ... FAILED
+
+failures:
+
+failures:
+    credential_v2_closure::tests::closure_cannot_replace_retained_offer_with_another_valid_signed_offer
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 61 filtered out; finished in 0.07s
+
+error: test failed, to rerun pass `-p selfsame-web-device --lib`

@@ -1,0 +1,20 @@
+   Compiling selfsame-pairing v0.1.0 (/Volumes/anuna-03/codex-closure-inspection/selfsame/crates/selfsame-pairing)
+   Compiling selfsame-web-device v0.1.0 (/Volumes/anuna-03/codex-closure-inspection/selfsame/crates/selfsame-web-device)
+    Finished `test` profile [unoptimized] target(s) in 2.23s
+     Running unittests src/lib.rs (/Volumes/anuna-03/codex-successor-wasm-native-target/debug/deps/selfsame_web_device-3b2c09f4cecd7e70)
+
+running 1 test
+
+thread 'credential_v2_closure::tests::closure_peer_bound_bootstrap_preserves_authenticated_mode_after_expiry' (8407369) panicked at crates/selfsame-web-device/src/credential_v2_closure_tests.rs:269:72:
+called `Result::unwrap()` on an `Err` value: "mutated closure expiry"
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test credential_v2_closure::tests::closure_peer_bound_bootstrap_preserves_authenticated_mode_after_expiry ... FAILED
+
+failures:
+
+failures:
+    credential_v2_closure::tests::closure_peer_bound_bootstrap_preserves_authenticated_mode_after_expiry
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 61 filtered out; finished in 0.02s
+
+error: test failed, to rerun pass `-p selfsame-web-device --lib`

@@ -1,0 +1,211 @@
+{
+  "base": "9f3f1b6511a44e9e46a023d4c291ac4a99e1e1fb",
+  "environment": {
+    "TMPDIR": "/Volumes/anuna-03/codex-scan-native-preview-1/tmp",
+    "CARGO_TARGET_DIR": "/Volumes/anuna-03/codex-successor-wasm-native-target",
+    "CARGO_PROFILE_DEV_DEBUG": "0",
+    "CARGO_PROFILE_TEST_DEBUG": "0",
+    "CARGO_INCREMENTAL": "0",
+    "CARGO_BUILD_JOBS": "4"
+  },
+  "results": [
+    {
+      "label": "credential-v2-allocator-session",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "-p",
+        "selfsame-web-device",
+        "--test",
+        "credential_v2_allocator_session"
+      ],
+      "exit_code": 0,
+      "summary": [
+        "    Finished `test` profile [unoptimized] target(s) in 0.93s",
+        "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s"
+      ]
+    },
+    {
+      "label": "cbcl-allocator-session",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "-p",
+        "selfsame-web-device",
+        "--test",
+        "cbcl_allocator_session"
+      ],
+      "exit_code": 0,
+      "summary": [
+        "    Finished `test` profile [unoptimized] target(s) in 0.41s",
+        "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s"
+      ]
+    },
+    {
+      "label": "pairing-credential-v2",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "-p",
+        "selfsame-pairing",
+        "--lib",
+        "--test",
+        "credential_v2_offer",
+        "--test",
+        "credential_v2_staging_receipt"
+      ],
+      "exit_code": 0,
+      "summary": [
+        "    Finished `test` profile [unoptimized] target(s) in 10.64s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s",
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s"
+      ]
+    },
+    {
+      "label": "doc",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "-p",
+        "selfsame-web-device",
+        "--doc"
+      ],
+      "exit_code": 0,
+      "summary": [
+        "    Finished `test` profile [unoptimized] target(s) in 0.13s",
+        "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.16s"
+      ]
+    },
+    {
+      "label": "clippy",
+      "command": [
+        "cargo",
+        "clippy",
+        "--locked",
+        "--offline",
+        "-p",
+        "selfsame-web-device",
+        "--lib",
+        "--tests",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit_code": 101,
+      "summary": [
+        "error: manual `RangeInclusive::contains` implementation",
+        "error: useless use of `vec!`",
+        "error: could not compile `selfsame-web-device` (lib test) due to 2 previous errors"
+      ]
+    },
+    {
+      "label": "lib",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "-p",
+        "selfsame-web-device",
+        "--lib"
+      ],
+      "exit_code": 0,
+      "summary": [
+        "    Finished `test` profile [unoptimized] target(s) in 1.74s",
+        "test result: ok. 63 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.32s"
+      ]
+    },
+    {
+      "label": "clippy-production",
+      "command": [
+        "cargo",
+        "clippy",
+        "--locked",
+        "--offline",
+        "-p",
+        "selfsame-web-device",
+        "--lib",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit_code": 0,
+      "summary": [
+        "    Finished `dev` profile [unoptimized] target(s) in 5.79s"
+      ]
+    },
+    {
+      "label": "clippy-tests-known-baseline",
+      "command": [
+        "cargo",
+        "clippy",
+        "--locked",
+        "--offline",
+        "-p",
+        "selfsame-web-device",
+        "--lib",
+        "--tests",
+        "--",
+        "-D",
+        "warnings",
+        "-A",
+        "clippy::manual_range_contains",
+        "-A",
+        "clippy::useless_vec"
+      ],
+      "exit_code": 0,
+      "summary": [
+        "    Finished `dev` profile [unoptimized] target(s) in 1.74s"
+      ]
+    }
+  ],
+  "source_sha256": {
+    "crates/selfsame-pairing/src/credential_v2.rs": "6b4139ff11ee4e1ddc5f4a1a2177301e0680030a666a4ccf344cb1a5d14e672e",
+    "crates/selfsame-web-device/src/lib.rs": "725096819b9d0db60438e2972cfdea72662421a061f6b089dbc43d055dc8fa0d",
+    "crates/selfsame-web-device/src/credential_v2_closure.rs": "17cdd7e3d7415766456eb995311f9904d738bc4cb5e9c636d47674a9f1fba538",
+    "crates/selfsame-web-device/src/credential_v2_closure_tests.rs": "d5790f3bd4803d9286ab2b69d40fb46c809ca04ff21cbbb04ccf96df0bd966a2",
+    "crates/selfsame-web-device/tests/support/spec078_wasm_closure_mutations.py": "b78ab6afbd1ebbb8fbcecdb93281e66370622a132eaf459a39e4021bd3489c23"
+  },
+  "siblings": {
+    "cbcl-pairing": {
+      "expected": "6e56ef2f2db0a918888cbfe39315944db30f50a3",
+      "actual": "6e56ef2f2db0a918888cbfe39315944db30f50a3",
+      "status": ""
+    },
+    "cbcl-rs": {
+      "expected": "febc6691e6dd2d5f7116b1a4d84c984b64717564",
+      "actual": "febc6691e6dd2d5f7116b1a4d84c984b64717564",
+      "status": ""
+    },
+    "did-crdt": {
+      "expected": "1f409a4229d07a62dd4cc6b2dce3b5a2e18e78a1",
+      "actual": "1f409a4229d07a62dd4cc6b2dce3b5a2e18e78a1",
+      "status": ""
+    }
+  },
+  "fixture": {
+    "path": "/tmp/spec078-closure-wasm-fixtures.json",
+    "sha256": "ae43c2176cd3067b69c9b440c5faaa0c5c5dcb8f1a89a0c901cff29158fe38d4",
+    "schema": "spec078-wasm-closure-fixtures/v1",
+    "export_test": "credential_v2_closure::tests::closure_real_payload_and_terminal_receipt_verify_after_expiry",
+    "env": "SPEC078_CLOSURE_FIXTURES_OUT",
+    "expiry": 1760000900,
+    "disposable_public_keys": true
+  },
+  "limitations": [
+    "Generated-WASM Chrome execution and browser ownership/CAS integration are owned by root and not claimed here.",
+    "Strict all-tests Clippy fails on two unchanged baseline assertions: manual_range_contains in lib.rs base line 4214; useless_vec in credential_v2_manual_tests.rs base line 371. Strict production Clippy and tests with only those two lint categories allowed pass.",
+    "Behavioral mutation logs precede the additive canonical-core grammar test; all mutated production source hashes exactly equal the final restored source hashes.",
+    "Fixture setup corrections before green were not behavioral red evidence.",
+    "No production approval or enablement; no pin, manifest, bundle, or checkpoint schema changes."
+  ]
+}

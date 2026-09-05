@@ -1,0 +1,134 @@
+{
+  "source_sha256": {
+    "crates/selfsame-web-device/src/credential_v2_closure.rs": "17cdd7e3d7415766456eb995311f9904d738bc4cb5e9c636d47674a9f1fba538",
+    "crates/selfsame-pairing/src/credential_v2.rs": "6b4139ff11ee4e1ddc5f4a1a2177301e0680030a666a4ccf344cb1a5d14e672e",
+    "crates/selfsame-web-device/src/lib.rs": "725096819b9d0db60438e2972cfdea72662421a061f6b089dbc43d055dc8fa0d"
+  },
+  "restored_sha256": {
+    "crates/selfsame-web-device/src/credential_v2_closure.rs": "17cdd7e3d7415766456eb995311f9904d738bc4cb5e9c636d47674a9f1fba538",
+    "crates/selfsame-pairing/src/credential_v2.rs": "6b4139ff11ee4e1ddc5f4a1a2177301e0680030a666a4ccf344cb1a5d14e672e",
+    "crates/selfsame-web-device/src/lib.rs": "725096819b9d0db60438e2972cfdea72662421a061f6b089dbc43d055dc8fa0d"
+  },
+  "results": [
+    {
+      "mutant": "closure-reapplies-expiry",
+      "file": "crates/selfsame-web-device/src/credential_v2_closure.rs",
+      "test": "credential_v2_closure::tests::closure_peer_bound_bootstrap_preserves_authenticated_mode_after_expiry",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "-p",
+        "selfsame-web-device",
+        "--lib",
+        "credential_v2_closure::tests::closure_peer_bound_bootstrap_preserves_authenticated_mode_after_expiry",
+        "--",
+        "--exact",
+        "--nocapture"
+      ],
+      "exit_code": 101,
+      "behavioral_failure": true
+    },
+    {
+      "mutant": "context-ignores-whole-carrier",
+      "file": "crates/selfsame-web-device/src/credential_v2_closure.rs",
+      "test": "credential_v2_closure::tests::closure_offer_context_checks_exact_carrier_and_authenticated_metadata",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "-p",
+        "selfsame-web-device",
+        "--lib",
+        "credential_v2_closure::tests::closure_offer_context_checks_exact_carrier_and_authenticated_metadata",
+        "--",
+        "--exact",
+        "--nocapture"
+      ],
+      "exit_code": 101,
+      "behavioral_failure": true
+    },
+    {
+      "mutant": "context-ignores-retained-offer",
+      "file": "crates/selfsame-web-device/src/credential_v2_closure.rs",
+      "test": "credential_v2_closure::tests::closure_cannot_replace_retained_offer_with_another_valid_signed_offer",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "-p",
+        "selfsame-web-device",
+        "--lib",
+        "credential_v2_closure::tests::closure_cannot_replace_retained_offer_with_another_valid_signed_offer",
+        "--",
+        "--exact",
+        "--nocapture"
+      ],
+      "exit_code": 101,
+      "behavioral_failure": true
+    },
+    {
+      "mutant": "terminal-ignores-receipt-hashes",
+      "file": "crates/selfsame-pairing/src/credential_v2.rs",
+      "test": "credential_v2_closure::tests::closure_terminal_candidate_hash_binds_otherwise_valid_status",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "-p",
+        "selfsame-web-device",
+        "--lib",
+        "credential_v2_closure::tests::closure_terminal_candidate_hash_binds_otherwise_valid_status",
+        "--",
+        "--exact",
+        "--nocapture"
+      ],
+      "exit_code": 101,
+      "behavioral_failure": true
+    },
+    {
+      "mutant": "terminal-skips-signature",
+      "file": "crates/selfsame-pairing/src/credential_v2.rs",
+      "test": "credential_v2_closure::tests::closure_terminal_sealed_hash_does_not_replace_signature_verification",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "-p",
+        "selfsame-web-device",
+        "--lib",
+        "credential_v2_closure::tests::closure_terminal_sealed_hash_does_not_replace_signature_verification",
+        "--",
+        "--exact",
+        "--nocapture"
+      ],
+      "exit_code": 101,
+      "behavioral_failure": true
+    },
+    {
+      "mutant": "live-context-ignores-expiry",
+      "file": "crates/selfsame-web-device/src/lib.rs",
+      "test": "credential_v2_closure::tests::closure_offer_expiry_does_not_relax_ordinary_live_context",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "-p",
+        "selfsame-web-device",
+        "--lib",
+        "credential_v2_closure::tests::closure_offer_expiry_does_not_relax_ordinary_live_context",
+        "--",
+        "--exact",
+        "--nocapture"
+      ],
+      "exit_code": 101,
+      "behavioral_failure": true
+    }
+  ]
+}

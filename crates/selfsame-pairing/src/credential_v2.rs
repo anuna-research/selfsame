@@ -887,6 +887,78 @@ where
     Ok(finalized_at)
 }
 
+/// Verify immutable status after an allocator's terminal Receipt plaintext was
+/// retired. Candidate payload/grant/issuer fields remain untrusted until the
+/// exact canonical Receipt matches its sealed intent and content hashes and the
+/// ordinary final-status signature and closed-core checks succeed.
+///
+/// This returns no protocol or receipt-release authority. The commitment and
+/// Receipt binding must come from authenticated checkpoint inspection.
+pub fn recognise_final_status_for_retained_receipt(
+    profile: &ApplicationProfile,
+    jws: &str,
+    expected_digest: [u8; 32],
+    signed_offer: &[u8],
+    receipt_recovery_commitment: [u8; 32],
+    receipt_binding: ([u8; 32], [u8; 32]),
+    finalized_at: u64,
+) -> Result<(), CredentialV2OfferError> {
+    if jws.is_empty() || jws.len() > MAX_FINAL_STATUS_JWS_BYTES || !jws.is_ascii() {
+        return Err(CredentialV2OfferError::Refused);
+    }
+    let mut segments = jws.split('.');
+    let (Some(_), Some(encoded_payload), Some(_), None) = (
+        segments.next(),
+        segments.next(),
+        segments.next(),
+        segments.next(),
+    ) else {
+        return Err(CredentialV2OfferError::Refused);
+    };
+    let core = decode_canonical_b64(encoded_payload)?;
+    let candidate = json::recognise(
+        &core,
+        Limits {
+            max_bytes: MAX_FINAL_STATUS_CORE_BYTES,
+            max_depth: 1,
+        },
+    )
+    .map_err(|_| CredentialV2OfferError::Refused)?;
+    let offer = recognise_signed_offer(profile, signed_offer)?;
+    let intent_digest =
+        cbcl_pairing::credential_v2::credential_v2_intent_digest(*offer.claims.offer_core_digest());
+    let payload_digest = fixed(&candidate, "payloadDigest")?;
+    let receipt = recovered_receipt_object(
+        intent_digest,
+        *offer.claims.carrier_ceremony_id(),
+        payload_digest,
+        CredentialV2ReceiptInput {
+            final_status_jws: jws.into(),
+            final_status_digest: expected_digest,
+        },
+    )
+    .map_err(|_| CredentialV2OfferError::Refused)?;
+    if receipt.intent_digest() != &receipt_binding.0 || receipt.content_hash() != receipt_binding.1
+    {
+        return Err(CredentialV2OfferError::Refused);
+    }
+    let expected = CredentialV2FinalStatusInput {
+        application_id: offer.claims.application_id().into(),
+        carrier_ceremony_id: *offer.claims.carrier_ceremony_id(),
+        request_id: offer.request_id,
+        account_principal_digest: *offer.claims.account_provenance().account_principal_digest(),
+        account_scope_id: *offer.claims.account_provenance().account_scope_id(),
+        device_did: offer.claims.device_binding().device_did().into(),
+        offer_core_digest: *offer.claims.offer_core_digest(),
+        payload_digest,
+        grant_id: fixed(&candidate, "grantId")?,
+        issuer_did: text(&candidate, "issuerDid")?.into(),
+        receipt_recovery_commitment,
+        finalized_at,
+    };
+    recognise_final_status(profile, jws, expected_digest, &expected, &offer.kid)
+}
+
 fn final_status_core(
     profile: &ApplicationProfile,
     input: &CredentialV2FinalStatusInput,
