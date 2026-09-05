@@ -11,11 +11,7 @@ fn test_801_every_ordinary_shell_starts_cbcl_without_a_protocol_option() {
     for (name, source, marker) in [
         // SPEC-008: the ordinary Tauri surface is the credential/v2 claimant;
         // the no-protocol-option property is unchanged.
-        (
-            "Tauri",
-            tauri,
-            "CredentialV2ClaimantSession::restore",
-        ),
+        ("Tauri", tauri, "CredentialV2ClaimantSession::restore"),
         ("CLI", cli, "SelfsameEndpointBootstrap::join_claimant"),
         (
             "web-device",
@@ -29,13 +25,16 @@ fn test_801_every_ordinary_shell_starts_cbcl_without_a_protocol_option() {
             "{name} does not start the CBCL endpoint"
         );
     }
-    // SPEC-077 amends the ordinary transfer surface to one complete handoff.
-    // The explicit legacy control still reaches the same credential/v2 core.
-    assert!(ui.contains("cbcl_v2_recognise_handoff"));
-    assert!(ui.contains("{ handoff }"));
+    // SPEC-079 makes the complete handoff the default reserved SingleLink
+    // entry. The explicit legacy control still reaches the same credential/v2
+    // core through its separate invitation and PAIR1 fields.
+    assert!(ui.contains("cbcl_v2_begin_handoff"));
+    assert!(ui.contains("{ request: { handoff } }"));
     assert!(ui.contains("cbcl_v2_recognise\""));
-    // The custody passcode is released only with the preliminary/final person
-    // decisions; it is not an input to invitation recognition or relay trust.
+    assert!(ui.contains("{ invitation: handoff.trim(), presenceCode }"));
+    // Default custody unlock derives only the local preview. Explicit legacy
+    // keeps its preliminary/final person decision passcode path.
+    assert!(ui.contains("cbcl_v2_unlock_preview"));
     assert!(ui.contains("cbcl_v2_preliminary_decide"));
     assert!(ui.contains("{ approve, passcode }"));
 
@@ -58,9 +57,7 @@ fn test_801_tauri_keeps_endpoint_state_out_of_the_webview() {
     let session = include_str!("../../../src-tauri/src/session.rs");
     // SPEC-008: the shell holds the live credential/v2 claimant (session +
     // socket) in native state — never the webview.
-    assert!(session.contains(
-        "Option<crate::cbcl_v2_commands::PendingCredentialV2Pairing>"
-    ));
+    assert!(session.contains("Option<crate::cbcl_v2_commands::PendingCredentialV2Pairing>"));
     assert!(command.contains("pending_cbcl_v2 = Some(pending)"));
     for secret in ["cpace_scalar:", "signing_seed:", "invitation_secret"] {
         assert!(

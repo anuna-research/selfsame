@@ -4,8 +4,25 @@
 use keyring::credential::{Credential, CredentialApi, CredentialBuilderApi};
 use std::any::Any;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, OnceLock};
 use zeroize::Zeroizing;
+static WRITES: AtomicUsize = AtomicUsize::new(0);
+static POLICY_OPERATIONS: AtomicUsize = AtomicUsize::new(0);
+pub fn write_count() -> usize {
+    WRITES.load(Ordering::SeqCst)
+}
+pub fn policy_operations() -> usize {
+    POLICY_OPERATIONS.load(Ordering::SeqCst)
+}
+fn observe(key: &str, write: bool) {
+    if write {
+        WRITES.fetch_add(1, Ordering::SeqCst);
+    }
+    if key.ends_with("credential-v2-exact-relay-policy-v1") {
+        POLICY_OPERATIONS.fetch_add(1, Ordering::SeqCst);
+    }
+}
 
 #[derive(Clone, Copy)]
 pub enum SetFailure {
@@ -30,6 +47,7 @@ struct SharedCredential {
 
 impl CredentialApi for SharedCredential {
     fn set_secret(&self, secret: &[u8]) -> keyring::Result<()> {
+        observe(&self.key, true);
         let failure = {
             let mut configured = next_set_failure().lock().unwrap();
             if configured
@@ -59,6 +77,7 @@ impl CredentialApi for SharedCredential {
     }
 
     fn get_secret(&self) -> keyring::Result<Vec<u8>> {
+        observe(&self.key, false);
         values()
             .lock()
             .unwrap()
@@ -68,6 +87,7 @@ impl CredentialApi for SharedCredential {
     }
 
     fn delete_credential(&self) -> keyring::Result<()> {
+        observe(&self.key, true);
         values().lock().unwrap().remove(&self.key);
         Ok(())
     }

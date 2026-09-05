@@ -1,0 +1,32 @@
+[
+  {
+    "target": "aarch64-apple-darwin",
+    "compiled": true,
+    "executed": false
+  },
+  {
+    "target": "aarch64-linux-android",
+    "compiled": true,
+    "executed": false
+  },
+  {
+    "target": "armv7-linux-androideabi",
+    "compiled": true,
+    "executed": false
+  },
+  {
+    "target": "i686-linux-android",
+    "compiled": true,
+    "executed": false
+  },
+  {
+    "target": "x86_64-linux-android",
+    "compiled": true,
+    "executed": false
+  },
+  {
+    "target": "x86_64-pc-windows-gnu",
+    "compiled": true,
+    "executed": false
+  }
+]
