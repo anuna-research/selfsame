@@ -1,0 +1,59 @@
+
+running 51 tests
+test credential_v2_manual_tests::independently_sealed_old_inner_v2_restores_as_full_only ... ok
+test credential_v2_manual_tests::mode_changes_no_public_context_or_carrier_bytes ... ok
+test enrolment_allocator_tests::the_link_code_round_trips_and_the_slots_are_well_formed ... ok
+test credential_v2_manual_tests::terminal_cancel_failure_and_exclusive_expiry_clear_private_core_values ... ok
+test enrolment_allocator_tests::the_statement_names_the_web_binding_and_the_application_origin ... ok
+test enrolment_allocator_tests::the_sealed_offer_opens_and_recognises_as_a_con_219_offer ... ok
+test credential_v2_manual_tests::full_default_keeps_independent_c16_t16_even_with_manual_prefix ... ok
+test scan_handoff_tests::scan_handoff_capacity_refusal_keeps_the_complete_input_intact ... ok
+test scan_handoff_tests::scan_handoff_qr_rejects_unrecognized_or_public_input ... ok
+test credential_v2_manual_tests::manual_finished_and_established_restore_grant_no_bootstrap_capability ... ok
+test scan_handoff_tests::scan_handoff_public_deadline_preserves_the_exact_carrier_u64 ... ok
+test tests::a_bundle_for_another_offer_is_refused ... ok
+test tests::a_mailbox_secret_must_be_exactly_sixteen_octets ... ok
+test tests::a_reply_that_is_not_for_this_device_is_refused_without_saying_why ... ok
+test scan_handoff_tests::scan_handoff_terminal_and_core_error_erase_every_secret_export ... ok
+test tests::an_offer_and_its_bundle_make_a_round_trip ... ok
+test tests::browser_timestamp_conversion_refuses_a_negative_instant ... ok
+test credential_v2_manual_tests::actual_restore_uses_fresh_scalar_before_peer_in_both_modes ... ok
+test tests::a_hint_built_only_from_the_exposed_facts_is_accepted ... ok
+test credential_v2_manual_tests::manual_bound_restore_preserves_exact_reply_and_one_peer_attempt ... ok
+test tests::a_substituted_key_of_equal_count_is_refused ... ok
+test tests::build_enrollment_refuses_a_statement_its_own_recogniser_rejects ... ok
+test credential_v2_manual_tests::constructor_and_restore_lengths_and_mode_are_strict_and_redacted ... ok
+test tests::build_enrollment_json_is_the_cores_canonical_unsigned_statement ... ok
+test tests::build_offer_json_calls_offer_core_to_json_and_builds_all_fifteen_members ... ok
+test tests::build_offer_refuses_a_hint_that_selects_something_the_profile_does_not_declare ... ok
+test tests::build_offer_refuses_evidence_that_is_not_a_con_214_jws_and_an_unrecognised_profile ... ok
+test tests::facts_are_refused_for_a_profile_the_recogniser_rejects ... ok
+test tests::json_strings_are_escaped_even_though_todays_values_need_none ... ok
+test tests::malformed_inputs_are_refused_at_the_constructor ... ok
+test tests::bundle_matches_offer_json_compares_the_identifiers_from_recognised_payloads ... ok
+test tests::every_structured_browser_input_is_closed_and_refuses_opaque ... ok
+test tests::recognise_bundle_json_returns_the_verbatim_grant_and_optional_closure ... ok
+test credential_v2_manual_tests::manual_qr_shared_recognizer_runs_before_rendering_or_capacity ... ok
+test tests::the_accepted_json_carries_the_four_fields_the_page_reads ... ok
+test tests::the_link_code_round_trips_through_the_cores_own_parser ... ok
+test tests::credential_v2_inactive_staging_refuses_unclosed_or_substituted_history ... ok
+test tests::the_sealed_offer_opens_under_the_derived_key_and_not_another ... ok
+test tests::the_two_slots_are_distinct_and_derived_from_the_secret ... ok
+test tests::the_two_slots_differ_and_are_a_function_of_the_secret_alone ... ok
+test tests::the_shared_vectors_are_answered_identically_here ... ok
+test tests::credential_v2_inactive_staging_replays_raw_signed_closure ... ok
+test tests::peer_verification_refuses_a_negative_closure_age ... ok
+test tests::peer_verification_refuses_clock_skew_that_would_overflow ... ok
+test tests::vendored_closure_vectors_match_their_pin ... ok
+test tests::proof_input_json_derives_the_core_input_from_device_owned_facts ... ok
+test tests::recognise_enrollment_json_returns_the_closed_signed_statement ... ok
+test tests::verify_path_b_peer_json_has_a_native_rlib_success_path ... ok
+test scan_handoff_tests::scan_handoff_normal_invitation_fits_one_qr ... ok
+test credential_v2_manual_tests::actual_manual_constructor_matches_independent_words_and_bootstrap ... ok
+test credential_v2_manual_tests::manual_qr_encodes_exact_complete_input_at_q_level_and_refuses_capacity ... ok
+
+test result: ok. 51 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.18s
+
+   Compiling selfsame-web-device v0.1.0 (/Volumes/anuna-03/codex-successor-closure/selfsame-wasm-manual-1/crates/selfsame-web-device)
+    Finished `test` profile [unoptimized] target(s) in 0.77s
+     Running unittests src/lib.rs (/Volumes/anuna-03/codex-successor-wasm-native-target/debug/deps/selfsame_web_device-a698fa6cb7ff8cd0)
