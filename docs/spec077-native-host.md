@@ -203,3 +203,22 @@ The complete signed browser/native ceremony and successful installation are unex
 The completion fixture regression is storage/verification evidence only, not a browser/native installation ceremony.
 [[SPEC-077-selfsame-scan-pairing#TEST-008]] and fresh independent review remain unverified, owned by root and its reviewer.
 Concept-link resolution in the spec vault remains root-owned; this evidence document does not amend the vault.
+
+## Explicit manual phone entry
+
+The test-only JSONL operation `begin-manual` takes exactly
+`{"bootstrap":"SSPAIR-M1:…","words":"word word word"}`. It calls the actual
+`cbcl_v2_begin_manual` command: shared complete pair recognition precedes the
+same opaque reservation used by `begin-handoff`. The response is the existing
+`{attemptTag,phase:"reserved",applicationId,relayOrigin}`. Pass that tag through
+`contact`, `unlock-preview`, `preview-rendered`, `link`, `continue-link`,
+`finish-link` and `cancel-link` unchanged. Neither a prefix nor a failed grammar
+selects a fallback mode. Manual recognition errors are `RecognitionFailed` and
+contain no raw inputs. The host's request line remains zeroizing and its output
+contains no bootstrap or phrase.
+
+Trace: [[SPEC-078-selfsame-manual-pairing#TEST-002]],
+[[SPEC-079-selfsame-single-link-consent#TEST-001]]. A parameterized host test runs
+both real Full and Manual reservations against an explicit local proxy that
+refuses the profile before any relay connection. This is a contact-failure
+receipt, not final native/served integration acceptance.

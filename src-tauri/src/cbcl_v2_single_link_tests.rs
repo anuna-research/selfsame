@@ -26,7 +26,7 @@ const PASS: &str = "native fixture passcode";
 const PHRASE: &str =
     "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
 
-fn profile(key: &SigningKey) -> (ApplicationProfile, Vec<u8>) {
+pub(super) fn profile(key: &SigningKey) -> (ApplicationProfile, Vec<u8>) {
     let Json::Object(mut members) = fixture::profile_value() else {
         unreachable!()
     };
@@ -149,7 +149,13 @@ impl Rig {
     }
 }
 
-async fn rig() -> Rig {
+async fn rig(manual: bool) -> Rig {
+    let words = CredentialV2ManualWords::from_csprng([0x35; 4]);
+    let secret = if manual {
+        *words.cpace_secret()
+    } else {
+        [0x35; 16]
+    };
     let now = crate::commands::now();
     let signing = SigningKey::from_bytes(&[0x21; 32]);
     let device = SigningKey::from_bytes(&[0x22; 32]);
@@ -167,7 +173,7 @@ async fn rig() -> Rig {
     .unwrap();
     let handoff = CredentialV2Handoff::new(
         carrier.clone(),
-        CredentialV2PresenceCode::new([0x35; 16], [0x34; 16]),
+        CredentialV2PresenceCode::new(secret, [0x34; 16]),
     )
     .unwrap()
     .encode()
@@ -194,7 +200,7 @@ async fn rig() -> Rig {
         assert!(
             cbcl_v2_claimant::test_ceremony_claimant(
                 carrier.clone(),
-                CredentialV2PresenceCode::new([0x35; 16], [0x34; 16]),
+                CredentialV2PresenceCode::new(secret, [0x34; 16]),
                 selfsame_app_identity_net::profile::FetchedProfile {
                     profile: wrong,
                     octets: octets.clone(),
@@ -210,25 +216,40 @@ async fn rig() -> Rig {
         .manage(AppSession(Mutex::new(Session::default())))
         .build(mock_context(noop_assets()))
         .unwrap();
-    let reserved = cbcl_v2_begin_handoff(
-        BeginHandoffRequest {
-            handoff: handoff.to_string(),
-        },
-        app.state(),
-    )
-    .await
-    .unwrap();
+    let reserved = if manual {
+        cbcl_v2_begin_manual(
+            BeginManualRequest {
+                bootstrap: CredentialV2ManualBootstrap::new(carrier.clone(), [0x34; 16], now)
+                    .unwrap()
+                    .encode()
+                    .unwrap()
+                    .to_string(),
+                words: words.encode().to_string(),
+            },
+            app.state(),
+        )
+        .await
+        .unwrap()
+    } else {
+        cbcl_v2_begin_handoff(
+            BeginHandoffRequest {
+                handoff: handoff.to_string(),
+            },
+            app.state(),
+        )
+        .await
+        .unwrap()
+    };
     assert_eq!(reserved.phase, "reserved");
-    let operation = {
+    let (entry, operation) = {
         let state = app.state::<AppSession>();
         let mut state = state.0.lock().unwrap();
-        assert!(state.pending_cbcl_v2_entry.take().is_some());
-        state.cbcl_v2_attempts.start_work().unwrap()
+        let entry = state.pending_cbcl_v2_entry.take().unwrap();
+        (entry, state.cbcl_v2_attempts.start_work().unwrap())
     };
     let attempt = operation.attempt.clone();
-    let claimant = cbcl_v2_claimant::test_ceremony_claimant(
-        carrier.clone(),
-        CredentialV2PresenceCode::new([0x35; 16], [0x34; 16]),
+    let claimant = cbcl_v2_claimant::test_recognised_entry_claimant(
+        entry,
         selfsame_app_identity_net::profile::FetchedProfile {
             profile: profile.clone(),
             octets,
@@ -267,7 +288,7 @@ async fn rig() -> Rig {
         let (state, message) = context
             .start_cpace(
                 Side::Allocator,
-                &CredentialV2Presence::new([0x35; 16], [0x34; 16]),
+                &CredentialV2Presence::new(secret, [0x34; 16]),
                 [0x38; 32],
             )
             .unwrap();
@@ -538,6 +559,16 @@ async fn legacy_finish_missing_presence_keeps_the_attempt_retryable() {
 #[tokio::test]
 #[ignore = "installs process-global memory custody; run alone"]
 async fn single_link_native_commands_render_mode_comparison_cancel_and_expiry() {
+    native_consent_cases(false).await;
+}
+
+#[tokio::test]
+#[ignore = "installs process-global memory custody; run alone"]
+async fn manual_single_link_native_commands_render_mode_comparison_cancel_and_expiry() {
+    native_consent_cases(true).await;
+}
+
+async fn native_consent_cases(manual: bool) {
     completion::shared_memkeyring::install();
     completion::shared_memkeyring::clear();
     Custody::restore(PHRASE, PASS).unwrap();
@@ -567,7 +598,7 @@ async fn single_link_native_commands_render_mode_comparison_cancel_and_expiry() 
     {
         let writes = completion::shared_memkeyring::write_count();
         let decisions = DECISIONS.load(std::sync::atomic::Ordering::SeqCst);
-        let rig = rig().await;
+        let rig = rig(manual).await;
         assert_eq!(completion::shared_memkeyring::write_count(), writes);
         let stale = TaggedRequest {
             attempt_tag: "f".repeat(32),
@@ -641,6 +672,12 @@ async fn single_link_native_commands_render_mode_comparison_cancel_and_expiry() 
         let continue_future = cbcl_v2_continue_link(rig.request(), rig.app.state());
         let cancel = async {
             tokio::time::sleep(Duration::from_millis(100)).await;
+            assert!(
+                cbcl_v2_continue_link(rig.request(), rig.app.state())
+                    .await
+                    .is_err(),
+                "a pending continuation cannot be duplicated"
+            );
             cbcl_v2_cancel_link(rig.request(), rig.app.state())
                 .await
                 .unwrap();
@@ -663,7 +700,7 @@ async fn single_link_native_commands_render_mode_comparison_cancel_and_expiry() 
         assert!(!rig.observations().contains(&CredentialV2Kind::FinalApprove));
     }
     {
-        let rig = rig().await;
+        let rig = rig(manual).await;
         rig.review().await;
         cbcl_v2_link(rig.request(), rig.app.state()).await.unwrap();
         rig.peer.release.send(ComparisonCase::Confirm).unwrap();
@@ -688,7 +725,7 @@ async fn single_link_native_commands_render_mode_comparison_cancel_and_expiry() 
         assert!(!rig.observations().contains(&CredentialV2Kind::FinalApprove));
     }
     {
-        let rig = rig().await;
+        let rig = rig(manual).await;
         rig.review().await;
         cbcl_v2_link(rig.request(), rig.app.state()).await.unwrap();
         rig.peer.release.send(ComparisonCase::Confirm).unwrap();
@@ -732,7 +769,7 @@ async fn single_link_native_commands_render_mode_comparison_cancel_and_expiry() 
         ComparisonCase::Alter("authorityStatusResponse"),
         ComparisonCase::Alter("result"),
     ] {
-        let rig = rig().await;
+        let rig = rig(manual).await;
         rig.review().await;
         cbcl_v2_link(rig.request(), rig.app.state()).await.unwrap();
         rig.peer.release.send(case).unwrap();
@@ -744,7 +781,7 @@ async fn single_link_native_commands_render_mode_comparison_cancel_and_expiry() 
         assert!(!rig.attempt.test_has_custody());
     }
     {
-        let rig = rig().await;
+        let rig = rig(manual).await;
         rig.review().await;
         cbcl_v2_link(rig.request(), rig.app.state()).await.unwrap();
         // Only this private native test can replace the retained preview. A
@@ -828,7 +865,7 @@ async fn single_link_native_commands_render_mode_comparison_cancel_and_expiry() 
         cbcl_v2_cancel(app.state()).await.unwrap();
     }
     for kind in ["continuous", "clock-failure", "root", "background"] {
-        let rig = rig().await;
+        let rig = rig(manual).await;
         rig.review().await;
         match kind {
             "continuous" => {

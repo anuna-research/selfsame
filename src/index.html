@@ -581,13 +581,32 @@
           and its declared relay for this link only. Unlock to review your local
           identity, then select Link to share it after checking the request.
         </p>
+        <div data-pairing-complete>
         <button class="btn btn--primary" data-action="scan-cbcl-pairing">Scan the QR code</button>
-        <p class="code-state" data-pairing-scanner-note aria-live="polite" hidden></p>
         <label class="field">
           <span class="field__label">Pairing invitation</span>
           <textarea id="pairing-input" rows="4" autocomplete="off" spellcheck="false"
                     autocapitalize="none" inputmode="text"></textarea>
         </label>
+        </div>
+        <p class="code-state" data-pairing-scanner-note aria-live="polite" hidden></p>
+        <details data-pairing-manual>
+          <summary>Enter three words</summary>
+          <p>Choose manual pairing in the application. Scan or paste its invitation, then type the three words shown beside it.</p>
+          <button class="btn" data-action="scan-cbcl-manual">Scan the manual QR code</button>
+          <label class="field">
+            <span class="field__label">Manual invitation</span>
+            <textarea id="pairing-manual-bootstrap" rows="4" autocomplete="off" spellcheck="false"
+                      autocapitalize="none" autocorrect="off" inputmode="text"></textarea>
+          </label>
+          <label class="field">
+            <span class="field__label">Three words</span>
+            <textarea id="pairing-manual-words" rows="2" autocomplete="off" spellcheck="false"
+                      autocapitalize="none" autocorrect="off" inputmode="text"
+                      aria-describedby="pairing-manual-help"></textarea>
+          </label>
+          <p id="pairing-manual-help">Keep these words private. Start checks both inputs before contacting the application. If a valid phrase does not match, ask the application for a new invitation.</p>
+        </details>
         <details data-pairing-legacy>
           <summary>Enter an older invitation</summary>
         <label class="field">

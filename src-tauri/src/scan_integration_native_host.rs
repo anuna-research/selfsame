@@ -31,6 +31,7 @@ struct Request<'a> {
 enum Op {
     Initialize,
     BeginHandoff,
+    BeginManual,
     Contact,
     UnlockPreview,
     PreviewRendered,
@@ -207,6 +208,9 @@ impl Host {
         match request.op {
             Op::BeginHandoff => view(
                 single_link::cbcl_v2_begin_handoff(args(request.args)?, self.app.state()).await?,
+            ),
+            Op::BeginManual => view(
+                single_link::cbcl_v2_begin_manual(args(request.args)?, self.app.state()).await?,
             ),
             Op::Contact => {
                 view(single_link::cbcl_v2_contact(args(request.args)?, self.app.state()).await?)
@@ -526,6 +530,16 @@ fn native_host_memory_init_cancel_shutdown_regression() {
 #[tokio::test]
 #[ignore = "installs global memory custody/configuration; run alone"]
 async fn native_host_single_link_reserves_before_contact_and_refuses_profile_failure() {
+    native_host_reservation_contact_failure(false).await;
+}
+
+#[tokio::test]
+#[ignore = "installs global memory custody/configuration; run alone"]
+async fn native_host_manual_reserves_before_contact_and_refuses_profile_failure() {
+    native_host_reservation_contact_failure(true).await;
+}
+
+async fn native_host_reservation_contact_failure(manual: bool) {
     use cbcl_pairing::credential_v2::*;
     use std::net::TcpListener;
     async fn call(host: &mut Host, op: &str, args: Value) -> Result<Value> {
@@ -568,6 +582,11 @@ async fn native_host_single_link_reserves_before_contact_and_refuses_profile_fai
         ),
     })
     .unwrap();
+    let manual_bootstrap = CredentialV2ManualBootstrap::new(carrier.clone(), [4; 16], now)
+        .unwrap()
+        .encode()
+        .unwrap();
+    let manual_words = CredentialV2ManualWords::from_csprng([5; 4]).encode();
     let handoff =
         CredentialV2Handoff::new(carrier, CredentialV2PresenceCode::new([5; 16], [4; 16]))
             .unwrap()
@@ -577,8 +596,16 @@ async fn native_host_single_link_reserves_before_contact_and_refuses_profile_fai
     let policy = completion::shared_memkeyring::policy_operations();
     let reserved = call(
         &mut host,
-        "begin-handoff",
-        json!({"handoff":handoff.as_str()}),
+        if manual {
+            "begin-manual"
+        } else {
+            "begin-handoff"
+        },
+        if manual {
+            json!({"bootstrap":manual_bootstrap.as_str(),"words":manual_words.as_str()})
+        } else {
+            json!({"handoff":handoff.as_str()})
+        },
     )
     .await
     .unwrap();

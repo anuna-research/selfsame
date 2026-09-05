@@ -119,6 +119,7 @@ pub fn run() {
             cbcl_pairing::cbcl_pairing_decline,
             cbcl_pairing::cbcl_pairing_cancel,
             cbcl_v2_commands::single_link::cbcl_v2_begin_handoff,
+            cbcl_v2_commands::single_link::cbcl_v2_begin_manual,
             cbcl_v2_commands::single_link::cbcl_v2_contact,
             cbcl_v2_commands::single_link::cbcl_v2_unlock_preview,
             cbcl_v2_commands::single_link::cbcl_v2_preview_rendered,

@@ -440,6 +440,17 @@ pub(crate) fn test_ceremony_claimant(
     )
 }
 
+// Test transport seam: consume the actual recognised reservation entry while
+// supplying an authenticated local profile instead of external HTTPS.
+#[cfg(test)]
+pub(crate) fn test_recognised_entry_claimant(
+    entry: RecognisedCredentialV2Entry,
+    fetched: FetchedProfile,
+    scalar: [u8; 32],
+) -> Result<PreparedClaimant> {
+    test_ceremony_claimant(entry.carrier, entry.presence, fetched, scalar)
+}
+
 /// Convert exact-pair state into the display's closed authenticated value.
 #[must_use]
 pub const fn display_tofu_state(state: ExactPairState) -> CredentialV2TofuState {

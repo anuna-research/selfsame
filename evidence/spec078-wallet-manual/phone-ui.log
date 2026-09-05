@@ -1,0 +1,42 @@
+
+> e2e:wallet-pairing
+> node --test tests/spec-007-wallet-pairing.mjs tests/spec-077-scan-pairing.mjs
+
+✔ TEST-1161 pending completion retains the authenticated offer profile for restart recovery (3.127916ms)
+✔ TEST-814 CBCL wallet states are keyboard complete and WCAG-clean (4035.182375ms)
+✔ TEST-1161 restart recovery preserves pending through rotation consent (1099.960917ms)
+✔ TEST-1159 installed links reload, prompt on rotation, and unlink locally (1324.481708ms)
+✔ TEST-1162 interrupted pre-payload links are visible and locally abandonable (1035.68525ms)
+✔ full: SPEC079 TEST002/003/010 scan unlocks once and a real render enables one Link (1671.21075ms)
+✔ full: SPEC079 TEST007 cancel fences a delayed comparison and never reports installation (1179.232708ms)
+✔ full: SPEC079 TEST007 a late reservation is cancelled before contact without cancelling the new tag (1083.497792ms)
+✔ full: SPEC079 TEST007 cancelling disables Link before cancellation returns (1046.370334ms)
+✔ full: SPEC079 TEST010 failed unlock clears passcode (1003.319375ms)
+✔ full: SPEC079 TEST008/010 a non-installed finish result cannot report success (1068.872041ms)
+✔ full: SPEC079 TEST007/008 ambiguous continuation exposes retained recovery without a negative claim (1041.653917ms)
+✔ full: SPEC079 TEST008 finish committed-then-error reports unknown completion and checks local state (1063.699666ms)
+✔ full: SPEC079 TEST007 background and navigation revoke tagged review before further actions (1045.325833ms)
+✔ manual: SPEC079 TEST002/003/010 scan unlocks once and a real render enables one Link (1080.567334ms)
+✔ manual: SPEC079 TEST007 cancel fences a delayed comparison and never reports installation (1176.080667ms)
+✔ manual: SPEC079 TEST007 a late reservation is cancelled before contact without cancelling the new tag (1292.833417ms)
+✔ manual: SPEC079 TEST007 cancelling disables Link before cancellation returns (1094.3595ms)
+✔ manual: SPEC079 TEST010 failed unlock clears passcode (1064.679291ms)
+✔ manual: SPEC079 TEST008/010 a non-installed finish result cannot report success (1099.062792ms)
+✔ manual: SPEC079 TEST007/008 ambiguous continuation exposes retained recovery without a negative claim (1088.864417ms)
+✔ manual: SPEC079 TEST008 finish committed-then-error reports unknown completion and checks local state (1154.881917ms)
+✔ manual: SPEC079 TEST007 background and navigation revoke tagged review before further actions (1220.55025ms)
+✔ manual bootstrap scan waits for words and local refusal preserves correction (1221.477625ms)
+✔ full: late scanner cannot enter or overwrite a successor (1048.498833ms)
+✔ manual: late scanner cannot enter or overwrite a successor (1070.731084ms)
+✔ manual disposal clears inputs and explicit legacy selection cannot fall back (1098.885875ms)
+✔ manual camera denied leaves a separate paste path (1037.372458ms)
+✔ manual camera prompt leaves a separate paste path (1064.829084ms)
+✔ manual missing camera plugin keeps paste usable without contact (990.950959ms)
+ℹ tests 30
+ℹ suites 0
+ℹ pass 30
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 28262.218125

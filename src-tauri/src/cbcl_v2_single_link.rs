@@ -1,4 +1,4 @@
-//! SPEC079 CON-001..004: default complete entry, local preview and one person Link.
+//! SPEC079 CON-001..004: complete/manual entry, local preview and one person Link.
 //! The live capability owns the existing immutable claimant and its predecessor
 //! chain; no independent mutable digest ledger or serialized authority exists.
 use super::*;
@@ -9,6 +9,12 @@ use serde::{Deserialize, Deserializer};
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct BeginHandoffRequest {
     handoff: String,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BeginManualRequest {
+    bootstrap: String,
+    words: String,
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -71,7 +77,27 @@ pub async fn cbcl_v2_begin_handoff(
     reserve_entry(entry, &session)
 }
 
-/// Reused by the later manual adapter after its complete shared recognition.
+/// Explicit manual entry shares the complete bounded Rust recognizer before
+/// creating any reservation, profile contact, relay work or custody authority.
+#[tauri::command]
+pub async fn cbcl_v2_begin_manual(
+    request: BeginManualRequest,
+    session: State<'_, AppSession>,
+) -> Result<ReservationView> {
+    let bootstrap = Zeroizing::new(request.bootstrap);
+    let words = Zeroizing::new(request.words);
+    let now = crate::cbcl_v2_clock::snapshot()?.utc;
+    let (carrier, presence) =
+        cbcl_pairing::credential_v2::CredentialV2ManualBootstrap::recognise_pair(
+            &bootstrap, &words, now,
+        )
+        .map_err(|_| UiError::from("RecognitionFailed"))?;
+    let now = i64::try_from(now).map_err(|_| UiError::from("PairingClockUnavailable"))?;
+    let entry = RecognisedCredentialV2Entry::from_parts(carrier, presence, now)?;
+    reserve_entry(entry, &session)
+}
+
+/// Shared by complete and manual entry after complete local recognition.
 pub(crate) fn reserve_entry(
     entry: RecognisedCredentialV2Entry,
     session: &AppSession,
@@ -416,3 +442,7 @@ pub async fn cbcl_v2_cancel_link(
 #[cfg(test)]
 #[path = "cbcl_v2_single_link_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "cbcl_v2_manual_entry_tests.rs"]
+mod manual_tests;

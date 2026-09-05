@@ -12,6 +12,7 @@ export function initPairing(d) {
   let credentialV2Stage = "idle";
   let attemptEpoch = 0;
   let flow = "single";
+  let entryMode = "full";
   let attemptTag = null;
   let attemptApplication = null;
   let decisionPending = false;
@@ -41,34 +42,59 @@ export function initPairing(d) {
     })
     .catch(() => {});
 
+  function clearTransferInputs() {
+    for (const selector of ["#pairing-input", "#pairing-presence-code", "#pairing-manual-bootstrap", "#pairing-manual-words"]) {
+      const input = $(selector);
+      if (input) input.value = "";
+    }
+  }
+  function selectEntryMode(mode) {
+    if (credentialV2Stage !== "idle" || entryMode === mode) return;
+    ++attemptEpoch;
+    clearTransferInputs();
+    entryMode = mode;
+    if (mode !== "manual") $("[data-pairing-manual]").open = false;
+    if (mode !== "legacy") $("[data-pairing-legacy]").open = false;
+    $("[data-pairing-complete]").hidden = mode === "manual";
+    $("[data-action='scan-cbcl-pairing']").hidden = mode !== "full" || !window.__TAURI__?.barcodeScanner;
+    onInput();
+  }
   function onInput() {
-    const value = $("#pairing-input")?.value ?? "";
-    const legacy = $("[data-pairing-legacy]")?.open === true;
+    const manual = entryMode === "manual";
+    const legacy = entryMode === "legacy";
+    const value = $(manual ? "#pairing-manual-bootstrap" : "#pairing-input")?.value ?? "";
     const presence = $("#pairing-presence-code")?.value.trim().toUpperCase() ?? "";
+    const words = $("#pairing-manual-words")?.value ?? "";
     if (credentialV2Stage === "idle" && passcodeField) passcodeField.hidden = !legacy || !capability.productionClaimant;
-    const ready = value.length > 0 && (!legacy || presencePattern.test(presence));
+    // Only presence of input is a UI affordance; Rust owns every manual bound,
+    // word/checksum and bootstrap rule, including accepted normalization.
+    const ready = value.length > 0 && (manual ? words.length > 0 : !legacy || presencePattern.test(presence));
     $("[data-pairing-state]").textContent = ready
       ? "Invitation ready"
-      : legacy && value.length > 0
-        ? "Enter the older invitation’s PAIR1 code"
-        : "Scan a QR code or paste an invitation";
-    $('[data-action="start-cbcl-pairing"]').disabled = !ready;
+      : manual ? "Enter the manual invitation and three words"
+        : legacy && value.length > 0 ? "Enter the older invitation’s PAIR1 code"
+          : "Scan a QR code or paste an invitation";
+    $('[data-action="start-cbcl-pairing"]').disabled = credentialV2Stage !== "idle" || !ready;
   }
 
   async function start(presented) {
     if (credentialV2Stage !== "idle") return;
     const epoch = ++attemptEpoch;
-    const input = $("#pairing-input");
-    const handoff = typeof presented === "string" ? presented : input.value;
-    const legacy = typeof presented !== "string" && $("[data-pairing-legacy]")?.open === true;
+    const manual = typeof presented !== "string" && entryMode === "manual";
+    const input = $(manual ? "#pairing-manual-bootstrap" : "#pairing-input");
+    let handoff = typeof presented === "string" ? presented : input.value;
+    let words = manual ? $("#pairing-manual-words").value : "";
+    const legacy = typeof presented !== "string" && entryMode === "legacy";
     flow = legacy ? "legacy" : "single";
     attemptTag = null;
     attemptApplication = null;
     credentialV2Stage = "entry";
     const presenceInput = $("#pairing-presence-code");
     const presenceCode = (presenceInput?.value ?? "").trim().toUpperCase();
-    input.value = "";
-    if (presenceInput) presenceInput.value = "";
+    if (!manual) {
+      input.value = "";
+      if (presenceInput) presenceInput.value = "";
+    }
     intentFields = [];
     onInput();
     busy("Checking the invitation…");
@@ -84,11 +110,16 @@ export function initPairing(d) {
         if (view.requiresApproval) showRelayConsent(view);
         else await advanceRelay(true, epoch);
       } else {
-        const reservation = await invoke("cbcl_v2_begin_handoff", { request: { handoff } });
+        const reservation = manual
+          ? await invoke("cbcl_v2_begin_manual", { request: { bootstrap: handoff, words } })
+          : await invoke("cbcl_v2_begin_handoff", { request: { handoff } });
+        handoff = "";
+        words = "";
         if (epoch !== attemptEpoch) {
           await invoke("cbcl_v2_cancel_link", { request: { attemptTag: reservation.attemptTag } }).catch(() => {});
           return;
         }
+        clearTransferInputs();
         attemptTag = reservation.attemptTag;
         attemptApplication = reservation.applicationId;
         credentialV2Stage = "contact";
@@ -100,13 +131,18 @@ export function initPairing(d) {
       }
     } catch (error) {
       if (epoch !== attemptEpoch) return;
+      const localRecognition = credentialV2Stage === "entry";
       await revokeNative();
       if (epoch !== attemptEpoch) return;
       credentialV2Stage = "idle";
       attemptTag = null;
       restoreEntryUnlock();
       show("pairing-enter");
-      fail("pairing", startFailureText(message(error)));
+      fail("pairing", manual && localRecognition && message(error) === "RecognitionFailed"
+        ? "The manual invitation could not be recognised. Check both inputs and try again."
+        : startFailureText(message(error)));
+      onInput();
+      if (manual) $("#pairing-manual-words").focus();
     } finally {
       if (epoch === attemptEpoch) idle();
     }
@@ -601,10 +637,13 @@ export function initPairing(d) {
   async function cancel(navigate = true) {
     const tag = attemptTag;
     const mode = flow;
+    const wasScanning = credentialV2Stage === "scanning";
     const epoch = ++attemptEpoch;
     attemptTag = null;
     attemptApplication = null;
     credentialV2Stage = "cancelling";
+    clearTransferInputs();
+    document.body.classList.remove("scanning");
     decisionPending = true;
     $('[data-action="approve-cbcl-pairing"]').disabled = true;
     $('[data-action="decline-cbcl-pairing"]').disabled = true;
@@ -612,7 +651,12 @@ export function initPairing(d) {
     const passcode = $("#pairing-passcode");
     if (passcode) passcode.value = "";
     idle();
-    try { await revokeNative(tag, mode); }
+    try {
+      await Promise.allSettled([
+        revokeNative(tag, mode),
+        wasScanning ? Promise.resolve().then(() => window.__TAURI__?.barcodeScanner?.cancel?.()) : Promise.resolve(),
+      ]);
+    }
     finally {
       if (epoch !== attemptEpoch) return;
       credentialV2Stage = "idle";
@@ -622,15 +666,23 @@ export function initPairing(d) {
   }
 
   function leaving(name) {
+    if (!["pairing-enter", "pairing-wait", "pairing-consent"].includes(name)) { clearTransferInputs(); onInput(); }
     if (!["idle", "cancelling"].includes(credentialV2Stage) &&
         !["pairing-enter", "pairing-wait", "pairing-consent"].includes(name)) {
       void cancel(false);
     }
   }
   document.addEventListener("visibilitychange", () => {
-    if (document.hidden && credentialV2Stage !== "idle") void cancel(false);
+    if (document.hidden) {
+      clearTransferInputs();
+      onInput();
+      if (credentialV2Stage !== "idle") void cancel(false);
+    }
   });
-  window.addEventListener("pagehide", () => { if (credentialV2Stage !== "idle") void cancel(false); });
+  window.addEventListener("pagehide", () => {
+    clearTransferInputs();
+    if (credentialV2Stage !== "idle") void cancel(false);
+  });
 
   // The confidential QR payload IS the paste payload. Scan and paste recognise
   // identical input and everything after this line is the one ordinary
@@ -638,8 +690,9 @@ export function initPairing(d) {
   // `scan` checks the permission and throws rather than requesting it, so the
   // asking is this caller's job; `windowed: true` renders the preview beneath
   // the webview, so the page must get out of its way for the duration.
-  async function scan() {
-    const epoch = attemptEpoch;
+  async function scan(manual = false) {
+    if (credentialV2Stage !== "idle" || entryMode !== (manual ? "manual" : "full")) return;
+    const epoch = ++attemptEpoch;
     const note = $("[data-pairing-scanner-note]");
     const say = (text) => {
       if (note) {
@@ -652,42 +705,53 @@ export function initPairing(d) {
       say("No camera in this build — paste the invitation instead.");
       return;
     }
+    credentialV2Stage = "scanning";
+    onInput();
     try {
       let access = await camera.checkPermissions();
       if (epoch !== attemptEpoch) return;
+      if (access === "denied") {
+        say("Camera access is off for Selfsame — turn it on in Settings, or paste the invitation instead.");
+        return;
+      }
       if (access !== "granted") {
         access = await camera.requestPermissions();
         if (epoch !== attemptEpoch) return;
-      }
-      if (access !== "granted") {
-        say(
-          "Camera access is off for Selfsame — turn it on in Settings, " +
-            "or paste the invitation instead.",
-        );
-        return;
+        if (access !== "granted") {
+          say("Camera access was declined. You can paste the invitation instead.");
+          return;
+        }
       }
       document.body.classList.add("scanning");
       let scanned;
       try {
         scanned = await camera.scan({ formats: ["QRCode"], windowed: true });
       } finally {
-        document.body.classList.remove("scanning");
+        if (epoch === attemptEpoch) document.body.classList.remove("scanning");
       }
       if (epoch !== attemptEpoch) return;
       say("");
-      const input = $("#pairing-input");
+      credentialV2Stage = "idle";
+      const input = $(manual ? "#pairing-manual-bootstrap" : "#pairing-input");
       if (input) input.value = scanned.content;
       onInput();
-      await start(scanned.content);
+      if (manual) $("#pairing-manual-words").focus();
+      else await start(scanned.content);
     } catch (error) {
       if (epoch !== attemptEpoch) return;
       const reason = String(error?.message ?? error ?? "unknown");
       say(
-        /denied|permission|not allowed/i.test(reason)
+        /cancel/i.test(reason) ? "Camera scanning was cancelled. You can paste the invitation instead."
+          : /denied|permission|not allowed/i.test(reason)
           ? "Camera access is off for Selfsame — turn it on in Settings, " +
               "or paste the invitation instead."
           : "The camera isn’t available. Paste the invitation instead.",
       );
+    } finally {
+      if (epoch === attemptEpoch && credentialV2Stage === "scanning") {
+        credentialV2Stage = "idle";
+        onInput();
+      }
     }
   }
 
@@ -700,6 +764,7 @@ export function initPairing(d) {
   }
 
   function forget() {
+    if (credentialV2Stage === "scanning") void Promise.resolve().then(() => window.__TAURI__?.barcodeScanner?.cancel?.()).catch(() => {});
     if (credentialV2Stage !== "idle") void revokeNative();
     attemptTag = null;
     attemptApplication = null;
@@ -708,6 +773,12 @@ export function initPairing(d) {
     decisionPending = false;
     intentFields = [];
     restoreEntryUnlock();
+    entryMode = "full";
+    clearTransferInputs();
+    document.body.classList.remove("scanning");
+    $("[data-pairing-manual]").open = false;
+    $("[data-pairing-complete]").hidden = false;
+    $("[data-action='scan-cbcl-pairing']").hidden = !window.__TAURI__?.barcodeScanner;
     const legacy = $("[data-pairing-legacy]");
     if (legacy) legacy.open = false;
     const input = $("#pairing-input");
@@ -897,7 +968,8 @@ export function initPairing(d) {
       show("pairing-enter");
     },
     "start-cbcl-pairing": start,
-    "scan-cbcl-pairing": scan,
+    "scan-cbcl-pairing": () => scan(false),
+    "scan-cbcl-manual": () => scan(true),
     "approve-cbcl-pairing": () => decide(true),
     "decline-cbcl-pairing": () => decide(false),
     "cancel-cbcl-pairing": cancel,
@@ -919,7 +991,17 @@ export function initPairing(d) {
 
   const input = $("#pairing-input");
   if (input) input.addEventListener("input", onInput);
-  $("[data-pairing-legacy]")?.addEventListener("toggle", onInput);
+  for (const mode of ["manual", "legacy"]) {
+    const panel = $(`[data-pairing-${mode}]`);
+    panel?.addEventListener("toggle", () => {
+      if (credentialV2Stage !== "idle") { panel.open = entryMode === mode; return; }
+      if (panel.open) selectEntryMode(mode);
+      else if (entryMode === mode) selectEntryMode("full");
+    });
+  }
+  for (const selector of ["#pairing-manual-bootstrap", "#pairing-manual-words"]) {
+    $(selector)?.addEventListener("input", onInput);
+  }
   const presence = $("#pairing-presence-code");
   if (presence) presence.addEventListener("input", onInput);
   // Desktop: the pasted route is the route. Hide the dead camera affordance
@@ -927,6 +1009,7 @@ export function initPairing(d) {
   if (!window.__TAURI__?.barcodeScanner) {
     const scanButton = $('[data-action="scan-cbcl-pairing"]');
     if (scanButton) scanButton.hidden = true;
+    $("[data-action='scan-cbcl-manual']").hidden = true;
   }
   return { forget, resumePending, refreshInstalledLinks, leaving };
 }
