@@ -138,18 +138,19 @@ jobs:
           cargo --version
           cargo clippy --version
 
-      # Keyed on both lockfiles: a sibling bump changes what is compiled without
-      # changing ours, and a stale cache would hide that.
-      - name: Cache cargo registry and target
+      # Registry and Git source caches are reusable across sibling source-pin
+      # changes. Cargo.lock identifies their required contents; Cargo fetches
+      # any missing entries and verifies registry checksums. Build artifacts
+      # remain uncached so the post-job archive does not dominate CI runtime.
+      - name: Cache Cargo registry and Git sources
         uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-selfsame-${{ hashFiles('Cargo.lock', 'cbcl-rs.sha', 'did-crdt.sha', 'cbcl-pairing.sha') }}
+          key: ${{ runner.os }}-cargo-registry-git-selfsame-v1-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-selfsame-
+            ${{ runner.os }}-cargo-registry-git-selfsame-v1-
 
       - name: Clippy (deny warnings)
         run: |
