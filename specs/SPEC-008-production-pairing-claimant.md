@@ -2,7 +2,7 @@
 id: SPEC-008
 title: Production Pairing Claimant — Transport, Real Credential, and Origin Trust
 status: draft
-version: 0.5.18-draft
+version: 0.5.19-draft
 tier: 1
 review-gate: test-first-implementation-owner-authorized; release-and-deployment-prohibited-pending-cross-model-pass
 authority-form: consolidated-direct-current-authority
@@ -17,7 +17,7 @@ last-updated: 2026-09-05
 
 # SPEC-008 — Production Pairing Claimant: Transport, Real Credential, and Origin Trust
 
-> **Consolidated current-law reissue.** Version 0.5.17 states the standalone
+> **Consolidated current-law reissue.** Version 0.5.19 states the standalone
 > first-contact authority directly. Trajectory documents and review reports
 > supply evidence only. They supply no current values.
 > The repository owner authorized local test-first implementation on
@@ -28,20 +28,24 @@ last-updated: 2026-09-05
 
 Intent: Link a wallet to a new application through cbcl-pairing without prior
 enrolment or a compiled relay allowlist. The wallet authenticates the application
-live, asks about the exact application-relay pair, and defers every identity effect
-until the person approves the authenticated intent.
+live and defers every identity effect until the person approves the authenticated intent.
+The default complete scan/manual flow treats the entry gesture as current-ceremony
+contact authority, then uses one unlock and one Link gesture with the existing
+authenticated desktop comparison. Explicit legacy entry retains exact-pair TOFU
+and two phone approvals.
 
 Metaphor: the invitation is an introduction, not a reference. The wallet checks
-the application's passport, asks whether this application may use this relay, and
-only then creates the application's account key.
+the application's passport and binds the declared relay before it creates the
+application's account key. Default entry carries contact permission for this
+ceremony; explicit legacy entry asks whether the exact pair may be remembered.
 
 Structure:
 
 ```
- invitation       live profile       exact-pair policy       cbcl-pairing
-┌──────────┐     ┌─────────────┐     ┌────────────────┐     ┌────────────┐
-│ recognise│────▶│ TLS profile │────▶│ pair consent   │────▶│ CPace bind │
-└──────────┘     └─────────────┘     └────────────────┘     └──────┬─────┘
+ invitation       live profile       contact authority       cbcl-pairing
+┌──────────┐     ┌─────────────┐     ┌─────────────────┐     ┌────────────┐
+│ recognise│────▶│ TLS profile │────▶│ ceremony/legacy │────▶│ CPace bind │
+└──────────┘     └─────────────┘     └─────────────────┘     └──────┬─────┘
                                                                   │
                  ┌────────────────┐     ┌────────────────┐         │
                  │ post-consent   │◀────│ authenticated  │◀────────┘
@@ -49,9 +53,9 @@ Structure:
                  └────────────────┘     └────────────────┘
 ```
 
-Decisions:    [[SPEC-008-production-pairing-claimant#ADR-902]] person-owned pair-scoped TOFU · [[SPEC-008-production-pairing-claimant#ADR-963]]
+Decisions:    [[SPEC-008-production-pairing-claimant#ADR-902]] mode-scoped contact authority · [[SPEC-008-production-pairing-claimant#ADR-963]]
               typed unavailability before policy · [[SPEC-008-production-pairing-claimant#ADR-903]] fixture isolation
-Load-bearing: [[SPEC-008-production-pairing-claimant#REQ-906]] exact-pair trust · [[SPEC-008-production-pairing-claimant#REQ-1005]] protocol and version
+Load-bearing: [[SPEC-008-production-pairing-claimant#REQ-906]] ceremony or legacy contact authority · [[SPEC-008-production-pairing-claimant#REQ-1005]] protocol and version
               isolation · [[SPEC-008-production-pairing-claimant#NFR-928]] total fail-closed consumers
 Controls:     [[SPEC-008-production-pairing-claimant#REQ-902]] fixture data SHALL NOT enter an ordinary build
               [[SPEC-008-production-pairing-claimant#REQ-905]] the carrier SHALL NOT become an OS-navigable URL
@@ -118,7 +122,7 @@ specification debt, covered by [[SPEC-008-production-pairing-claimant#REQ-904]] 
 ### REQ-901 — Claimant transport over TLS
 
 WHEN [[SPEC-008-production-pairing-claimant#REQ-906]]'s pre-socket recognition
-and exact-pair consent have produced a `RelaySocketCapability`, the claimant
+and mode-appropriate contact authority have produced a `RelaySocketCapability`, the claimant
 shell SHALL open one TLS WebSocket (`wss://`). It uses the derived relay
 resource. The shell SHALL pump binary
 messages between that socket and the sans-io `ClaimantRelaySession`. It SHALL retain
@@ -140,22 +144,21 @@ facts, authenticated account-principal digest and scope identifier, profile-decl
 issuer constraints, and public ceremony bindings. It contains no derived application key,
 issuer DID, WebFinger JRD, signature, or publication result.
 
-Preliminary approval authorizes one hierarchy derivation inside a zeroizing custody
-closure. It authorizes pure `HomeKey::home_did`, fingerprint computation, and preview
-DID disclosure to the authenticated application. It authorizes no signature,
-publication, grant, alias, bundle, or durable identity write. The preliminary screen
-SHALL state the disclosure.
+In the default complete scan/manual flow, unlock authorizes one hierarchy derivation
+inside bounded zeroizing native custody. It authorizes pure `HomeKey::home_did` and
+fingerprint computation for local display, with no protocol decision or preview
+disclosure. After the complete authenticated request and preview render, one Link
+gesture permits disclosure and conditional completion.
 
-After the authenticated comparison or binding result, the wallet SHALL display its
-locally recomputed DID and fingerprint. It SHALL also display the complete
-authenticated transition and ask for final release approval. Final decline zeroizes
-preview state and leaves no identity residue.
+The existing authenticated comparison or binding result remains mandatory. Only a
+matching result permits the native engine to emit protocol final approval and begin
+identity construction. Bounded success requires no second phone approval or unlock.
 
-Final approval authorizes a new custody operation. It re-derives the same key and
-requires byte-for-byte equality with the preview DID. Creation, signing, publication,
-live issuer and WebFinger verification, and delivery of the application identity and
-grant occur only then. CPace session-key computation is protocol transport work, not
-an application identity effect.
+Explicit legacy entry retains preliminary approval before preview disclosure and a
+separate final approval with its existing fresh custody operation. Every mode requires
+preview equality before its first identity signature. Creation, signing, publication,
+live issuer and WebFinger verification, and delivery occur only under the applicable
+final protocol authority. CPace session-key computation remains transport work.
 
 A non-demo build SHALL NOT construct any part of the verification context from
 `local_demo`, from `LOCAL_CONFORMANCE_DIGEST`, or from any compiled test fixture.
@@ -167,16 +170,21 @@ Trace: [[SPEC-008-production-pairing-claimant#TEST-903]] [[SPEC-008-production-p
 
 ### REQ-903 — Live approve and decline
 
-WHEN a verified session has displayed the recognised intent, the live decision
-commands SHALL commit the person's decision. Those commands are
-`cbcl_pairing_approve` and `cbcl_pairing_decline`. They use [[SPEC-008-production-pairing-claimant#REQ-901]] in non-demo
-builds and retain [[SPEC-007-cbcl-pairing-cutover#REQ-804]] ordering.
+WHEN an explicit LegacyTwoDecision session has displayed the recognised intent,
+`cbcl_pairing_approve` and `cbcl_pairing_decline` SHALL commit its preliminary
+person decision. In SingleLink, only the rendered-review Link command can cause
+the native engine to emit the equivalent protocol decision. Both use
+[[SPEC-008-production-pairing-claimant#REQ-901]] in non-demo builds and retain
+[[SPEC-007-cbcl-pairing-cutover#REQ-804]] ordering.
 
 Trace: [[SPEC-008-production-pairing-claimant#TEST-905]] [[SPEC-008-production-pairing-claimant#CON-901]]
 
-### REQ-904 — Scan and paste converge (specification of existing behaviour)
+### REQ-904 — Scan, paste, and manual entry converge by mode
 
-The scan path and paste path SHALL deliver byte-identical carriers to one entry point.
+The default complete scan and paste paths SHALL deliver byte-identical `SSPAIR1:`
+handoffs to one entry point. Explicit manual mode SHALL accept a scanned or pasted
+`SSPAIR-M1:` bootstrap plus a separate three-word phrase under cbcl-bus SPEC-078
+0.1.1-draft. It SHALL NOT combine, infer, or fall back between these modes.
 The Android wallet SHALL distinguish three scan failures. They are platform refusal,
 person refusal, and plugin unavailability. Each produces its own message. Screen
 detail lives in [[SCREEN-003-wallet-pairing]].
@@ -187,16 +195,22 @@ Trace: [[SPEC-008-production-pairing-claimant#TEST-906]] [[SPEC-008-production-p
 
 Credential/v1 and explicitly selected legacy credential/v2 input retain the
 unpadded base64url public carrier. New credential/v2 scan and paste use the
-shared cbcl-pairing SPEC-001 0.5.9 confidential `SSPAIR1:` handoff recognizer.
+shared cbcl-pairing SPEC-001 0.5.10 confidential `SSPAIR1:` handoff recognizer.
 The complete handoff contains the unchanged public carrier and independent C/T.
 Neither input is an OS-navigable URL. Recognition, commitment matching, required
 allocator key and exclusive relay-expiry checks precede profile/relay effects.
 Unsupported prefixes never fall back to another input path. New scan starts
 recognition automatically. A complete handoff requires no presence keystrokes.
 
+Explicit manual entry uses only the fully recognized `SSPAIR-M1:` carrier-plus-T
+bootstrap and three complete words. Local bounds, canonical decoding, list
+recognition, and checksum verification precede profile or relay work. The resulting
+typed C and T enter the unchanged credential/v2 protocol. A checksum-valid wrong
+phrase consumes the invitation's single peer-share attempt; invalid local input does not.
+
 Trace: [[SPEC-008-production-pairing-claimant#TEST-908]] [[SPEC-008-production-pairing-claimant#CON-901]]
 
-### REQ-906 — Live application authentication and exact-pair TOFU
+### REQ-906 — Live application authentication and mode-scoped contact authority
 
 Before a relay socket opens, the claimant SHALL dereference the invitation's
 canonical application ID and complete [[SPEC-004-application-scoped-identity#CON-220]] steps 1 through 5. This
@@ -212,11 +226,12 @@ new policy row, intent display, or profile-key use. The local profile digest
 SHALL equal the peer-authenticated CPace digest. Mismatch is terminal and
 creates no row.
 
-The wallet SHALL evaluate trust for the exact tuple
+Explicit legacy entry SHALL evaluate trust for the exact tuple
 `(authenticatedApplicationId, canonicalRelayOrigin)`. Relay-only trust SHALL NOT
-authorize a new application.
+authorize a new application. SingleLink SHALL neither evaluate nor create this
+durable trust state.
 
-WHEN the tuple is absent, the wallet SHALL show one new-relay decision. The surface
+WHEN explicit legacy entry finds the tuple absent, the wallet SHALL show one new-relay decision. The surface
 SHALL name the origin-recognised application and canonical relay origin. Approval SHALL
 produce one provisional, single-use socket capability. After CPace binds the same
 profile digest, the wallet SHALL atomically seal the tuple into the person's policy
@@ -224,13 +239,20 @@ before intent display. Rejection SHALL create no policy entry, socket, wallet sc
 key, alias, DID, grant, or publication.
 The browser's bounded candidate scope remains ceremony-only and expires or aborts.
 
-WHEN the tuple is present and valid, the wallet MAY proceed without another TOFU
+WHEN explicit legacy entry finds the tuple present and valid, the wallet MAY proceed without another TOFU
 prompt. A changed application or changed relay origin is a new tuple and SHALL prompt.
 
+For default complete scan/manual entry, the recognized foreground entry gesture
+creates `CeremonyGesture` provenance after complete local recognition. It authorizes
+only this ceremony's live profile fetch and socket to the unique matching declared
+relay. It creates, modifies, and relies on no durable exact-pair row. The typed display
+states ceremony contact provenance without claiming remembered relay trust.
+
 The person SHALL NOT enter, choose, or repair a relay origin. TLS failure,
-candidate-profile failure, malformed origin, or consent-store unavailability
-SHALL end the attempt before relay socket creation. A peer profile-digest mismatch or
-durable policy-write failure SHALL end it after Finished but before display or
+candidate-profile failure, or malformed origin SHALL end the attempt before
+relay socket creation. Legacy consent-store unavailability SHALL also end its
+attempt before socket creation. A peer profile-digest mismatch, or a legacy
+durable policy-write failure, SHALL end it after Finished but before display or
 identity work.
 
 Trace: [[SPEC-008-production-pairing-claimant#TEST-909]] [[SPEC-008-production-pairing-claimant#TEST-910]] [[SPEC-008-production-pairing-claimant#CON-903]] [[SPEC-008-production-pairing-claimant#CON-986]] [[SPEC-008-production-pairing-claimant#CON-988]] [[SPEC-008-production-pairing-claimant#OBS-903]]
@@ -293,28 +315,34 @@ Verified by: [[SPEC-008-production-pairing-claimant#TEST-901]] [[SPEC-008-produc
 
 ### CON-902 — Split authenticated plan, preview, and effect assembly
 
-Endpoint/Interface: `recognise_claimant_invitation` fully recognises the machine
-carrier and PAIR1 value. It performs the pre-socket candidate-profile
-recognition in [[SPEC-008-production-pairing-claimant#CON-988]] and returns one
-zero-effect `RelayConsentPlan` before any relay socket opens.
+Endpoint/Interface: explicit legacy `recognise_claimant_invitation` fully
+recognises the machine carrier and PAIR1 value. Default entry fully recognizes
+the complete handoff or manual bootstrap-plus-words pair before reserving one
+native attempt. It then uses `CeremonyGesture` for the pre-socket candidate-profile
+recognition in [[SPEC-008-production-pairing-claimant#CON-988]].
 
-`authorise_claimant_relay` owns the exact-pair decision. The Tauri commands
+In LegacyTwoDecision, `authorise_claimant_relay` owns the exact-pair decision. The Tauri commands
 `cbcl_pairing_relay_approve` and `cbcl_pairing_relay_decline` are its only UI
 entry points from `pairing.js`.
 
-Approval returns one provisional `RelaySocketCapability`. Decline returns a
+Legacy approval returns one provisional `RelaySocketCapability`. Decline returns a
 terminal without a policy write, socket, CPace operation, or identity effect.
 An existing exact policy returns the same capability without another prompt.
+SingleLink consumes its private current-ceremony contact authority to create an
+equivalent one-use socket capability without policy lookup, prompt, or row write.
 
 `prepare_claimant` consumes that capability before opening the relay socket.
 It completes CPace and both Finished values. It requires the peer-bound profile
-digest to equal the pre-socket candidate digest. It then atomically persists a
-newly approved [[SPEC-008-production-pairing-claimant#CON-903]] row. Signed-offer verification and every authority
-cross-check precede the zero-effect authenticated identity plan.
+digest to equal the pre-socket candidate digest. In legacy mode it then atomically
+persists a newly approved [[SPEC-008-production-pairing-claimant#CON-903]] row.
+SingleLink persists no such row. Signed-offer verification and every authority
+cross-check precede the zero-effect authenticated identity plan in both modes.
 
-`preview_claimant_identity` consumes preliminary approval. It returns only
-zeroizable preview DID and fingerprint material. `complete_claimant` consumes
-one final-approval capability and re-derives the approved identity for effects.
+SingleLink unlock computes only local preview and retains bounded native custody.
+After rendered review, its Link capability emits preliminary approval and preparation
+once, then conditionally emits final protocol approval only after authenticated
+comparison. Legacy `preview_claimant_identity` consumes preliminary approval and
+returns preview material; `complete_claimant` consumes its separate final approval.
 
 The authenticated plan contains these authoritative sources:
 
@@ -346,9 +374,11 @@ request, carrier ceremony, and persisted installation key. It starts a fresh
 allocation only after authenticated status proves that no pending or finalized
 record exists. A concurrent different allocation refuses while pending state exists.
 
-A fresh attempt after decline, expiry, or pre-commit failure receives fresh account
-and scope randomness. If the resulting preview DID differs, the wallet SHALL display
-and obtain both decisions again. Prior preview consent cannot authorize it.
+A fresh attempt after authenticated exact-ceremony terminal or absence proof
+receives fresh account and scope randomness. Local cancellation, deadline, or
+ambiguous failure alone does not authorize it. If the resulting preview DID differs, the wallet SHALL display
+it again and obtain the mode's complete person authority. Prior Link or legacy
+approval cannot authorize it.
 
 A crash before hub allocation commit leaves no pending value. A crash after that
 commit recovers the exact bounded pending record or deletes it at expiry. A crash
@@ -356,10 +386,15 @@ during final migration recovers either the complete pending state or the complet
 immutable finalized state. A crash after final commit cannot recreate legacy rows or
 roll the account back.
 
-The preliminary capability permits one zeroizing derivation and pure DID preview. It
-retains no hierarchy root or private key. The final capability contains no derived
-key. After final approval, it permits a separate custody call and preview equality
-check. It then permits the declared issuance effects.
+SingleLink unlock permits one pure DID preview and retains the root only inside
+zeroizing native custody until its bounded deadline. Its Link capability is
+private, noncloneable, nonserializable, and single-use. It binds the exact
+attempt, flow, root generation, carrier, profile, relay, transcript, offer,
+intent, transition, account, scope, device, permissions, preview, predecessor,
+and deadlines.
+After comparison and protocol final approval, it recomputes preview equality within
+that retained custody before effects. Legacy capabilities retain no hierarchy root
+or private key and use their existing separate final custody call.
 
 The executor re-derives the wallet application home key and checks the preview.
 It then creates and signs the issuer state and publishes the DID. It resolves
@@ -370,9 +405,10 @@ It performs no issuer, closure, or JRD operation that depends on the derived DID
 before final approval. A failure compensates only effects created by this
 ceremony and never operator withdrawal state.
 
-Pre-conditions: an unlocked custody session, authenticated profile and signed
-offer, exact-pair policy capability, authenticated preliminary intent,
-successful comparison or binding result, and final approved release.
+Pre-conditions: authenticated profile and signed offer, authenticated preliminary
+intent, successful comparison or binding result, and applicable final protocol
+authority. SingleLink additionally requires live bounded Link authority and exact
+ceremony provenance. Legacy requires its exact-pair policy and separate approvals.
 
 Post-conditions: one real verification context contains no fixture bytes. Every
 derived or published effect traces to the approved authenticated plan.
@@ -387,6 +423,9 @@ Verified by: [[SPEC-008-production-pairing-claimant#TEST-903]] [[SPEC-008-produc
 Endpoint/Interface: a sealed wallet-owned set keyed by the exact pair
 `(applicationId, relayOrigin)`. The interface supports recognised lookup, atomic
 insert after explicit approval, explicit removal, and root-lifecycle purge.
+
+This set governs only explicit LegacyTwoDecision entry. SingleLink neither reads
+nor writes it and cannot convert `CeremonyGesture` into a durable row.
 
 Input grammar: `applicationId` uses the
 [[SPEC-008-production-pairing-claimant#CON-988]]-bound profile identifier.
@@ -432,6 +471,11 @@ of wallet releases and prevents an accepted relay from authorizing another appli
 The application profile does not prove relay operatorship. Exact-pair consent contains
 that residual without claiming to solve it.
 
+This decision remains current for explicit LegacyTwoDecision. For default complete
+scan/manual entry, cbcl-bus SPEC-079 0.1.1-draft makes the foreground entry gesture
+current-ceremony contact authority after exact live-profile recognition. It grants no
+durable trust and cannot authorize another ceremony, application, relay, or effect.
+
 ### ADR-903 — The fixture is unreachable, not deleted
 
 `local_demo` and the `local-pairing-demo` feature remain, compile-gated, as the
@@ -459,10 +503,11 @@ fallback attempt.
 
 ### TEST-903 — Final approval consumes the only real context capability
 
-Positive for [[SPEC-008-production-pairing-claimant#REQ-902]]. Preview
-assembly performs zero custody derivations and zero writes. Final approval
-consumes one capability and derives one real context from the authenticated
-plan.
+Positive for [[SPEC-008-production-pairing-claimant#REQ-902]]. In SingleLink,
+unlock performs one pure preview derivation and zero protocol decisions, disclosures,
+or writes. Rendered Link consumes one capability. Authenticated comparison permits
+one final protocol approval and the retained bounded custody supplies the real context.
+Legacy retains its separate preliminary and final approvals and final custody call.
 
 ### TEST-904 — Ordinary binaries contain no fixture authority
 
@@ -479,7 +524,9 @@ approve and decline drive the live session to matching terminal states.
 ### TEST-906 — Scan and paste carriers converge
 
 Positive for [[SPEC-008-production-pairing-claimant#REQ-904]]. Scan-delivered
-and pasted carriers produce byte-identical `cbcl_pairing_start` inputs.
+and pasted complete handoffs produce byte-identical default inputs. Scanned and
+pasted manual bootstraps plus the same words produce byte-identical typed manual
+inputs. Cross-mode combinations refuse without fallback.
 
 ### TEST-907 — Scanner failures remain distinct
 
@@ -492,20 +539,28 @@ depth case.
 Negative input for [[SPEC-008-production-pairing-claimant#REQ-905]]. Wrap a
 legacy carrier in a URL scheme, padding, or a legacy prefix. For complete handoffs, test unsupported versions, malformed/oversize/noncanonical wrappers and claim mismatch. Recognition refuses it
 before any state change.
+For manual input, test bootstrap/phrase bounds, canonical CBOR/base64url, word count,
+list membership, ASCII normalization, checksum, commitment, and wrong-mode inputs.
+Require every local refusal before profile, policy, relay, or endpoint state.
 
 ### TEST-909 — A new exact pair prompts once
 
 Positive and negative for [[SPEC-008-production-pairing-claimant#REQ-906]]. A
-new exact pair prompts once. Approval creates one provisional socket capability.
+new explicit legacy exact pair prompts once. Approval creates one provisional socket capability.
 Matching CPace Finished values then permit one pair row before intent display.
 Rejection and pre-socket profile failure open no socket. A CPace profile
 mismatch creates no row or display.
+
+Default complete scan/manual entry produces `CeremonyGesture`, opens only the
+unique live-profile relay, and displays truthful current-ceremony provenance.
+Require no policy lookup, relay prompt, new row, or conversion to legacy trust.
 
 ### TEST-910 — Pair trust cannot authorize another application
 
 Negative for [[SPEC-008-production-pairing-claimant#CON-903]]. Trust for one
 application-relay pair never authorizes another application on the same relay.
 Corrupt or unavailable policy refuses without a socket or identity effect.
+SingleLink ignores that policy for authority and cannot read, modify, or create it.
 
 ### TEST-911 — Production allocation remains closed
 
@@ -602,19 +657,22 @@ terminal boundaries.
 This parent specification is the sole current Selfsame authority for this
 increment. Trajectory documents provide evidence and no normative precedence.
 
-Credential/v2 SHALL conform to cbcl-pairing SPEC-001 0.5.9-draft. The
+Credential/v2 SHALL conform to cbcl-pairing SPEC-001 0.5.10-draft. The
 cbcl-pairing parent records this document as its consumer.
 
-The wallet and browser use separate typed machine-carrier and PAIR1
-presence-field inputs. Cbcl-pairing enforces non-substitutability, version
-isolation, CPace source, sender rules, state rules, and its envelope.
+Explicit legacy entry uses separate typed machine-carrier and PAIR1
+presence-field inputs. Default full entry uses the complete `SSPAIR1:` handoff.
+Explicit manual entry uses separate typed `SSPAIR-M1:` bootstrap and three-word
+inputs. Cbcl-pairing enforces non-substitutability, mode and version isolation,
+CPace source, sender rules, state rules, and its envelope.
 
 The wallet provides live approve and decline under [[SPEC-008-production-pairing-claimant#REQ-903]]. The two-stage
 credential/v2 decision sequence follows [[SPEC-008-production-pairing-claimant#CON-902]] and
 [[SPEC-007-cbcl-pairing-cutover#REQ-804]].
 
-Scan and paste decode the machine carrier into the same recognised type under
-[[SPEC-008-production-pairing-claimant#REQ-904]]. The separate PAIR1 presence field remains type-only.
+Within each mode, scan and paste decode the same accepted bootstrap form into
+the same recognized type under [[SPEC-008-production-pairing-claimant#REQ-904]].
+The separate legacy PAIR1 and manual word fields remain type-only.
 
 The production scan is the completeness authority for every classified
 credential-v1 site. Its closed identifier set is `PROFILE_VERSION`,
@@ -708,9 +766,21 @@ the protocol. The public carrier contains no C, T, or PAIR1 text. The shared
 confidential handoff yields those two typed inputs after full recognition.
 Possession of the complete QR can authenticate bootstrap possession during the
 attempt lifetime. It authorizes neither identity effects nor installation.
-The default scan/paste entry accepts the complete handoff. An explicitly
-selected legacy entry MAY accept a public carrier and separate PAIR1 value;
-there is no automatic format or protocol downgrade. The legacy encoding follows.
+The default scan/paste entry accepts the complete handoff. Explicit manual entry
+accepts cbcl-bus SPEC-078 0.1.1-draft CON-001's carrier-plus-T bootstrap and
+CON-002's three complete words. Its typed mode, phrase-to-C mapping, one-peer-share
+checkpoint, restoration, and expiry follow that draft's CON-003 and CON-005.
+An explicitly selected legacy entry MAY accept a public carrier and separate
+PAIR1 value. No input, C prefix, error, or restored unmodeled record automatically
+selects or falls back to another mode. The legacy encoding follows.
+
+A requested mode switch SHALL hide the old transfer values and retain the old
+sealed recovery record. Release requires an authenticated exact-ceremony
+`expired`, `aborted`, or `absent` hub result, or a verified accepted immutable
+final status. Local cancellation, local or forward-clock expiry, hub
+unavailability, and transport failure are not closure proof. Only verified
+closure permits fresh independent mailbox, ceremony, nonce, T, C, scalar,
+request, and intent material.
 
 The canonical code is `PAIR1-` followed by eleven hyphen-separated groups of
 five Crockford Base32 characters. The decoded big-endian bits are
@@ -727,7 +797,7 @@ Unicode case folding, lookalikes, whitespace, missing separators, forbidden
 letters, nonzero pad bits, checksum failure, and every valid twelve-word
 BIP-39 mnemonic.
 
-Before preliminary consent, `cbcl-pairing` SHALL construct one private
+Before any disclosure consent, `cbcl-pairing` SHALL construct one private
 `CredentialV2Display` only after Selfsame verification. The verifier SHALL
 authenticate the live profile, signed hub offer, carrier, and transcript. It
 SHALL also authenticate the exact application, relay, account, scope,
@@ -739,18 +809,25 @@ replace, or mutate display text. Generic `DisplayField`, wire
 booleans, and DOM room values SHALL NOT enter the credential/v2 consent
 surface.
 
-The preliminary screen SHALL show the authenticated application ID, HTTPS
-origin, relay origin, and account assertion provenance. It SHALL also show
-permissions, installation binding, exact-pair TOFU state, and the complete
-authenticated transition. The final screen SHALL add only the locally derived
-DID, fingerprint, and final-effect statement.
+The authenticated request SHALL show application ID, HTTPS origin, relay origin,
+account assertion provenance, permissions, installation binding, contact provenance,
+and the complete transition. Default entry truthfully shows `CeremonyGesture`, not
+remembered trust. Legacy entry shows its exact-pair policy state.
 
-The wallet SHALL store credential/v2 relay policy only under the exact
+In SingleLink, unlock adds the locally derived DID and fingerprint only to the
+local display. After that complete review renders, one Link gesture authorizes
+preview disclosure and conditional completion under cbcl-bus SPEC-079 0.1.1-draft
+CON-002 and CON-003. Authenticated desktop comparison remains mandatory before
+the native engine emits final protocol approval. The bounded success path requires
+no second phone approval or passcode. LegacyTwoDecision retains its preliminary
+and final approval screens and existing custody behavior.
+
+For explicit legacy entry, the wallet SHALL store credential/v2 relay policy only under the exact
 `(applicationId, relayOrigin)` pair. The credential/v2 path SHALL use no
 compiled relay allowlist, conformance-digest registry, relay wildcard, or
 relay-only trust fallback in an ordinary build. A profile that names a
 previously accepted relay under another application SHALL still require the
-new exact-pair prompt. The standing credential/v1 registry and selection
+new exact-pair prompt. SingleLink reads and writes no such row. The standing credential/v1 registry and selection
 control remain compiled and unchanged. Their implementation comment SHALL cite
 [[SPEC-007-cbcl-pairing-cutover#CON-806]], not
 [[SPEC-008-production-pairing-claimant#CON-903]].
@@ -777,16 +854,21 @@ record, including pre-payload phases that are not eligible for terminal
 recovery. Every pending record SHALL be visible to the person as an interrupted
 link after restart. Unlink SHALL require explicit confirmation and current-root
 presence. Selection SHALL retain both the exact pending-or-installed slot and
-the exact-pair policy state observed with it. Deletion SHALL refuse and retain
-the slot if either value differs at confirmed execution. An absent policy that
-was already absent at selection SHALL not prevent deletion. A trusted policy
-that was present at selection SHALL be removed before the exact slot. If slot
-deletion fails, policy restoration is best effort. A later selection of the
-still-present slot and now-absent policy SHALL remain deletable.
+its flow and contact provenance. Deletion SHALL refuse and retain the slot if
+that value differs at confirmed execution. For LegacyTwoDecision only, selection
+also retains the exact-pair policy state observed with the slot. Legacy deletion
+SHALL refuse and retain the slot if that selected policy state also differs at
+confirmed execution. An absent
+legacy policy at selection SHALL not prevent deletion. A present selected
+legacy policy SHALL be removed before the exact slot. If slot deletion fails,
+legacy policy restoration is best effort. A later selection of the still-present
+slot and now-absent legacy policy SHALL remain deletable. SingleLink SHALL NOT
+read, compare, remove, or restore any exact-pair policy.
 
-Successful unlink SHALL remove only the selected application record, its
-selected `(applicationId, relayOrigin)` policy when present, and the profile
-cache contained by that record. It SHALL retain the root seed, sibling
+Successful unlink SHALL remove only the selected application record and its
+contained profile cache. For LegacyTwoDecision, it SHALL also remove the selected
+`(applicationId, relayOrigin)` policy when present. SingleLink SHALL preserve
+every unrelated legacy policy row. Every mode retains the root seed, sibling
 applications, and every remote hub record. It SHALL NOT claim remote hub
 revocation. Re-grant after hub-side deletion or confirmed local abandonment
 requires a complete fresh pairing ceremony. A local shortcut using the
@@ -1124,8 +1206,8 @@ The exact coordinated hub test set is TEST-115 through TEST-121. The hub's
 base-parent tests remain current outside this coordinated increment set.
 
 The coordinated review set contains this parent,
-[[SPEC-007-cbcl-pairing-cutover]] 0.3.9-draft, cbcl-pairing SPEC-001
-0.5.9-draft, and cbcl-bus SPEC-053 0.17.14-draft.
+[[SPEC-007-cbcl-pairing-cutover]] 0.3.10-draft, cbcl-pairing SPEC-001
+0.5.10-draft, and cbcl-bus SPEC-053 0.17.15-draft.
 
 The `anuna-ssi` namespace reference is outside that set. It is pinned at
 `c7d462029841ea1884bb6f089732058d8838728d` only to resolve
@@ -1163,22 +1245,32 @@ the already verified pin files rather than retaining caller-edited stale SHAs.
 ### CON-986 — Standalone claimant decisions, effects, and recovery
 
 `recognise_claimant_handoff` SHALL recognize the shared complete handoff.
+`recognise_claimant_manual` SHALL recognize cbcl-bus SPEC-078 0.1.1-draft's
+complete manual bootstrap and three-word language before profile or relay work.
 `recognise_claimant_invitation` MAY retain explicit legacy carrier and PAIR1 input.
-Both SHALL use the same authenticated profile and relay-policy gate. It SHALL perform [[SPEC-008-production-pairing-claimant#CON-988]]'s
-pre-socket origin recognition and exact declared-relay check before returning
-`RelayConsentPlan`. It opens no relay socket.
+All modes SHALL perform [[SPEC-008-production-pairing-claimant#CON-988]]'s
+pre-socket origin recognition and exact declared-relay check before a socket.
+Default recognition creates a fresh opaque native attempt tag before contact and
+binds `CeremonyGesture`; a stale tag cannot contact or cancel a newer attempt.
+Legacy recognition alone enters the existing relay-policy gate.
 
-`authorise_claimant_relay` SHALL own the exact-pair prompt and provisional
+For explicit legacy entry, `authorise_claimant_relay` SHALL own the exact-pair prompt and provisional
 socket capability. `cbcl_pairing_relay_approve` returns that single-use
 capability without writing a new pair row. `cbcl_pairing_relay_decline` creates
 no row or socket. `prepare_claimant` atomically writes a newly approved
 [[SPEC-008-production-pairing-claimant#CON-903]]
 row only after CPace and both Finished values bind the candidate profile digest.
 
+For default complete scan/manual entry, `CeremonyGesture` produces a private
+single-use socket capability for only the exact live profile and unique declared
+relay. It SHALL NOT read, write, or promote a legacy pair row. The typed display
+names ceremony contact provenance instead of exact-pair trust.
+
 `prepare_claimant` SHALL consume the socket capability before socket creation.
 It SHALL complete CPace and both Finished values. The peer-bound profile digest
 SHALL equal the pre-socket candidate digest. Only then SHALL it persist a newly
-approved policy row. Signed hub-offer verification and every overlapping
+approved policy row in LegacyTwoDecision; SingleLink SHALL persist no such row.
+Signed hub-offer verification and every overlapping
 authority comparison SHALL precede the bounded authenticated plan.
 
 The plan SHALL contain no custody handle, hierarchy root, or derived
@@ -1190,49 +1282,66 @@ signed final status, and private installed record. None is a public identity
 authority. The raw application account ID remains hub-private.
 The wallet SHALL neither allocate nor persist the scope before final status.
 
-The first decision capability authorizes exactly one zeroizing custody call.
-That call derives the application home key and computes the pure home DID and
-fingerprint preview. It returns only zeroizable public preview material. It
-erases the key and hierarchy root before returning. It performs no signature,
-issuer creation, resolver call, WebFinger call, grant construction,
-publication, alias operation, bundle construction, or durable identity write.
+In SingleLink, unlock authorizes exactly one zeroizing custody call. It derives
+the application home key and computes the pure home DID and fingerprint for local
+display. It retains the hierarchy root only in bounded native custody and performs
+no protocol decision, disclosure, signature, issuer creation, or resolver/WebFinger
+call. It also performs no grant construction, publication, alias, bundle, or
+durable identity write.
+Legacy preliminary approval retains its existing one-shot preview behavior and
+erases the key and hierarchy root before returning.
 
 The wallet SHALL disclose the preview DID and fingerprint only to the
 [[SPEC-008-production-pairing-claimant#CON-988]]-bound application inside the established cbcl-pairing channel.
-Before preparation disclosure, preliminary approval SHALL return the local
-preview to the UI. The UI SHALL await a render boundary before invoking a
-single-use continuation to send preparation and await comparison. Final
-approval stays unavailable until comparison is authenticated. A shared native
-attempt generation and UI epoch invalidate in-flight results on cancellation;
-stale operations cannot restore pending state, send preparation, or authorize
-effects after observing cancellation.
+SingleLink SHALL first return the local preview to the UI with no decision or
+preparation. After the complete request and preview render, one Link gesture
+creates one private, noncloneable, nonserializable native authority. It emits the
+existing preliminary protocol approval and preparation once, then awaits comparison.
+Legacy SHALL retain preliminary approval before that disclosure and continuation.
+A shared native attempt generation and UI epoch invalidate in-flight results on
+cancellation; stale operations cannot restore state, send preparation, or authorize effects.
 The browser SHALL return the authenticated comparison or binding result. Any
 mismatch, terminal, decline, cancellation, timeout, or relay failure erases the
 preview and authorizes no later effect.
 
-The final screen SHALL contain the same immutable typed display plus the local
-preview DID and fingerprint. Final approval produces one single-use effect
-capability. It binds the intent, offer-core, and transition digests. It also
-binds the preview DID, application, account, scope, installation key,
-permissions, relay, and the exact signed `OfferCoreV2.expiresAt`.
+SingleLink's Link authority binds attempt/generation, flow, root generation,
+carrier/profile/descriptor/relay/transcript, offer/core/intent/transition,
+account/scope, installation key, permissions, preview, predecessor, and deadlines.
+Only exact authenticated comparison or binding consumes it into protocol final
+approval and effect execution. A UI boolean, matching text, or duplicate command
+cannot substitute. Legacy retains its separate final screen and approval capability
+with the same immutable protocol bindings.
 
-The offer deadline is exclusive and equals the hub's `pendingExpiresAt`. The
+The offer deadline is exclusive and equals the hub's `pendingExpiresAt`. SingleLink
+additionally expires at the earliest of 120 suspend-inclusive monotonic seconds from
+unlock, offer expiry, and relay expiry. Every await/effect boundary resamples that
+deadline, whole-UTC offer/relay time, attempt generation, root generation, and
+cancellation fence. No clock failure, suspension, background transition, rollback,
+renewal, or extension preserves authority. The
 wallet SHALL refresh its whole-UTC-seconds clock after each human pause and
 immediately before final approval, the first final identity effect, and payload
 send. It SHALL require `now < expiresAt` at every check. No clock-skew allowance
-applies to this offer deadline. Expiry before payload erases the capability,
-performs only ceremony-owned compensation, and requires a fresh ceremony.
-Expiry after durable payload send preserves the pending slot for signed status
-recovery; it never authorizes another effect or payload send.
+applies to this offer deadline. Expiry before the durable recovery barrier
+erases the capability and performs only ceremony-owned compensation. A fresh
+ceremony still requires authenticated closure. The barrier is the transaction's
+recognized durable `PayloadPrepared` value. That recognized commit remains the barrier,
+including after an ambiguous write before observed payload release. After the
+barrier, expiry or cancellation preserves the sealed pending slot. Recovery MAY
+resume only its permitted exact cached frame and receipt transition. It never
+authorizes another identity effect, payload construction, or fresh payload.
+Every effect entry SHALL atomically recheck and register against the same
+revocation fence before starting. Once cancellation or expiry is observed, an
+already in-flight effect MAY perform only its exact ceremony-owned compensation.
 
 Before the first final identity effect, `complete_claimant` SHALL write one
 sealed `PendingCredentialV2Completion` into the application's secure-store
 slot. The slot is a tagged pending-or-installed union, never two records.
 
-The pending value contains the final capability, authenticated plan, and
-cbcl-pairing `EndpointCheckpointV2`. It contains no hierarchy root, derived
-key, issuer key, grant key, signature, publication result, or application
-capability.
+The pending value contains authenticated final-decision protocol evidence, the
+authenticated plan, and cbcl-pairing `EndpointCheckpointV2`. It contains no live
+Link or legacy decision capability, hierarchy root, passcode, or renewable
+custody permission. It contains no derived key, issuer key, grant key, signature,
+publication result, or application capability.
 
 Its checkpoint wrapping key is a distinct HKDF-SHA512 child of the 64-octet
 hierarchy root. Let `labelBytes` be the UTF-8 bytes of
@@ -1250,13 +1359,15 @@ checkpointWrappingKey = HKDF-Expand-SHA512(checkpointPrk, checkpointInfo, 32)
 Both lengths count octets. `carrierCeremonyId` is the raw 32-octet salt. The
 raw wrapping key never leaves the custody closure.
 
-The final executor SHALL invoke custody again and re-derive the key. It SHALL
-require byte-for-byte preview DID and fingerprint equality before its first
-signature. It SHALL then create and sign the issuer and publish the DID. It
+The SingleLink final executor SHALL use only the still-live bounded native custody
+and recompute byte-for-byte preview DID and fingerprint equality. It SHALL NOT
+reopen custody or reuse a cached passcode. The legacy final executor retains its
+separate custody invocation and the same equality check. The applicable executor SHALL
+then create and sign the issuer and publish the DID. It
 SHALL resolve and verify the closure and live WebFinger JRD. It SHALL then
 construct the grant and approved reverse payload.
 
-Those steps occur only after final approval and as the declared provisioning
+Those steps occur only after the applicable final protocol approval and as the declared provisioning
 work needed to deliver the approved payload. A failure releases no accepted
 credential or application capability. Compensation is limited to effects
 created by this ceremony and follows
@@ -1265,7 +1376,7 @@ operator withdrawal or a pre-existing identity.
 
 These effects conform directly to
 [[SPEC-007-cbcl-pairing-cutover#REQ-812]] and
-[[SPEC-007-cbcl-pairing-cutover#CON-807]]. Before final approval, no causal
+[[SPEC-007-cbcl-pairing-cutover#CON-807]]. Before final protocol approval, no causal
 identity effect is permitted. Post-final failure authorizes no application
 capability and enters the exact compensation path.
 
@@ -1283,6 +1394,11 @@ then sends that exact JWS and digest through the receipt's large body.
 The wallet SHALL accept no receipt without that immutable JWS and digest. It
 SHALL verify the signature against the live authenticated profile. It SHALL
 also match every status field to its retained ceremony and accepted payload.
+Before ordinary or recovered installation, it SHALL independently verify the
+live reciprocal binding required by cbcl-bus SPEC-079 0.1.1-draft CON-004.
+The signed status, receipt, pre-grant WebFinger check, and reload verification
+cannot substitute. Unavailable or mismatched reciprocal binding preserves the
+pending slot and grants no installed state.
 
 The wallet SHALL then atomically install the record required by
 [[SPEC-008-production-pairing-claimant#REQ-1006]]. Crash or loss before that
@@ -1318,9 +1434,12 @@ conformance registry, relay allowlist, held-enrolment precondition, or fallback
 to `assemble_claimant`. That path SHALL contain no `record_pairing_trust` call
 edge. The standing SPEC-004 caller remains unchanged.
 
-The five split functions SHALL be the only credential/v2 claimant construction path.
-They are `recognise_claimant_invitation`, `authorise_claimant_relay`,
+Two mode-checked dispatch paths SHALL be the only credential/v2 claimant construction paths.
+SingleLink owns recognized full/manual entry, tagged contact, unlock preview,
+render acknowledgement, Link, comparison continuation, and bounded completion.
+LegacyTwoDecision retains `recognise_claimant_invitation`, `authorise_claimant_relay`,
 `prepare_claimant`, `preview_claimant_identity`, and `complete_claimant`.
+Neither path invokes a command or consumes authority from the other.
 `recover_claimant_completion` is a terminal recovery adapter only. It cannot
 construct, derive, sign, publish, or resend the payload.
 
@@ -1332,12 +1451,12 @@ Verified by: [[SPEC-008-production-pairing-claimant#TEST-1158]], [[SPEC-008-prod
 Every logical body below is exact deterministic CBOR. The map is closed: an
 unknown, missing, duplicate, reordered, non-canonical, or trailing member
 refuses before display, decision, or effect. Every `predecessorDigest` is the
-raw `objectContentHash` from cbcl-pairing SPEC-001 0.5.9-draft CON-031. The
+raw `objectContentHash` from cbcl-pairing SPEC-001 0.5.10-draft CON-031. The
 envelope field 2 carries the one retained `intentDigest`; no body can replace it.
 
-The offer body is exactly cbcl-bus SPEC-053 0.17.14-draft CON-012's
+The offer body is exactly cbcl-bus SPEC-053 0.17.15-draft CON-012's
 `signed-offer-v2`. The receipt body is exactly cbcl-pairing SPEC-001
-0.5.9-draft CON-028's `credential-v2-receipt-body`. The remaining nine bodies
+0.5.10-draft CON-028's `credential-v2-receipt-body`. The remaining nine bodies
 are:
 
 ```cddl
@@ -1433,7 +1552,7 @@ ASCII. `previewFingerprintDigest` is
 those exact bytes. Every later occurrence is byte-identical to preparation.
 
 `authorityStatusResponse` is the exact deterministic-CBOR
-`authority-status-response-v2` from cbcl-bus SPEC-053 0.17.14-draft CON-012.
+`authority-status-response-v2` from cbcl-bus SPEC-053 0.17.15-draft CON-012.
 `authorityStatusDigest` is SHA-256 over those exact response bytes. The wallet
 SHALL recompute that digest and verify the response signature under the same
 profile `kid` and key that signed the offer. It SHALL require exact carrier
@@ -1447,7 +1566,7 @@ produce only refusal. The browser cannot replace the signed response with an
 outcome token or digest.
 
 `migrationConfirmationDigest` is the exact raw digest defined by cbcl-bus
-SPEC-053 0.17.14-draft CON-012. The wallet recomputes it from the authenticated
+SPEC-053 0.17.15-draft CON-012. The wallet recomputes it from the authenticated
 offer and its local `previewIssuerDid`. It copies no browser-supplied digest.
 
 The payload grant is one verbatim compact JWS in ASCII. It contains exactly
@@ -1468,7 +1587,7 @@ Verified by: [[SPEC-008-production-pairing-claimant#TEST-1160]].
 
 ### CON-988 — Credential/v2 binds the live profile without rendezvous
 
-Before socket creation, `recognise_claimant_invitation` performs exactly
+Before socket creation, the selected complete/manual/legacy recognizer performs exactly
 [[SPEC-004-application-scoped-identity#CON-220]] steps 1 through 5. Those steps require HTTPS certificate validation,
 no redirects, and exact media type and identity encoding. They also require the
 65,536-octet body cap, complete
@@ -1482,10 +1601,15 @@ origin served the bytes. It is not a
 [[SPEC-004-application-scoped-identity#CON-220]] result and cannot verify an offer,
 construct a display, write policy, or supply an issuance key.
 
-The exact-pair prompt can name only this candidate's application ID and the
+In LegacyTwoDecision, the exact-pair prompt can name only this candidate's application ID and the
 selected canonical relay origin. Approval produces one private single-use
 `RelaySocketCapability` bound to the candidate digest, carrier digest,
 application ID, relay origin, and carrier ceremony ID. It writes no policy row.
+
+In SingleLink, the prior explicit foreground entry and exact candidate match
+produce `CeremonyGesture`. It creates the same narrowly bound one-use socket
+capability without a prompt or policy read/write. It expires with the attempt and
+cannot authorize identity disclosure, identity effects, or another contact.
 
 Both cbcl-pairing endpoints independently place their recognised
 `profileDigest` into the credential/v2 `ci`, `ad`, and public context. The
@@ -1494,21 +1618,22 @@ claimant SHALL require both Finished values before treating the candidate as
 or ceremony makes Finished or the explicit equality check fail and erases the
 provisional capability.
 
-Only `BoundCredentialV2Profile` can atomically promote a newly approved tuple
-to [[SPEC-008-production-pairing-claimant#CON-903]] durable policy and supply profile keys or authenticated display
-authority. Existing exact-pair policy skips only the prompt; it never skips the
-live fetch, CPace digest binding, or Finished checks.
+Only `BoundCredentialV2Profile` supplies profile keys or authenticated display
+authority. In legacy mode it can atomically promote a newly approved tuple to
+[[SPEC-008-production-pairing-claimant#CON-903]] durable policy. SingleLink performs
+no promotion. Existing legacy policy skips only its prompt; neither mode skips
+the live fetch, CPace digest binding, or Finished checks.
 
 The exact substitute for
 [[SPEC-004-application-scoped-identity#CON-220]] step 6 has these seven ordered steps:
 
 1. obtain `OriginRecognisedProfileCandidate` and its digest;
-2. obtain or reuse exact-pair relay consent and one socket capability;
+2. obtain one socket capability from `CeremonyGesture` or legacy exact-pair authority;
 3. place that digest and the carrier digest in both endpoint contexts;
 4. complete CPace and verify both Finished values;
 5. require peer-bound and candidate profile bytes and digests to be equal;
-6. promote only a newly approved exact pair to durable
-   [[SPEC-008-production-pairing-claimant#CON-903]] policy; and
+6. promote only a newly approved legacy exact pair to durable
+   [[SPEC-008-production-pairing-claimant#CON-903]] policy, with no SingleLink write; and
 7. expose profile keys and authenticated display authority only from
    `BoundCredentialV2Profile`.
 
@@ -1537,7 +1662,7 @@ receiptRecoveryCommitment = SHA-256(
 )
 ```
 
-`EXPORTER` and `TH` are the raw cbcl-pairing SPEC-001 0.5.9-draft CON-031
+`EXPORTER` and `TH` are the raw cbcl-pairing SPEC-001 0.5.10-draft CON-031
 values. Both results contain 32 octets. The token is secret and zeroizable. It
 is sealed inside the endpoint checkpoint. It never enters an offer, profile,
 log, error, metric, URL, hub record, or JavaScript. The browser sends
@@ -1546,7 +1671,7 @@ only the commitment in the authenticated finalization command.
 The hub includes that exact commitment in its signed immutable final status
 and indexes the status under the carrier ceremony. After ordinary relay
 receipt loss, `recover_claimant_completion` POSTs the token and ceremony. It
-uses cbcl-bus SPEC-053 0.17.14-draft CON-036's closed CBOR request to the
+uses cbcl-bus SPEC-053 0.17.15-draft CON-036's closed CBOR request to the
 exact application origin retained from
 [[SPEC-008-production-pairing-claimant#CON-988]]. The wallet repeats
 [[SPEC-004-application-scoped-identity#CON-220]] steps 1 through 5 against that
@@ -1581,7 +1706,8 @@ that JWS, digest, carrier ceremony, and its retained payload
 private `CredentialV2RecoveredReceiptAuthority`. CON-032 then runs the
 ordinary receipt transition. The adapter cannot rebuild a grant, repeat a
 signature, republish a DID, or resend a payload. It cannot create an installed
-record without the retained verified pending slot.
+record without the retained verified pending slot and a fresh independent live
+reciprocal-binding verification.
 
 `in-progress`, `unknown`, unavailable, rate-limited, malformed, unsigned, mismatched, and
 ambiguous responses leave the pending slot unchanged and grant no capability.
@@ -1606,7 +1732,8 @@ Every error return while the transaction is armed SHALL attempt exact pending
 removal before returning. Exact identity covers root generation, application,
 relay, profile, carrier, offer, decisions, preview, and exclusive deadline. A
 storage backend MAY have committed a replacement before reporting an error.
-Compensation SHALL compare the immutable attempt identity. It SHALL remove the
+Compensation SHALL compare the immutable attempt identity, including flow and
+contact provenance. It SHALL remove the
 recognised current pre-payload phase without assuming an in-memory phase.
 It SHALL NOT remove another attempt, an installed record, or a sibling
 application. Compensation failure SHALL NOT replace or hide the original
@@ -1621,12 +1748,15 @@ ambiguous storage result exposes that `PayloadPrepared` value, compensation
 SHALL retain it for [[SPEC-008-production-pairing-claimant#CON-989]] recovery.
 Errors in payload release or later receipt handling likewise retain it.
 
-Automatic pre-payload compensation removes the pending ceremony cache. It does
-not revoke the person's accepted exact-pair policy. Independently,
+Automatic pre-payload compensation removes the pending ceremony cache. For
+LegacyTwoDecision, it does not revoke the person's accepted exact-pair policy.
+SingleLink has no such row to retain or delete. Independently,
 [[SPEC-008-production-pairing-claimant#REQ-1006]]'s confirmed unlink SHALL
-enumerate every pending phase. It SHALL remove the exact slot, policy, and
-contained profile cache under current-root presence. It retains the hierarchy
-root and remote state and reports no remote revocation.
+enumerate every pending phase. It SHALL remove the exact slot and contained
+profile cache under current-root presence. LegacyTwoDecision also removes its
+selected exact-pair policy. SingleLink performs no policy operation and preserves
+unrelated legacy trust. Every mode retains the hierarchy root and remote state
+and reports no remote revocation.
 
 Implements: [[SPEC-008-production-pairing-claimant#REQ-1006]].
 Verified by: [[SPEC-008-production-pairing-claimant#TEST-1162]].
@@ -1858,7 +1988,7 @@ Require credential/v2 to reach no classified credential-v1 site. Require
 frozen v1 bytes to remain byte-identical.
 
 Require this Selfsame parent and its open review gate. Require cbcl-bus
-SPEC-053 0.17.14-draft to name this coordinated review set.
+SPEC-053 0.17.15-draft to name this coordinated review set.
 
 Require the cbcl-pairing parent consumer pointer here. Require generation
 family, version, session, and synthesis trajectory in this parent,
@@ -1898,19 +2028,25 @@ creation, signing, resolver publication, and closure resolution. Also
 instrument WebFinger, grant construction, issuance persistence, alias
 operations, hub migration, payload release, and wallet installation.
 
-Before preliminary approval, require zero calls to every instrumented effect.
-At preliminary approval, permit one zeroizing derivation, pure DID and
-fingerprint computation, and authenticated preview disclosure only.
+For SingleLink before unlock, require zero calls to every instrumented effect.
+Unlock permits one pure DID/fingerprint computation and bounded native custody,
+with no decision, disclosure, or write. Render alone grants no authority. Link
+permits one preliminary protocol decision and preview disclosure.
 
 Decline, cancel, expire, close the relay, corrupt the comparison, and mutate the
-preview after preliminary approval. Require zero signatures, publications,
+preview after Link. Require zero signatures, publications,
 authority calls, grants, aliases, hub migration, payload, and durable identity
 records.
 
-At final approval, require a new custody call and byte-identical preview
-comparison before the first signature. Require issuer creation, publication,
+After authenticated comparison, require one native final protocol approval and
+byte-identical preview comparison in the retained bounded custody before the first
+signature. Require no second phone approval, passcode, or custody reopening.
+Require issuer creation, publication,
 closure verification, WebFinger verification, grant construction, and one
 reverse payload in the declared order.
+
+Run LegacyTwoDecision separately and retain preliminary disclosure, separate
+final person approval, and its existing final custody call.
 
 Fail each post-final operation independently. Require no accepted application
 capability, exact ceremony-only compensation, and no changed pre-existing or
@@ -1921,14 +2057,18 @@ commit. The browser record remains inactive before that commit. Require hub
 immutable status before browser activation and wallet installation. Lose every
 response and restart each component at every boundary. Require exact recovery
 without duplicate migration or a local grant shortcut.
+Before ordinary or recovered wallet installation, require an independent live
+reciprocal-binding verification. Make it unavailable or mismatched and require
+the pending slot preserved with no wallet installation.
 
-Before final approval, a wallet restart SHALL abandon the ceremony and retain
-no effect capability. After final approval, require the sealed pending slot
+Before final protocol approval, a wallet restart SHALL abandon the ceremony and retain
+no effect capability. After final protocol approval, require the sealed pending slot
 before the first identity effect. Restart from each later boundary and require
-only the cached frame, exact final capability, and one installed replacement.
+only the cached frame, exact authenticated decision evidence, and one installed replacement.
 
-Mutate the pending tag, root generation, application, carrier ceremony,
-wrapping key, checkpoint, plan, capability, expiry, and cached frame. Require
+Mutate the live attempt tag/capability before persistence. Mutate pending root
+generation, flow, provenance, application, carrier ceremony, wrapping key,
+checkpoint, plan, expiry, and cached frame. Require
 refusal before identity work or protocol output.
 
 Set current time to one second before signed `expiresAt` at every declared
@@ -1942,19 +2082,30 @@ Mutate its signature, digest, `kid`, field, ceremony binding, profile, and size.
 Require browser activation and wallet installation to refuse every mutation.
 
 Statically require the production credential/v2 call graph to exclude
-`assemble_claimant`. Require `recognise_claimant_invitation` to open no socket.
-Require `authorise_claimant_relay` to own the exact prompt and provisional
-socket capability. Require `prepare_claimant` to own the policy write only
+`assemble_claimant`. Require every entry recognizer to open no socket. In
+SingleLink, require native tag reservation before contact, `CeremonyGesture`,
+no relay prompt/policy access, and exact Link/comparison guards. In legacy,
+require `authorise_claimant_relay` to own the exact prompt and provisional
+socket capability. Require `prepare_claimant` to own a legacy policy write only
 after CPace profile-digest binding.
 Require `prepare_claimant` to have no custody, issuer, resolver-write,
 WebFinger, signing, grant, alias, or persistence edge.
 
 ### TEST-1159 — Presence, display, policy, installed state, and transport are exact
 
-Generate valid PAIR1 codes for minimum and maximum alphabet branches. Mutate
-every separator, forbidden letter, pad bit, checksum bit, case mode, Unicode
-lookalike, whitespace position, and BIP-39 collision. Require local refusal and
-zeroization without populating the machine carrier.
+Generate valid explicit-legacy PAIR1 codes for minimum and maximum alphabet
+branches. Mutate every separator, forbidden letter, pad bit, checksum bit, case
+mode, Unicode lookalike, whitespace position, and BIP-39 collision. Require
+local refusal and zeroization without populating the machine carrier.
+
+Generate cbcl-bus SPEC-078 0.1.1-draft's exact manual bootstrap and three-word
+vectors. Mutate the prefix, CBOR, bounds, T, word count, list membership,
+separator, 30-bit value, checksum, authenticated mode, peer share, and exporter.
+Require local refusal before contact for grammar/checksum failures. Require one
+distinct peer-bound response for a checksum-valid phrase, durable exact-share
+replay after restart, and terminal refusal of a different share. A fresh mode
+invitation requires authenticated closure proof; a local deadline or clock
+advance SHALL leave old recovery authoritative.
 
 Insert `C`, `T`, PAIR1 text, or a claim bearer into the carrier. Insert carrier
 bytes, QR data, clipboard data, autofill, password-manager data, notification
@@ -1966,9 +2117,13 @@ a mismatch. Compile-fail attempts to construct or mutate
 `CredentialV2Display`, to return display fields from the verifier, and to use
 generic fields or `authority_summary`.
 
-Accept one exact application-relay pair. Present the same relay under another
-authenticated application and require a new prompt. Remove the descriptor from
-the live profile and require refusal. Scan the ordinary binary and source graph
+In LegacyTwoDecision, accept one exact application-relay pair. Present the same
+relay under another authenticated application and require a new prompt. In
+SingleLink, require `CeremonyGesture`, the exact live application and relay in
+the display, and zero policy lookup, write, promotion, or remembered-trust text.
+Mutate the attempt tag, flow, contact provenance, profile, descriptor, application,
+or relay and require refusal before contact, disclosure, or effect. Remove the
+descriptor from the live profile and require refusal. Scan the ordinary binary and source graph
 for a compiled conformance registry, relay allowlist, relay-only key,
 held-enrolment precondition, and `record_pairing_trust` call edge. Every match
 on the credential/v2 path fails.
@@ -2004,10 +2159,12 @@ ceremony, offer digest, outcome, nullable DID, and local preview. Mutate each
 byte and require refusal before final display.
 
 Run [[SPEC-004-application-scoped-identity#CON-220]] steps 1 through 5 against a live origin. Substitute the profile
-after fetch, between CPace frames, before Finished, and before policy commit.
+after fetch, between CPace frames, before Finished, and before authority commit.
 Require profile-digest mismatch, zero durable pair row, zero intent display,
 and zero identity effect. With matching independent profile recognition,
-require both Finished values before one exact-pair row is committed.
+require both Finished values before authenticated display authority exists.
+SingleLink SHALL commit no exact-pair row. LegacyTwoDecision SHALL commit one
+new exact-pair row only after both Finished values.
 
 Present an existing exact-pair row with a changed profile digest. Require a
 fresh live fetch and CPace binding without another pair prompt. The row never
@@ -2016,7 +2173,7 @@ turns TLS-only bytes into authenticated display authority.
 ### TEST-1161 — Final status recovery survives the relay window
 
 **Validates:** [[SPEC-008-production-pairing-claimant#CON-989]] and
-cbcl-pairing SPEC-001 0.5.9-draft TEST-067.
+cbcl-pairing SPEC-001 0.5.10-draft TEST-067.
 
 Lose the ordinary receipt and delete the expired relay mailbox. Restart the
 wallet, browser, relay, and hub in every order. Retain only their declared
@@ -2028,6 +2185,8 @@ Mutate the token, commitment, application, ceremony, request, account, scope,
 device, offer, payload, grant, issuer, `kid`, JWS, digest, and predecessor.
 Mutate the route, TLS origin, and profile key independently. Require no installation, no repeated
 identity effect, and preservation of the sealed pending slot.
+Also make the wallet's live reciprocal binding unavailable or mismatched after
+valid status recovery. Require the same preservation and no installation.
 
 Return `in-progress`, unavailable, rate-limited, malformed, unsigned, stale,
 and ambiguous results. None clears pending or grants capability. Return a
@@ -2071,17 +2230,21 @@ failure. Delete a hook or disarm the transaction and require failure.
 
 Expose a recognised pending value at every phase after restart. Require a
 person-visible interrupted-link row containing only application, relay, and
-phase. Confirm local abandonment with current-root presence. Require removal of
-only the exact application slot, exact `(applicationId, relayOrigin)` policy,
-and contained profile cache. Require the root, sibling application slots, and
-remote state to remain. Require the result to claim no remote revocation and a
-fresh same-application ceremony to occupy the released slot.
+phase. Confirm local abandonment with current-root presence. Mutate flow or
+contact provenance and require refusal rather than deletion. Require removal of
+only the exact application slot and contained profile cache. In
+LegacyTwoDecision, also remove the exact `(applicationId, relayOrigin)` policy
+selected with the slot. In SingleLink, require no policy lookup or deletion.
+Require the root, sibling application slots, and remote state to remain. Require
+the result to claim no remote revocation and a fresh same-application ceremony
+to occupy the released slot.
 
 Persist a correct `PayloadPrepared` value and inject failures in payload release
 and receipt handling. Require preservation for
 [[SPEC-008-production-pairing-claimant#CON-989]] recovery. Substitute another
-attempt, an installed value, or a changed root generation. Also substitute a
-changed exact-pair policy. Require refusal rather than deletion.
+attempt, an installed value, or a changed root generation. For
+LegacyTwoDecision, also substitute a changed exact-pair policy. Require refusal
+rather than deletion.
 
 The continuous gate SHALL execute this process-global keyring test in an
 isolated test process, even while it remains ignored by the concurrent default
@@ -2160,10 +2323,11 @@ zero before the isolated [[SPEC-008-production-pairing-claimant#TEST-1162]]
 step. Remove the explicit lint disposition from the credential/v2 browser
 restore boundary and require the job to stop before TEST-1162.
 
-Run `CI=true npm run screens`. The harness SHALL enter one invitation and one
-well-formed PAIR1 code through the current credential/v2 surface. It SHALL
-render the pre-socket authentication wait, new exact-pair consent, and
-authenticated exact-intent consent.
+Run `CI=true npm run screens`. The harness SHALL exercise default complete
+scan/paste, manual bootstrap-plus-words, and explicit legacy invitation-plus-PAIR1
+through the current credential/v2 surface. It SHALL render pre-contact provenance,
+pre-socket authentication wait, default unlock/render/Link/comparison wait,
+legacy new exact-pair consent, legacy preliminary/final consent, and verified result.
 
 The invoke-surface check SHALL scan every JavaScript module that calls Tauri.
 It SHALL recognise every module prefix inside the actual `generate_handler!`
@@ -2222,7 +2386,28 @@ remains separate. The final Selfsame commit pins the exact pairing commit;
 browser integration pins that Selfsame commit and rebuilds WASM. Existing
 production, human cryptographic and release gates remain open and effective.
 
+## Successor entry and consent amendment — 0.5.19-draft
+
+The 2026-09-05 owner instruction delegates the manual-entry and single-Link
+parent amendment to Codex. The exact model build and generation session for
+this amendment are unavailable. Historical generation metadata remains a
+historical record and is not reused as provenance for this revision.
+
+This parent coordinates Selfsame SPEC-007 0.3.10, cbcl-pairing SPEC-001
+0.5.10, cbcl-bus SPEC-053 0.17.15, cbcl-bus SPEC-078 0.1.1, and cbcl-bus
+SPEC-079 0.1.1. It preserves explicit legacy two-approval compatibility while
+adding manual-mode isolation and the default one-unlock/one-Link conditional
+flow. It records no independent human cryptographic, security, privacy,
+release, production-allocation, or deployment approval. Existing gates remain
+open and effective.
+
 ## Changelog
+
+- **0.5.19-draft — 2026-09-05 — manual entry and single-Link successor.**
+  Adds explicit manual bootstrap/word mode, ceremony-only contact provenance,
+  bounded native custody, rendered Link authority, comparison-gated final
+  protocol approval, and flow-specific legacy policy behavior. Existing
+  transaction, compatibility, human-review, and production gates remain effective.
 
 - **0.5.18-draft — 2026-09-05 — confidential complete scan handoff.** Amends QR disclosure and typed entry policy, preserves the public carrier and authorization boundaries, and requires preview rendering before comparison continuation. Local implementation is authorized; production review is unchanged.
 
