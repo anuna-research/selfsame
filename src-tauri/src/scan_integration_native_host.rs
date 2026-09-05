@@ -15,6 +15,9 @@ use tauri::{
     Manager,
 };
 
+#[path = "scan_integration_native_host_jobs.rs"]
+mod jobs;
+
 const MAX_LINE: u64 = 65_536;
 
 #[derive(Deserialize)]
@@ -36,6 +39,8 @@ enum Op {
     PreviewRendered,
     Link,
     ContinueLink,
+    StartContinueLink,
+    PollContinueLink,
     FinishLink,
     CancelLink,
     RecogniseHandoff,
@@ -45,6 +50,9 @@ enum Op {
     Compare,
     FinalDecide,
     Finish,
+    PendingRecoveries,
+    PendingLinks,
+    Recover,
     InstalledLinks,
     Cancel,
     Shutdown,
@@ -93,6 +101,14 @@ struct Presence {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct Recovery {
+    application_id: String,
+    passcode: Zeroizing<String>,
+    approve_rotation: bool,
+}
+
+#[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Empty {}
 
@@ -107,6 +123,7 @@ fn view(value: impl Serialize) -> Result<Value> {
 struct Host {
     app: tauri::App<MockRuntime>,
     initialized: bool,
+    jobs: jobs::NativeHostJobs,
 }
 
 impl Host {
@@ -120,6 +137,7 @@ impl Host {
         Self {
             app,
             initialized: false,
+            jobs: jobs::NativeHostJobs::default(),
         }
     }
 
@@ -186,12 +204,70 @@ impl Host {
             .collect()
     }
 
+    fn recognise_occupied_request(&self, request: &Request<'_>) -> Result<()> {
+        match request.op {
+            Op::BeginHandoff => {
+                let _: single_link::BeginHandoffRequest = args(request.args)?;
+            }
+            Op::Contact
+            | Op::PreviewRendered
+            | Op::Link
+            | Op::ContinueLink
+            | Op::StartContinueLink
+            | Op::FinishLink
+            | Op::CancelLink => {
+                let _: single_link::TaggedRequest = args(request.args)?;
+            }
+            Op::UnlockPreview => {
+                let _: single_link::UnlockPreviewRequest = args(request.args)?;
+            }
+            Op::PollContinueLink => {
+                let _: jobs::PollContinueLink = args(request.args)?;
+            }
+            Op::RecogniseHandoff => {
+                let _: Handoff = args(request.args)?;
+            }
+            Op::RecogniseLegacy => {
+                let _: LegacyEntry = args(request.args)?;
+            }
+            Op::RelayDecide => {
+                let _: RelayDecision = args(request.args)?;
+            }
+            Op::PreliminaryDecide | Op::FinalDecide => {
+                let _: Decision = args(request.args)?;
+            }
+            Op::Compare | Op::PendingRecoveries | Op::PendingLinks | Op::InstalledLinks => {
+                let _: Empty = args(request.args)?;
+            }
+            Op::Finish => {
+                let _: Presence = args(request.args)?;
+            }
+            Op::Recover => {
+                let _: Recovery = args(request.args)?;
+            }
+            Op::Initialize | Op::Cancel | Op::Shutdown => unreachable!("handled before guard"),
+        }
+        Ok(())
+    }
+
     async fn dispatch(&mut self, request: &Request<'_>) -> Result<Value> {
         if matches!(request.op, Op::Initialize) {
-            return self.initialize(args(request.args)?);
+            let initialize = args(request.args)?;
+            if self.jobs.occupied() {
+                return Err(UiError::from("HostJobOccupied"));
+            }
+            return self.initialize(initialize);
         }
-        if matches!(request.op, Op::Cancel | Op::Shutdown) {
+        if matches!(request.op, Op::Shutdown) {
             let _: Empty = args(request.args)?;
+            self.jobs.teardown(self.app.handle()).await?;
+            return Ok(Value::Null);
+        }
+        if matches!(request.op, Op::Cancel) {
+            let _: Empty = args(request.args)?;
+            if self.jobs.occupied() {
+                return Err(UiError::from("HostJobOccupied"));
+            }
             self.app
                 .state::<AppSession>()
                 .0
@@ -204,6 +280,22 @@ impl Host {
             return Err(UiError::from("HostNotInitialized"));
         }
         completion::shared_memkeyring::assert_active();
+        if self.jobs.occupied() {
+            self.recognise_occupied_request(request)?;
+            match request.op {
+                Op::PollContinueLink
+                | Op::InstalledLinks
+                | Op::PendingRecoveries
+                | Op::PendingLinks => {}
+                Op::CancelLink => {
+                    let binding: jobs::StartContinueLink = args(request.args)?;
+                    if !self.jobs.matches_attempt(&binding.attempt_tag) {
+                        return Err(UiError::from("HostJobRefused"));
+                    }
+                }
+                _ => return Err(UiError::from("HostJobOccupied")),
+            }
+        }
         match request.op {
             Op::BeginHandoff => view(
                 single_link::cbcl_v2_begin_handoff(args(request.args)?, self.app.state()).await?,
@@ -224,8 +316,43 @@ impl Host {
             Op::ContinueLink => view(
                 single_link::cbcl_v2_continue_link(args(request.args)?, self.app.state()).await?,
             ),
+            Op::StartContinueLink => {
+                let binding: jobs::StartContinueLink = args(request.args)?;
+                let tagged = args(request.args)?;
+                self.app
+                    .state::<AppSession>()
+                    .0
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .cbcl_v2_attempts
+                    .tagged(&binding.attempt_tag)?
+                    .check()?;
+                let app = self.app.handle().clone();
+                self.jobs.start(binding.attempt_tag, async move {
+                    view(single_link::cbcl_v2_continue_link(tagged, app.state()).await?)
+                })
+            }
+            Op::PollContinueLink => {
+                let request: jobs::PollContinueLink = args(request.args)?;
+                self.jobs.require_poll(&request)?;
+                let work_active = self
+                    .app
+                    .state::<AppSession>()
+                    .0
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .cbcl_v2_attempts
+                    .tagged_worker_active(&request.attempt_tag)?;
+                self.jobs.poll(request, work_active)
+            }
             Op::CancelLink => {
-                view(single_link::cbcl_v2_cancel_link(args(request.args)?, self.app.state()).await?)
+                let binding: jobs::StartContinueLink = args(request.args)?;
+                let result =
+                    single_link::cbcl_v2_cancel_link(args(request.args)?, self.app.state()).await?;
+                if self.jobs.occupied() {
+                    self.jobs.mark_cancelled(&binding.attempt_tag)?;
+                }
+                view(result)
             }
             Op::FinishLink => {
                 let application = self
@@ -326,6 +453,24 @@ impl Host {
                 }
                 Ok(json!({"outcome": result.outcome, "installedLinks": installed}))
             }
+            Op::PendingRecoveries => {
+                let _: Empty = args(request.args)?;
+                view(cbcl_v2_pending_recoveries().await?)
+            }
+            Op::PendingLinks => {
+                let _: Empty = args(request.args)?;
+                view(cbcl_v2_pending_links().await?)
+            }
+            Op::Recover => {
+                let args: Recovery = args(request.args)?;
+                let result = cbcl_v2_recover(
+                    args.application_id,
+                    args.passcode.to_string(),
+                    args.approve_rotation,
+                )
+                .await?;
+                Ok(json!({"recovery":result, "installedLinks":self.installed().await?}))
+            }
             Op::InstalledLinks => {
                 let _: Empty = args(request.args)?;
                 view(self.installed().await?)
@@ -337,8 +482,11 @@ impl Host {
 
 impl Drop for Host {
     fn drop(&mut self) {
-        // The run loop cancels before dropping; erase only process-local values.
-        completion::shared_memkeyring::clear();
+        // An undrained job may still own a spawn_blocking operation. Process
+        // exit erases memory; never clear the test keyring underneath live work.
+        if !self.jobs.occupied() {
+            completion::shared_memkeyring::clear();
+        }
     }
 }
 
@@ -350,6 +498,7 @@ fn error_category(error: &UiError) -> &'static str {
         "PairingStaleAttempt" => "PairingStaleAttempt",
         "PairingExpired" => "PairingExpired",
         "PairingClockUnavailable" => "PairingClockUnavailable",
+        "PairingCancelled" => "PairingCancelled",
         "HostRequestRefused" => "HostRequestRefused",
         "HostNotInitialized" => "HostNotInitialized",
         "HostAlreadyInitialized" => "HostAlreadyInitialized",
@@ -361,6 +510,10 @@ fn error_category(error: &UiError) -> &'static str {
         "HostPasscodeRefused" => "HostPasscodeRefused",
         "HostCustodyRefused" => "HostCustodyRefused",
         "HostInstalledRecordMissing" => "HostInstalledRecordMissing",
+        "HostJobOccupied" => "HostJobOccupied",
+        "HostJobMissing" => "HostJobMissing",
+        "HostJobRefused" => "HostJobRefused",
+        "HostJobDrainFailed" => "HostJobDrainFailed",
         "PairingAllocatorKeyRequired" => "PairingAllocatorKeyRequired",
         "PairingAlreadyActive" => "PairingAlreadyActive",
         "PairingApplicationAlreadyLinked" => "PairingApplicationAlreadyLinked",
@@ -379,6 +532,7 @@ fn error_category(error: &UiError) -> &'static str {
         "PairingProfileUnavailable" => "PairingProfileUnavailable",
         "PairingProvisioningRefused" => "PairingProvisioningRefused",
         "PairingReceiptRefused" => "PairingReceiptRefused",
+        "PairingRecoveryRefused" => "PairingRecoveryRefused",
         "PairingRelayRefused" => "PairingRelayRefused",
         "PairingRelayTimedOut" => "PairingRelayTimedOut",
         "PairingRelayTlsRefused" => "PairingRelayTlsRefused",
@@ -442,13 +596,12 @@ fn run(input: &mut impl BufRead, output: &mut impl Write) -> std::io::Result<()>
         }
         Ok(())
     })();
-    host.app
-        .state::<AppSession>()
-        .0
-        .lock()
-        .unwrap_or_else(|p| p.into_inner())
-        .revoke_cbcl_v2();
-    result
+    let teardown = tauri::async_runtime::block_on(host.jobs.teardown(host.app.handle()));
+    match (result, teardown) {
+        (Err(error), _) => Err(error),
+        (Ok(()), Ok(())) => Ok(()),
+        (Ok(()), Err(_)) => Err(std::io::Error::other("HostJobDrainFailed")),
+    }
 }
 
 #[test]
@@ -476,6 +629,15 @@ fn native_host_request_grammar_and_error_redaction() {
     }
     let raw = RawValue::from_string(r#"{"approve":true,"unexpected":1}"#.into()).unwrap();
     assert!(args::<Decision>(&raw).is_err());
+    assert!(serde_json::from_str::<jobs::StartContinueLink>(r#"{"attemptTag":"A"}"#).is_err());
+    assert!(serde_json::from_str::<jobs::PollContinueLink>(
+        r#"{"attemptTag":"00000000000000000000000000000000","jobId":"A"}"#
+    )
+    .is_err());
+    assert!(serde_json::from_str::<Recovery>(
+        r#"{"applicationId":"https://photos.example/selfsame/v2","passcode":"test-only-913","approveRotation":false,"extra":1}"#
+    )
+    .is_err());
     assert_eq!(
         error_category(&UiError::from("not a closed category")),
         "HostCommandRefused"
@@ -489,14 +651,17 @@ fn native_host_memory_init_cancel_shutdown_regression() {
     let cert = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
     let mnemonic = bip39::Mnemonic::from_entropy(&[19; 16]).unwrap();
     let input = Zeroizing::new(format!(
-        "{}\n{}\n{}\n{}\n{}\n{}\n{}\n",
+        "{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n",
         json!({"id":1,"op":"initialize","args":{"mnemonic":mnemonic.to_string(),"passcode":"test-only-913","rootPem":cert.cert.pem(),"proxyUrl":"http://127.0.0.1:1","relayAddress":"127.0.0.1:1"}}),
         json!({"id":2,"op":"installed-links","args":{}}),
-        json!({"id":3,"op":"begin-handoff","args":{"handoff":"SSPAIR2:invalid"}}),
-        json!({"id":4,"op":"final-decide","args":{"approve":true,"passcode":"test-only-913"}}),
-        json!({"id":5,"op":"cancel","args":{}}),
-        json!({"id":6,"op":"installed-links","args":{}}),
-        json!({"id":7,"op":"shutdown","args":{}}),
+        json!({"id":3,"op":"pending-recoveries","args":{}}),
+        json!({"id":4,"op":"pending-links","args":{}}),
+        json!({"id":5,"op":"recover","args":{"applicationId":"https://photos.example/selfsame/v2","passcode":"test-only-913","approveRotation":false}}),
+        json!({"id":6,"op":"begin-handoff","args":{"handoff":"SSPAIR2:invalid"}}),
+        json!({"id":7,"op":"final-decide","args":{"approve":true,"passcode":"test-only-913"}}),
+        json!({"id":8,"op":"cancel","args":{}}),
+        json!({"id":9,"op":"installed-links","args":{}}),
+        json!({"id":10,"op":"shutdown","args":{}}),
     ));
     let mut output = Vec::new();
     run(&mut std::io::Cursor::new(input.as_bytes()), &mut output).unwrap();
@@ -510,15 +675,18 @@ fn native_host_memory_init_cancel_shutdown_regression() {
         .lines()
         .map(|line| serde_json::from_str(line.strip_prefix("SPEC077_HOST ").unwrap()).unwrap())
         .collect();
-    assert_eq!(responses.len(), 7);
+    assert_eq!(responses.len(), 10);
     assert_eq!(responses[0]["result"]["custody"], "memory");
     assert_eq!(responses[0]["result"]["backupConfirmed"], true);
     assert_eq!(responses[1]["result"], json!([]));
-    assert_eq!(responses[2]["error"], "PairingVersionUnsupported");
-    assert_eq!(responses[3]["error"], "PairingNotStarted");
-    assert_eq!(responses[4]["ok"], true);
-    assert_eq!(responses[5]["result"], json!([]));
-    assert_eq!(responses[6]["ok"], true);
+    assert_eq!(responses[2]["result"], json!([]));
+    assert_eq!(responses[3]["result"], json!([]));
+    assert_eq!(responses[4]["error"], "PairingCheckpointRefused");
+    assert_eq!(responses[5]["error"], "PairingVersionUnsupported");
+    assert_eq!(responses[6]["error"], "PairingNotStarted");
+    assert_eq!(responses[7]["ok"], true);
+    assert_eq!(responses[8]["result"], json!([]));
+    assert_eq!(responses[9]["ok"], true);
     completion::shared_memkeyring::assert_active();
     assert!(!Custody::exists().unwrap());
 }
@@ -583,6 +751,86 @@ async fn native_host_single_link_reserves_before_contact_and_refuses_profile_fai
     .await
     .unwrap();
     assert_eq!(reserved["phase"], "reserved");
+    let attempt_tag = reserved["attemptTag"].as_str().unwrap();
+    {
+        let state = host.app.state::<AppSession>();
+        let mut session = state
+            .0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        assert!(!session
+            .cbcl_v2_attempts
+            .tagged_worker_active(attempt_tag)
+            .unwrap());
+        let work = session.cbcl_v2_attempts.start_work().unwrap();
+        assert!(session
+            .cbcl_v2_attempts
+            .tagged_worker_active(attempt_tag)
+            .unwrap());
+        work.retain();
+        assert!(!session
+            .cbcl_v2_attempts
+            .tagged_worker_active(attempt_tag)
+            .unwrap());
+    }
+    let started = call(
+        &mut host,
+        "start-continue-link",
+        json!({"attemptTag":attempt_tag}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(started["state"], "started");
+    let job_id = started["jobId"].as_str().unwrap();
+    assert_eq!(job_id.len(), 32);
+    assert_eq!(
+        call(
+            &mut host,
+            "begin-handoff",
+            json!({"handoff":handoff.as_str()})
+        )
+        .await
+        .unwrap_err()
+        .to_string(),
+        "HostJobOccupied"
+    );
+    assert_eq!(
+        call(&mut host, "installed-links", json!({})).await.unwrap(),
+        json!([])
+    );
+    let wrong_job = if job_id.starts_with('0') {
+        format!("1{}", &job_id[1..])
+    } else {
+        format!("0{}", &job_id[1..])
+    };
+    assert_eq!(
+        call(
+            &mut host,
+            "poll-continue-link",
+            json!({"attemptTag":attempt_tag,"jobId":wrong_job})
+        )
+        .await
+        .unwrap_err()
+        .to_string(),
+        "HostJobRefused"
+    );
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    loop {
+        let polled = call(
+            &mut host,
+            "poll-continue-link",
+            json!({"attemptTag":attempt_tag,"jobId":job_id}),
+        )
+        .await
+        .unwrap();
+        if polled["state"] == "finished" {
+            assert_eq!(polled["ok"], false);
+            assert_eq!(polled["error"], "PairingWrongPhase");
+            break;
+        }
+        assert!(std::time::Instant::now() < deadline);
+        tokio::task::yield_now().await;
+    }
     assert_eq!(
         proxy.accept().err().unwrap().kind(),
         std::io::ErrorKind::WouldBlock
