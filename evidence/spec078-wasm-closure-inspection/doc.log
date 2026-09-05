@@ -1,0 +1,9 @@
+    Finished `test` profile [unoptimized] target(s) in 0.13s
+   Doc-tests selfsame_web_device
+
+running 3 tests
+test crates/selfsame-web-device/src/credential_v2_closure.rs - credential_v2_closure::CredentialV2BrowserAllocatorClosureInspection (line 25) - compile fail ... ok
+test crates/selfsame-web-device/src/credential_v2_closure.rs - credential_v2_closure::CredentialV2BrowserAllocatorClosureInspection (line 17) - compile fail ... ok
+test crates/selfsame-web-device/src/credential_v2_closure.rs - credential_v2_closure::CredentialV2BrowserAllocatorClosureInspection (line 21) - compile fail ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.16s

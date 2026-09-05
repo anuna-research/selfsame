@@ -1,0 +1,9 @@
+   Compiling selfsame-web-device v0.1.0 (/Volumes/anuna-03/codex-closure-inspection/selfsame/crates/selfsame-web-device)
+    Finished `test` profile [unoptimized] target(s) in 0.41s
+     Running tests/cbcl_allocator_session.rs (/Volumes/anuna-03/codex-successor-wasm-native-target/debug/deps/cbcl_allocator_session-1113a150db4027e1)
+
+running 2 tests
+test cancelled_session_burns_the_attempt ... ok
+test browser_allocator_surface_completes_a_ceremony_over_the_relay_wire ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s

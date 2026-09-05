@@ -1,0 +1,21 @@
+   Compiling selfsame-pairing v0.1.0 (/Volumes/anuna-03/codex-closure-inspection/selfsame/crates/selfsame-pairing)
+   Compiling selfsame-web-device v0.1.0 (/Volumes/anuna-03/codex-closure-inspection/selfsame/crates/selfsame-web-device)
+    Finished `test` profile [unoptimized] target(s) in 1.20s
+     Running unittests src/lib.rs (/Volumes/anuna-03/codex-successor-wasm-native-target/debug/deps/selfsame_web_device-3b2c09f4cecd7e70)
+
+running 1 test
+
+thread 'credential_v2_closure::tests::closure_terminal_sealed_hash_does_not_replace_signature_verification' (8408135) panicked at crates/selfsame-web-device/src/credential_v2_closure_tests.rs:731:5:
+assertion failed: view.verify_final_status_inner(changed.jws.as_bytes(), &changed.digest,
+        saved.status_input.finalized_at).is_err()
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test credential_v2_closure::tests::closure_terminal_sealed_hash_does_not_replace_signature_verification ... FAILED
+
+failures:
+
+failures:
+    credential_v2_closure::tests::closure_terminal_sealed_hash_does_not_replace_signature_verification
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 61 filtered out; finished in 0.07s
+
+error: test failed, to rerun pass `-p selfsame-web-device --lib`

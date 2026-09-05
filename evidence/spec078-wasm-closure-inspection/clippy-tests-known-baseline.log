@@ -1,0 +1,6 @@
+    Checking selfsame-core v0.1.0 (/Volumes/anuna-03/codex-closure-inspection/selfsame/crates/selfsame-core)
+   Compiling selfsame-pairing v0.1.0 (/Volumes/anuna-03/codex-closure-inspection/selfsame/crates/selfsame-pairing)
+    Checking selfsame-app-identity v0.1.0 (/Volumes/anuna-03/codex-closure-inspection/selfsame/crates/selfsame-app-identity)
+    Checking selfsame-rendezvous v0.1.0 (/Volumes/anuna-03/codex-closure-inspection/selfsame/crates/selfsame-rendezvous)
+    Checking selfsame-web-device v0.1.0 (/Volumes/anuna-03/codex-closure-inspection/selfsame/crates/selfsame-web-device)
+    Finished `dev` profile [unoptimized] target(s) in 1.74s

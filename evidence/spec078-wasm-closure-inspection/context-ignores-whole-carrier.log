@@ -1,0 +1,31 @@
+   Compiling selfsame-web-device v0.1.0 (/Volumes/anuna-03/codex-closure-inspection/selfsame/crates/selfsame-web-device)
+warning: unused variable: `carrier`
+   --> crates/selfsame-web-device/src/credential_v2_closure.rs:230:13
+    |
+230 |         let carrier = cbcl_pairing::credential_v2::decode_carrier(raw_carrier)
+    |             ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_carrier`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: `selfsame-web-device` (lib test) generated 1 warning (run `cargo fix --lib -p selfsame-web-device --tests` to apply 1 suggestion)
+    Finished `test` profile [unoptimized] target(s) in 0.84s
+     Running unittests src/lib.rs (/Volumes/anuna-03/codex-successor-wasm-native-target/debug/deps/selfsame_web_device-3b2c09f4cecd7e70)
+
+running 1 test
+
+thread 'credential_v2_closure::tests::closure_offer_context_checks_exact_carrier_and_authenticated_metadata' (8407544) panicked at crates/selfsame-web-device/src/credential_v2_closure_tests.rs:765:5:
+assertion failed: view.restore_offer_context_inner(&changed_carrier, &saved.offer.offer_core,
+        &saved.offer.offer_core_digest, EXPIRY - 100,
+        &saved.offer.signed_offer, &saved.authority_response,
+        &saved.authority_digest, EXPIRY).is_err()
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test credential_v2_closure::tests::closure_offer_context_checks_exact_carrier_and_authenticated_metadata ... FAILED
+
+failures:
+
+failures:
+    credential_v2_closure::tests::closure_offer_context_checks_exact_carrier_and_authenticated_metadata
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 61 filtered out; finished in 0.04s
+
+error: test failed, to rerun pass `-p selfsame-web-device --lib`

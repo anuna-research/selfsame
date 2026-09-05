@@ -328,6 +328,9 @@ fn live_effects_json(effects: &[selfsame_pairing::live::LiveEffect]) -> String {
 const V2_ALLOCATOR_CHECKPOINT_INFO: &[u8] =
     b"cbcl-chat credential/v2 allocator checkpoint wrapping v1";
 
+mod credential_v2_closure;
+pub use credential_v2_closure::CredentialV2BrowserAllocatorClosureInspection;
+
 /// Distinct browser allocator for standalone credential/v2 pairing.
 ///
 /// This surface cannot select credential/v1. It returns a closed JSON effect
@@ -459,6 +462,37 @@ impl CredentialV2BrowserAllocatorSession {
         .map_err(|error| JsError::new(&error))
     }
 
+    /// Inspect authenticated saved state, including elapsed expiry, without
+    /// restoring a live allocator or granting relay or issuance authority.
+    #[wasm_bindgen(js_name = restore_for_closure)]
+    #[allow(clippy::too_many_arguments)]
+    pub fn restore_for_closure(
+        profile: &[u8],
+        carrier: &[u8],
+        checkpoint: &[u8],
+        generation: u64,
+        request_id: &[u8],
+        intent_nonce: &[u8],
+        expected_allocator_key: &[u8],
+        installation_seed: &[u8],
+        now: u64,
+        mode: String,
+    ) -> Result<CredentialV2BrowserAllocatorClosureInspection, JsError> {
+        CredentialV2BrowserAllocatorClosureInspection::restore_inner(
+            profile,
+            carrier,
+            checkpoint,
+            generation,
+            request_id,
+            intent_nonce,
+            expected_allocator_key,
+            installation_seed,
+            now,
+            mode,
+        )
+        .map_err(|error| JsError::new(&error))
+    }
+
     /// Authenticated live bootstrap mode only; established and terminal state
     /// grants no mode or bootstrap capability. Never infer a mode from C.
     pub fn bootstrap_mode(&self) -> Option<String> {
@@ -547,18 +581,43 @@ impl CredentialV2BrowserAllocatorSession {
         authority_digest: &[u8],
         now: u64,
     ) -> Result<(), JsError> {
+        self.restore_offer_context_inner(
+            raw_carrier,
+            offer_core,
+            offer_core_digest,
+            pending_expires_at,
+            signed_offer,
+            authority_response,
+            authority_digest,
+            now,
+        )
+        .map_err(|error| JsError::new(&error))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn restore_offer_context_inner(
+        &mut self,
+        raw_carrier: &[u8],
+        offer_core: &[u8],
+        offer_core_digest: &[u8],
+        pending_expires_at: u64,
+        signed_offer: &[u8],
+        authority_response: &[u8],
+        authority_digest: &[u8],
+        now: u64,
+    ) -> Result<(), String> {
         if now >= pending_expires_at {
-            return Err(JsError::new("the credential/v2 restored offer expired"));
+            return Err("the credential/v2 restored offer expired".into());
         }
         let carrier = cbcl_pairing::credential_v2::decode_carrier(raw_carrier)
-            .map_err(|_| JsError::new("the credential/v2 carrier was refused"))?;
+            .map_err(|_| "the credential/v2 carrier was refused".to_owned())?;
         let supplied_digest: [u8; 32] =
-            fixed_browser_bytes(offer_core_digest, "offer-core digest")?;
+            fixed_browser_bytes_inner(offer_core_digest, "offer-core digest")?;
         let supplied_authority_digest: [u8; 32] =
-            fixed_browser_bytes(authority_digest, "authority-status digest")?;
+            fixed_browser_bytes_inner(authority_digest, "authority-status digest")?;
         let recognised =
             selfsame_pairing::credential_v2::recognise_signed_offer(&self.profile, signed_offer)
-                .map_err(|_| JsError::new("the credential/v2 signed offer was refused"))?;
+                .map_err(|_| "the credential/v2 signed offer was refused".to_owned())?;
         if carrier.carrier_ceremony_id() != &self.carrier_ceremony_id
             || carrier.application_context() != self.profile.application_id.as_str()
             || recognised.offer_core.as_slice() != offer_core
@@ -569,9 +628,7 @@ impl CredentialV2BrowserAllocatorSession {
             || recognised.expires_at != pending_expires_at
             || <[u8; 32]>::from(Sha256::digest(authority_response)) != supplied_authority_digest
         {
-            return Err(JsError::new(
-                "the credential/v2 restored offer binding was refused",
-            ));
+            return Err("the credential/v2 restored offer binding was refused".into());
         }
         let status = selfsame_pairing::credential_v2::recognise_authority_status_response(
             &self.profile,
@@ -580,7 +637,7 @@ impl CredentialV2BrowserAllocatorSession {
             self.carrier_ceremony_id,
             supplied_digest,
         )
-        .map_err(|_| JsError::new("the credential/v2 signed authority was refused"))?;
+        .map_err(|_| "the credential/v2 signed authority was refused".to_owned())?;
         if !matches!(
             self.session
                 .as_ref()
@@ -589,7 +646,7 @@ impl CredentialV2BrowserAllocatorSession {
         ) {
             self.body_authority
                 .require_bound_offer(&self.profile, &recognised)
-                .map_err(|_| JsError::new("the restored body authority was refused"))?;
+                .map_err(|_| "the restored body authority was refused".to_owned())?;
         }
         self.prepared_offer_core = Some(offer_core.to_vec());
         self.prepared_offer_digest = Some(supplied_digest);
