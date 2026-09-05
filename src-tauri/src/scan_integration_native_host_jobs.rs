@@ -118,6 +118,12 @@ impl NativeHostJobs {
 
     pub(super) fn poll(&mut self, request: PollContinueLink, work_active: bool) -> Result<Value> {
         self.require_poll(&request)?;
+        // A ready or disconnected async result does not prove that the
+        // spawn_blocking native worker released its lease. Keep the job owned
+        // until the exact observed lease is idle.
+        if work_active {
+            return Ok(json!({"state":"pending", "workActive":true}));
+        }
         let job = self.continuation.as_ref().expect("poll binding checked");
         match job.receiver.try_recv() {
             Err(TryRecvError::Empty) => Ok(json!({"state":"pending", "workActive":work_active})),
@@ -204,19 +210,24 @@ mod tests {
 
     #[test]
     fn job_id_grammar_is_closed() {
+        let attempt = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
         for value in [
             "0000000000000000000000000000000",
             "000000000000000000000000000000000",
             "0000000000000000000000000000000g",
             "0000000000000000000000000000000A",
         ] {
-            let raw = format!(r#"{{"attemptTag":"a","jobId":"{value}"}}"#);
+            let raw = format!(r#"{{"attemptTag":"{attempt}","jobId":"{value}"}}"#);
             assert!(serde_json::from_str::<PollContinueLink>(&raw).is_err());
         }
         assert!(serde_json::from_str::<PollContinueLink>(
-            r#"{"attemptTag":"a","jobId":"00000000000000000000000000000000","extra":1}"#
+            r#"{"attemptTag":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","jobId":"00000000000000000000000000000000","extra":1}"#
         )
         .is_err());
+        assert!(serde_json::from_str::<PollContinueLink>(
+            r#"{"attemptTag":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","jobId":"00000000000000000000000000000000"}"#
+        )
+        .is_ok());
     }
 
     #[tokio::test]
@@ -318,5 +329,75 @@ mod tests {
             tokio::task::yield_now().await;
         }
         assert!(!jobs.occupied());
+    }
+
+    #[tokio::test]
+    async fn ready_result_stays_owned_until_the_actual_lease_is_idle() {
+        let attempt_tag = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let mut jobs = NativeHostJobs::default();
+        let started = jobs
+            .start(attempt_tag.into(), async {
+                Ok(json!({"phase":"await-receipt"}))
+            })
+            .unwrap();
+        let job_id = started["jobId"].as_str().unwrap().to_owned();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !jobs
+            .continuation
+            .as_ref()
+            .unwrap()
+            .task
+            .inner()
+            .is_finished()
+        {
+            assert!(Instant::now() < deadline);
+            tokio::task::yield_now().await;
+        }
+        let request = || PollContinueLink {
+            attempt_tag: attempt_tag.into(),
+            job_id: job_id.clone(),
+        };
+        assert_eq!(
+            jobs.poll(request(), true).unwrap(),
+            json!({"state":"pending", "workActive":true})
+        );
+        assert!(jobs.occupied());
+        let finished = jobs.poll(request(), false).unwrap();
+        assert_eq!(finished["state"], "finished");
+        assert_eq!(finished["ok"], true);
+        assert!(!jobs.occupied());
+        assert!(jobs.poll(request(), false).is_err());
+    }
+
+    #[tokio::test]
+    async fn disconnected_result_stays_owned_until_the_actual_lease_is_idle() {
+        let attempt_tag = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let job_id = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        let (sender, receiver) = mpsc::sync_channel(1);
+        drop(sender);
+        let mut jobs = NativeHostJobs {
+            continuation: Some(ContinueLinkJob {
+                attempt_tag: attempt_tag.into(),
+                job_id: job_id.into(),
+                receiver,
+                task: tauri::async_runtime::spawn(async {}),
+                cancelled: false,
+            }),
+        };
+        let request = || PollContinueLink {
+            attempt_tag: attempt_tag.into(),
+            job_id: job_id.into(),
+        };
+        assert_eq!(
+            jobs.poll(request(), true).unwrap(),
+            json!({"state":"pending", "workActive":true})
+        );
+        assert!(jobs.occupied());
+        let finished = jobs.poll(request(), false).unwrap();
+        assert_eq!(finished["state"], "finished");
+        assert_eq!(finished["ok"], false);
+        assert_eq!(finished["error"], "HostCommandRefused");
+        assert!(!jobs.occupied());
+        assert!(jobs.poll(request(), false).is_err());
     }
 }
