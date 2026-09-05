@@ -29,8 +29,11 @@ fn test_801_every_ordinary_shell_starts_cbcl_without_a_protocol_option() {
             "{name} does not start the CBCL endpoint"
         );
     }
-    assert!(ui.contains("cbcl_v2_recognise"));
-    assert!(ui.contains("{ invitation, presenceCode }"));
+    // SPEC-077 amends the ordinary transfer surface to one complete handoff.
+    // The explicit legacy control still reaches the same credential/v2 core.
+    assert!(ui.contains("cbcl_v2_recognise_handoff"));
+    assert!(ui.contains("{ handoff }"));
+    assert!(ui.contains("cbcl_v2_recognise\""));
     // The custody passcode is released only with the preliminary/final person
     // decisions; it is not an input to invitation recognition or relay trust.
     assert!(ui.contains("cbcl_v2_preliminary_decide"));
