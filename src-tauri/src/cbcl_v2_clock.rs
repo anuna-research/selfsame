@@ -24,6 +24,7 @@ pub(crate) fn snapshot() -> Result<Snapshot> {
 }
 
 // u128 avoids truncating intermediate products; the final u64 conversion is checked.
+#[cfg(any(target_vendor = "apple", target_os = "windows", test))]
 fn scale(ticks: u64, numer: u32, denom: u32) -> Result<u64> {
     if numer == 0 || denom == 0 {
         return Err(refused());
