@@ -16,6 +16,7 @@
     verify_credential_v2_offer_proof/6,
     verify_credential_v2_staging_receipt/13,
     verify_credential_v2_acceptance/14,
+    verify_credential_v2_acceptance_at/15,
     credential_v2_acceptance_facts/1,
     build_credential_v2_authority_status/6,
     recognise_credential_v2_recovery_request/1,
@@ -24,6 +25,7 @@
     credential_v2_recovery_unknown/0,
     credential_v2_recovery_not_finalized/7,
     rehydrate_path_b/2,
+    run_acceptance/0,
     run/0,
     sign_enrollment/4,
     sign_enrollment_profile_bound/4,
@@ -49,6 +51,8 @@ verify_credential_v2_offer_proof(_, _, _, _, _, _) ->
 verify_credential_v2_staging_receipt(_, _, _, _, _, _, _, _, _, _, _, _, _) ->
     nif_not_loaded().
 verify_credential_v2_acceptance(_, _, _, _, _, _, _, _, _, _, _, _, _, _) ->
+    nif_not_loaded().
+verify_credential_v2_acceptance_at(_, _, _, _, _, _, _, _, _, _, _, _, _, _, _) ->
     nif_not_loaded().
 credential_v2_acceptance_facts(_) -> nif_not_loaded().
 build_credential_v2_authority_status(_, _, _, _, _, _) ->
@@ -151,6 +155,58 @@ run() ->
     Elapsed = erlang:monotonic_time(microsecond) - Started,
     expect_true(Elapsed < 1000000, oversized_kid_scheduler_bound),
     ok.
+
+run_acceptance() ->
+    First = acceptance(1785412802, 1785412801, 1785412801),
+    {ok, FirstWitness} = First,
+    {ok, FirstFacts} = credential_v2_acceptance_facts(FirstWitness),
+    Retry = acceptance(1785412900, 1785412801, 1785412899),
+    {ok, RetryWitness} = Retry,
+    {ok, RetryFacts} = credential_v2_acceptance_facts(RetryWitness),
+    true = maps:get(final_status_jws, FirstFacts) =:= maps:get(final_status_jws, RetryFacts),
+    true = maps:get(final_status_digest, FirstFacts) =:= maps:get(final_status_digest, RetryFacts),
+    1785412801 = maps:get(finalized_at, FirstFacts),
+    1785412801 = maps:get(finalized_at, RetryFacts),
+    {error, rejected} = acceptance(1785412900, 1785412801, 1785412901),
+    {error, rejected} = acceptance(1785412800, 1785412801, 1785412799),
+    ok.
+
+acceptance(VerificationNow, FinalizedAt, FetchedAt) ->
+    Dir = os:getenv("SELFSAME_NIF_FIXTURE_DIR"),
+    Closure = #{
+        resolver_id => read(Dir, "accept-resolver-id.bin"),
+        did => read(Dir, "accept-issuer-did.bin"),
+        did_recomputed_ok => true,
+        deltas_verified => true,
+        locally_closed => true,
+        deactivated => false,
+        assertion_methods => [#{
+            id => read(Dir, "accept-method-id.bin"),
+            kind => read(Dir, "accept-method-kind.bin"),
+            public_key => read(Dir, "accept-method-key.bin"),
+            has_private_component => false
+        }],
+        revoked_credential_ids => [],
+        also_known_as => [read(Dir, "accept-account.bin")],
+        fetched_at_seconds => FetchedAt
+    },
+    verify_credential_v2_acceptance_at(
+        read(Dir, "accept-profile.bin"),
+        read(Dir, "accept-offer.bin"),
+        read(Dir, "accept-grant.bin"),
+        read(Dir, "accept-closure.bin"),
+        #{resolver_closures => [Closure]},
+        read(Dir, "accept-payload-digest.bin"),
+        read(Dir, "accept-migration-digest.bin"),
+        read(Dir, "accept-issuer-did.bin"),
+        read(Dir, "accept-grant-id.bin"),
+        read(Dir, "accept-staging-receipt.bin"),
+        read(Dir, "accept-recovery-commitment.bin"),
+        VerificationNow,
+        FinalizedAt,
+        read(Dir, "accept-kid.bin"),
+        read(Dir, "accept-signing-seed.bin")
+    ).
 
 read(Directory, Name) ->
     {ok, Bytes} = file:read_file(filename:join(Directory, Name)),

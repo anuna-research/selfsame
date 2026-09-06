@@ -9,6 +9,9 @@ use cbcl_selfsame_erl::credential_v2::{
     recognise_credential_v2_recovery_request, verify_credential_v2_staging_receipt,
     CredentialV2AcceptanceInput,
 };
+use cbcl_selfsame_erl::path_b::{
+    verify_inactive_grant_pure, ResolverAssertionMethod, ResolverClosure,
+};
 use ed25519_dalek::{Signer, SigningKey};
 use selfsame_app_identity::profile::ApplicationProfile;
 use selfsame_app_identity::{alias, codec, didkey, grant, json, path_b::InactiveStagedGrant};
@@ -111,6 +114,83 @@ fn credential_profile(signing_key: &SigningKey) -> ApplicationProfile {
         ("mobileBindings", mobile),
     ]);
     ApplicationProfile::recognise(&json::canonicalise(&json::Json::Object(members))).unwrap()
+}
+
+fn resolver_closure(ceremony: &common::Ceremony, fetched_at_seconds: i64) -> ResolverClosure {
+    ResolverClosure {
+        resolver_id: ceremony.profile.state_resolvers[0].id.clone(),
+        did: ceremony.issuer.did.clone(),
+        did_recomputed_ok: ceremony.issuer.did_recomputed_ok,
+        deltas_verified: ceremony.issuer.deltas_verified,
+        locally_closed: ceremony.issuer.locally_closed,
+        deactivated: ceremony.issuer.deactivated,
+        assertion_methods: ceremony
+            .issuer
+            .assertion_methods
+            .iter()
+            .map(|method| ResolverAssertionMethod {
+                id: method.id.clone(),
+                kind: method.kind.clone(),
+                public_key: method.jwk.public_key,
+                has_private_component: method.has_private_component,
+            })
+            .collect(),
+        revoked_credential_ids: ceremony.issuer.revoked_credential_ids.clone(),
+        also_known_as: ceremony.issuer.also_known_as.clone(),
+        fetched_at_seconds,
+    }
+}
+
+#[test]
+fn test_117_resolver_verification_uses_the_post_fetch_clock_and_refuses_future_evidence() {
+    let ceremony = common::Ceremony::accepted();
+    let permissions = vec![common::PERMISSION.to_string()];
+    let fetched_after_decode = common::NOW + 1;
+    let closure = resolver_closure(&ceremony, fetched_after_decode);
+
+    // The command's earlier decode clock makes the sidecar observation future.
+    assert!(verify_inactive_grant_pure(
+        &common::profile_octets(),
+        &ceremony.home_did,
+        ceremony.account.as_str(),
+        &ceremony.device_public_key,
+        &permissions,
+        common::NOW,
+        0,
+        &ceremony.grant_bytes,
+        std::slice::from_ref(&closure),
+    )
+    .is_err());
+
+    // Sampling after the sidecar returns admits the same real grant and
+    // resolver facts. A later accepted retry uses its own current verifier
+    // clock, independent of the historical signed-finalization timestamp.
+    verify_inactive_grant_pure(
+        &common::profile_octets(),
+        &ceremony.home_did,
+        ceremony.account.as_str(),
+        &ceremony.device_public_key,
+        &permissions,
+        fetched_after_decode + 1,
+        0,
+        &ceremony.grant_bytes,
+        std::slice::from_ref(&closure),
+    )
+    .expect("a post-fetch verifier clock must accept fresh resolver evidence");
+
+    let future = resolver_closure(&ceremony, fetched_after_decode + 2);
+    assert!(verify_inactive_grant_pure(
+        &common::profile_octets(),
+        &ceremony.home_did,
+        ceremony.account.as_str(),
+        &ceremony.device_public_key,
+        &permissions,
+        fetched_after_decode + 1,
+        0,
+        &ceremony.grant_bytes,
+        &[future],
+    )
+    .is_err());
 }
 
 #[test]

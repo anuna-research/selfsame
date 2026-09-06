@@ -618,7 +618,95 @@ pub fn verify_credential_v2_acceptance_nif<'a>(
     signing_kid: Binary<'a>,
     signing_seed: Binary<'a>,
 ) -> Term<'a> {
+    verify_credential_v2_acceptance_inner(
+        env,
+        profile_bytes,
+        signed_offer,
+        raw_grant_value,
+        raw_resolver_closure,
+        resolver_evidence,
+        payload_digest_value,
+        migration_confirmation_digest_value,
+        issuer_did_value,
+        grant_id_value,
+        staging_receipt,
+        receipt_recovery_commitment_value,
+        finalized_at,
+        finalized_at,
+        signing_kid,
+        signing_seed,
+    )
+}
+
+/// Acceptance with distinct verifier and signed-finalization clocks.
+///
+/// Resolver evidence is obtained after the wire command is decoded, so its
+/// verifier-owned fetch stamp can legitimately be newer than the immutable
+/// finalization time retained for an accepted retry.  The former is used only
+/// for freshness; the latter remains part of the signed final status.
+#[allow(clippy::too_many_arguments)]
+#[rustler::nif(name = "verify_credential_v2_acceptance_at", schedule = "DirtyCpu")]
+pub fn verify_credential_v2_acceptance_at_nif<'a>(
+    env: Env<'a>,
+    profile_bytes: Binary<'a>,
+    signed_offer: Binary<'a>,
+    raw_grant_value: Binary<'a>,
+    raw_resolver_closure: Binary<'a>,
+    resolver_evidence: Term<'a>,
+    payload_digest_value: Binary<'a>,
+    migration_confirmation_digest_value: Binary<'a>,
+    issuer_did_value: Binary<'a>,
+    grant_id_value: Binary<'a>,
+    staging_receipt: Binary<'a>,
+    receipt_recovery_commitment_value: Binary<'a>,
+    verification_now: u64,
+    finalized_at: u64,
+    signing_kid: Binary<'a>,
+    signing_seed: Binary<'a>,
+) -> Term<'a> {
+    verify_credential_v2_acceptance_inner(
+        env,
+        profile_bytes,
+        signed_offer,
+        raw_grant_value,
+        raw_resolver_closure,
+        resolver_evidence,
+        payload_digest_value,
+        migration_confirmation_digest_value,
+        issuer_did_value,
+        grant_id_value,
+        staging_receipt,
+        receipt_recovery_commitment_value,
+        verification_now,
+        finalized_at,
+        signing_kid,
+        signing_seed,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn verify_credential_v2_acceptance_inner<'a>(
+    env: Env<'a>,
+    profile_bytes: Binary<'a>,
+    signed_offer: Binary<'a>,
+    raw_grant_value: Binary<'a>,
+    raw_resolver_closure: Binary<'a>,
+    resolver_evidence: Term<'a>,
+    payload_digest_value: Binary<'a>,
+    migration_confirmation_digest_value: Binary<'a>,
+    issuer_did_value: Binary<'a>,
+    grant_id_value: Binary<'a>,
+    staging_receipt: Binary<'a>,
+    receipt_recovery_commitment_value: Binary<'a>,
+    verification_now: u64,
+    finalized_at: u64,
+    signing_kid: Binary<'a>,
+    signing_seed: Binary<'a>,
+) -> Term<'a> {
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        if finalized_at > verification_now {
+            return Err(String::from(REFUSED));
+        }
         if raw_grant_value.as_slice().is_empty()
             || raw_grant_value.as_slice().len() > 49_152
             || raw_resolver_closure.as_slice().is_empty()
@@ -635,7 +723,7 @@ pub fn verify_credential_v2_acceptance_nif<'a>(
             &profile,
             &issuer_did,
             raw_resolver_closure.as_slice(),
-            i64::try_from(finalized_at).map_err(|_| String::from(REFUSED))?,
+            i64::try_from(verification_now).map_err(|_| String::from(REFUSED))?,
         )?;
         let offer = recognise_signed_offer(&profile, signed_offer.as_slice())
             .map_err(|_| String::from(REFUSED))?;
@@ -649,7 +737,7 @@ pub fn verify_credential_v2_acceptance_nif<'a>(
             &account,
             &device_public_key,
             offer.claims.permissions(),
-            i64::try_from(finalized_at).map_err(|_| String::from(REFUSED))?,
+            i64::try_from(verification_now).map_err(|_| String::from(REFUSED))?,
             0,
             raw_grant_value.as_slice(),
             &closures,
