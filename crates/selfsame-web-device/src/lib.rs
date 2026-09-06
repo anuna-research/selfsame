@@ -328,6 +328,9 @@ fn live_effects_json(effects: &[selfsame_pairing::live::LiveEffect]) -> String {
 const V2_ALLOCATOR_CHECKPOINT_INFO: &[u8] =
     b"cbcl-chat credential/v2 allocator checkpoint wrapping v1";
 
+mod credential_v2_closure;
+pub use credential_v2_closure::CredentialV2BrowserAllocatorClosureInspection;
+
 /// Distinct browser allocator for standalone credential/v2 pairing.
 ///
 /// This surface cannot select credential/v1. It returns a closed JSON effect
@@ -350,12 +353,11 @@ pub struct CredentialV2BrowserAllocatorSession {
     authority_response: Option<Vec<u8>>,
     body_authority: selfsame_pairing::credential_v2::CredentialV2BodyAuthority,
     last_received_object: Option<cbcl_pairing::credential_v2::CredentialV2Object>,
-    presence_code: Option<Zeroizing<String>>,
 }
 
 #[wasm_bindgen]
 impl CredentialV2BrowserAllocatorSession {
-    /// Construct a v2 attempt from a recognised live profile and shell CSPRNG bytes.
+    /// Construct Full mode with independent 16-octet C and T from the shell CSPRNG.
     #[wasm_bindgen(constructor)]
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -372,37 +374,8 @@ impl CredentialV2BrowserAllocatorSession {
         expected_allocator_key: &[u8],
         installation_seed: &[u8],
     ) -> Result<CredentialV2BrowserAllocatorSession, JsError> {
-        let profile = ApplicationProfile::recognise(profile)
-            .map_err(|_| JsError::new("the credential/v2 application profile was refused"))?;
-        if !profile
-            .cbcl_pairing_relays
-            .iter()
-            .any(|descriptor| descriptor.relay_origin == relay_origin)
-        {
-            return Err(JsError::new(
-                "the credential/v2 relay is absent from the application profile",
-            ));
-        }
-        let mailbox_id = fixed_browser_bytes(mailbox_id, "mailbox ID")?;
-        let carrier_ceremony_id = fixed_browser_bytes(carrier_ceremony_id, "carrier ceremony ID")?;
-        let carrier_nonce = fixed_browser_bytes(carrier_nonce, "carrier nonce")?;
-        let cpace_secret = fixed_browser_bytes(cpace_secret, "CPace presence secret")?;
-        let claim_token = fixed_browser_bytes(claim_token, "relay claim token")?;
-        let presence_code =
-            cbcl_pairing::credential_v2::CredentialV2PresenceCode::new(cpace_secret, claim_token)
-                .to_string();
-        let cpace_scalar = fixed_browser_bytes(cpace_scalar, "CPace scalar")?;
-        let request_id = fixed_browser_bytes(request_id, "request ID")?;
-        let intent_nonce = fixed_browser_bytes(intent_nonce, "intent nonce")?;
-        let expected_allocator_key = fixed_browser_bytes(expected_allocator_key, "allocator key")?;
-        let installation_seed: [u8; 32] =
-            fixed_browser_bytes(installation_seed, "installation seed")?;
-        let mut wrapping_key = [0_u8; 32];
-        hkdf::Hkdf::<sha2::Sha512>::new(Some(&carrier_ceremony_id), &installation_seed)
-            .expand(V2_ALLOCATOR_CHECKPOINT_INFO, &mut wrapping_key)
-            .map_err(|_| JsError::new("credential/v2 checkpoint key derivation failed"))?;
-        let input = cbcl_pairing::credential_v2::CredentialV2AllocatorSessionInput {
-            application_context: profile.application_id.as_str().into(),
+        Self::new_inner(
+            profile,
             relay_origin,
             mailbox_id,
             carrier_ceremony_id,
@@ -410,38 +383,54 @@ impl CredentialV2BrowserAllocatorSession {
             cpace_secret,
             claim_token,
             cpace_scalar,
-            profile_digest: *profile.digest(),
-            expected_allocator_key: Some(expected_allocator_key),
-            checkpoint_wrapping_key: wrapping_key,
-        };
-        let (body_authority, body_verifier) =
-            selfsame_pairing::credential_v2::credential_v2_body_authority();
-        let session = cbcl_pairing::credential_v2::CredentialV2AllocatorSession::new(
-            input,
-            Box::new(body_verifier),
-        )
-        .map_err(|_| JsError::new("the credential/v2 allocator attempt was refused"))?;
-        Ok(Self {
-            session: Some(session),
-            profile,
             request_id,
             intent_nonce,
-            carrier_ceremony_id,
             expected_allocator_key,
-            transcript_hash: None,
-            prepared_offer_core: None,
-            prepared_offer_digest: None,
-            offer_kid: None,
-            authority_status: None,
-            authority_response: None,
-            body_authority,
-            last_received_object: None,
-            presence_code: Some(Zeroizing::new(presence_code)),
-        })
+            installation_seed,
+            cbcl_pairing::credential_v2::CredentialV2AllocatorMode::Full,
+        )
+        .map_err(|error| JsError::new(&error))
     }
 
-    /// Restore one exact allocator checkpoint under its persisted carrier,
-    /// generation, authenticated profile and installation seed.
+    /// Construct Manual mode. The presence position takes exactly four CSPRNG
+    /// octets; only the shared word codec maps those bytes to the CPace secret.
+    #[wasm_bindgen(js_name = new_manual)]
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_manual(
+        profile: &[u8],
+        relay_origin: String,
+        mailbox_id: &[u8],
+        carrier_ceremony_id: &[u8],
+        carrier_nonce: &[u8],
+        manual_word_randomness: &[u8],
+        claim_token: &[u8],
+        cpace_scalar: &[u8],
+        request_id: &[u8],
+        intent_nonce: &[u8],
+        expected_allocator_key: &[u8],
+        installation_seed: &[u8],
+    ) -> Result<CredentialV2BrowserAllocatorSession, JsError> {
+        Self::new_inner(
+            profile,
+            relay_origin,
+            mailbox_id,
+            carrier_ceremony_id,
+            carrier_nonce,
+            manual_word_randomness,
+            claim_token,
+            cpace_scalar,
+            request_id,
+            intent_nonce,
+            expected_allocator_key,
+            installation_seed,
+            cbcl_pairing::credential_v2::CredentialV2AllocatorMode::Manual,
+        )
+        .map_err(|error| JsError::new(&error))
+    }
+
+    /// Restore one authenticated checkpoint with an explicit exact mode and
+    /// fresh shell CSPRNG scalar on every call. Peer-bound state retains its
+    /// authenticated scalar and cached response instead of using the fresh one.
     #[wasm_bindgen(js_name = restore)]
     #[allow(clippy::too_many_arguments)]
     pub fn restore(
@@ -454,69 +443,76 @@ impl CredentialV2BrowserAllocatorSession {
         expected_allocator_key: &[u8],
         installation_seed: &[u8],
         now: u64,
+        mode: String,
+        fresh_cpace_scalar: &[u8],
     ) -> Result<CredentialV2BrowserAllocatorSession, JsError> {
-        let profile = ApplicationProfile::recognise(profile)
-            .map_err(|_| JsError::new("the credential/v2 application profile was refused"))?;
-        let carrier = cbcl_pairing::credential_v2::decode_carrier(carrier)
-            .map_err(|_| JsError::new("the credential/v2 carrier was refused"))?;
-        let request_id = fixed_browser_bytes(request_id, "request ID")?;
-        let intent_nonce = fixed_browser_bytes(intent_nonce, "intent nonce")?;
-        let expected_allocator_key = fixed_browser_bytes(expected_allocator_key, "allocator key")?;
-        let installation_seed: [u8; 32] =
-            fixed_browser_bytes(installation_seed, "installation seed")?;
-        if generation == 0
-            || carrier.application_context() != profile.application_id.as_str()
-            || carrier.expected_allocator_key() != Some(&expected_allocator_key)
-        {
-            return Err(JsError::new(
-                "the credential/v2 checkpoint binding was refused",
-            ));
-        }
-        let mut wrapping_key = [0_u8; 32];
-        hkdf::Hkdf::<sha2::Sha512>::new(Some(carrier.carrier_ceremony_id()), &installation_seed)
-            .expand(V2_ALLOCATOR_CHECKPOINT_INFO, &mut wrapping_key)
-            .map_err(|_| JsError::new("credential/v2 checkpoint key derivation failed"))?;
-        let (body_authority, body_verifier) =
-            selfsame_pairing::credential_v2::credential_v2_body_authority_for_restore(
-                profile.clone(),
-            );
-        let session = cbcl_pairing::credential_v2::CredentialV2AllocatorSession::restore(
-            checkpoint,
-            &wrapping_key,
-            carrier.clone(),
-            generation,
-            *profile.digest(),
-            now,
-            Box::new(body_verifier),
-        )
-        .map_err(|_| JsError::new("the credential/v2 allocator checkpoint was refused"))?;
-        let transcript_hash = session.transcript_hash();
-        let last_received_object = session
-            .last_received_object()
-            .map_err(|_| JsError::new("the credential/v2 restored object was refused"))?;
-        if let Some(object) = last_received_object.as_ref() {
-            body_authority
-                .restore_retained_received_object(object)
-                .map_err(|_| JsError::new("the credential/v2 retained body was refused"))?;
-        }
-        let presence_code = session.presence_code().map(Zeroizing::new);
-        Ok(Self {
-            session: Some(session),
+        Self::restore_inner(
             profile,
+            carrier,
+            checkpoint,
+            generation,
             request_id,
             intent_nonce,
-            carrier_ceremony_id: *carrier.carrier_ceremony_id(),
             expected_allocator_key,
-            transcript_hash,
-            prepared_offer_core: None,
-            prepared_offer_digest: None,
-            offer_kid: None,
-            authority_status: None,
-            authority_response: None,
-            body_authority,
-            last_received_object,
-            presence_code,
-        })
+            installation_seed,
+            now,
+            mode,
+            fresh_cpace_scalar,
+        )
+        .map_err(|error| JsError::new(&error))
+    }
+
+    /// Inspect authenticated saved state, including elapsed expiry, without
+    /// restoring a live allocator or granting relay or issuance authority.
+    #[wasm_bindgen(js_name = restore_for_closure)]
+    #[allow(clippy::too_many_arguments)]
+    pub fn restore_for_closure(
+        profile: &[u8],
+        carrier: &[u8],
+        checkpoint: &[u8],
+        generation: u64,
+        request_id: &[u8],
+        intent_nonce: &[u8],
+        expected_allocator_key: &[u8],
+        installation_seed: &[u8],
+        now: u64,
+        mode: String,
+    ) -> Result<CredentialV2BrowserAllocatorClosureInspection, JsError> {
+        CredentialV2BrowserAllocatorClosureInspection::restore_inner(
+            profile,
+            carrier,
+            checkpoint,
+            generation,
+            request_id,
+            intent_nonce,
+            expected_allocator_key,
+            installation_seed,
+            now,
+            mode,
+        )
+        .map_err(|error| JsError::new(&error))
+    }
+
+    /// Authenticated live bootstrap mode only; established and terminal state
+    /// grants no mode or bootstrap capability. Never infer a mode from C.
+    pub fn bootstrap_mode(&self) -> Option<String> {
+        self.session
+            .as_ref()
+            .and_then(|session| session.bootstrap_mode())
+            .map(|mode| {
+                match mode {
+                    cbcl_pairing::credential_v2::CredentialV2AllocatorMode::Full => "full",
+                    cbcl_pairing::credential_v2::CredentialV2AllocatorMode::Manual => "manual",
+                }
+                .into()
+            })
+    }
+
+    /// Private transfer only. Reconstructed from live core on each call, with
+    /// exactly bootstrap/words JSON fields and no retained adapter string cache.
+    /// The shell gates display on checkpoint/hub commits and the earlier deadline.
+    pub fn manual_transfer_text(&self) -> Result<Option<String>, JsError> {
+        self.manual_transfer_text_inner().map_err(JsError::new)
     }
 
     /// Return the restored endpoint phase, or `bootstrap` before Finished.
@@ -554,12 +550,20 @@ impl CredentialV2BrowserAllocatorSession {
         .into()
     }
 
+    /// Reconstruct confidential scan material from this exact live core session.
+    /// The caller releases it only after durable hub allocation and clears it at
+    /// the earlier hub/relay deadline. Consumed T cannot be reconstructed here.
+    pub fn handoff_text(&self) -> Result<Option<String>, JsError> {
+        self.handoff_text_inner()
+            .map_err(|error| JsError::new(&error))
+    }
+
     /// Return the restored one-use presence code while the claim token remains
     /// sealed in the allocator bootstrap checkpoint.
     pub fn restored_presence_code(&self) -> Option<String> {
-        self.presence_code
+        self.session
             .as_ref()
-            .map(|value| value.as_str().to_string())
+            .and_then(|session| session.presence_code())
     }
 
     /// Re-validate and retain public hub offer facts needed by the browser
@@ -577,18 +581,43 @@ impl CredentialV2BrowserAllocatorSession {
         authority_digest: &[u8],
         now: u64,
     ) -> Result<(), JsError> {
+        self.restore_offer_context_inner(
+            raw_carrier,
+            offer_core,
+            offer_core_digest,
+            pending_expires_at,
+            signed_offer,
+            authority_response,
+            authority_digest,
+            now,
+        )
+        .map_err(|error| JsError::new(&error))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn restore_offer_context_inner(
+        &mut self,
+        raw_carrier: &[u8],
+        offer_core: &[u8],
+        offer_core_digest: &[u8],
+        pending_expires_at: u64,
+        signed_offer: &[u8],
+        authority_response: &[u8],
+        authority_digest: &[u8],
+        now: u64,
+    ) -> Result<(), String> {
         if now >= pending_expires_at {
-            return Err(JsError::new("the credential/v2 restored offer expired"));
+            return Err("the credential/v2 restored offer expired".into());
         }
         let carrier = cbcl_pairing::credential_v2::decode_carrier(raw_carrier)
-            .map_err(|_| JsError::new("the credential/v2 carrier was refused"))?;
+            .map_err(|_| "the credential/v2 carrier was refused".to_owned())?;
         let supplied_digest: [u8; 32] =
-            fixed_browser_bytes(offer_core_digest, "offer-core digest")?;
+            fixed_browser_bytes_inner(offer_core_digest, "offer-core digest")?;
         let supplied_authority_digest: [u8; 32] =
-            fixed_browser_bytes(authority_digest, "authority-status digest")?;
+            fixed_browser_bytes_inner(authority_digest, "authority-status digest")?;
         let recognised =
             selfsame_pairing::credential_v2::recognise_signed_offer(&self.profile, signed_offer)
-                .map_err(|_| JsError::new("the credential/v2 signed offer was refused"))?;
+                .map_err(|_| "the credential/v2 signed offer was refused".to_owned())?;
         if carrier.carrier_ceremony_id() != &self.carrier_ceremony_id
             || carrier.application_context() != self.profile.application_id.as_str()
             || recognised.offer_core.as_slice() != offer_core
@@ -599,9 +628,7 @@ impl CredentialV2BrowserAllocatorSession {
             || recognised.expires_at != pending_expires_at
             || <[u8; 32]>::from(Sha256::digest(authority_response)) != supplied_authority_digest
         {
-            return Err(JsError::new(
-                "the credential/v2 restored offer binding was refused",
-            ));
+            return Err("the credential/v2 restored offer binding was refused".into());
         }
         let status = selfsame_pairing::credential_v2::recognise_authority_status_response(
             &self.profile,
@@ -610,7 +637,7 @@ impl CredentialV2BrowserAllocatorSession {
             self.carrier_ceremony_id,
             supplied_digest,
         )
-        .map_err(|_| JsError::new("the credential/v2 signed authority was refused"))?;
+        .map_err(|_| "the credential/v2 signed authority was refused".to_owned())?;
         if !matches!(
             self.session
                 .as_ref()
@@ -619,7 +646,7 @@ impl CredentialV2BrowserAllocatorSession {
         ) {
             self.body_authority
                 .require_bound_offer(&self.profile, &recognised)
-                .map_err(|_| JsError::new("the restored body authority was refused"))?;
+                .map_err(|_| "the restored body authority was refused".to_owned())?;
         }
         self.prepared_offer_core = Some(offer_core.to_vec());
         self.prepared_offer_digest = Some(supplied_digest);
@@ -642,7 +669,10 @@ impl CredentialV2BrowserAllocatorSession {
             &self.request_id,
             &self.intent_nonce,
             &self.carrier_ceremony_id,
-            self.presence_code.as_ref().map(|value| value.as_str()),
+            self.restored_presence_code()
+                .map(Zeroizing::new)
+                .as_deref()
+                .map(String::as_str),
         ))
     }
 
@@ -653,47 +683,14 @@ impl CredentialV2BrowserAllocatorSession {
         now: u64,
         checkpoint_nonce: &[u8],
     ) -> Result<String, JsError> {
-        let checkpoint_nonce: [u8; 12] = fixed_browser_bytes(checkpoint_nonce, "checkpoint nonce")?;
-        let effects = self
-            .session
-            .as_mut()
-            .ok_or_else(|| JsError::new("the credential/v2 attempt was cancelled"))?
-            .receive(
-                input,
-                now,
-                cbcl_pairing::credential_v2::CredentialV2CheckpointNonce::from_csprng(
-                    checkpoint_nonce,
-                ),
-            )
-            .map_err(|_| JsError::new("the credential/v2 relay message was refused"))?;
-        self.capture_allocator_effects(&effects)?;
-        Ok(v2_allocator_effects_json(
-            &effects,
-            &self.request_id,
-            &self.intent_nonce,
-            &self.carrier_ceremony_id,
-            self.presence_code.as_ref().map(|value| value.as_str()),
-        ))
+        self.receive_inner(input, now, checkpoint_nonce)
+            .map_err(|error| JsError::new(&error))
     }
 
     /// Confirm one durable checkpoint and release only its covered effects.
     pub fn checkpoint_persisted(&mut self, generation: u64) -> Result<String, JsError> {
-        let effects = self
-            .session
-            .as_mut()
-            .ok_or_else(|| JsError::new("the credential/v2 attempt was cancelled"))?
-            .checkpoint_persisted(generation)
-            .map_err(|_| {
-                JsError::new("the credential/v2 checkpoint acknowledgement was refused")
-            })?;
-        self.capture_allocator_effects(&effects)?;
-        Ok(v2_allocator_effects_json(
-            &effects,
-            &self.request_id,
-            &self.intent_nonce,
-            &self.carrier_ceremony_id,
-            self.presence_code.as_ref().map(|value| value.as_str()),
-        ))
+        self.checkpoint_persisted_inner(generation)
+            .map_err(|error| JsError::new(&error))
     }
 
     /// Return the public receipt-recovery commitment after the protected
@@ -846,7 +843,10 @@ impl CredentialV2BrowserAllocatorSession {
             &self.request_id,
             &self.intent_nonce,
             &self.carrier_ceremony_id,
-            self.presence_code.as_ref().map(|value| value.as_str()),
+            self.restored_presence_code()
+                .map(Zeroizing::new)
+                .as_deref()
+                .map(String::as_str),
         ))
     }
 
@@ -891,7 +891,10 @@ impl CredentialV2BrowserAllocatorSession {
             &self.request_id,
             &self.intent_nonce,
             &self.carrier_ceremony_id,
-            self.presence_code.as_ref().map(|value| value.as_str()),
+            self.restored_presence_code()
+                .map(Zeroizing::new)
+                .as_deref()
+                .map(String::as_str),
         ))
     }
 
@@ -1079,32 +1082,31 @@ impl CredentialV2BrowserAllocatorSession {
             &self.request_id,
             &self.intent_nonce,
             &self.carrier_ceremony_id,
-            self.presence_code.as_ref().map(|value| value.as_str()),
+            self.restored_presence_code()
+                .map(Zeroizing::new)
+                .as_deref()
+                .map(String::as_str),
         ))
     }
 
     /// Burn the local attempt without releasing another protocol frame.
     pub fn cancel(&mut self) -> String {
         self.session = None;
-        self.presence_code = None;
         r#"[{"outcome":"cancelled","type":"terminal"}]"#.into()
     }
 
     fn capture_allocator_effects(
         &mut self,
         effects: &[cbcl_pairing::credential_v2::CredentialV2AllocatorEffect],
-    ) -> Result<(), JsError> {
+    ) -> Result<(), String> {
         for effect in effects {
             match effect {
                 cbcl_pairing::credential_v2::CredentialV2AllocatorEffect::Established {
                     transcript_hash,
                 } => {
                     if self.transcript_hash.replace(*transcript_hash).is_some() {
-                        return Err(JsError::new(
-                            "the credential/v2 transcript was established twice",
-                        ));
+                        return Err("the credential/v2 transcript was established twice".to_owned());
                     }
-                    self.presence_code = None;
                 }
                 cbcl_pairing::credential_v2::CredentialV2AllocatorEffect::ReceivedObject {
                     object,
@@ -1155,15 +1157,296 @@ impl CredentialV2BrowserAllocatorSession {
     }
 }
 
+// Native-testable error boundary. JsError is constructed only by the exports.
+impl CredentialV2BrowserAllocatorSession {
+    #[allow(clippy::too_many_arguments)]
+    fn new_inner(
+        profile: &[u8],
+        relay_origin: String,
+        mailbox_id: &[u8],
+        carrier_ceremony_id: &[u8],
+        carrier_nonce: &[u8],
+        cpace_secret: &[u8],
+        claim_token: &[u8],
+        cpace_scalar: &[u8],
+        request_id: &[u8],
+        intent_nonce: &[u8],
+        expected_allocator_key: &[u8],
+        installation_seed: &[u8],
+        mode: cbcl_pairing::credential_v2::CredentialV2AllocatorMode,
+    ) -> Result<CredentialV2BrowserAllocatorSession, String> {
+        let profile = ApplicationProfile::recognise(profile)
+            .map_err(|_| "the credential/v2 application profile was refused".to_owned())?;
+        if !profile
+            .cbcl_pairing_relays
+            .iter()
+            .any(|descriptor| descriptor.relay_origin == relay_origin)
+        {
+            return Err(
+                "the credential/v2 relay is absent from the application profile".to_owned(),
+            );
+        }
+        let mailbox_id = fixed_browser_bytes_inner(mailbox_id, "mailbox ID")?;
+        let carrier_ceremony_id =
+            fixed_browser_bytes_inner(carrier_ceremony_id, "carrier ceremony ID")?;
+        let carrier_nonce = fixed_browser_bytes_inner(carrier_nonce, "carrier nonce")?;
+        let cpace_secret = match mode {
+            cbcl_pairing::credential_v2::CredentialV2AllocatorMode::Full => {
+                fixed_browser_bytes_inner(cpace_secret, "CPace presence secret")?
+            }
+            cbcl_pairing::credential_v2::CredentialV2AllocatorMode::Manual => {
+                let entropy: [u8; 4] =
+                    fixed_browser_bytes_inner(cpace_secret, "manual word randomness")?;
+                *cbcl_pairing::credential_v2::CredentialV2ManualWords::from_csprng(entropy)
+                    .cpace_secret()
+            }
+        };
+        let claim_token = fixed_browser_bytes_inner(claim_token, "relay claim token")?;
+        let cpace_scalar = fixed_browser_bytes_inner(cpace_scalar, "CPace scalar")?;
+        let request_id = fixed_browser_bytes_inner(request_id, "request ID")?;
+        let intent_nonce = fixed_browser_bytes_inner(intent_nonce, "intent nonce")?;
+        let expected_allocator_key =
+            fixed_browser_bytes_inner(expected_allocator_key, "allocator key")?;
+        let installation_seed: [u8; 32] =
+            fixed_browser_bytes_inner(installation_seed, "installation seed")?;
+        let mut wrapping_key = [0_u8; 32];
+        hkdf::Hkdf::<sha2::Sha512>::new(Some(&carrier_ceremony_id), &installation_seed)
+            .expand(V2_ALLOCATOR_CHECKPOINT_INFO, &mut wrapping_key)
+            .map_err(|_| "credential/v2 checkpoint key derivation failed".to_owned())?;
+        let input = cbcl_pairing::credential_v2::CredentialV2AllocatorSessionInput {
+            application_context: profile.application_id.as_str().into(),
+            relay_origin,
+            mailbox_id,
+            carrier_ceremony_id,
+            carrier_nonce,
+            mode,
+            cpace_secret,
+            claim_token,
+            cpace_scalar,
+            profile_digest: *profile.digest(),
+            expected_allocator_key: Some(expected_allocator_key),
+            checkpoint_wrapping_key: wrapping_key,
+        };
+        let (body_authority, body_verifier) =
+            selfsame_pairing::credential_v2::credential_v2_body_authority();
+        let session = cbcl_pairing::credential_v2::CredentialV2AllocatorSession::new(
+            input,
+            Box::new(body_verifier),
+        )
+        .map_err(|_| "the credential/v2 allocator attempt was refused".to_owned())?;
+        Ok(Self {
+            session: Some(session),
+            profile,
+            request_id,
+            intent_nonce,
+            carrier_ceremony_id,
+            expected_allocator_key,
+            transcript_hash: None,
+            prepared_offer_core: None,
+            prepared_offer_digest: None,
+            offer_kid: None,
+            authority_status: None,
+            authority_response: None,
+            body_authority,
+            last_received_object: None,
+        })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn restore_inner(
+        profile: &[u8],
+        carrier: &[u8],
+        checkpoint: &[u8],
+        generation: u64,
+        request_id: &[u8],
+        intent_nonce: &[u8],
+        expected_allocator_key: &[u8],
+        installation_seed: &[u8],
+        now: u64,
+        mode: String,
+        fresh_cpace_scalar: &[u8],
+    ) -> Result<CredentialV2BrowserAllocatorSession, String> {
+        // No legacy ABI or scalar default: recognize both inputs on every restore,
+        // including established checkpoints (which grant no bootstrap capability).
+        let mode = match mode.as_str() {
+            "full" => cbcl_pairing::credential_v2::CredentialV2AllocatorMode::Full,
+            "manual" => cbcl_pairing::credential_v2::CredentialV2AllocatorMode::Manual,
+            _ => return Err("the credential/v2 allocator mode was refused".into()),
+        };
+        let fresh_cpace_scalar: [u8; 32] =
+            fixed_browser_bytes_inner(fresh_cpace_scalar, "fresh CPace scalar")?;
+        let profile = ApplicationProfile::recognise(profile)
+            .map_err(|_| "the credential/v2 application profile was refused".to_owned())?;
+        let carrier = cbcl_pairing::credential_v2::decode_carrier(carrier)
+            .map_err(|_| "the credential/v2 carrier was refused".to_owned())?;
+        let request_id = fixed_browser_bytes_inner(request_id, "request ID")?;
+        let intent_nonce = fixed_browser_bytes_inner(intent_nonce, "intent nonce")?;
+        let expected_allocator_key =
+            fixed_browser_bytes_inner(expected_allocator_key, "allocator key")?;
+        let installation_seed: [u8; 32] =
+            fixed_browser_bytes_inner(installation_seed, "installation seed")?;
+        if generation == 0
+            || carrier.application_context() != profile.application_id.as_str()
+            || carrier.expected_allocator_key() != Some(&expected_allocator_key)
+        {
+            return Err("the credential/v2 checkpoint binding was refused".to_owned());
+        }
+        let mut wrapping_key = [0_u8; 32];
+        hkdf::Hkdf::<sha2::Sha512>::new(Some(carrier.carrier_ceremony_id()), &installation_seed)
+            .expand(V2_ALLOCATOR_CHECKPOINT_INFO, &mut wrapping_key)
+            .map_err(|_| "credential/v2 checkpoint key derivation failed".to_owned())?;
+        let (body_authority, body_verifier) =
+            selfsame_pairing::credential_v2::credential_v2_body_authority_for_restore(
+                profile.clone(),
+            );
+        let session = cbcl_pairing::credential_v2::CredentialV2AllocatorSession::restore(
+            checkpoint,
+            &wrapping_key,
+            carrier.clone(),
+            generation,
+            *profile.digest(),
+            now,
+            mode,
+            fresh_cpace_scalar,
+            Box::new(body_verifier),
+        )
+        .map_err(|_| "the credential/v2 allocator checkpoint was refused".to_owned())?;
+        let transcript_hash = session.transcript_hash();
+        let last_received_object = session
+            .last_received_object()
+            .map_err(|_| "the credential/v2 restored object was refused".to_owned())?;
+        if let Some(object) = last_received_object.as_ref() {
+            body_authority
+                .restore_retained_received_object(object)
+                .map_err(|_| "the credential/v2 retained body was refused".to_owned())?;
+        }
+        Ok(Self {
+            session: Some(session),
+            profile,
+            request_id,
+            intent_nonce,
+            carrier_ceremony_id: *carrier.carrier_ceremony_id(),
+            expected_allocator_key,
+            transcript_hash,
+            prepared_offer_core: None,
+            prepared_offer_digest: None,
+            offer_kid: None,
+            authority_status: None,
+            authority_response: None,
+            body_authority,
+            last_received_object,
+        })
+    }
+
+    fn handoff_text_inner(&self) -> Result<Option<String>, String> {
+        let Some(session) = self.session.as_ref() else {
+            return Ok(None);
+        };
+        session
+            .handoff_text()
+            .map(|text| text.map(|value| value.as_str().to_owned()))
+            .map_err(|_| "the pairing invitation was refused".to_owned())
+    }
+
+    fn receive_inner(
+        &mut self,
+        input: &[u8],
+        now: u64,
+        checkpoint_nonce: &[u8],
+    ) -> Result<String, String> {
+        let checkpoint_nonce: [u8; 12] =
+            fixed_browser_bytes_inner(checkpoint_nonce, "checkpoint nonce")?;
+        let effects = self
+            .session
+            .as_mut()
+            .ok_or_else(|| "the credential/v2 attempt was cancelled".to_owned())?
+            .receive(
+                input,
+                now,
+                cbcl_pairing::credential_v2::CredentialV2CheckpointNonce::from_csprng(
+                    checkpoint_nonce,
+                ),
+            )
+            .map_err(|_| "the credential/v2 relay message was refused".to_owned())?;
+        self.capture_allocator_effects(&effects)?;
+        Ok(v2_allocator_effects_json(
+            &effects,
+            &self.request_id,
+            &self.intent_nonce,
+            &self.carrier_ceremony_id,
+            self.restored_presence_code()
+                .map(Zeroizing::new)
+                .as_deref()
+                .map(String::as_str),
+        ))
+    }
+
+    fn checkpoint_persisted_inner(&mut self, generation: u64) -> Result<String, String> {
+        let effects = self
+            .session
+            .as_mut()
+            .ok_or_else(|| "the credential/v2 attempt was cancelled".to_owned())?
+            .checkpoint_persisted(generation)
+            .map_err(|_| "the credential/v2 checkpoint acknowledgement was refused".to_owned())?;
+        self.capture_allocator_effects(&effects)?;
+        Ok(v2_allocator_effects_json(
+            &effects,
+            &self.request_id,
+            &self.intent_nonce,
+            &self.carrier_ceremony_id,
+            self.restored_presence_code()
+                .map(Zeroizing::new)
+                .as_deref()
+                .map(String::as_str),
+        ))
+    }
+
+    fn manual_transfer_text_inner(&self) -> Result<Option<String>, &'static str> {
+        let Some(session) = self.session.as_ref() else {
+            return Ok(None);
+        };
+        let Some((bootstrap, words)) = session
+            .manual_transfer_text()
+            .map_err(|_| "the pairing invitation was refused")?
+        else {
+            return Ok(None);
+        };
+        // Borrow the zeroizing core strings so serialization creates only the
+        // intentional private return value, not another native secret cache.
+        #[derive(serde::Serialize)]
+        struct Transfer<'a> {
+            bootstrap: &'a str,
+            words: &'a str,
+        }
+        serde_json::to_string(&Transfer {
+            bootstrap: &bootstrap,
+            words: &words,
+        })
+        .map(Some)
+        .map_err(|_| "the pairing invitation was refused")
+    }
+}
+
 fn fixed_browser_bytes<const LENGTH: usize>(
     value: &[u8],
     label: &str,
 ) -> Result<[u8; LENGTH], JsError> {
-    value.try_into().map_err(|_| {
-        JsError::new(&format!(
-            "the credential/v2 {label} is exactly {LENGTH} octets"
-        ))
-    })
+    fixed_browser_bytes_inner(value, label).map_err(|error| JsError::new(&error))
+}
+
+fn fixed_browser_bytes_inner<const LENGTH: usize>(
+    value: &[u8],
+    label: &str,
+) -> Result<[u8; LENGTH], String> {
+    value
+        .try_into()
+        .map_err(|_| format!("the credential/v2 {label} is exactly {LENGTH} octets"))
+}
+
+/// ABI capability gate for all allocator starts/restores, including Full mode.
+#[wasm_bindgen]
+pub fn cbcl_allocator_api_version() -> u32 {
+    2
 }
 
 fn v2_allocator_effects_json(
@@ -1217,6 +1500,56 @@ fn v2_allocator_effects_json(
         })
         .collect::<Vec<_>>();
     serde_json::Value::Array(values).to_string()
+}
+
+/// Read the public carrier's original deadline through the shared recognizer.
+/// Browser display uses this alongside the authenticated hub deadline.
+#[wasm_bindgen]
+pub fn cbcl_carrier_relay_expires_at(carrier: &[u8]) -> Result<u64, JsError> {
+    cbcl_pairing::credential_v2::decode_carrier(carrier)
+        .map(|carrier| carrier.relay_expires_at())
+        .map_err(|_| JsError::new("the pairing invitation was refused"))
+}
+
+// SPEC-077 TEST-005: a pure boundary keeps recognition/capacity errors testable
+// natively, without constructing a JavaScript exception outside WASM.
+fn handoff_qr_modules_json(handoff: &str) -> Result<String, &'static str> {
+    let _: cbcl_pairing::credential_v2::CredentialV2Handoff = handoff
+        .parse()
+        .map_err(|_| "the pairing invitation was refused")?;
+    transfer_qr_modules_json(handoff)
+}
+
+fn manual_bootstrap_qr_modules_json(text: &str, now: u64) -> Result<String, &'static str> {
+    cbcl_pairing::credential_v2::CredentialV2ManualBootstrap::recognise(text, now)
+        .map_err(|_| "the pairing invitation was refused")?;
+    transfer_qr_modules_json(text)
+}
+
+/// Encode the exact complete text with the existing Q-level implementation.
+/// Capacity failure leaves the caller's private paste text intact.
+fn transfer_qr_modules_json(text: &str) -> Result<String, &'static str> {
+    let code = qrcode::QrCode::with_error_correction_level(text.as_bytes(), qrcode::EcLevel::Q)
+        .map_err(|_| "the pairing invitation does not fit a QR symbol")?;
+    let size = code.width();
+    let dark: Vec<u8> = (0..size)
+        .flat_map(|y| (0..size).map(move |x| (x, y)))
+        .map(|(x, y)| u8::from(code[(x, y)] == qrcode::Color::Dark))
+        .collect();
+    serde_json::to_string(&serde_json::json!({ "size": size, "dark": dark }))
+        .map_err(|_| "the pairing invitation was refused")
+}
+
+/// Render a fully recognized confidential handoff, without another encoding layer.
+#[wasm_bindgen]
+pub fn cbcl_handoff_qr_modules_json(handoff: &str) -> Result<String, JsError> {
+    handoff_qr_modules_json(handoff).map_err(JsError::new)
+}
+
+/// Render a fully recognized, unexpired manual bootstrap as one Q-level QR.
+#[wasm_bindgen]
+pub fn cbcl_manual_bootstrap_qr_modules_json(text: &str, now: u64) -> Result<String, JsError> {
+    manual_bootstrap_qr_modules_json(text, now).map_err(JsError::new)
 }
 
 /// QR module matrix for one complete CBCL invitation carrier.
@@ -3837,3 +4170,140 @@ mod enrolment_allocator_tests {
         assert_eq!(statement.offer_digest, offer.core.digest());
     }
 }
+
+#[cfg(test)]
+mod scan_handoff_tests {
+    use super::handoff_qr_modules_json;
+
+    fn allocated_session() -> super::CredentialV2BrowserAllocatorSession {
+        use cbcl_pairing::wire::{encode_server_message, ServerMessage};
+        let corpus: serde_json::Value =
+            serde_json::from_str(include_str!("../../../test-vectors/spec-004-v1.json")).unwrap();
+        let profile = corpus["con_201_application_profile"][0]["input"]["profile"]
+            .as_str()
+            .unwrap();
+        let mut session = super::CredentialV2BrowserAllocatorSession::new(
+            profile.as_bytes(),
+            "https://cbcl-au.provider.example".into(),
+            &[0x11; 32],
+            &[0x12; 32],
+            &[0x13; 32],
+            &[0x14; 16],
+            &[0x15; 16],
+            &[0x18; 32],
+            &[0x21; 32],
+            &[0x22; 32],
+            &[0x19; 32],
+            &[0x16; 32],
+        )
+        .unwrap();
+        session
+            .receive(
+                &encode_server_message(&ServerMessage::Welcome).unwrap(),
+                1_800_000_000,
+                &[0x31; 12],
+            )
+            .unwrap();
+        session
+            .receive(
+                &encode_server_message(&ServerMessage::AllocatedV2 {
+                    mailbox_id: [0x11; 32],
+                    membership_token: [0x20; 32],
+                    expires_at: 1_800_000_900,
+                })
+                .unwrap(),
+                1_800_000_000,
+                &[0x32; 12],
+            )
+            .unwrap();
+        session.checkpoint_persisted(1).unwrap();
+        assert!(session.handoff_text().unwrap().is_some());
+        assert!(session.restored_presence_code().is_some());
+        session
+    }
+
+    #[test]
+    fn scan_handoff_terminal_and_core_error_erase_every_secret_export() {
+        use cbcl_pairing::wire::{encode_server_message, CloseReason, ServerMessage};
+        for closed in [true, false] {
+            let mut session = allocated_session();
+            let frame = encode_server_message(&if closed {
+                ServerMessage::Closed(CloseReason::Closed)
+            } else {
+                ServerMessage::Welcome
+            })
+            .unwrap();
+            // Execute the same adapter implementation as the export, without
+            // constructing a native JsError on its refusal path.
+            let result = session.receive_inner(&frame, 1_800_000_000, &[0x33; 12]);
+            assert_eq!(result.is_ok(), closed);
+            assert!(session.handoff_text().unwrap().is_none());
+            assert!(
+                session.restored_presence_code().is_none(),
+                "legacy export must follow terminal core state even without effect capture"
+            );
+        }
+    }
+
+    fn vectors() -> serde_json::Value {
+        serde_json::from_str(include_str!("../../../test-vectors/spec-077-handoff.json")).unwrap()
+    }
+
+    #[test]
+    fn scan_handoff_public_deadline_preserves_the_exact_carrier_u64() {
+        let corpus = vectors();
+        for (index, expected) in [1_800_000_900, u64::MAX].into_iter().enumerate() {
+            let handoff: cbcl_pairing::credential_v2::CredentialV2Handoff =
+                corpus[index]["handoff"].as_str().unwrap().parse().unwrap();
+            let carrier = cbcl_pairing::credential_v2::encode_carrier(handoff.carrier()).unwrap();
+            assert_eq!(super::cbcl_carrier_relay_expires_at(&carrier).unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn scan_handoff_normal_invitation_fits_one_qr() {
+        let corpus = vectors();
+        let text = corpus[0]["handoff"].as_str().unwrap();
+        let modules: serde_json::Value =
+            serde_json::from_str(&handoff_qr_modules_json(text).unwrap()).unwrap();
+        let size = modules["size"].as_u64().unwrap() as usize;
+        let dark = modules["dark"].as_array().unwrap();
+        assert!((21..=177).contains(&size));
+        assert_eq!(dark.len(), size * size);
+        assert!(dark
+            .iter()
+            .all(|value| matches!(value.as_u64(), Some(0 | 1))));
+        assert!(dark.iter().any(|value| value.as_u64() == Some(1)));
+    }
+
+    #[test]
+    fn scan_handoff_capacity_refusal_keeps_the_complete_input_intact() {
+        let corpus = vectors();
+        let text = corpus[1]["handoff"].as_str().unwrap();
+        assert_eq!(text.len(), 3691);
+        assert_eq!(
+            handoff_qr_modules_json(text).unwrap_err(),
+            "the pairing invitation does not fit a QR symbol"
+        );
+        assert_eq!(text, corpus[1]["handoff"].as_str().unwrap());
+    }
+
+    #[test]
+    fn scan_handoff_qr_rejects_unrecognized_or_public_input() {
+        for text in [
+            "",
+            "SSPAIR9:invalid",
+            "SSPAIR1:invalid",
+            "https://example.org/",
+            "o2ZyZWxheQ",
+        ] {
+            assert_eq!(
+                handoff_qr_modules_json(text).unwrap_err(),
+                "the pairing invitation was refused"
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod credential_v2_manual_tests;

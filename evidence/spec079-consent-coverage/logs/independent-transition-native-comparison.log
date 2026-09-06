@@ -1,0 +1,36 @@
+   Compiling selfsame v0.1.0 (/Volumes/anuna-03/codex-successor-consent-coverage-closure/selfsame/src-tauri)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 6.31s
+     Running unittests src/lib.rs (/Volumes/anuna-03/codex-selfsame-reconcile-target/debug/deps/selfsame_lib-e46a86733091f9f7)
+
+running 1 test
+test cbcl_v2_commands::single_link::tests::coverage::single_link_valid_mutable_comparison_bindings_refuse_before_effects ... comparison mode=full field=positiveNoBinding successor=true
+comparison mode=full field=boundSame successor=true
+comparison mode=full field=carrierCeremonyId successor=false
+comparison mode=full field=predecessorDigest successor=false
+comparison mode=full field=intentDigest successor=false
+comparison mode=full field=previewIssuerDid successor=false
+comparison mode=full field=previewFingerprintDigest successor=false
+comparison mode=full field=authorityStatusDigest successor=false
+comparison mode=full field=authorityStatusResponse successor=false
+comparison mode=full field=statusOffer successor=false
+comparison mode=full field=statusSignature successor=false
+comparison mode=full field=boundOther successor=false
+comparison mode=full field=kind successor=false
+comparison mode=full field=result successor=false
+comparison mode=manual field=positiveNoBinding successor=true
+comparison mode=manual field=boundSame successor=true
+comparison mode=manual field=carrierCeremonyId successor=false
+comparison mode=manual field=predecessorDigest successor=false
+comparison mode=manual field=intentDigest successor=false
+comparison mode=manual field=previewIssuerDid successor=false
+comparison mode=manual field=previewFingerprintDigest successor=false
+comparison mode=manual field=authorityStatusDigest successor=false
+comparison mode=manual field=authorityStatusResponse successor=false
+comparison mode=manual field=statusOffer successor=false
+comparison mode=manual field=statusSignature successor=false
+comparison mode=manual field=boundOther successor=false
+comparison mode=manual field=kind successor=false
+comparison mode=manual field=result successor=false
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 107 filtered out; finished in 33.32s

@@ -507,6 +507,7 @@ name = "cbcl-pairing"
 version = "0.1.0"
 dependencies = [
  "aes-gcm",
+ "base64ct",
  "bip39",
  "cbcl-core 0.1.0 (git+https://codeberg.org/anuna/cbcl-rs?rev=febc6691e6dd2d5f7116b1a4d84c984b64717564)",
  "cbcl-parser 0.1.0 (git+https://codeberg.org/anuna/cbcl-rs?rev=febc6691e6dd2d5f7116b1a4d84c984b64717564)",
@@ -4190,10 +4191,13 @@ dependencies = [
  "bip39",
  "blake3",
  "cbcl-pairing",
+ "cbor2",
+ "ciborium",
  "did-crdt",
  "ed25519-dalek",
  "hkdf 0.12.4",
  "keyring",
+ "libc",
  "rand 0.8.7",
  "rcgen",
  "reqwest 0.12.28",
@@ -4246,7 +4250,9 @@ dependencies = [
  "did-crdt",
  "ed25519-dalek",
  "http",
+ "rcgen",
  "reqwest 0.12.28",
+ "rustls",
  "selfsame-app-identity",
  "selfsame-core",
  "serde",
@@ -6812,6 +6818,7 @@ version = "1.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e13c156562582aa81c60cb29407084cdb54c4164760106ab78e6c5b0858cf64e"
 dependencies = [
+ "serde",
  "zeroize_derive",
 ]
 

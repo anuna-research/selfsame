@@ -357,16 +357,11 @@ pub async fn assemble_claimant(
 }
 
 #[cfg(test)]
-#[path = "../../crates/selfsame-app-identity/tests/common/mod.rs"]
-mod fixture;
-
-#[cfg(test)]
 mod tests {
     use super::*;
     use crate::cbcl_registry;
+    use crate::fixture;
     use selfsame_app_identity::json::Json;
-
-    use super::fixture;
 
     const ORIGIN: &str = "https://relay.example:9443";
     const OTHER_ORIGIN: &str = "https://other.example:9443";

@@ -1,0 +1,86 @@
+{
+  "base": "3c92cafc6b6d60659ed01f34cb7e770d2d4012dc",
+  "environment": {
+    "CARGO_NET_OFFLINE": "true",
+    "CARGO_TARGET_DIR": "/Volumes/anuna-03/codex-successor-wasm-native-target",
+    "TMPDIR": "/Volumes/anuna-03/codex-scan-native-preview-1/tmp",
+    "CARGO_PROFILE_DEV_DEBUG": "0",
+    "CARGO_PROFILE_TEST_DEBUG": "0",
+    "CARGO_INCREMENTAL": "0"
+  },
+  "results": [
+    {
+      "label": "lib",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "selfsame-web-device",
+        "--lib"
+      ],
+      "exit_code": 0,
+      "summary": [
+        "test result: ok. 51 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.18s"
+      ]
+    },
+    {
+      "label": "credential-v2-allocator-session",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "selfsame-web-device",
+        "--test",
+        "credential_v2_allocator_session"
+      ],
+      "exit_code": 0,
+      "summary": [
+        "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s"
+      ]
+    },
+    {
+      "label": "cbcl-allocator-session",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "selfsame-web-device",
+        "--test",
+        "cbcl_allocator_session"
+      ],
+      "exit_code": 0,
+      "summary": [
+        "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s"
+      ]
+    }
+  ],
+  "pins": {
+    "cbcl-pairing": {
+      "expected": "ffb348d2d840dcc43d6ead2681b5fbf9a886e363",
+      "actual": "ffb348d2d840dcc43d6ead2681b5fbf9a886e363",
+      "status": ""
+    },
+    "cbcl-rs": {
+      "expected": "febc6691e6dd2d5f7116b1a4d84c984b64717564",
+      "actual": "febc6691e6dd2d5f7116b1a4d84c984b64717564",
+      "status": ""
+    },
+    "did-crdt": {
+      "expected": "1f409a4229d07a62dd4cc6b2dce3b5a2e18e78a1",
+      "actual": "1f409a4229d07a62dd4cc6b2dce3b5a2e18e78a1",
+      "status": ""
+    }
+  },
+  "fixture_reproduction": "byte-identical",
+  "source_sha256": {
+    "crates/selfsame-web-device/src/lib.rs": "a8fb68d08079a11d16466d6d46f44bca785d914301ac48904e1d4984eed52f8c",
+    "crates/selfsame-web-device/src/credential_v2_manual_tests.rs": "5928cc88fc055acd433e8b598118d81712a317109f18795af0b498df28c41f58",
+    "crates/selfsame-web-device/tests/credential_v2_allocator_session.rs": "5ea3ad5902da3fe052e274d637c9df458c9185081ad3d4667e1084b5d955f80d",
+    "crates/selfsame-web-device/tests/fixtures/spec078-wasm-manual.json": "b4192e91dac769f7efa813f8c98fa6b1133a0357feef0893648d28fea62839aa",
+    "crates/selfsame-web-device/tests/support/spec078_wasm_manual_vectors.py": "dc74dc11ac85dfdbfe0780f7487e4855abce55886d1493f42f4c77fcdbd5a0c5",
+    "crates/selfsame-web-device/tests/support/spec078_wasm_manual_mutations.py": "87760fc31d5abf6c6740553d6344a857bd20aec6726ee5d9c7e369f56f7d8b88"
+  }
+}

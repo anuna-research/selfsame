@@ -8,7 +8,7 @@
     "e2e:preflight": "node tests/e2e/preflight.mjs",
     "e2e": "node tests/e2e/driver.mjs",
     "e2e:pairing": "node --test tests/cbcl-pairing-demo.mjs",
-    "e2e:wallet-pairing": "node --test tests/spec-007-wallet-pairing.mjs"
+    "e2e:wallet-pairing": "node --test tests/spec-007-wallet-pairing.mjs tests/spec-077-scan-pairing.mjs"
   },
   "devDependencies": {
     "axe-core": "^4.13.0",

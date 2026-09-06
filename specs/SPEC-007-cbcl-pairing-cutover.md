@@ -3,28 +3,28 @@ id: SPEC-007
 title: cbcl-pairing Protocol Cutover
 status: draft
 tier: 1
-version: 0.3.8-draft
-last-updated: 2026-08-25
+version: 0.3.10-draft
+last-updated: 2026-09-05
 previous-approved-version: 0.2.1
 owner-repo: selfsame
 review-gate: test-first-implementation-owner-authorized; release-prohibited-pending-cross-model-pass
 authority-form: direct-current-safety-authority
 implementation-baseline: 0220cec2dec44cd95d4f411ea4814d790b6716d2
-coordinated-claimant-design: selfsame SPEC-008 0.5.17-draft
-coordinated-hub-design: cbcl-bus SPEC-053 0.17.13-draft
-coordinated-pairing-design: cbcl-pairing SPEC-001 0.5.8-draft
+coordinated-claimant-design: selfsame SPEC-008 0.5.19-draft
+coordinated-hub-design: cbcl-bus SPEC-053 0.17.15-draft
+coordinated-pairing-design: cbcl-pairing SPEC-001 0.5.10-draft
 generation-model-family: OpenAI GPT-5
 generation-model-version: gpt-5.6-sol
 generation-session: 01a029aa-9127-7c42-ad28-81512b91ded6
-generation-synthesis-trajectory: "approved 0.2.1 cutover -> standalone credential/v2 ordering conflict -> rejected reviews through 0.5.7 -> direct 0.3.8 proof-input closure"
+generation-synthesis-trajectory: "approved 0.2.1 cutover -> standalone credential/v2 ordering conflict -> rejected reviews through 0.5.7 -> direct 0.3.9 proof-input closure"
 candidate-successor-to: SPEC-006
 depends-on: cbcl-pairing SPEC-001; SPEC-004; SCREEN-001
 ---
 
 # SPEC-007 — cbcl-pairing Protocol Cutover
 
-> **Current draft safety revision.** Version 0.3.8 states the credential/v2
-> consent and effect boundary directly. Version 0.2.1 remains the last approved
+> **Current draft safety revision.** Version 0.3.10 states the credential/v2
+> entry, consent, and effect boundary directly. Version 0.2.1 remains the last approved
 > revision. The owner authorizes local test-first implementation. This draft
 > authorizes no production allocation, release, or deployment.
 
@@ -72,6 +72,13 @@ after final approval.
 [[SPEC-007-cbcl-pairing-cutover#REQ-804]] preserves explicit consent.
 [[SPEC-007-cbcl-pairing-cutover#REQ-812]] bounds every credential/v2 effect.
 [[SPEC-007-cbcl-pairing-cutover#REQ-809]] holds production allocation.
+
+The default complete scan/manual flow follows cbcl-bus SPEC-079 0.1.1-draft.
+Its explicit ceremony gesture authorizes only live profile and declared-relay contact.
+After one unlock displays a local preview, one Link gesture permits disclosure and
+conditional completion only after the existing authenticated desktop comparison.
+It creates no durable legacy exact-pair policy row. Explicit legacy entry retains
+the existing relay prompt, preliminary approval, comparison, and final approval.
 
 **Controls.**
 
@@ -252,9 +259,14 @@ Trace:
 For credential/v1, the allocator SHALL NOT release a payload before explicit
 approval of the exact recognised intent digest.
 
-For credential/v2, the claimant SHALL NOT construct or release the reverse
-payload before final approval. Preliminary approval authorizes only the preview
-specified by [[SPEC-007-cbcl-pairing-cutover#REQ-812]].
+For credential/v2 default complete scan/manual entry, unlock authorizes only a
+local preview. One Link gesture after rendered review authorizes preview disclosure
+and conditional completion. The claimant SHALL NOT construct or release the
+reverse payload before authenticated desktop comparison succeeds. The native
+bound authority SHALL then emit the distinct protocol final approval.
+
+Explicit legacy credential/v2 entry retains preliminary approval before preview
+disclosure and a separate final approval before reverse-payload construction.
 
 Trace:
 - [[SPEC-007-cbcl-pairing-cutover#CON-801]]
@@ -344,6 +356,17 @@ An endpoint SHALL atomically consume an unused invitation before processing its
 first peer CPace message.
 
 Failure, decline, crowding, cancellation, expiry, and success leave the invitation consumed.
+For manual entry, a checksum-valid first CPace share consumes the only online
+phrase attempt before acknowledgement or allocator-share output. Another share,
+including the correct phrase after a wrong phrase, requires a fresh invitation.
+Local grammar or checksum refusal before relay contact consumes no online attempt.
+
+A mode switch SHALL disable old transfer display and retain the old recovery
+record. Release requires an authenticated exact-ceremony `expired`, `aborted`,
+or `absent` hub result, or a verified accepted immutable final status. Local
+cancellation, a local deadline, forward clock movement, hub unavailability,
+and transport failure are not closure proof. They SHALL NOT authorize fresh
+ceremony material.
 
 Trace:
 - [[SPEC-007-cbcl-pairing-cutover#CON-801]]
@@ -357,17 +380,24 @@ Trace:
 For profiles without credential/v2 reverse issuance, failures SHALL produce no
 accepted credential or identity side effect before approved payload delivery.
 
-Before credential/v2 preliminary approval, the endpoint SHALL produce no
-application identity effect. Preliminary approval authorizes one zeroizing
-derivation, pure DID and fingerprint computation, and the stated authenticated
-preview disclosure.
+In the default complete scan/manual flow, unlock authorizes one pure local DID and
+fingerprint computation and bounded zeroizing native custody. It authorizes no
+protocol decision, preview disclosure, signature, publication, resolution, grant,
+scope allocation, persistence, or payload. One rendered Link gesture authorizes
+preview disclosure and a conditional native execution bound to the exact ceremony.
 
-Before credential/v2 final approval, the endpoint SHALL NOT sign, publish,
-resolve, issue, persist, stage capability, or construct a credential payload.
+The conditional execution emits the existing preliminary protocol approval and
+preparation once. It SHALL emit final protocol approval or begin an identity effect
+only after the exact authenticated comparison or binding result. It retains no
+authority past the earliest 120-second custody, offer, or relay deadline.
 
-Final approval authorizes only causal work required to construct the approved
-credential/v2 reverse payload. That work includes re-derivation, preview equality,
-issuer creation, signing, DID publication, closure resolution, WebFinger
+Explicit legacy entry retains the existing preliminary and final person approvals.
+Before its final approval, the endpoint SHALL NOT sign, publish, resolve, issue,
+persist, stage capability, or construct a credential payload.
+
+The applicable final protocol approval authorizes only causal work required to
+construct the approved credential/v2 reverse payload. That work includes preview
+equality, issuer creation, signing, DID publication, closure resolution, WebFinger
 verification, grant construction, and payload construction.
 
 Final approval also authorizes one encrypted non-authorizing completion
@@ -401,6 +431,12 @@ profile descriptor before consent. No declared relay match means refusal.
 
 Credential/v2 eligibility uses the live authenticated descriptor and exact-pair
 person policy. It SHALL NOT use a compiled relay allowlist or conformance registry.
+
+For default complete scan/manual entry, the recognized foreground gesture
+authorizes only this ceremony's live HTTPS profile fetch. It also authorizes
+one socket to the unique exact declared relay. The typed display identifies this provenance as
+`CeremonyGesture`. It creates, modifies, and relies on no durable legacy policy row.
+Explicit legacy entry retains existing-policy lookup or a separate new-pair prompt.
 
 Relay failure burns the attempt and requires a fresh selection and invitation.
 The SDK SHALL NOT use an undeclared fallback.
@@ -515,15 +551,17 @@ The selector creates a permanent downgrade surface and a second test matrix.
 **Status:** candidate, pending the coordinated Tier-1 review.
 
 Credential/v2 needs identity material to construct the payload that travels
-from the wallet to the application. Final approval therefore authorizes that
-causal construction before delivery.
+from the wallet to the application. In the default flow, one Link gesture arms
+causal construction only after authenticated desktop comparison. The native
+engine then emits the distinct protocol final approval. Explicit legacy entry
+retains a separate person's final approval before the same construction.
 
 The application writes a non-authorizing staged record before hub finalization.
 Only immutable hub acceptance activates it. This order supports crash recovery
 without granting capability from a partial ceremony.
 
-Construction before preliminary or final approval was rejected. Active browser
-installation before hub acceptance was also rejected.
+Construction before the applicable conditional or legacy final authority was
+rejected. Active browser installation before hub acceptance was also rejected.
 
 **Simplicity Ladder:** rung 5. Existing staging, status, and compensation
 primitives compose the boundary without another identity authority.
@@ -539,6 +577,16 @@ and payloads use the exact canonical CBOR grammar pinned by [[cbcl-pairing]].
 
 **Recognition:** the upstream recogniser consumes the complete input before a
 session transition. Downstream code consumes typed values only.
+
+Credential/v2 default entry accepts the fully recognized `SSPAIR1:` handoff or
+cbcl-bus SPEC-078 0.1.1-draft manual bootstrap-plus-words pair. Manual mode maps
+the words to typed C and accepts only one peer share under its authenticated
+allocator-bootstrap mode. Explicit legacy entry retains public carrier plus
+`PAIR1-` input. No recognizer, exporter, or restored checkpoint crosses modes.
+Before a peer share is accepted, restore requires a fresh shell-supplied CSPRNG
+scalar. After acceptance, restore uses only the retained authenticated scalar,
+peer share, and cached response; the endpoint binds at most one distinct peer
+share and response.
 
 **Preconditions:**
 
@@ -666,10 +714,16 @@ No pairing success value can be converted into credential acceptance.
 
 ### CON-804: Invitation and cutover record
 
-**Persisted grammar:** only the secret-free upstream `InvitationRecord` encoding is permitted.
+**Persisted grammar:** a path without an authenticated endpoint checkpoint SHALL
+persist only the secret-free upstream `InvitationRecord` encoding.
 
-Active cryptographic state remains process-private.
-A process exit burns the bound invitation and requires a fresh ceremony.
+Uncheckpointed cryptographic state remains process-private. A process exit on
+such a path burns the bound invitation and requires a fresh ceremony.
+Credential/v2 instead persists only the sealed `EndpointCheckpointV2` and
+pending forms in [[SPEC-008-production-pairing-claimant#CON-986]] and
+[[SPEC-008-production-pairing-claimant#CON-990]]. Manual peer-bound restore also
+obeys cbcl-bus SPEC-078 0.1.1-draft CON-003. Neither exception permits an
+unsealed secret or bypasses invitation consumption.
 
 Legacy record recognition uses the closed corpus discriminators before canonical CBOR parsing.
 Recognised legacy input returns `PairingVersionUnsupported` with zero side effect.
@@ -779,6 +833,13 @@ any of those values.
 Before consent, the claimant requires the invitation relay origin to match one
 eligible descriptor exactly. The descriptor's operator and privacy policy are display-only.
 
+The default complete scan/manual entry gesture produces `CeremonyGesture` only
+after complete local recognition. It authorizes this ceremony's live profile
+fetch and unique declared-relay socket without consulting or writing the durable
+exact-pair policy. The authenticated display states that provenance and does not
+describe it as remembered trust. `LegacyExistingTrust` and
+`LegacyNewPairApproval` remain available only to explicit legacy entry.
+
 **Implements:**
 - [[SPEC-007-cbcl-pairing-cutover#REQ-813]]
 
@@ -787,33 +848,40 @@ eligible descriptor exactly. The descriptor's operator and privacy policy are di
 
 ### CON-807: Credential/v2 consent and activation boundary
 
-**Interface:** the standalone credential/v2 claimant uses five ordered owned
-functions followed by activation and terminal recovery.
+**Interface:** the standalone credential/v2 claimant has a default SingleLink
+flow and an explicit LegacyTwoDecision flow, followed by shared activation and
+terminal recovery. Both retain distinct protocol intent and final decisions.
 
-1. `recognise_claimant_invitation` produces an origin-recognised zero-effect
-   relay-consent plan without a socket.
-2. `authorise_claimant_relay` produces only a single-use socket capability
-   after an existing exact-pair lookup or explicit person approval.
-3. `prepare_claimant` produces an authenticated zero-effect plan after relay
-   consent and cbcl-pairing authentication.
-4. `preview_claimant_identity` consumes preliminary approval and returns only
-   zeroizable public preview material.
-5. `complete_claimant` consumes final approval and performs the causal
-   construction allowed by [[SPEC-007-cbcl-pairing-cutover#REQ-812]]. It first
-   persists the sealed non-authorizing completion checkpoint.
+1. Default entry recognizes a complete scan/manual input and creates only
+   current-ceremony contact authority under cbcl-bus SPEC-079 0.1.1-draft.
+2. After authentication, one unlock computes the local preview and retains
+   bounded native custody without a protocol decision or disclosure.
+3. After the complete request and preview render, one Link gesture permits
+   preliminary approval, preparation disclosure, and comparison.
+4. Only matching authenticated comparison permits native final protocol approval
+   and causal construction under [[SPEC-007-cbcl-pairing-cutover#REQ-812]].
+5. Legacy entry preserves `recognise_claimant_invitation`, relay policy approval,
+   `prepare_claimant`, preliminary approval, comparison, and separate final approval.
 
 Browser and wallet activation then consume the immutable hub final status.
 `recover_claimant_completion` is not a sixth construction function: it can
 only authenticate that retained status and finish the already-sent payload's
 receipt transition.
+Browser activation requires the signed status. Wallet installation additionally
+requires its independent live reciprocal-binding verification. The status,
+receipt, or earlier WebFinger check cannot substitute for that wallet check.
 
-**Preconditions:** the exact application-relay pair has person-owned policy.
-The profile, carrier, transcript, hub offer, transition, and display sources
-have passed complete recognition and authentication.
+**Preconditions:** the profile, carrier, transcript, hub offer, transition, and
+display sources have passed complete recognition and authentication. Default
+flow holds live `CeremonyGesture` provenance and its bound Link authority.
+Legacy flow holds the existing exact-pair policy and its separate approvals.
 
-**Postconditions:** preliminary decline creates no derived identity residue.
-Final decline creates no signature, publication, grant, staged record, or
-application capability.
+**Postconditions:** default cancellation before final execution, or failed
+comparison, creates no signature, publication, grant, staged record, or
+application capability. Legacy preliminary or final decline retains the same
+prohibition. After final execution starts, failure performs only exact
+ceremony-owned compensation. Cancellation after durable `PayloadPrepared`
+preserves the sealed recovery slot and grants no active capability.
 
 After final approval, the browser verifies the payload and writes one inactive
 staged record. The hub verifies its receipt before one atomic final transaction.
@@ -961,6 +1029,9 @@ Reject every legacy pairing implementation or selectable legacy path.
 
 Run allocator and claimant in separate processes through a real relay transport.
 Verify CPace, both Finished values, roles, intent, decision, payload, and terminal erasure.
+For manual mode, persist the first peer share before Ack or allocator-share output.
+Crash around that checkpoint and require only exact-share replay. A second
+checksum-valid phrase SHALL fail under the consumed invitation.
 
 #### TEST-804: Consent prohibits early payload
 
@@ -1055,6 +1126,9 @@ Verify identity derivation, credential semantics, revocation, and unrelated rout
 Exercise wrong secret, invalid Finished, cancellation, expiry, crowding, decision
 replay, payload replay, simultaneous claims, and invitation reuse.
 Verify closed results, consumed invitations, erased secrets, and zero extra effects.
+Run both SingleLink and LegacyTwoDecision. In SingleLink, require zero protocol
+decision or disclosure before rendered Link and zero final approval or identity
+effect before authenticated comparison. In legacy, retain both person approvals.
 
 #### TEST-814: Wallet accessibility
 
@@ -1101,6 +1175,11 @@ Verify refusal before consent, payload, or Selfsame acceptance.
 For credential/v2, install an empty or hostile compiled relay registry.
 Verify the registry has no selection, prompt, socket, or acceptance effect.
 
+For default complete scan/manual entry, require `CeremonyGesture` to authorize
+only the live exact profile and unique declared relay. Require no relay prompt,
+durable policy lookup, policy write, or remembered-trust display. Exercise explicit
+legacy entry separately and retain its existing-policy and new-pair prompt paths.
+
 #### TEST-818: Credential payload boundary
 
 **Validates:** [[SPEC-007-cbcl-pairing-cutover#REQ-814]].
@@ -1140,21 +1219,28 @@ Instrument custody, derivation, DID computation, issuer creation, signing,
 publication, closure, WebFinger, grant construction, persistence, payload,
 hub finalization, and both installation activations.
 
-Before preliminary approval, require zero calls. At preliminary approval,
-permit one zeroizing derivation, pure preview computation, and stated disclosure.
-
-Before final approval, require zero signatures, publications, resolutions,
+For SingleLink, unlock permits one pure local preview and bounded native custody,
+with zero protocol decision or disclosure. Render alone changes no authority.
+Link permits one preliminary decision and disclosure. Before authenticated
+comparison, require zero final decision, signatures, publications, resolutions,
 grants, payloads, staged records, and active application capabilities.
 
-After final approval, require causal construction in the declared order.
+After matching comparison, require one protocol final approval and causal
+construction in the declared order without another phone approval or unlock.
+At every guarded boundary, require the original Link authority, attempt, bindings,
+root generation, and earliest exclusive custody/offer/relay deadline.
+
+Run explicit LegacyTwoDecision separately. Retain preliminary preview disclosure,
+comparison, a separate final person approval, and its existing custody behavior.
 Require browser verification to write only one inactive staged record.
 
 Lose every response before and after hub commit. Require status recovery to
 return absent, pending, or immutable finalized state without duplicate effects.
 
 Before immutable hub acceptance, require zero active application capability.
-After that acceptance, require one browser activation and one authenticated
-wallet installation.
+After that acceptance, require one browser activation. Require the wallet's
+independent live reciprocal-binding verification before one wallet installation.
+Make that check unavailable or mismatched and require no wallet installation.
 
 Fail every causal operation independently. Require ceremony-only compensation,
 zero active capability, and unchanged pre-existing and withdrawal state.
@@ -1249,8 +1335,8 @@ Production invitation allocation remains prohibited until all items have durable
 - the repository owner approves the recorded no-users finding and no-migration disposition;
 - coordinated SPEC-004, SPEC-006, and PROTO-002 through PROTO-004 amendments pass their own channels;
 - the upstream credential-profile disposition passes the `cbcl-pairing` amendment channel;
-- Selfsame SPEC-008 0.5.17-draft, cbcl-bus SPEC-053 0.17.13-draft,
-  and cbcl-pairing SPEC-001 0.5.8-draft pass one coordinated Tier-1 review;
+- Selfsame SPEC-008 0.5.19-draft, cbcl-bus SPEC-053 0.17.15-draft,
+  and cbcl-pairing SPEC-001 0.5.10-draft pass one coordinated Tier-1 review;
 - every SPEC-004 Tier-1 row has the exact disposition in the inherited gate ledger;
 - every retained or replaced SPEC-004 ledger row reaches pass through its exact disposition;
 - the exact upstream `cbcl-pairing` production gates pass without local reinterpretation;
@@ -1277,6 +1363,33 @@ or agent-authored report substitutes for these approvals.
 - Stakeholder: [[SPEC-007-cbcl-pairing-cutover#Intent source]] →
   [[SPEC-007-cbcl-pairing-cutover#Compatibility disposition]] →
   [[SPEC-007-cbcl-pairing-cutover#Requirements]].
+
+## Scan-handoff Gate Evidence Record — 0.3.9-draft
+
+The 2026-09-05 owner instruction authorizes local implementation of the
+confidential scan handoff and preview ordering. Its coordinated revisions are
+Selfsame SPEC-008 0.5.18, cbcl-pairing SPEC-001 0.5.9, bus SPEC-053 0.17.14,
+and bus SPEC-077 0.1.1.
+This is an explicit local exception to earlier exclusions of carrier-format
+work: the new wrapper is confidential and the public relay carrier is unchanged.
+No Finished, grant, final-effect or installation binding is relaxed.
+Shared codec vectors, pre-network rejection, preview render ordering, cancellation,
+and exact pinned native/WASM integration are required; results are pending.
+Existing production gates and independent human review remain unverified.
+
+## Successor UX Amendment Record — 0.3.10-draft
+
+The 2026-09-05 owner instruction delegates the current manual-entry and
+single-Link parent amendments to Codex. The exact model build and generation
+session are unavailable; no value is inferred from historical generation
+metadata. The coordinated drafts are Selfsame SPEC-008 0.5.19, cbcl-pairing
+SPEC-001 0.5.10, cbcl-bus SPEC-053 0.17.15, cbcl-bus SPEC-078 0.1.1, and
+cbcl-bus SPEC-079 0.1.1.
+
+This record authorizes specification drafting and the already authorized local
+implementation sequence only. It supplies no independent human cryptographic,
+security, privacy, release, production-allocation, or deployment approval. All
+existing production gates remain open and effective.
 
 ## Amendment Channels
 
@@ -1305,6 +1418,14 @@ No channel can waive a hard stop without a new specification version and require
 
 <details>
 <summary>Revision history</summary>
+
+- 0.3.10-draft — distinguishes default full/manual SingleLink entry from
+  explicit LegacyTwoDecision. It authenticates current-ceremony contact
+  provenance and preserves comparison-gated final protocol approval. It also
+  imports the manual one-attempt and proof-before-mode-switch boundaries.
+  Production gates remain unchanged.
+
+- 0.3.9-draft — coordinates the locally authorized confidential handoff and preview continuation; existing safety and production gates remain effective.
 
 - 0.3.8-draft — reissues the unchanged safety boundary against Selfsame
   SPEC-008 0.5.17, cbcl-pairing SPEC-001 0.5.8, and cbcl-bus SPEC-053 0.17.13.

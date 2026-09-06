@@ -29,6 +29,9 @@ use selfsame_pairing::credential_v2::{
 use sha2::{Digest, Sha256};
 
 const RELAY: &str = "https://photos.example:9443";
+const KID: &str = "https://photos.example/selfsame/application#credential-v2-test";
+#[path = "../../../src-tauri/src/cbcl_v2_comparison_test_inputs.rs"]
+mod comparison_inputs;
 
 #[derive(Debug)]
 struct AcceptBodies;
@@ -701,4 +704,161 @@ fn exchange(
 ) {
     assert_eq!(sender.send(object), Ok(CredentialV2Advance::Advanced));
     assert_eq!(receiver.receive(object), Ok(CredentialV2Advance::Advanced));
+}
+
+#[test]
+fn spec079_valid_comparison_transition_guards() {
+    let offer_signing_key = SigningKey::from_bytes(&[0x21; 32]);
+    let device_key = SigningKey::from_bytes(&[0x22; 32])
+        .verifying_key()
+        .to_bytes();
+    let profile = profile(&offer_signing_key);
+    let carrier = CredentialV2Carrier::new(CredentialV2CarrierInput {
+        application_context: profile.application_id.as_str().into(),
+        relay_origin: RELAY.into(),
+        mailbox_id: [0x31; 32],
+        carrier_ceremony_id: [0x32; 32],
+        carrier_nonce: [0x33; 32],
+        claim_commitment: [0x34; 32],
+        relay_expires_at: 1_800_000_900,
+        expected_allocator_key: Some(device_key),
+    })
+    .unwrap();
+    let input = CredentialV2OfferBuildInput {
+        request_id: [0x41; 32],
+        transcript_hash: [0x42; 64],
+        application_account_id: [0x43; 32],
+        account_scope_id: [0x44; 32],
+        device_public_key: device_key,
+        requested_permissions: vec![fixture::PERMISSION.into()],
+        intent_nonce: [0x45; 32],
+        issued_at: 1_800_000_300,
+        expires_at: 1_800_000_900,
+        legacy_handle: "@alice".into(),
+        enrolled_key: [0x46; 32],
+        snapshot_rows: Vec::new(),
+        snapshot_nonce: [0x47; 32],
+    };
+    use ed25519_dalek::Signer as _;
+    let prepared = prepare_offer_core(&profile, &carrier, &input).unwrap();
+    let proof = SigningKey::from_bytes(&[0x22; 32])
+        .sign(
+            &device_possession_proof_input(
+                [0x48; 32],
+                *carrier.carrier_ceremony_id(),
+                prepared.offer_core_digest,
+            )
+            .unwrap(),
+        )
+        .to_bytes();
+    let verified = verify_prepared_offer_device_proof(
+        &profile,
+        &prepared,
+        [0x48; 32],
+        *carrier.carrier_ceremony_id(),
+        device_key,
+        proof,
+    )
+    .unwrap();
+    let built = finalize_verified_offer(&profile, &verified, KID, &offer_signing_key).unwrap();
+    let recognised = recognise_signed_offer(&profile, &built.signed_offer).unwrap();
+    let object = CredentialV2Object::new(
+        CredentialV2Kind::Offer,
+        built.intent_digest,
+        built.signed_offer.clone(),
+    )
+    .unwrap();
+    let (bodies, _) = credential_v2_body_authority();
+    bodies.bind_offer(profile.clone(), &recognised).unwrap();
+    let approve = bodies
+        .intent_decision(&object, CredentialV2IntentDecision::Approve)
+        .unwrap();
+    let preview_did = format!("did:crdt:{}", "a".repeat(64));
+    let preparation = bodies.preparation(&approve, &preview_did).unwrap();
+    let status = build_authority_status_response(
+        &profile,
+        *carrier.carrier_ceremony_id(),
+        built.offer_core_digest,
+        &CredentialV2AuthorityStatus::NoBinding,
+        KID,
+        &offer_signing_key,
+    )
+    .unwrap();
+    let comparison = bodies.comparison(&preparation, &status.response).unwrap();
+    // SPEC079 TEST005: this actual mode-free endpoint/body operation exposes
+    // the earliest transition verdict, before later native/durable fences can
+    // hide a removed guard. The native matrix uses the identical candidates.
+    for field in [
+        "positiveNoBinding",
+        "boundSame",
+        "earlyComparison",
+        "carrierCeremonyId",
+        "predecessorDigest",
+        "intentDigest",
+        "previewIssuerDid",
+        "previewFingerprintDigest",
+        "authorityStatusDigest",
+        "authorityStatusResponse",
+        "statusOffer",
+        "statusSignature",
+        "boundOther",
+        "kind",
+        "result",
+    ] {
+        let (bodies, verifier) = credential_v2_body_authority();
+        let mut endpoint =
+            CredentialV2Endpoint::new(Side::Claimant, carrier.clone(), Box::new(verifier));
+        CredentialV2WalletOfferVerifier::new(
+            profile.clone(),
+            carrier.clone(),
+            input.transcript_hash,
+            CredentialV2TofuState::CeremonyGesture,
+        )
+        .unwrap()
+        .with_body_authority(bodies.clone())
+        .verify_offer(&mut endpoint, &object, input.expires_at - 1)
+        .unwrap();
+        endpoint.send(&approve).unwrap();
+        let prepared = bodies.preparation(&approve, &preview_did).unwrap();
+        assert_eq!(
+            prepared, preparation,
+            "same actual signed-context Preparation"
+        );
+        if field != "earlyComparison" {
+            endpoint.send(&prepared).unwrap();
+        }
+        let selected = if field == "earlyComparison" {
+            "predecessorDigest"
+        } else {
+            field
+        };
+        let candidate = if field == "positiveNoBinding" {
+            comparison.clone()
+        } else {
+            comparison_inputs::alter(
+                comparison.clone(),
+                selected,
+                &profile,
+                &carrier,
+                built.offer_core_digest,
+                approve.content_hash(),
+                &offer_signing_key,
+            )
+        };
+        let verdict = endpoint.receive(&candidate);
+        if matches!(field, "positiveNoBinding" | "boundSame") {
+            assert_eq!(verdict.unwrap(), CredentialV2Advance::Advanced);
+        } else if field == "earlyComparison" {
+            assert_eq!(
+                verdict.unwrap_err(),
+                CredentialV2Error::Phase,
+                "comparison requires actual Preparation progress"
+            );
+        } else {
+            assert!(
+                verdict.is_err(),
+                "actual comparison transition accepted mismatched {field}"
+            );
+        }
+    }
 }

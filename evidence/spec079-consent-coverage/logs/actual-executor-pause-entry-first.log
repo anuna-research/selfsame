@@ -1,0 +1,36 @@
+   Compiling selfsame v0.1.0 (/Volumes/anuna-03/codex-successor-consent-coverage-closure/selfsame/src-tauri)
+warning: field `entry` is never read
+   --> src-tauri/src/cbcl_v2_commands.rs:528:5
+    |
+525 | struct CancellationFaults<'a, F> {
+    |        ------------------ field in this struct
+...
+528 |     entry: Option<CredentialV2Effect>,
+    |     ^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `selfsame` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.70s
+     Running unittests src/lib.rs (/Volumes/anuna-03/codex-selfsame-reconcile-target/debug/deps/selfsame_lib-6c74a308fa24404a)
+
+running 1 test
+test cbcl_v2_commands::single_link::tests::coverage::single_link_actual_executor_expiry_and_revocation_at_every_boundary ... executor mode=full reason=Expire boundary=FinalApprovalRelease reached=1 next_effects=0
+executor mode=full reason=Expire boundary=AcknowledgementRead reached=2 next_effects=0
+executor mode=full reason=Expire boundary=AcknowledgementRecognition reached=3 next_effects=0
+
+thread 'cbcl_v2_commands::single_link::tests::coverage::single_link_actual_executor_expiry_and_revocation_at_every_boundary' (9650353) panicked at src-tauri/src/cbcl_v2_consent_coverage_tests.rs:137:17:
+assertion `left == right` failed: only owned slot deletion and index compensation at AcknowledgementCheckpointReplacement
+  left: 18
+ right: 17
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    cbcl_v2_commands::single_link::tests::coverage::single_link_actual_executor_expiry_and_revocation_at_every_boundary
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 106 filtered out; finished in 6.00s
+
+error: test failed, to rerun pass `-p selfsame --lib`

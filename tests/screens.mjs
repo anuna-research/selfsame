@@ -330,11 +330,12 @@ const shots = [
   // with two blank evidence fields.
   { name: '29-fingerprint-mismatch', expect: 'fingerprint-mismatch', state: STATE_APPS, steps: ['to-applications', 'open-application', 'to-fingerprint', 'fingerprint-differs'] },
 
-  // SPEC-007: one invitation enters the single CBCL pairing path.
+  // SPEC-007 legacy states remain explicit: default Full/Manual SingleLink is
+  // exercised by spec-007-wallet-pairing.mjs and spec-077-scan-pairing.mjs.
   { name: '30-pairing-enter', expect: 'pairing-enter', state: STATE_APPS, steps: ['to-applications', 'to-pairing'] },
-  { name: '31-pairing-wait', expect: 'pairing-wait', state: { ...STATE_APPS, pairing_recognise_pending: true }, steps: ['to-applications', 'to-pairing', 'fill-cbcl-invitation', 'fill-cbcl-presence-code', 'start-cbcl-pairing'] },
-  { name: '32-pairing-relay-consent', expect: 'pairing-consent', state: STATE_APPS, steps: ['to-applications', 'to-pairing', 'fill-cbcl-invitation', 'fill-cbcl-presence-code', 'start-cbcl-pairing'] },
-  { name: '33-pairing-intent-consent', expect: 'pairing-consent', state: { ...STATE_APPS, pairing_requires_relay_approval: false }, steps: ['to-applications', 'to-pairing', 'fill-cbcl-invitation', 'fill-cbcl-presence-code', 'start-cbcl-pairing'] },
+  { name: '31-pairing-wait', expect: 'pairing-wait', state: { ...STATE_APPS, pairing_recognise_pending: true }, steps: ['to-applications', 'to-pairing', 'select-cbcl-legacy', 'fill-cbcl-presence-code', 'fill-cbcl-invitation', 'start-cbcl-pairing'] },
+  { name: '32-pairing-relay-consent', expect: 'pairing-consent', state: STATE_APPS, steps: ['to-applications', 'to-pairing', 'select-cbcl-legacy', 'fill-cbcl-presence-code', 'fill-cbcl-invitation', 'start-cbcl-pairing'] },
+  { name: '33-pairing-intent-consent', expect: 'pairing-consent', state: { ...STATE_APPS, pairing_requires_relay_approval: false }, steps: ['to-applications', 'to-pairing', 'select-cbcl-legacy', 'fill-cbcl-presence-code', 'fill-cbcl-invitation', 'start-cbcl-pairing'] },
 ];
 
 // ── Negative-output assertions (IMPL-004 TEST-605 / 611 / 613) ───────────
@@ -443,7 +444,7 @@ const SCREEN_RULES = {
     requiredTextAll: [
       'Secure pairing started',
       'No relay connection yet',
-      'Checking the invitation and its declared relay before any socket opens.',
+      'Checking the application and its relay.',
       'Nothing is authorised until you see and approve the verified request.',
     ],
     forbidden: [
@@ -624,10 +625,14 @@ for (const shot of shots) {
           'harbour lichen quarry saddle verbena tundra gravel mussel plover basalt ferment willow';
         document.querySelector('#restore-passcode').value = 'correct horse';
       });
+    } else if (step === 'select-cbcl-legacy') {
+      await page.evaluate(() => {
+        document.querySelector('[data-pairing-legacy]').open = true;
+      });
     } else if (step === 'fill-cbcl-invitation') {
       await page.evaluate(() => {
         const el = document.querySelector('#pairing-input');
-        el.value = 'cbcl-pairing-invitation-for-render-check';
+        el.value = 'SSPAIR1:fixture';
         el.dispatchEvent(new Event('input'));
       });
     } else if (step === 'fill-cbcl-presence-code') {
@@ -1057,7 +1062,7 @@ for (const [name, outcome] of [['denied', 'denied'], ['granted', 'granted']]) {
   const handler = src('src-tauri/src/lib.rs');
   const open = handler.indexOf('generate_handler![');
   const block = handler.slice(open, handler.indexOf('])', open));
-  const registered = new Set([...block.matchAll(/\b[A-Za-z_]\w*::([A-Za-z_]\w*)\b/g)].map((m) => m[1]));
+  const registered = new Set([...block.matchAll(/\b(?:[A-Za-z_]\w*::)+([A-Za-z_]\w*)\b/g)].map((m) => m[1]));
 
   const invokeCallerFiles = javascriptModules
     .filter((file) => /\binvoke\s*\(/.test(src(file)))

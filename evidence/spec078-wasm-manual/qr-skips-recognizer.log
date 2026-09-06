@@ -1,0 +1,22 @@
+
+running 1 test
+test credential_v2_manual_tests::manual_qr_shared_recognizer_runs_before_rendering_or_capacity ... FAILED
+
+failures:
+
+---- credential_v2_manual_tests::manual_qr_shared_recognizer_runs_before_rendering_or_capacity stdout ----
+
+thread 'credential_v2_manual_tests::manual_qr_shared_recognizer_runs_before_rendering_or_capacity' (7996122) panicked at crates/selfsame-web-device/src/credential_v2_manual_tests.rs:822:58:
+called `Result::unwrap_err()` on an `Ok` value: "{\"dark\":[1,1,1,1,1,1,1,0,0,1,0,1,0,0,1,1,1,1,1,1,1,1,0,0,0,0,0,1,0,0,1,1,0,1,0,1,0,0,0,0,0,1,1,0,1,1,1,0,1,0,0,1,1,0,0,0,1,0,1,1,1,0,1,1,0,1,1,1,0,1,0,1,0,0,0,1,0,1,0,1,1,1,0,1,1,0,1,1,1,0,1,0,0,1,0,0,1,0,1,0,1,1,1,0,1,1,0,0,0,0,0,1,0,1,0,1,1,0,0,1,0,0,0,0,0,1,1,1,1,1,1,1,1,0,1,0,1,0,1,0,1,1,1,1,1,1,1,0,0,0,0,0,0,0,0,1,0,0,0,1,0,0,0,0,0,0,0,0,0,1,1,0,0,0,1,0,0,1,1,0,1,0,1,1,0,1,0,0,0,1,1,1,1,0,1,0,0,0,0,1,1,0,1,1,1,0,1,1,1,0,1,0,0,0,1,0,1,0,1,1,1,0,0,1,0,1,1,1,0,1,1,1,0,0,1,0,0,0,1,1,0,1,0,0,1,1,1,0,1,1,1,0,0,0,1,1,0,0,1,1,1,0,0,1,0,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0,0,1,0,0,0,1,0,0,0,0,0,0,0,0,1,1,1,1,1,1,1,0,0,0,0,0,0,0,1,0,0,0,1,0,0,1,0,0,0,0,0,1,0,0,1,1,1,0,0,0,0,1,0,0,0,1,1,0,1,1,1,0,1,0,0,1,0,1,1,0,1,0,0,0,1,0,0,1,0,1,1,1,0,1,0,0,0,1,1,0,1,1,1,0,1,1,0,0,1,0,1,1,1,0,1,0,1,0,0,1,1,1,0,1,1,1,0,1,1,1,0,0,0,0,0,1,0,1,1,0,1,0,1,1,1,0,1,1,0,0,1,1,1,1,1,1,1,0,0,1,0,1,1,1,1,1,1,1,1,1,1],\"size\":21}"
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    credential_v2_manual_tests::manual_qr_shared_recognizer_runs_before_rendering_or_capacity
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 50 filtered out; finished in 0.01s
+
+   Compiling selfsame-web-device v0.1.0 (/Volumes/anuna-03/codex-successor-closure/selfsame-wasm-manual-1/crates/selfsame-web-device)
+    Finished `test` profile [unoptimized] target(s) in 0.78s
+     Running unittests src/lib.rs (/Volumes/anuna-03/codex-successor-wasm-native-target/debug/deps/selfsame_web_device-a698fa6cb7ff8cd0)
+error: test failed, to rerun pass `-p selfsame-web-device --lib`

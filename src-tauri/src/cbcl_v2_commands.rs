@@ -1,13 +1,15 @@
-//! Tauri shell for standalone credential/v2 relay and preliminary consent.
+//! Tauri shell for standalone credential/v2 consent, preview, and completion.
 
-use cbcl_pairing::{
-    credential_v2::{CredentialV2ClaimantEffect, CredentialV2Kind, CredentialV2TofuState},
-    wire::{encode_client_message, ClientMessage},
+use cbcl_pairing::credential_v2::{
+    CredentialV2ClaimantEffect, CredentialV2Kind, CredentialV2TofuState,
 };
 use rand::RngCore as _;
 use serde::Serialize;
 use sha2::Digest as _;
-use std::net::TcpStream;
+use std::{
+    net::TcpStream,
+    time::{Duration, Instant},
+};
 use tauri::State;
 use tungstenite::{stream::MaybeTlsStream, Message, WebSocket};
 use zeroize::Zeroizing;
@@ -22,18 +24,120 @@ use crate::{
     },
     cbcl_v2_policy::ExactPairState,
     commands::{AppSession, UiError},
+    session::{CredentialV2Attempt, CredentialV2Effect, CredentialV2Flow, CredentialV2Operation},
 };
 
 type Result<T> = std::result::Result<T, UiError>;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CredentialV2Phase {
+    Intent,
+    PreviewReady,
+    PreviewUnpainted,
+    ReviewReady,
+    Comparing,
+    FinalReview,
+    PayloadSent,
+}
+
+impl CredentialV2Phase {
+    fn require(self, expected: Self) -> Result<()> {
+        if self != expected {
+            return Err(UiError::from("PairingWrongPhase"));
+        }
+        Ok(())
+    }
+}
+
+/// Consumes the local preview continuation before the first preparation send.
+fn continue_preview<T>(
+    phase: &mut CredentialV2Phase,
+    attempt: &CredentialV2Attempt,
+    compare: impl FnOnce() -> Result<T>,
+) -> Result<T> {
+    phase.require(CredentialV2Phase::PreviewReady)?;
+    *phase = CredentialV2Phase::Comparing;
+    let comparison = attempt.run(compare)?;
+    *phase = CredentialV2Phase::FinalReview;
+    Ok(comparison)
+}
+
 /// Live claimant held only after the one-use pre-socket authority is consumed.
 pub struct PendingCredentialV2Pairing {
+    attempt: CredentialV2Attempt,
+    phase: CredentialV2Phase,
     claimant: PreparedClaimant,
     socket: WebSocket<MaybeTlsStream<TcpStream>>,
     intent_approve: Option<cbcl_pairing::credential_v2::CredentialV2Object>,
-    preview_did: Option<String>,
+    preview_did: Option<Zeroizing<String>>,
     comparison: Option<cbcl_pairing::credential_v2::CredentialV2Object>,
     recovered_receipt: Option<cbcl_pairing::credential_v2::CredentialV2ClaimantRecoveredReceipt>,
+    /// One final-consent authorization.  It is never persisted or exposed to
+    /// the web view, and is zeroised when this live pairing is dropped.
+    ceremony_custody: Option<CeremonyCustody>,
+}
+
+/// A deliberately short, single-ceremony authorization.  Final pairing has
+/// several durable checkpoints but only one person decision; re-prompting for
+/// every checkpoint makes the biometric prompt an accidental protocol loop.
+const CEREMONY_CUSTODY_LIFETIME: Duration = Duration::from_secs(120);
+
+enum CeremonyCustody {
+    Legacy {
+        root: selfsame_app_identity::hierarchy::HierarchyRoot,
+        authorized_at: Instant,
+    },
+    Bounded(CredentialV2Attempt),
+}
+impl Drop for CeremonyCustody {
+    fn drop(&mut self) {
+        if let Self::Bounded(attempt) = self {
+            attempt.clear_custody();
+        }
+    }
+}
+impl CeremonyCustody {
+    fn with_root<T>(
+        &self,
+        action: impl FnOnce(&selfsame_app_identity::hierarchy::HierarchyRoot) -> Result<T>,
+    ) -> Result<T> {
+        match self {
+            Self::Legacy { root, .. } => action(root),
+            Self::Bounded(attempt) => attempt.with_custody(action),
+        }
+    }
+}
+
+impl PendingCredentialV2Pairing {
+    fn ensure_ceremony_custody(&mut self, passcode: &str) -> Result<()> {
+        self.attempt.check()?;
+        if self.attempt.mode() == CredentialV2Flow::SingleLink {
+            return if self.ceremony_custody.is_some() {
+                Ok(())
+            } else {
+                Err(UiError::from("PairingExpired"))
+            };
+        }
+        if self
+            .ceremony_custody
+            .as_ref()
+            .is_some_and(|custody| matches!(custody, CeremonyCustody::Legacy { authorized_at, .. } if authorized_at.elapsed() >= CEREMONY_CUSTODY_LIFETIME))
+        {
+            self.ceremony_custody = None;
+        }
+        if self.ceremony_custody.is_none() {
+            self.ceremony_custody = Some(CeremonyCustody::Legacy {
+                root: crate::custody::Custody::unlock_hierarchy_root(passcode)?,
+                authorized_at: Instant::now(),
+            });
+        }
+        self.attempt.check()?;
+        Ok(())
+    }
+
+    fn clear_ceremony_custody(&mut self) {
+        self.ceremony_custody = None;
+    }
 }
 
 /// Authenticated preliminary consent values; no peer string is display authority.
@@ -147,30 +251,83 @@ struct CredentialV2AuthorityRotationView {
     current_profile_digest: String,
 }
 
-/// Recognise carrier, PAIR1, live profile, declared relay, and exact-pair state.
-/// No relay socket is opened by this command.
+/// Recognise one complete confidential invitation before profile or relay effects.
+#[tauri::command]
+pub async fn cbcl_v2_recognise_handoff(
+    handoff: String,
+    session: State<'_, AppSession>,
+) -> Result<RelayConsentView> {
+    let _input = Zeroizing::new(handoff);
+    let _ = session;
+    Err(UiError::from("PairingWrongMode"))
+}
+
+/// Explicit legacy carrier and presence entry shares the same attempt and policy gate.
 #[tauri::command]
 pub async fn cbcl_v2_recognise(
     invitation: String,
     presence_code: String,
     session: State<'_, AppSession>,
 ) -> Result<RelayConsentView> {
-    let now = crate::commands::now() as i64;
-    let plan = cbcl_v2_claimant::recognise_claimant_invitation(
-        invitation.trim(),
-        presence_code.trim(),
-        now,
+    recognise_v2_entry(
+        CredentialV2Entry::Legacy {
+            invitation,
+            presence_code: Zeroizing::new(presence_code),
+        },
+        &session,
     )
-    .await?;
+    .await
+}
+
+enum CredentialV2Entry {
+    Legacy {
+        invitation: String,
+        presence_code: Zeroizing<String>,
+    },
+}
+
+async fn recognise_v2_entry(
+    input: CredentialV2Entry,
+    session: &AppSession,
+) -> Result<RelayConsentView> {
+    let operation = {
+        let mut guard = session
+            .0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        guard
+            .cbcl_v2_attempts
+            .require_entry_mode(CredentialV2Flow::LegacyTwoDecision)?;
+        let operation = guard.cbcl_v2_attempts.begin()?;
+        guard.pending_cbcl_v2_relay = None;
+        guard.pending_cbcl_v2 = None;
+        operation
+    };
+    operation.attempt.check()?;
+    let now = crate::commands::now() as i64;
+    let plan = match input {
+        CredentialV2Entry::Legacy {
+            invitation,
+            presence_code,
+        } => {
+            cbcl_v2_claimant::recognise_claimant_invitation(
+                invitation.trim(),
+                presence_code.trim(),
+                now,
+            )
+            .await?
+        }
+    };
     let view = plan.view();
     let mut guard = session
         .0
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    if guard.pending_cbcl_v2.is_some() {
-        return Err(UiError::from("PairingAlreadyActive"));
-    }
-    guard.pending_cbcl_v2_relay = Some(plan);
+    guard.update_cbcl_v2_attempt(&operation.attempt, |guard| {
+        guard.pending_cbcl_v2_relay = Some(plan);
+        Ok(())
+    })?;
+    operation.retain();
     Ok(view)
 }
 
@@ -181,13 +338,15 @@ pub async fn cbcl_v2_relay_decide(
     approve: bool,
     session: State<'_, AppSession>,
 ) -> Result<CredentialV2RelayDecisionView> {
-    let plan = take_relay_plan(&session)?;
+    let (plan, operation) = take_relay_plan(&session)?;
+    operation.attempt.check()?;
     let decision = match (plan.pair_state(), approve) {
         (_, false) => RelayConsentDecision::Decline,
         (ExactPairState::NewPair, true) => RelayConsentDecision::Approve,
         (ExactPairState::TrustedPair, true) => RelayConsentDecision::ExistingTrust,
     };
     let Some(capability) = cbcl_v2_claimant::authorise_claimant_relay(plan, decision)? else {
+        ensure_current(&session, &operation.attempt)?;
         return Ok(CredentialV2RelayDecisionView {
             outcome: "declined",
             intent: None,
@@ -200,17 +359,13 @@ pub async fn cbcl_v2_relay_decide(
     let relay_origin = claimant.relay_origin().to_owned();
     let target = cbcl_transport::relay_target(&relay_origin)
         .map_err(|_| UiError::from("PairingRelayRefused"))?;
-    let (pending, intent) = tauri::async_runtime::spawn_blocking(move || {
-        let socket = cbcl_transport::connect_wss(&target).map_err(map_transport)?;
-        pump_to_offer(claimant, socket)
+    let attempt = operation.attempt.clone();
+    let (pending, intent) = pairing_blocking(&operation, move || {
+        let socket = attempt.run(|| cbcl_transport::connect_wss(&target).map_err(map_transport))?;
+        pump_to_offer(claimant, socket, attempt)
     })
-    .await
-    .map_err(|_| UiError::from("PairingFailed"))??;
-    session
-        .0
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .pending_cbcl_v2 = Some(pending);
+    .await?;
+    put_pending(&session, pending, operation)?;
     Ok(CredentialV2RelayDecisionView {
         outcome: "intent",
         intent: Some(intent),
@@ -218,15 +373,15 @@ pub async fn cbcl_v2_relay_decide(
 }
 
 /// Commit preliminary consent. Approval permits exactly one custody call for
-/// pure DID preview, sends that preview inside the protected channel, and
-/// stops at the authenticated comparison result. It signs or publishes nothing.
+/// pure DID preview and returns it before preparation disclosure. The UI must
+/// paint this result before invoking cbcl_v2_compare. No identity effect occurs.
 #[tauri::command]
 pub async fn cbcl_v2_preliminary_decide(
     approve: bool,
     passcode: Option<String>,
     session: State<'_, AppSession>,
 ) -> Result<CredentialV2PreliminaryDecisionView> {
-    let mut pending = take_pending(&session)?;
+    let (mut pending, operation) = take_pending(&session, CredentialV2Phase::Intent)?;
     let offer = pending
         .claimant
         .authenticated_offer()
@@ -255,58 +410,138 @@ pub async fn cbcl_v2_preliminary_decide(
     };
     send_claimant_object(&mut pending, &decision)?;
     if !approve {
+        ensure_current(&session, &operation.attempt)?;
         return Ok(CredentialV2PreliminaryDecisionView {
             outcome: "declined",
             final_review: None,
         });
     }
-    let passcode = passcode.expect("approved path checked presence above");
-    let (pending, view) = tauri::async_runtime::spawn_blocking(move || {
+    let passcode = Zeroizing::new(passcode.expect("approved path checked presence above"));
+    let (pending, view) = pairing_blocking(&operation, move || {
         wait_outbound_ack(&mut pending)?;
-        let preview_did = preview_identity(&pending.claimant, &passcode)?;
-        let preparation = pending
-            .claimant
-            .body_authority()
-            .preparation(&decision, &preview_did)
-            .map_err(|_| UiError::from("PairingFailed"))?;
-        send_claimant_object(&mut pending, &preparation)?;
-        let comparison = pump_to_comparison(&mut pending)?;
+        let (preview_did, view) = prepare_preview(
+            &mut pending.phase,
+            &pending.attempt,
+            pending.claimant.profile().application_id.as_str(),
+            || preview_identity(&pending.claimant, &passcode),
+        )?;
+        pending.preview_did = Some(preview_did);
+        pending.intent_approve = Some(decision);
+        Ok((pending, view))
+    })
+    .await?;
+    put_pending(&session, pending, operation)?;
+    Ok(view)
+}
+
+/// One continuation after the local preview has painted. It carries no new
+/// decision, custody input, or peer-supplied identity value.
+#[tauri::command]
+pub async fn cbcl_v2_compare(
+    session: State<'_, AppSession>,
+) -> Result<CredentialV2FinalReviewView> {
+    let (mut pending, operation) = take_pending(&session, CredentialV2Phase::PreviewReady)?;
+    let (pending, view) = pairing_blocking(&operation, move || {
+        let attempt = pending.attempt.clone();
+        let mut phase = pending.phase;
+        let comparison = continue_preview(&mut phase, &attempt, || {
+            let decision = pending
+                .intent_approve
+                .as_ref()
+                .ok_or_else(|| UiError::from("PairingFailed"))?;
+            let preview = pending
+                .preview_did
+                .as_ref()
+                .ok_or_else(|| UiError::from("PairingFailed"))?;
+            let preparation = pending
+                .claimant
+                .body_authority()
+                .preparation(decision, preview)
+                .map_err(|_| UiError::from("PairingFailed"))?;
+            send_claimant_object(&mut pending, &preparation)?;
+            pump_to_comparison(&mut pending)
+        })?;
         let comparison_name = match comparison.kind() {
             CredentialV2Kind::ComparisonConfirmed => "no-binding-person-compared",
             CredentialV2Kind::BindingConfirmed => "bound-same-did",
             _ => return Err(UiError::from("PairingFailed")),
         };
-        let application_id = pending.claimant.profile().application_id.as_str().into();
-        let preview_fingerprint = selfsame_core::fingerprint::fingerprint_did(&preview_did).into();
-        pending.preview_did = Some(preview_did.clone());
-        pending.intent_approve = Some(decision);
+        pending.phase = phase;
         pending.comparison = Some(comparison);
-        Ok::<_, UiError>((
-            pending,
-            CredentialV2FinalReviewView {
-                application_id,
-                preview_issuer_did: preview_did,
-                preview_fingerprint,
-                comparison: comparison_name,
-            },
-        ))
+        let view = final_review_view(&pending, comparison_name)?;
+        Ok((pending, view))
     })
-    .await
-    .map_err(|_| UiError::from("PairingFailed"))??;
-    session
-        .0
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .pending_cbcl_v2 = Some(pending);
-    Ok(CredentialV2PreliminaryDecisionView {
-        outcome: "final-review",
-        final_review: Some(view),
-    })
+    .await?;
+    put_pending(&session, pending, operation)?;
+    Ok(view)
+}
+
+fn prepare_preview(
+    phase: &mut CredentialV2Phase,
+    attempt: &CredentialV2Attempt,
+    application_id: &str,
+    derive: impl FnOnce() -> Result<String>,
+) -> Result<(Zeroizing<String>, CredentialV2PreliminaryDecisionView)> {
+    phase.require(CredentialV2Phase::Intent)?;
+    let did = attempt.run(|| derive().map(Zeroizing::new))?;
+    let view = CredentialV2PreliminaryDecisionView {
+        outcome: "preview",
+        final_review: Some(review_projection(application_id, &did, "waiting")),
+    };
+    *phase = CredentialV2Phase::PreviewReady;
+    Ok((did, view))
+}
+
+fn review_projection(
+    application_id: &str,
+    preview: &str,
+    comparison: &'static str,
+) -> CredentialV2FinalReviewView {
+    CredentialV2FinalReviewView {
+        application_id: application_id.into(),
+        preview_issuer_did: preview.into(),
+        preview_fingerprint: selfsame_core::fingerprint::fingerprint_did(preview).into(),
+        comparison,
+    }
+}
+
+fn final_review_view(
+    pending: &PendingCredentialV2Pairing,
+    comparison: &'static str,
+) -> Result<CredentialV2FinalReviewView> {
+    pending.attempt.check()?;
+    let preview = pending
+        .preview_did
+        .as_ref()
+        .ok_or_else(|| UiError::from("PairingFailed"))?;
+    Ok(review_projection(
+        pending.claimant.profile().application_id.as_str(),
+        preview,
+        comparison,
+    ))
+}
+
+/// Check cancellation around the existing injectable transaction boundaries.
+struct CancellationFaults<'a, F> {
+    attempt: &'a CredentialV2Attempt,
+    inner: &'a mut F,
+    entry: Option<CredentialV2Effect>,
+}
+
+impl<F: PrePayloadFaultSink> PrePayloadFaultSink for CancellationFaults<'_, F> {
+    fn after(&mut self) -> Result<()> {
+        self.attempt.check()
+    }
+    fn before(&mut self, boundary: PrePayloadBoundary) -> Result<()> {
+        self.attempt.check()?;
+        self.inner.before(boundary)?;
+        self.entry = Some(self.attempt.enter()?);
+        Ok(())
+    }
 }
 
 /// Commit the second person decision. Final approval is checkpointed into the
 /// application's secure-store slot before its protocol frame is released.
-/// No issuer or grant effect is performed by this first durable boundary.
 #[tauri::command]
 pub async fn cbcl_v2_final_decide(
     approve: bool,
@@ -323,13 +558,9 @@ async fn cbcl_v2_final_decide_with_faults(
     session: State<'_, AppSession>,
     faults: &mut impl PrePayloadFaultSink,
 ) -> Result<CredentialV2FinalDecisionView> {
-    let mut pending = take_pending(&session)?;
+    let (mut pending, operation) = take_pending(&session, CredentialV2Phase::FinalReview)?;
     let comparison = pending
         .comparison
-        .clone()
-        .ok_or_else(|| UiError::from("PairingFailed"))?;
-    let preview_did = pending
-        .preview_did
         .clone()
         .ok_or_else(|| UiError::from("PairingFailed"))?;
     let final_decision = pending
@@ -346,6 +577,7 @@ async fn cbcl_v2_final_decide_with_faults(
         .map_err(|_| UiError::from("PairingFailed"))?;
     if !approve {
         send_claimant_object(&mut pending, &final_decision)?;
+        ensure_current(&session, &operation.attempt)?;
         return Ok(CredentialV2FinalDecisionView {
             outcome: "declined",
         });
@@ -354,7 +586,49 @@ async fn cbcl_v2_final_decide_with_faults(
     let passcode = passcode
         .filter(|value| !value.is_empty())
         .ok_or_else(|| UiError::from("PresenceRequired"))?;
-    crate::custody::Custody::require_backup_confirmed()?;
+    let ceremony_custody = CeremonyCustody::Legacy {
+        root: pending
+            .attempt
+            .run(|| Ok(crate::custody::Custody::unlock_hierarchy_root(&passcode)?))?,
+        authorized_at: Instant::now(),
+    };
+    complete_approved(
+        pending,
+        operation,
+        final_decision,
+        ceremony_custody,
+        &session,
+        faults,
+    )
+    .await
+}
+
+/// Shared transaction executor: its caller already owns the distinct protocol
+/// final approval and native custody. It is not a command or a consent source.
+async fn complete_approved(
+    mut pending: PendingCredentialV2Pairing,
+    operation: CredentialV2Operation,
+    final_decision: cbcl_pairing::credential_v2::CredentialV2Object,
+    ceremony_custody: CeremonyCustody,
+    session: &AppSession,
+    faults: &mut impl PrePayloadFaultSink,
+) -> Result<CredentialV2FinalDecisionView> {
+    let attempt = pending.attempt.clone();
+    let mut cancellation_faults = CancellationFaults {
+        attempt: &attempt,
+        inner: faults,
+        entry: None,
+    };
+    let faults = &mut cancellation_faults;
+    let comparison = pending
+        .comparison
+        .clone()
+        .ok_or_else(|| UiError::from("PairingFailed"))?;
+    let preview_did = pending
+        .preview_did
+        .clone()
+        .ok_or_else(|| UiError::from("PairingFailed"))?;
+    attempt.run(|| Ok(crate::custody::Custody::require_backup_confirmed()?))?;
     let offer_object = pending
         .claimant
         .authenticated_offer()
@@ -386,55 +660,53 @@ async fn cbcl_v2_final_decide_with_faults(
     let preview_fingerprint: [u8; 32] = sha2::Sha256::digest(preview_did.as_bytes()).into();
     let mut checkpoint_nonce = [0_u8; 12];
     rand::rngs::OsRng.fill_bytes(&mut checkpoint_nonce);
-
-    let (generation, checkpoint) =
-        crate::custody::Custody::use_hierarchy_root(&passcode, |root| -> Result<_> {
-            let claims = recognised.claims.account_provenance();
-            let scope = selfsame_app_identity::scope::AccountScopeId::from_octets(
-                *claims.account_scope_id(),
-            );
-            let home = selfsame_app_identity::hierarchy::derive(
-                root,
-                &pending.claimant.profile().application_id,
-                &scope,
-            );
-            let final_did = home
-                .home_did()
-                .map_err(|_| UiError::from("PairingIdentityUnavailable"))?;
-            let final_fingerprint: [u8; 32] = sha2::Sha256::digest(final_did.as_bytes()).into();
-            if final_did != preview_did || final_fingerprint != preview_fingerprint {
-                return Err(UiError::from("PairingPreviewChanged"));
-            }
-            let wrapping_key = crate::cbcl_v2_completion::checkpoint_wrapping_key(
-                root,
-                &application_id,
-                carrier.carrier_ceremony_id(),
-            )?;
-            let effects = pending
-                .claimant
-                .core_mut()
-                .prepare_final_approval(
-                    &final_decision,
-                    &wrapping_key,
-                    cbcl_pairing::credential_v2::CredentialV2CheckpointNonce::from_csprng(
-                        checkpoint_nonce,
-                    ),
-                    now,
-                )
-                .map_err(|_| UiError::from("PairingFailed"))?;
-            let mut effects = effects.into_iter();
-            let Some(CredentialV2ClaimantEffect::Checkpoint {
-                generation,
-                checkpoint,
-            }) = effects.next()
-            else {
-                return Err(UiError::from("PairingFailed"));
-            };
-            if effects.next().is_some() {
-                return Err(UiError::from("PairingFailed"));
-            }
-            Ok((generation, checkpoint))
-        })??;
+    attempt.check()?;
+    let (generation, checkpoint) = ceremony_custody.with_root(|root| -> Result<_> {
+        let claims = recognised.claims.account_provenance();
+        let scope =
+            selfsame_app_identity::scope::AccountScopeId::from_octets(*claims.account_scope_id());
+        let home = selfsame_app_identity::hierarchy::derive(
+            root,
+            &pending.claimant.profile().application_id,
+            &scope,
+        );
+        let final_did = home
+            .home_did()
+            .map_err(|_| UiError::from("PairingIdentityUnavailable"))?;
+        let final_fingerprint: [u8; 32] = sha2::Sha256::digest(final_did.as_bytes()).into();
+        if final_did != *preview_did || final_fingerprint != preview_fingerprint {
+            return Err(UiError::from("PairingPreviewChanged"));
+        }
+        let wrapping_key = crate::cbcl_v2_completion::checkpoint_wrapping_key(
+            root,
+            &application_id,
+            carrier.carrier_ceremony_id(),
+        )?;
+        let effects = pending
+            .claimant
+            .core_mut()
+            .prepare_final_approval(
+                &final_decision,
+                &wrapping_key,
+                cbcl_pairing::credential_v2::CredentialV2CheckpointNonce::from_csprng(
+                    checkpoint_nonce,
+                ),
+                now,
+            )
+            .map_err(|_| UiError::from("PairingFailed"))?;
+        let mut effects = effects.into_iter();
+        let Some(CredentialV2ClaimantEffect::Checkpoint {
+            generation,
+            checkpoint,
+        }) = effects.next()
+        else {
+            return Err(UiError::from("PairingFailed"));
+        };
+        if effects.next().is_some() {
+            return Err(UiError::from("PairingFailed"));
+        }
+        Ok((generation, checkpoint))
+    })?;
 
     let durable = crate::cbcl_v2_completion::PendingCredentialV2Completion::new(
         crate::cbcl_v2_completion::PendingCredentialV2Input {
@@ -453,21 +725,22 @@ async fn cbcl_v2_final_decide_with_faults(
             checkpoint: &checkpoint,
         },
     )?;
-    let mut transaction = PrePayloadPendingTransaction::begin(durable)?;
+    let durable = durable.with_flow(attempt.mode());
+    let mut transaction = attempt.run(|| PrePayloadPendingTransaction::begin(durable))?;
     transaction.try_step(faults, PrePayloadBoundary::FinalApprovalRelease, || {
         let effects = pending
             .claimant
             .core_mut()
             .checkpoint_persisted(generation)
             .map_err(|_| UiError::from("PairingFailed"))?;
-        send_effects(&mut pending.socket, effects)
+        send_effects(&mut pending.socket, &pending.attempt, effects)
     })?;
 
     // The blind relay acknowledgement changes the cached-frame projection.
     // Seal and replace the pending record before any identity signature.
     let acknowledgement =
         transaction.try_step(faults, PrePayloadBoundary::AcknowledgementRead, || {
-            read_binary(&mut pending.socket)
+            read_binary(&mut pending.socket, &pending.attempt)
         })?;
     let acknowledgement_now = crate::commands::now();
     let mut acknowledgement_nonce = [0_u8; 12];
@@ -476,26 +749,25 @@ async fn cbcl_v2_final_decide_with_faults(
         faults,
         PrePayloadBoundary::AcknowledgementRecognition,
         || {
-            let acknowledgement_effects =
-                crate::custody::Custody::use_hierarchy_root(&passcode, |root| -> Result<_> {
-                    let wrapping_key = crate::cbcl_v2_completion::checkpoint_wrapping_key(
-                        root,
-                        &application_id,
-                        carrier.carrier_ceremony_id(),
-                    )?;
-                    pending
-                        .claimant
-                        .core_mut()
-                        .receive_durable(
-                            &acknowledgement,
-                            acknowledgement_now,
-                            &wrapping_key,
-                            cbcl_pairing::credential_v2::CredentialV2CheckpointNonce::from_csprng(
-                                acknowledgement_nonce,
-                            ),
-                        )
-                        .map_err(|_| UiError::from("PairingFailed"))
-                })??;
+            let acknowledgement_effects = ceremony_custody.with_root(|root| -> Result<_> {
+                let wrapping_key = crate::cbcl_v2_completion::checkpoint_wrapping_key(
+                    root,
+                    &application_id,
+                    carrier.carrier_ceremony_id(),
+                )?;
+                pending
+                    .claimant
+                    .core_mut()
+                    .receive_durable(
+                        &acknowledgement,
+                        acknowledgement_now,
+                        &wrapping_key,
+                        cbcl_pairing::credential_v2::CredentialV2CheckpointNonce::from_csprng(
+                            acknowledgement_nonce,
+                        ),
+                    )
+                    .map_err(|_| UiError::from("PairingFailed"))
+            })?;
             one_checkpoint(acknowledgement_effects)
         },
     )?;
@@ -545,12 +817,12 @@ async fn cbcl_v2_final_decide_with_faults(
     transaction.replace_at(faults, PrePayloadBoundary::PlannedStageReplacement, planned)?;
 
     // First final signature: issuer creation only. The deterministic plan was
-    // durable before this custody call, and the preview is re-derived before
-    // issuer construction inside the call.
+    // durable before this ceremony authorization, and the preview is
+    // re-derived before issuer construction.
     let issuer = transaction.try_step(faults, PrePayloadBoundary::IssuerCustody, || {
-        crate::custody::Custody::use_hierarchy_root(&passcode, |root| {
+        ceremony_custody.with_root(|root| {
             crate::cbcl_v2_completion::build_issuer_artifacts(root, &plan, effect_time)
-        })?
+        })
     })?;
     let issuer_created = transaction.current().issuer_created(&issuer)?;
     transaction.replace_at(
@@ -560,22 +832,31 @@ async fn cbcl_v2_final_decide_with_faults(
     )?;
 
     transaction.before_async(faults, PrePayloadBoundary::IssuerPublication)?;
-    let publication =
-        selfsame_app_identity_net::state::publish_issuer_identity(&profile, &issuer.identity)
-            .await
-            .map_err(|_| UiError::from("PairingResolverUnavailable"))?;
+    let publication = attempt
+        .io(async {
+            selfsame_app_identity_net::state::publish_issuer_identity(&profile, &issuer.identity)
+                .await
+                .map_err(|_| UiError::from("PairingResolverUnavailable"))
+        })
+        .await?;
+    attempt.check()?;
     if publication.acknowledged.is_empty() {
         return Err(UiError::from("PairingResolverUnavailable"));
     }
     transaction.before_async(faults, PrePayloadBoundary::ResolverVerification)?;
-    let resolved = selfsame_app_identity_net::state::resolve_closure(
-        &profile,
-        &issuer.identity.did,
-        None,
-        selfsame_app_identity_net::state::Acceptance::Repeat,
-    )
-    .await
-    .map_err(|_| UiError::from("PairingResolverUnavailable"))?;
+    let resolved = attempt
+        .io(async {
+            selfsame_app_identity_net::state::resolve_closure(
+                &profile,
+                &issuer.identity.did,
+                None,
+                selfsame_app_identity_net::state::Acceptance::Repeat,
+            )
+            .await
+            .map_err(|_| UiError::from("PairingResolverUnavailable"))
+        })
+        .await?;
+    attempt.check()?;
     if resolved.document.did.as_str() != issuer.identity.did
         || resolved.document.is_deactivated()
         || !resolved
@@ -592,7 +873,7 @@ async fn cbcl_v2_final_decide_with_faults(
     // finalizer provisions it atomically, and wallet installation verifies it
     // from the authenticated receipt before granting capability.
     let grant = transaction.try_step(faults, PrePayloadBoundary::GrantConstruction, || {
-        crate::custody::Custody::use_hierarchy_root(&passcode, |root| {
+        ceremony_custody.with_root(|root| {
             crate::cbcl_v2_completion::build_grant_artifacts(
                 root,
                 &plan,
@@ -601,7 +882,7 @@ async fn cbcl_v2_final_decide_with_faults(
                 effect_time,
                 profile.revocation.max_grant_lifetime_seconds,
             )
-        })?
+        })
     })?;
     let provisioned = transaction.current().provisioned(&grant)?;
     transaction.replace_at(
@@ -633,26 +914,25 @@ async fn cbcl_v2_final_decide_with_faults(
             }
             let mut payload_nonce = [0_u8; 12];
             rand::rngs::OsRng.fill_bytes(&mut payload_nonce);
-            let payload_effects =
-                crate::custody::Custody::use_hierarchy_root(&passcode, |root| -> Result<_> {
-                    let wrapping_key = crate::cbcl_v2_completion::checkpoint_wrapping_key(
-                        root,
-                        &application_id,
-                        carrier.carrier_ceremony_id(),
-                    )?;
-                    pending
-                        .claimant
-                        .core_mut()
-                        .prepare_payload(
-                            &payload,
-                            &wrapping_key,
-                            cbcl_pairing::credential_v2::CredentialV2CheckpointNonce::from_csprng(
-                                payload_nonce,
-                            ),
-                            payload_now,
-                        )
-                        .map_err(|_| UiError::from("PairingFailed"))
-                })??;
+            let payload_effects = ceremony_custody.with_root(|root| -> Result<_> {
+                let wrapping_key = crate::cbcl_v2_completion::checkpoint_wrapping_key(
+                    root,
+                    &application_id,
+                    carrier.carrier_ceremony_id(),
+                )?;
+                pending
+                    .claimant
+                    .core_mut()
+                    .prepare_payload(
+                        &payload,
+                        &wrapping_key,
+                        cbcl_pairing::credential_v2::CredentialV2CheckpointNonce::from_csprng(
+                            payload_nonce,
+                        ),
+                        payload_now,
+                    )
+                    .map_err(|_| UiError::from("PairingFailed"))
+            })?;
             one_checkpoint(payload_effects)
         },
     )?;
@@ -660,18 +940,18 @@ async fn cbcl_v2_final_decide_with_faults(
         .current()
         .payload_prepared(payload.content_hash())?
         .with_checkpoint(payload_generation, &payload_checkpoint)?;
-    let _payload_prepared = transaction.commit_payload(payload_prepared)?;
-    let payload_release = pending
-        .claimant
-        .core_mut()
-        .checkpoint_persisted(payload_generation)
-        .map_err(|_| UiError::from("PairingFailed"))?;
-    send_effects(&mut pending.socket, payload_release)?;
-    session
-        .0
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .pending_cbcl_v2 = Some(pending);
+    let _payload_prepared = attempt.run(|| transaction.commit_payload(payload_prepared))?;
+    let payload_release = attempt.run(|| {
+        pending
+            .claimant
+            .core_mut()
+            .checkpoint_persisted(payload_generation)
+            .map_err(|_| UiError::from("PairingFailed"))
+    })?;
+    send_effects(&mut pending.socket, &pending.attempt, payload_release)?;
+    pending.ceremony_custody = Some(ceremony_custody);
+    pending.phase = CredentialV2Phase::PayloadSent;
+    put_pending(session, pending, operation)?;
     Ok(CredentialV2FinalDecisionView {
         outcome: "payload-sent",
     })
@@ -685,18 +965,37 @@ pub async fn cbcl_v2_finish(
     passcode: Option<String>,
     session: State<'_, AppSession>,
 ) -> Result<CredentialV2FinishView> {
+    // Mode refusal precedes even the legacy presence requirement, while a
+    // missing presence value must not take and cancel the live pending worker.
+    session
+        .0
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .cbcl_v2_attempts
+        .require_mode(CredentialV2Flow::LegacyTwoDecision)?;
     let passcode = passcode
         .filter(|value| !value.is_empty())
         .ok_or_else(|| UiError::from("PresenceRequired"))?;
-    let pending = take_pending(&session)?;
-    let (mut pending, prepared) =
-        tauri::async_runtime::spawn_blocking(move || prepare_received_receipt(pending, &passcode))
-            .await
-            .map_err(|_| UiError::from("PairingFailed"))?;
+    let (pending, operation) = take_pending(&session, CredentialV2Phase::PayloadSent)?;
+    finish_pending(pending, operation, Zeroizing::new(passcode), &session).await
+}
+
+async fn finish_pending(
+    pending: PendingCredentialV2Pairing,
+    operation: CredentialV2Operation,
+    passcode: Zeroizing<String>,
+    session: &AppSession,
+) -> Result<CredentialV2FinishView> {
+    let attempt = operation.attempt.clone();
+    let (mut pending, prepared) = pairing_blocking(&operation, move || {
+        Ok(prepare_received_receipt(pending, &passcode))
+    })
+    .await?;
     let (durable, receipt_recovery_commitment) = match prepared {
         Ok(value) => value,
         Err(error) => {
-            put_pending(&session, pending);
+            pending.clear_ceremony_custody();
+            put_pending(session, pending, operation)?;
             return Err(error);
         }
     };
@@ -713,7 +1012,8 @@ pub async fn cbcl_v2_finish(
         ) {
             Ok(value) => value,
             Err(error) => {
-                put_pending(&session, pending);
+                pending.clear_ceremony_custody();
+                put_pending(session, pending, operation)?;
                 return Err(error);
             }
         };
@@ -721,20 +1021,31 @@ pub async fn cbcl_v2_finish(
     let live_account = match installed.account() {
         Ok(value) => value,
         Err(error) => {
-            put_pending(&session, pending);
+            pending.clear_ceremony_custody();
+            put_pending(session, pending, operation)?;
             return Err(error);
         }
     };
     let live_issuer_did = installed.issuer_did().to_owned();
-    let jrd = match verify_live_installation(live_profile, live_account, live_issuer_did).await {
+    attempt.check()?;
+    let jrd = match verify_live_installation_guarded(
+        live_profile,
+        live_account,
+        live_issuer_did,
+        &attempt,
+    )
+    .await
+    {
         Ok(value) => value,
         Err(error) => {
-            put_pending(&session, pending);
+            pending.clear_ceremony_custody();
+            put_pending(session, pending, operation)?;
             return Err(error);
         }
     };
-    if let Err(error) = crate::cbcl_v2_completion::install(&durable, &installed, &jrd) {
-        put_pending(&session, pending);
+    if let Err(error) = install_guarded(&attempt, &durable, &installed, &jrd) {
+        pending.clear_ceremony_custody();
+        put_pending(session, pending, operation)?;
         return Err(error);
     }
 
@@ -746,12 +1057,13 @@ pub async fn cbcl_v2_finish(
             .core_mut()
             .commit_recovered_receipt(receipt)
         {
-            let _ = tauri::async_runtime::spawn_blocking(move || {
-                let _ = send_effects(&mut pending.socket, effects);
+            let _ = pairing_blocking(&operation, move || {
+                send_effects(&mut pending.socket, &pending.attempt, effects)
             })
             .await;
         }
     }
+    ensure_current(session, &attempt)?;
     Ok(CredentialV2FinishView {
         outcome: "installed",
     })
@@ -1409,73 +1721,94 @@ fn rotation_view(
     }
 }
 
-/// Cancel a pre-socket decision or close one live credential/v2 relay session.
+/// Invalidate even a command which currently owns the socket. Dropping an idle
+/// socket closes it; in-flight I/O retains its existing bounded transport wait.
+/// Sealed post-payload recovery belongs to the durable slot and is preserved.
 #[tauri::command]
 pub async fn cbcl_v2_cancel(session: State<'_, AppSession>) -> Result<()> {
-    let pending = {
-        let mut guard = session
-            .0
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        guard.pending_cbcl_v2_relay = None;
-        guard.pending_cbcl_v2.take()
-    };
-    if let Some(mut pending) = pending {
-        let _ = tauri::async_runtime::spawn_blocking(move || {
-            if let Ok(close) = encode_client_message(&ClientMessage::Close) {
-                let _ = pending.socket.send(Message::Binary(close.into()));
-            }
-        })
-        .await;
-    }
+    let mut guard = session
+        .0
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    guard
+        .cbcl_v2_attempts
+        .require_mode(CredentialV2Flow::LegacyTwoDecision)?;
+    guard.revoke_cbcl_v2();
     Ok(())
 }
 
-fn take_relay_plan(session: &State<'_, AppSession>) -> Result<RelayConsentPlan> {
-    session
+fn take_relay_plan(session: &AppSession) -> Result<(RelayConsentPlan, CredentialV2Operation)> {
+    let mut guard = session
         .0
         .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    guard
+        .cbcl_v2_attempts
+        .require_mode(CredentialV2Flow::LegacyTwoDecision)?;
+    if guard.pending_cbcl_v2_relay.is_none() {
+        return Err(UiError::from("PairingNotStarted"));
+    }
+    let operation = guard.cbcl_v2_attempts.start_work()?;
+    let plan = guard
         .pending_cbcl_v2_relay
         .take()
-        .ok_or_else(|| UiError::from("PairingNotStarted"))
+        .expect("checked relay plan");
+    Ok((plan, operation))
+}
+
+async fn pairing_blocking<T: Send + 'static>(
+    operation: &CredentialV2Operation,
+    action: impl FnOnce() -> Result<T> + Send + 'static,
+) -> Result<T> {
+    let lease = operation.lease();
+    let attempt = operation.attempt.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let _lease = lease;
+        attempt.run(action)
+    })
+    .await
+    .map_err(|_| UiError::from("PairingFailed"))?
 }
 
 fn pump_to_offer(
     mut claimant: PreparedClaimant,
     mut socket: WebSocket<MaybeTlsStream<TcpStream>>,
+    attempt: CredentialV2Attempt,
 ) -> Result<(PendingCredentialV2Pairing, CredentialV2IntentView)> {
+    attempt.check()?;
     let start = claimant
         .core_mut()
         .start()
         .map_err(|_| UiError::from("PairingFailed"))?;
-    socket
-        .send(Message::Binary(start.into()))
-        .map_err(|_| UiError::from("PairingRelayUnavailable"))?;
+    send_binary(&mut socket, &attempt, start)?;
     loop {
-        let bytes = read_binary(&mut socket)?;
+        let bytes = read_binary(&mut socket, &attempt)?;
         let effects = claimant
             .core_mut()
             .receive(&bytes, crate::commands::now())
             .map_err(|_| UiError::from("PairingFailed"))?;
         for effect in effects {
+            attempt.check()?;
             match effect {
-                CredentialV2ClaimantEffect::Send(bytes) => socket
-                    .send(Message::Binary(bytes.into()))
-                    .map_err(|_| UiError::from("PairingRelayUnavailable"))?,
+                CredentialV2ClaimantEffect::Send(bytes) => {
+                    send_binary(&mut socket, &attempt, bytes)?
+                }
                 CredentialV2ClaimantEffect::Established { transcript_hash } => {
-                    claimant.bind_finished_profile(transcript_hash)?;
+                    attempt.run(|| claimant.bind_finished_profile(transcript_hash))?;
                 }
                 CredentialV2ClaimantEffect::DisplayIntent(display) => {
                     let view = intent_view(&display);
                     return Ok((
                         PendingCredentialV2Pairing {
+                            attempt,
+                            phase: CredentialV2Phase::Intent,
                             claimant,
                             socket,
                             intent_approve: None,
                             preview_did: None,
                             comparison: None,
                             recovered_receipt: None,
+                            ceremony_custody: None,
                         },
                         view,
                     ));
@@ -1483,19 +1816,41 @@ fn pump_to_offer(
                 CredentialV2ClaimantEffect::ReceivedObject { .. }
                 | CredentialV2ClaimantEffect::Checkpoint { .. }
                 | CredentialV2ClaimantEffect::Terminal => {
-                    return Err(UiError::from("PairingFailed"));
+                    return Err(UiError::from("PairingFailed"))
                 }
             }
         }
     }
 }
 
-fn put_pending(session: &State<'_, AppSession>, pending: PendingCredentialV2Pairing) {
+fn ensure_current(session: &AppSession, attempt: &CredentialV2Attempt) -> Result<()> {
     session
         .0
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .pending_cbcl_v2 = Some(pending);
+        .cbcl_v2_attempts
+        .ensure_current(attempt)
+}
+
+fn put_pending(
+    session: &AppSession,
+    pending: PendingCredentialV2Pairing,
+    operation: CredentialV2Operation,
+) -> Result<()> {
+    let mut guard = session
+        .0
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    guard.update_cbcl_v2_attempt(&operation.attempt, |guard| {
+        guard.cbcl_v2_attempts.ensure_current(&pending.attempt)?;
+        if guard.pending_cbcl_v2.is_some() || guard.pending_cbcl_v2_relay.is_some() {
+            return Err(UiError::from("PairingAlreadyActive"));
+        }
+        guard.pending_cbcl_v2 = Some(pending);
+        Ok(())
+    })?;
+    operation.retain();
+    Ok(())
 }
 
 fn prepare_received_receipt(
@@ -1516,19 +1871,29 @@ fn prepare_received_receipt(
             .as_str()
             .to_owned();
         let carrier = pending.claimant.carrier().clone();
+        // The normal path reuses final consent.  A stalled ceremony requires
+        // one fresh presence check rather than retaining an authorization.
+        pending.ensure_ceremony_custody(passcode)?;
+        let (claimant, socket, ceremony_custody) = (
+            &mut pending.claimant,
+            &mut pending.socket,
+            &pending.ceremony_custody,
+        );
+        let custody = ceremony_custody
+            .as_ref()
+            .expect("ceremony custody was installed");
         let mut durable = crate::cbcl_v2_completion::load_pending(&application_id)?;
-        while pending.claimant.core_mut().has_cached_outbound_frame() {
-            let acknowledgement = read_binary(&mut pending.socket)?;
+        while claimant.core_mut().has_cached_outbound_frame() {
+            let acknowledgement = read_binary(socket, &pending.attempt)?;
             let mut nonce = [0_u8; 12];
             rand::rngs::OsRng.fill_bytes(&mut nonce);
-            let effects = crate::custody::Custody::use_hierarchy_root(passcode, |root| {
+            let effects = custody.with_root(|root| {
                 let wrapping_key = crate::cbcl_v2_completion::checkpoint_wrapping_key(
                     root,
                     &application_id,
                     carrier.carrier_ceremony_id(),
                 )?;
-                pending
-                    .claimant
+                claimant
                     .core_mut()
                     .receive_durable(
                         &acknowledgement,
@@ -1539,12 +1904,13 @@ fn prepare_received_receipt(
                         ),
                     )
                     .map_err(|_| UiError::from("PairingFailed"))
-            })??;
+            })?;
             let (generation, checkpoint) = one_checkpoint(effects)?;
             let acknowledged = durable.with_checkpoint(generation, &checkpoint)?;
-            crate::cbcl_v2_completion::replace_pending(&durable, &acknowledged)?;
-            let after = pending
-                .claimant
+            pending
+                .attempt
+                .run(|| crate::cbcl_v2_completion::replace_pending(&durable, &acknowledged))?;
+            let after = claimant
                 .core_mut()
                 .checkpoint_persisted(generation)
                 .map_err(|_| UiError::from("PairingFailed"))?;
@@ -1559,7 +1925,7 @@ fn prepare_received_receipt(
             .receipt_recovery_commitment()
             .map_err(|_| UiError::from("PairingFailed"))?;
         if pending.recovered_receipt.is_none() {
-            let frame = read_binary(&mut pending.socket)?;
+            let frame = read_binary(&mut pending.socket, &pending.attempt)?;
             pending.recovered_receipt = Some(
                 pending
                     .claimant
@@ -1571,6 +1937,57 @@ fn prepare_received_receipt(
         Ok((durable, receipt_recovery_commitment))
     })();
     (pending, result)
+}
+
+fn install_guarded(
+    attempt: &CredentialV2Attempt,
+    durable: &crate::cbcl_v2_completion::PendingCredentialV2Completion,
+    installed: &crate::cbcl_v2_completion::InstalledCredentialV2Link,
+    jrd: &selfsame_app_identity::alias::Jrd,
+) -> Result<()> {
+    attempt.run(|| crate::cbcl_v2_completion::install(durable, installed, jrd))
+}
+
+async fn verify_live_installation_guarded(
+    profile: selfsame_app_identity::profile::ApplicationProfile,
+    account: selfsame_app_identity::alias::AcctUri,
+    issuer_did: String,
+    attempt: &CredentialV2Attempt,
+) -> Result<selfsame_app_identity::alias::Jrd> {
+    let account_text = account.as_str().to_owned();
+    let resolved = attempt
+        .io(async {
+            selfsame_app_identity_net::state::resolve_closure(
+                &profile,
+                &issuer_did,
+                None,
+                selfsame_app_identity_net::state::Acceptance::Repeat,
+            )
+            .await
+            .map_err(|_| UiError::from("PairingResolverUnavailable"))
+        })
+        .await?;
+    if resolved.document.did.as_str() != issuer_did
+        || resolved.document.is_deactivated()
+        || !resolved
+            .document
+            .also_known_as()
+            .iter()
+            .any(|v| v == &account_text)
+    {
+        return Err(UiError::from("PairingResolverRefused"));
+    }
+    attempt
+        .io(async {
+            selfsame_app_identity_net::webfinger::fetch_and_verify(
+                &account,
+                &issuer_did,
+                &[account_text],
+            )
+            .await
+            .map_err(|_| UiError::from("PairingAuthorityRefused"))
+        })
+        .await
 }
 
 async fn verify_live_installation(
@@ -1602,48 +2019,64 @@ async fn verify_live_installation(
         .map_err(|_| UiError::from("PairingAuthorityRefused"))
 }
 
-fn take_pending(session: &State<'_, AppSession>) -> Result<PendingCredentialV2Pairing> {
-    session
+fn take_pending(
+    session: &AppSession,
+    phase: CredentialV2Phase,
+) -> Result<(PendingCredentialV2Pairing, CredentialV2Operation)> {
+    let mut guard = session
         .0
         .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    guard
+        .cbcl_v2_attempts
+        .require_mode(CredentialV2Flow::LegacyTwoDecision)?;
+    let pending = guard
         .pending_cbcl_v2
-        .take()
-        .ok_or_else(|| UiError::from("PairingNotStarted"))
+        .as_ref()
+        .ok_or_else(|| UiError::from("PairingNotStarted"))?;
+    guard.cbcl_v2_attempts.ensure_current(&pending.attempt)?;
+    pending.phase.require(phase)?;
+    let operation = guard.cbcl_v2_attempts.start_work()?;
+    let pending = guard.pending_cbcl_v2.take().expect("checked pending phase");
+    Ok((pending, operation))
 }
 
 fn send_claimant_object(
     pending: &mut PendingCredentialV2Pairing,
     object: &cbcl_pairing::credential_v2::CredentialV2Object,
 ) -> Result<()> {
-    let effects = pending
-        .claimant
-        .core_mut()
-        .prepare_application_object(object)
-        .map_err(|_| UiError::from("PairingFailed"))?;
-    for effect in effects {
-        match effect {
-            CredentialV2ClaimantEffect::Send(bytes) => pending
-                .socket
-                .send(Message::Binary(bytes.into()))
-                .map_err(|_| UiError::from("PairingRelayUnavailable"))?,
-            _ => return Err(UiError::from("PairingFailed")),
-        }
-    }
-    Ok(())
+    pending.attempt.check()?;
+    let effects = pending.attempt.run(|| {
+        pending
+            .claimant
+            .core_mut()
+            .prepare_application_object(object)
+            .map_err(|_| UiError::from("PairingFailed"))
+    })?;
+    send_effects(&mut pending.socket, &pending.attempt, effects)
+}
+
+fn send_binary(
+    socket: &mut WebSocket<MaybeTlsStream<TcpStream>>,
+    attempt: &CredentialV2Attempt,
+    bytes: Vec<u8>,
+) -> Result<()> {
+    attempt.run(|| {
+        socket
+            .send(Message::Binary(bytes.into()))
+            .map_err(|_| UiError::from("PairingRelayUnavailable"))
+    })
 }
 
 fn send_effects(
     socket: &mut WebSocket<MaybeTlsStream<TcpStream>>,
+    attempt: &CredentialV2Attempt,
     effects: Vec<CredentialV2ClaimantEffect>,
 ) -> Result<()> {
+    attempt.check()?;
     for effect in effects {
         match effect {
-            CredentialV2ClaimantEffect::Send(bytes) => {
-                socket
-                    .send(Message::Binary(bytes.into()))
-                    .map_err(|_| UiError::from("PairingRelayUnavailable"))?
-            }
+            CredentialV2ClaimantEffect::Send(bytes) => send_binary(socket, attempt, bytes)?,
             _ => return Err(UiError::from("PairingFailed")),
         }
     }
@@ -1668,8 +2101,9 @@ fn one_checkpoint(
 }
 
 fn wait_outbound_ack(pending: &mut PendingCredentialV2Pairing) -> Result<()> {
+    pending.attempt.check()?;
     while pending.claimant.core_mut().has_cached_outbound_frame() {
-        let bytes = read_binary(&mut pending.socket)?;
+        let bytes = read_binary(&mut pending.socket, &pending.attempt)?;
         let effects = pending
             .claimant
             .core_mut()
@@ -1677,10 +2111,9 @@ fn wait_outbound_ack(pending: &mut PendingCredentialV2Pairing) -> Result<()> {
             .map_err(|_| UiError::from("PairingFailed"))?;
         for effect in effects {
             match effect {
-                CredentialV2ClaimantEffect::Send(bytes) => pending
-                    .socket
-                    .send(Message::Binary(bytes.into()))
-                    .map_err(|_| UiError::from("PairingRelayUnavailable"))?,
+                CredentialV2ClaimantEffect::Send(bytes) => {
+                    send_binary(&mut pending.socket, &pending.attempt, bytes)?
+                }
                 _ => return Err(UiError::from("PairingFailed")),
             }
         }
@@ -1692,7 +2125,7 @@ fn pump_to_comparison(
     pending: &mut PendingCredentialV2Pairing,
 ) -> Result<cbcl_pairing::credential_v2::CredentialV2Object> {
     loop {
-        let bytes = read_binary(&mut pending.socket)?;
+        let bytes = read_binary(&mut pending.socket, &pending.attempt)?;
         let effects = pending
             .claimant
             .core_mut()
@@ -1700,10 +2133,9 @@ fn pump_to_comparison(
             .map_err(|_| UiError::from("PairingFailed"))?;
         for effect in effects {
             match effect {
-                CredentialV2ClaimantEffect::Send(bytes) => pending
-                    .socket
-                    .send(Message::Binary(bytes.into()))
-                    .map_err(|_| UiError::from("PairingRelayUnavailable"))?,
+                CredentialV2ClaimantEffect::Send(bytes) => {
+                    send_binary(&mut pending.socket, &pending.attempt, bytes)?
+                }
                 CredentialV2ClaimantEffect::ReceivedObject { object }
                     if matches!(
                         object.kind(),
@@ -1754,6 +2186,7 @@ fn intent_view(
     let tofu_state = match display.tofu_state() {
         CredentialV2TofuState::NewPair => "new-pair",
         CredentialV2TofuState::TrustedPair => "trusted-pair",
+        CredentialV2TofuState::CeremonyGesture => "ceremony-gesture",
         _ => "unknown",
     };
     CredentialV2IntentView {
@@ -1770,11 +2203,41 @@ fn intent_view(
     }
 }
 
-fn read_binary(socket: &mut WebSocket<MaybeTlsStream<TcpStream>>) -> Result<Vec<u8>> {
+fn read_binary(
+    socket: &mut WebSocket<MaybeTlsStream<TcpStream>>,
+    attempt: &CredentialV2Attempt,
+) -> Result<Vec<u8>> {
+    let waiting_since = Instant::now();
+    if attempt.mode() == CredentialV2Flow::SingleLink {
+        let tcp = match socket.get_ref() {
+            MaybeTlsStream::Plain(tcp) => tcp,
+            MaybeTlsStream::Rustls(tls) => &tls.sock,
+            _ => return Err(UiError::from("PairingRelayUnavailable")),
+        };
+        tcp.set_read_timeout(Some(Duration::from_millis(50)))
+            .map_err(|_| UiError::from("PairingRelayUnavailable"))?;
+    }
     loop {
-        match socket.read() {
+        attempt.check()?;
+        let entry = attempt.enter()?;
+        let message = socket.read();
+        drop(entry);
+        attempt.check()?;
+        match message {
             Ok(Message::Binary(bytes)) => return Ok(bytes.to_vec()),
             Ok(Message::Ping(_) | Message::Pong(_) | Message::Frame(_)) => {}
+            Err(tungstenite::Error::Io(error))
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                ) =>
+            {
+                if attempt.mode() != CredentialV2Flow::SingleLink
+                    || waiting_since.elapsed() >= cbcl_transport::IO_TIMEOUT
+                {
+                    return Err(UiError::from("PairingRelayTimedOut"));
+                }
+            }
             Ok(Message::Close(_)) | Err(_) => {
                 return Err(UiError::from("PairingRelayUnavailable"));
             }
@@ -1815,9 +2278,262 @@ fn classify_webfinger_failure(
     }
 }
 
+#[cfg(all(
+    test,
+    not(any(target_os = "android", target_os = "ios", target_arch = "wasm32"))
+))]
+#[path = "scan_integration_native_host.rs"]
+mod scan_integration_host;
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn scan_preview_returns_identity_before_continuation_and_derives_only_once() {
+        use std::cell::Cell;
+        let attempt = CredentialV2Attempt::default();
+        let derivations = Cell::new(0);
+        let preparations = Cell::new(0);
+        let mut phase = CredentialV2Phase::Intent;
+        let (did, view) = prepare_preview(&mut phase, &attempt, "https://app.example", || {
+            derivations.set(derivations.get() + 1);
+            Ok("did:crdt:test-preview".into())
+        })
+        .unwrap();
+        let json = serde_json::to_value(&view).unwrap();
+        assert_eq!(json["outcome"], "preview");
+        assert_eq!(json["finalReview"]["applicationId"], "https://app.example");
+        assert_eq!(json["finalReview"]["previewIssuerDid"], did.as_str());
+        assert!(json["finalReview"]["previewFingerprint"].is_object());
+        assert_eq!(json["finalReview"]["comparison"], "waiting");
+        assert_eq!(preparations.get(), 0);
+        assert!(phase.require(CredentialV2Phase::FinalReview).is_err());
+        assert!(
+            prepare_preview(&mut phase, &attempt, "https://app.example", || {
+                derivations.set(derivations.get() + 1);
+                Ok("did:crdt:changed".into())
+            })
+            .is_err()
+        );
+        continue_preview(&mut phase, &attempt, || {
+            preparations.set(preparations.get() + 1);
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(derivations.get(), 1);
+        assert_eq!(preparations.get(), 1);
+        assert_eq!(did.as_str(), "did:crdt:test-preview");
+        assert_eq!(phase, CredentialV2Phase::FinalReview);
+    }
+
+    #[test]
+    fn scan_preview_cancellation_during_derivation_or_comparison_erases_result() {
+        for during_preview in [true, false] {
+            let mut attempts = crate::session::CredentialV2Attempts::default();
+            let work = attempts.begin().unwrap();
+            if during_preview {
+                let mut phase = CredentialV2Phase::Intent;
+                assert!(
+                    prepare_preview(&mut phase, &work.attempt, "https://app.example", || {
+                        attempts.cancel();
+                        Ok("did:crdt:cancelled".into())
+                    })
+                    .is_err()
+                );
+                assert_eq!(phase, CredentialV2Phase::Intent);
+            } else {
+                let mut phase = CredentialV2Phase::PreviewReady;
+                assert!(continue_preview(&mut phase, &work.attempt, || {
+                    attempts.cancel();
+                    Ok("authenticated comparison arrived after cancellation")
+                })
+                .is_err());
+                assert_ne!(phase, CredentialV2Phase::FinalReview);
+            }
+        }
+    }
+
+    #[test]
+    fn scan_preview_cancelled_transport_sends_zero_frames() {
+        use std::net::TcpListener;
+        use tungstenite::protocol::Role;
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (mut peer, _) = listener.accept().unwrap();
+        peer.set_read_timeout(Some(Duration::from_millis(50)))
+            .unwrap();
+        let mut socket =
+            WebSocket::from_raw_socket(MaybeTlsStream::Plain(client), Role::Client, None);
+        let mut attempts = crate::session::CredentialV2Attempts::default();
+        let work = attempts.begin().unwrap();
+        attempts.cancel();
+        assert!(send_binary(&mut socket, &work.attempt, vec![1, 2, 3]).is_err());
+        assert!(send_effects(
+            &mut socket,
+            &work.attempt,
+            vec![CredentialV2ClaimantEffect::Send(vec![4])]
+        )
+        .is_err());
+        use std::io::Read;
+        let mut bytes = [0; 32];
+        let error = peer.read(&mut bytes).unwrap_err();
+        assert!(matches!(
+            error.kind(),
+            std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+        ));
+    }
+
+    #[test]
+    fn scan_preview_final_boundaries_refuse_cancellation_observed_after_wait() {
+        struct CancelAtBoundary(crate::session::CredentialV2Attempts);
+        impl PrePayloadFaultSink for CancelAtBoundary {
+            fn before(&mut self, _: PrePayloadBoundary) -> Result<()> {
+                self.0.cancel();
+                Ok(())
+            }
+        }
+        for boundary in [
+            PrePayloadBoundary::FinalApprovalRelease,
+            PrePayloadBoundary::AcknowledgementRead,
+            PrePayloadBoundary::AcknowledgementRecognition,
+            PrePayloadBoundary::AcknowledgementCheckpointReplacement,
+            PrePayloadBoundary::AcknowledgementCheckpointCommit,
+            PrePayloadBoundary::PlanConstruction,
+            PrePayloadBoundary::PlannedStageReplacement,
+            PrePayloadBoundary::IssuerCustody,
+            PrePayloadBoundary::IssuerStageReplacement,
+            PrePayloadBoundary::IssuerPublication,
+            PrePayloadBoundary::ResolverVerification,
+            PrePayloadBoundary::GrantConstruction,
+            PrePayloadBoundary::ProvisionedStageReplacement,
+            PrePayloadBoundary::PayloadConstruction,
+            PrePayloadBoundary::PayloadCheckpointPreparation,
+        ] {
+            let mut inner = CancelAtBoundary(Default::default());
+            let work = inner.0.begin().unwrap();
+            let mut faults = CancellationFaults {
+                attempt: &work.attempt,
+                inner: &mut inner,
+                entry: None,
+            };
+            assert!(
+                faults.before(boundary).is_err(),
+                "{boundary:?} must refuse its effect"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn scan_preview_blocking_wrapper_keeps_lease_after_command_is_dropped() {
+        use std::sync::mpsc;
+        let mut attempts = crate::session::CredentialV2Attempts::default();
+        let operation = attempts.begin().unwrap();
+        let (started, entered) = mpsc::channel();
+        let (release, blocked) = mpsc::channel();
+        let command = tokio::spawn(async move {
+            pairing_blocking(&operation, move || {
+                started.send(()).unwrap();
+                blocked.recv_timeout(Duration::from_secs(5)).unwrap();
+                Ok(())
+            })
+            .await
+        });
+        // Yield this runtime's thread until the actual blocking wrapper entered.
+        let start_deadline = Instant::now() + Duration::from_secs(5);
+        while entered.try_recv().is_err() {
+            assert!(Instant::now() < start_deadline);
+            tokio::task::yield_now().await;
+        }
+        command.abort();
+        assert!(command.await.unwrap_err().is_cancelled());
+        assert!(attempts.begin().is_err());
+        release.send(()).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            if attempts.begin().is_ok() {
+                break;
+            }
+            assert!(Instant::now() < deadline);
+            tokio::task::yield_now().await;
+        }
+    }
+
+    #[test]
+    fn scan_preview_continuation_is_single_use_and_wrong_phases_have_no_effects() {
+        use std::cell::Cell;
+        let preparations = Cell::new(0);
+        let grants = Cell::new(0);
+        for mut phase in [
+            CredentialV2Phase::Intent,
+            CredentialV2Phase::Comparing,
+            CredentialV2Phase::FinalReview,
+            CredentialV2Phase::PayloadSent,
+        ] {
+            assert!(continue_preview(&mut phase, &Default::default(), || {
+                preparations.set(preparations.get() + 1);
+                Ok(())
+            })
+            .is_err());
+        }
+        assert_eq!(preparations.get(), 0);
+        let mut phase = CredentialV2Phase::PreviewReady;
+        continue_preview(&mut phase, &Default::default(), || {
+            preparations.set(preparations.get() + 1);
+            Ok(())
+        })
+        .unwrap();
+        assert!(continue_preview(&mut phase, &Default::default(), || {
+            preparations.set(preparations.get() + 1);
+            Ok(())
+        })
+        .is_err());
+        assert_eq!(preparations.get(), 1);
+        let phase = CredentialV2Phase::PreviewReady;
+        if phase.require(CredentialV2Phase::FinalReview).is_ok() {
+            grants.set(grants.get() + 1);
+        }
+        assert_eq!(grants.get(), 0);
+    }
+
+    #[test]
+    fn scan_preview_cancel_blocked_continuation_refuses_send_and_return() {
+        use crate::session::CredentialV2Attempts;
+        use std::sync::{
+            atomic::{AtomicUsize, Ordering},
+            mpsc, Arc,
+        };
+        let mut attempts = CredentialV2Attempts::default();
+        let work = attempts.begin().unwrap();
+        let attempt = work.attempt.clone();
+        let lease = work.lease();
+        let effects = Arc::new(AtomicUsize::new(0));
+        let worker_effects = effects.clone();
+        let (entered, blocked) = mpsc::channel();
+        let (release, wait) = mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            let _lease = lease;
+            let mut phase = CredentialV2Phase::PreviewReady;
+            continue_preview(&mut phase, &attempt, || {
+                entered.send(()).unwrap();
+                wait.recv_timeout(Duration::from_secs(5)).unwrap();
+                attempt.run(|| {
+                    worker_effects.fetch_add(1, Ordering::SeqCst);
+                    Ok(())
+                })
+            })
+        });
+        blocked.recv_timeout(Duration::from_secs(5)).unwrap();
+        attempts.cancel();
+        drop(work);
+        assert!(
+            attempts.begin().is_err(),
+            "blocked worker retains the only lease"
+        );
+        release.send(()).unwrap();
+        assert!(worker.join().unwrap().is_err());
+        assert_eq!(effects.load(Ordering::SeqCst), 0);
+    }
 
     #[test]
     fn test_1163_oversized_webfinger_is_unavailable_not_revoked() {
@@ -1827,3 +2543,6 @@ mod tests {
         );
     }
 }
+
+#[path = "cbcl_v2_single_link.rs"]
+pub mod single_link;

@@ -49,12 +49,12 @@ pub const JRD_MEDIA_TYPE: &str = "application/jrd+json";
 pub async fn fetch(acct: &AcctUri) -> Result<Jrd, NetError> {
     // Unlike every other fetch in this crate, redirects are permitted — within
     // HTTPS and within a bound.
-    let http = reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::limited(MAX_REDIRECTS))
-        .timeout(FETCH_DEADLINE)
-        .https_only(true)
-        .build()
-        .map_err(|e| NetError::Transport(e.to_string()))?;
+    let http = crate::build_client(
+        reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::limited(MAX_REDIRECTS))
+            .timeout(FETCH_DEADLINE)
+            .https_only(true),
+    )?;
 
     let url = format!("https://{}{}", acct.authority(), alias::webfinger_query(acct));
     let response = http
@@ -146,7 +146,12 @@ async fn fetch_reciprocal_bytes(
     also_known_as: &[String],
     absence_is_answerable: bool,
 ) -> Result<Option<Vec<u8>>, NetError> {
-    let http = reqwest::Client::builder().redirect(reqwest::redirect::Policy::limited(MAX_REDIRECTS)).timeout(FETCH_DEADLINE).https_only(true).build().map_err(|e| NetError::Transport(e.to_string()))?;
+    let http = crate::build_client(
+        reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::limited(MAX_REDIRECTS))
+            .timeout(FETCH_DEADLINE)
+            .https_only(true),
+    )?;
     let url = format!("https://{}{}", acct.authority(), alias::webfinger_query(acct));
     let response = http.get(&url).header(reqwest::header::ACCEPT, JRD_MEDIA_TYPE).header(reqwest::header::ACCEPT_ENCODING, "identity").send().await.map_err(|e| if e.is_timeout() { NetError::Timeout } else { NetError::Transport(e.to_string()) })?;
     if absence_is_answerable && absence_is_an_answer(response.status()) {

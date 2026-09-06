@@ -1,0 +1,7 @@
+    Finished `test` profile [unoptimized] target(s) in 0.17s
+     Running unittests src/lib.rs (/Volumes/anuna-03/codex-scan-clean-native-target/debug/deps/selfsame_lib-b99b11374ecf365a)
+
+running 1 test
+test cbcl_v2_commands::single_link::tests::manual_single_link_native_commands_render_mode_comparison_cancel_and_expiry ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 94 filtered out; finished in 19.88s

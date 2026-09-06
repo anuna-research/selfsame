@@ -1,0 +1,36 @@
+   Compiling selfsame-pairing v0.1.0 (/Volumes/anuna-03/codex-closure-inspection/selfsame/crates/selfsame-pairing)
+warning: unused variable: `receipt_binding`
+   --> crates/selfsame-pairing/src/credential_v2.rs:903:5
+    |
+903 |     receipt_binding: ([u8; 32], [u8; 32]),
+    |     ^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_receipt_binding`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `receipt`
+   --> crates/selfsame-pairing/src/credential_v2.rs:931:9
+    |
+931 |     let receipt = recovered_receipt_object(
+    |         ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_receipt`
+
+warning: `selfsame-pairing` (lib) generated 2 warnings (run `cargo fix --lib -p selfsame-pairing` to apply 2 suggestions)
+   Compiling selfsame-web-device v0.1.0 (/Volumes/anuna-03/codex-closure-inspection/selfsame/crates/selfsame-web-device)
+    Finished `test` profile [unoptimized] target(s) in 1.22s
+     Running unittests src/lib.rs (/Volumes/anuna-03/codex-successor-wasm-native-target/debug/deps/selfsame_web_device-3b2c09f4cecd7e70)
+
+running 1 test
+
+thread 'credential_v2_closure::tests::closure_terminal_candidate_hash_binds_otherwise_valid_status' (8407992) panicked at crates/selfsame-web-device/src/credential_v2_closure_tests.rs:747:5:
+assertion failed: view.verify_final_status_inner(status.jws.as_bytes(), &status.digest,
+        changed.finalized_at).is_err()
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test credential_v2_closure::tests::closure_terminal_candidate_hash_binds_otherwise_valid_status ... FAILED
+
+failures:
+
+failures:
+    credential_v2_closure::tests::closure_terminal_candidate_hash_binds_otherwise_valid_status
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 61 filtered out; finished in 0.07s
+
+error: test failed, to rerun pass `-p selfsame-web-device --lib`

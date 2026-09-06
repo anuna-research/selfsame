@@ -1,0 +1,363 @@
+{
+  "base_commit": "d84c984efc318b966840a449ec21e030a1895ae0",
+  "environment": {
+    "TMPDIR": "/Volumes/anuna-03/codex-scan-native-preview-1/tmp",
+    "CARGO_TARGET_DIR": "/Volumes/anuna-03/codex-scan-clean-native-target",
+    "CARGO_PROFILE_DEV_DEBUG": "0",
+    "CARGO_PROFILE_TEST_DEBUG": "0",
+    "CARGO_INCREMENTAL": "0",
+    "CARGO_BUILD_JOBS": "4"
+  },
+  "source_sha256": {
+    "src-tauri/src/cbcl_v2_claimant.rs": "6b3e05ab549000b903662a1ef7307bf091b373eb6765c8534c590d28c7ab9a5f",
+    "src-tauri/src/cbcl_v2_single_link.rs": "e60369191f9add2f58932fea424ada5f4f2625e63159fc04dd649940d27dac20",
+    "src-tauri/src/cbcl_v2_single_link_tests.rs": "5dfd2c11a6f01333effe84b1664c9da39b79a973d5ba4d1a4de66ca23d2d5320",
+    "src-tauri/src/cbcl_v2_manual_entry_tests.rs": "5fc483f22ee005cf71c223e8c6f16d5994467231b99eedc5aa2943eed69eee00",
+    "src-tauri/src/scan_integration_native_host.rs": "d7d623f5c0b7d05e39dcb3d18f436249de00100daefcd2f31278de6645a96f7e",
+    "src-tauri/src/lib.rs": "3d3bf883e8631bb317056a9509c9bd79fa476fa3944478847a575e2414a75e8b",
+    "src/pairing.js": "72a6d9909d8f9b135f764cc0778d2ae60afc660679fd0a722c02cd2afb4e5c79",
+    "src/index.html": "0e6a1740ebb1dfa5d5388f31b36456afebebefb6b46d9d0ef5aebfec5f157e6e",
+    "tests/spec-077-scan-pairing.mjs": "f10ae64d380c2bd4969be0cef583178d742104b8119ee4ca07e696118d00805a",
+    "docs/spec077-native-host.md": "943e634e63143808b9d3127ea2ed2f65486cbd683500ee344439d8ef5a052ae0"
+  },
+  "results": [
+    {
+      "label": "native-lib",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "-p",
+        "selfsame",
+        "--lib"
+      ],
+      "exit_code": 0,
+      "result_lines": [
+        "test result: ok. 84 passed; 0 failed; 11 ignored; 0 measured; 0 filtered out; finished in 4.08s"
+      ]
+    },
+    {
+      "label": "native_host_explicit_relay_setter_routes_actual_connect_wss",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "-p",
+        "selfsame",
+        "--lib",
+        "cbcl_transport::tests::native_host_explicit_relay_setter_routes_actual_connect_wss",
+        "--",
+        "--exact",
+        "--ignored",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "exit_code": 0,
+      "result_lines": [
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 94 filtered out; finished in 0.00s"
+      ]
+    },
+    {
+      "label": "native_host_manual_reserves_before_contact_and_refuses_profile_failure",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "-p",
+        "selfsame",
+        "--lib",
+        "cbcl_v2_commands::scan_integration_host::native_host_manual_reserves_before_contact_and_refuses_profile_failure",
+        "--",
+        "--exact",
+        "--ignored",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "exit_code": 0,
+      "result_lines": [
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 94 filtered out; finished in 2.01s"
+      ]
+    },
+    {
+      "label": "native_host_memory_init_cancel_shutdown_regression",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "-p",
+        "selfsame",
+        "--lib",
+        "cbcl_v2_commands::scan_integration_host::native_host_memory_init_cancel_shutdown_regression",
+        "--",
+        "--exact",
+        "--ignored",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "exit_code": 0,
+      "result_lines": [
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 94 filtered out; finished in 1.99s"
+      ]
+    },
+    {
+      "label": "native_host_single_link_reserves_before_contact_and_refuses_profile_failure",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "-p",
+        "selfsame",
+        "--lib",
+        "cbcl_v2_commands::scan_integration_host::native_host_single_link_reserves_before_contact_and_refuses_profile_failure",
+        "--",
+        "--exact",
+        "--ignored",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "exit_code": 0,
+      "result_lines": [
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 94 filtered out; finished in 2.00s"
+      ]
+    },
+    {
+      "label": "scan_integration_native_host",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "-p",
+        "selfsame",
+        "--lib",
+        "cbcl_v2_commands::scan_integration_host::scan_integration_native_host",
+        "--",
+        "--exact",
+        "--ignored",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "exit_code": 0,
+      "result_lines": [
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 94 filtered out; finished in 0.00s"
+      ]
+    },
+    {
+      "label": "manual_checksum_valid_wrong_words_reach_one_share_but_no_finished_or_retry",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "-p",
+        "selfsame",
+        "--lib",
+        "cbcl_v2_commands::single_link::manual_tests::manual_checksum_valid_wrong_words_reach_one_share_but_no_finished_or_retry",
+        "--",
+        "--exact",
+        "--ignored",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "exit_code": 0,
+      "result_lines": [
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 94 filtered out; finished in 1.01s"
+      ]
+    },
+    {
+      "label": "manual_recognition_refuses_locally_and_preserves_typed_entry",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "-p",
+        "selfsame",
+        "--lib",
+        "cbcl_v2_commands::single_link::manual_tests::manual_recognition_refuses_locally_and_preserves_typed_entry",
+        "--",
+        "--exact",
+        "--ignored",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "exit_code": 0,
+      "result_lines": [
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 94 filtered out; finished in 1.00s"
+      ]
+    },
+    {
+      "label": "manual_single_link_native_commands_render_mode_comparison_cancel_and_expiry",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "-p",
+        "selfsame",
+        "--lib",
+        "cbcl_v2_commands::single_link::tests::manual_single_link_native_commands_render_mode_comparison_cancel_and_expiry",
+        "--",
+        "--exact",
+        "--ignored",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "exit_code": 0,
+      "result_lines": [
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 94 filtered out; finished in 19.88s"
+      ]
+    },
+    {
+      "label": "single_link_native_commands_render_mode_comparison_cancel_and_expiry",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "-p",
+        "selfsame",
+        "--lib",
+        "cbcl_v2_commands::single_link::tests::single_link_native_commands_render_mode_comparison_cancel_and_expiry",
+        "--",
+        "--exact",
+        "--ignored",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "exit_code": 0,
+      "result_lines": [
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 94 filtered out; finished in 19.92s"
+      ]
+    },
+    {
+      "label": "single_link_transaction_faults_ambiguous_payload_and_policy_free_unlink",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "-p",
+        "selfsame",
+        "--lib",
+        "cbcl_v2_completion::tests::single_link_transaction_faults_ambiguous_payload_and_policy_free_unlink",
+        "--",
+        "--exact",
+        "--ignored",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "exit_code": 0,
+      "result_lines": [
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 94 filtered out; finished in 0.98s"
+      ]
+    },
+    {
+      "label": "test_1162_pre_payload_failure_and_person_abandonment_release_the_exact_slot",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "-p",
+        "selfsame",
+        "--lib",
+        "cbcl_v2_completion::tests::test_1162_pre_payload_failure_and_person_abandonment_release_the_exact_slot",
+        "--",
+        "--exact",
+        "--ignored",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "exit_code": 0,
+      "result_lines": [
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 94 filtered out; finished in 1.91s"
+      ]
+    },
+    {
+      "label": "phone-ui",
+      "command": [
+        "npm",
+        "run",
+        "e2e:wallet-pairing"
+      ],
+      "exit_code": 0,
+      "result_lines": [
+        "\u2139 tests 30",
+        "\u2139 pass 30",
+        "\u2139 fail 0"
+      ]
+    },
+    {
+      "label": "native-clippy",
+      "command": [
+        "cargo",
+        "clippy",
+        "--locked",
+        "--offline",
+        "-p",
+        "selfsame",
+        "--lib",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit_code": 0,
+      "result_lines": []
+    },
+    {
+      "label": "rustfmt",
+      "command": [
+        "rustfmt",
+        "--edition",
+        "2021",
+        "--check",
+        "--config",
+        "skip_children=true",
+        "src-tauri/src/cbcl_v2_claimant.rs",
+        "src-tauri/src/cbcl_v2_single_link.rs",
+        "src-tauri/src/cbcl_v2_single_link_tests.rs",
+        "src-tauri/src/cbcl_v2_manual_entry_tests.rs",
+        "src-tauri/src/scan_integration_native_host.rs",
+        "src-tauri/src/lib.rs"
+      ],
+      "exit_code": 0,
+      "result_lines": []
+    },
+    {
+      "label": "pairing-js-syntax",
+      "command": [
+        "node",
+        "--check",
+        "src/pairing.js"
+      ],
+      "exit_code": 0,
+      "result_lines": []
+    },
+    {
+      "label": "ui-test-syntax",
+      "command": [
+        "node",
+        "--check",
+        "tests/spec-077-scan-pairing.mjs"
+      ],
+      "exit_code": 0,
+      "result_lines": []
+    },
+    {
+      "label": "diff-check",
+      "command": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "exit_code": 0,
+      "result_lines": []
+    }
+  ]
+}

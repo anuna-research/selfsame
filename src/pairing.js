@@ -10,6 +10,13 @@ export function initPairing(d) {
   const { $, show, invoke, fail, message, actions, busy, idle, refresh } = d;
   const presencePattern = /^PAIR1-(?:[0-9A-HJKMNP-TV-Z]{5}-){10}[0-9A-HJKMNP-TV-Z]{5}$/;
   let credentialV2Stage = "idle";
+  let attemptEpoch = 0;
+  let flow = "single";
+  let entryMode = "full";
+  let attemptTag = null;
+  let attemptApplication = null;
+  let decisionPending = false;
+  let intentFields = [];
   let recoveryApplication = null;
   let installedLink = null;
   let pendingLink = null;
@@ -19,10 +26,10 @@ export function initPairing(d) {
   // shows no demo copy — the fail-safe direction.
   let capability = { demoRelay: false, productionClaimant: true };
   const passcodeField = $("[data-pairing-passcode-field]");
-  // Fail-safe default (review finding m-5): the production shape shows the
-  // field; only a build that ANSWERS demo hides it. A failed capability call
-  // leaves the production surface intact.
-  if (passcodeField) passcodeField.hidden = false;
+  // SingleLink asks for presence only after the request is authenticated.
+  // Explicit legacy entry reveals this production field from `onInput`; a
+  // build that identifies itself as demo keeps the field hidden there too.
+  if (passcodeField) passcodeField.hidden = true;
   invoke("cbcl_pairing_capability")
     .then((view) => {
       // A bridge that answers with anything but the capability shape leaves
@@ -31,48 +38,113 @@ export function initPairing(d) {
       if (view && typeof view.productionClaimant === "boolean") {
         capability = view;
       }
-      if (passcodeField) passcodeField.hidden = !capability.productionClaimant;
+      if (passcodeField) passcodeField.hidden = flow === "single" || !capability.productionClaimant;
     })
     .catch(() => {});
 
+  function clearTransferInputs() {
+    for (const selector of ["#pairing-input", "#pairing-presence-code", "#pairing-manual-bootstrap", "#pairing-manual-words"]) {
+      const input = $(selector);
+      if (input) input.value = "";
+    }
+  }
+  function selectEntryMode(mode) {
+    if (credentialV2Stage !== "idle" || entryMode === mode) return;
+    ++attemptEpoch;
+    clearTransferInputs();
+    entryMode = mode;
+    if (mode !== "manual") $("[data-pairing-manual]").open = false;
+    if (mode !== "legacy") $("[data-pairing-legacy]").open = false;
+    $("[data-pairing-complete]").hidden = mode === "manual";
+    $("[data-action='scan-cbcl-pairing']").hidden = mode !== "full" || !window.__TAURI__?.barcodeScanner;
+    onInput();
+  }
   function onInput() {
-    const value = $("#pairing-input")?.value.trim() ?? "";
+    const manual = entryMode === "manual";
+    const legacy = entryMode === "legacy";
+    const value = $(manual ? "#pairing-manual-bootstrap" : "#pairing-input")?.value ?? "";
     const presence = $("#pairing-presence-code")?.value.trim().toUpperCase() ?? "";
-    const ready = value.length > 0 && presencePattern.test(presence);
+    const words = $("#pairing-manual-words")?.value ?? "";
+    if (credentialV2Stage === "idle" && passcodeField) passcodeField.hidden = !legacy || !capability.productionClaimant;
+    // Only presence of input is a UI affordance; Rust owns every manual bound,
+    // word/checksum and bootstrap rule, including accepted normalization.
+    const ready = value.length > 0 && (manual ? words.length > 0 : !legacy || presencePattern.test(presence));
     $("[data-pairing-state]").textContent = ready
-      ? "Invitation and presence code ready"
-      : value.length > 0
-        ? "Enter the PAIR1 code shown by the application"
-        : "Paste one invitation";
-    $('[data-action="start-cbcl-pairing"]').disabled = !ready;
+      ? "Invitation ready"
+      : manual ? "Enter the manual invitation and three words"
+        : legacy && value.length > 0 ? "Enter the older invitation’s PAIR1 code"
+          : "Scan a QR code or paste an invitation";
+    $('[data-action="start-cbcl-pairing"]').disabled = credentialV2Stage !== "idle" || !ready;
   }
 
   async function start(presented) {
-    const input = $("#pairing-input");
-    const invitation = typeof presented === "string" ? presented.trim() : input.value.trim();
+    if (credentialV2Stage !== "idle") return;
+    const epoch = ++attemptEpoch;
+    const manual = typeof presented !== "string" && entryMode === "manual";
+    const input = $(manual ? "#pairing-manual-bootstrap" : "#pairing-input");
+    let handoff = typeof presented === "string" ? presented : input.value;
+    let words = manual ? $("#pairing-manual-words").value : "";
+    const legacy = typeof presented !== "string" && entryMode === "legacy";
+    flow = legacy ? "legacy" : "single";
+    attemptTag = null;
+    attemptApplication = null;
+    credentialV2Stage = "entry";
     const presenceInput = $("#pairing-presence-code");
     const presenceCode = (presenceInput?.value ?? "").trim().toUpperCase();
-    busy("Authenticating the application profile…");
-    $("[data-cbcl-relay]").textContent = "No relay connection yet";
-    $("[data-cbcl-status]").textContent = "Checking the invitation and its declared relay before any socket opens.";
-    show("pairing-wait");
-    $("[data-screen='pairing-wait']").focus();
-    try {
-      const view = await invoke("cbcl_v2_recognise", { invitation, presenceCode });
+    if (!manual) {
       input.value = "";
       if (presenceInput) presenceInput.value = "";
-      onInput();
-      if (view.requiresApproval) {
-        showRelayConsent(view);
+    }
+    intentFields = [];
+    onInput();
+    busy("Checking the invitation…");
+    $("[data-cbcl-relay]").textContent = "No relay connection yet";
+    $("[data-cbcl-status]").textContent = "Checking the application and its relay.";
+    show("pairing-wait");
+    $("[data-screen='pairing-wait']").focus();
+    idle(); // The wait screen keeps cancellation reachable.
+    try {
+      if (legacy) {
+        const view = await invoke("cbcl_v2_recognise", { invitation: handoff.trim(), presenceCode });
+        if (epoch !== attemptEpoch) return;
+        if (view.requiresApproval) showRelayConsent(view);
+        else await advanceRelay(true, epoch);
       } else {
-        await advanceRelay(true);
+        const reservation = manual
+          ? await invoke("cbcl_v2_begin_manual", { request: { bootstrap: handoff, words } })
+          : await invoke("cbcl_v2_begin_handoff", { request: { handoff } });
+        handoff = "";
+        words = "";
+        if (epoch !== attemptEpoch) {
+          await invoke("cbcl_v2_cancel_link", { request: { attemptTag: reservation.attemptTag } }).catch(() => {});
+          return;
+        }
+        clearTransferInputs();
+        attemptTag = reservation.attemptTag;
+        attemptApplication = reservation.applicationId;
+        credentialV2Stage = "contact";
+        $("[data-cbcl-relay]").textContent = reservation.relayOrigin;
+        $("[data-cbcl-status]").textContent = `This invitation permits contact with ${reservation.applicationId} and its displayed relay for this link only.`;
+        const result = await invoke("cbcl_v2_contact", { request: { attemptTag } });
+        if (epoch !== attemptEpoch) return;
+        showIntent(result.intent);
       }
     } catch (error) {
-      const token = message(error);
+      if (epoch !== attemptEpoch) return;
+      const localRecognition = credentialV2Stage === "entry";
+      await revokeNative();
+      if (epoch !== attemptEpoch) return;
+      credentialV2Stage = "idle";
+      attemptTag = null;
+      restoreEntryUnlock();
       show("pairing-enter");
-      fail("pairing", startFailureText(token));
+      fail("pairing", manual && localRecognition && message(error) === "RecognitionFailed"
+        ? "The manual invitation could not be recognised. Check both inputs and try again."
+        : startFailureText(message(error)));
+      onInput();
+      if (manual) $("#pairing-manual-words").focus();
     } finally {
-      idle();
+      if (epoch === attemptEpoch) idle();
     }
   }
 
@@ -81,7 +153,9 @@ export function initPairing(d) {
   // (REQ-908 / TEST-912).
   function startFailureText(token) {
     if (token === "PairingVersionUnsupported")
-      return "That invitation came from an obsolete development build. Ask the application for a new one.";
+      return "Update Selfsame and the application, then create a new invitation.";
+    if (token === "PairingInvitationExpired" || token === "PairingOfferExpired" || token === "PairingExpired")
+      return "That invitation expired. Create a new one in the application and scan it again.";
     if (token === "PairingRelayUnavailable")
       return capability.demoRelay
         ? "The local relay could not be reached. Check the demo server and adb reverse, then create a fresh invitation."
@@ -139,8 +213,22 @@ export function initPairing(d) {
     const approveButton = $('[data-action="approve-cbcl-pairing"]');
     const declineButton = $('[data-action="decline-cbcl-pairing"]');
     approveButton.textContent = approve;
+    approveButton.disabled = actionDisabled();
+    const channel = $("[data-cbcl-channel-status]");
+    if (channel) channel.textContent = credentialV2Stage === "relay"
+      ? "Application profile checked; secure connection follows your approval"
+      : credentialV2Stage.startsWith("recovery")
+        ? "Checking the saved link with the application"
+        : "Secure connection verified";
+    const unlockSlot = $("[data-pairing-consent-unlock]");
+    if (unlockSlot && passcodeField) {
+      unlockSlot.append(passcodeField);
+      passcodeField.hidden = !capability.productionClaimant ||
+        (flow === "single" && !credentialV2Stage.startsWith("recovery") ? credentialV2Stage !== "single-unlock" : credentialV2Stage === "relay" || credentialV2Stage === "comparison");
+    }
     declineButton.textContent = decline;
     declineButton.hidden = false;
+    declineButton.disabled = false;
     show("pairing-consent");
     $("[data-screen='pairing-consent']").focus();
   }
@@ -162,13 +250,15 @@ export function initPairing(d) {
   }
 
   function showIntent(intent) {
-    credentialV2Stage = "intent";
+    credentialV2Stage = flow === "single" ? "single-unlock" : "intent";
     const fields = [
       { label: "Authenticated application", value: intent.applicationId },
       { label: "HTTPS origin", value: intent.httpsOrigin },
       { label: "Blind relay", value: intent.relayOrigin },
       { label: "Installation device", value: intent.deviceDid },
       { label: "Account principal", value: intent.accountPrincipalDigest },
+      { label: "Contact permission", value: intent.tofuState === "ceremony-gesture" ? "This ceremony only" : intent.tofuState === "trusted-pair" ? "Previously approved exact application–relay pair" : "New exact application–relay approval" },
+      { label: "Transition", value: intent.transition?.kind ?? "none" },
       ...intent.permissions.map((value) => ({ label: "Permission", value })),
     ];
     if (intent.transition?.kind === "path-a-to-b") {
@@ -177,14 +267,141 @@ export function initPairing(d) {
         fields.push({ label: "Room to migrate", value: room });
       }
     }
+    intentFields = fields;
     paintConsent({
       title: "Review the exact request",
       authority: "CPace and both Finished values authenticated this request under the live application profile.",
       application: intent.applicationId,
-      action: "Approval permits a pure account-identity preview; it does not issue or publish anything.",
+      action: flow === "single" ? "Unlock to show your local identity for this request." : "Approval permits a pure account-identity preview; it does not issue or publish anything.",
       fields,
-      approve: "Preview identity",
+      approve: flow === "single" ? "Unlock to show identity" : "Preview identity",
     });
+  }
+
+  const linkWording = "Share this identity with this application and link this device if the desktop comparison succeeds.";
+  function actionDisabled() {
+    return decisionPending || ["comparison", "single-preview", "single-link", "single-comparison", "single-finish", "cancelling"].includes(credentialV2Stage);
+  }
+  function showSinglePreview(review) {
+    credentialV2Stage = "single-preview";
+    paintConsent({
+      title: "Review and link this device",
+      authority: "Your identity is shown locally. Nothing has been shared with the application.",
+      application: review.applicationId,
+      action: linkWording,
+      fields: [...intentFields,
+        { label: "Account issuer DID", value: review.previewIssuerDid },
+        { label: "Comparison fingerprint", value: review.previewFingerprint.hex },
+        { label: "Recognition aid", value: review.previewFingerprint.label }],
+      approve: "Link", decline: "Cancel linking",
+    });
+    idle();
+  }
+  async function revokeNative(tag = attemptTag, mode = flow) {
+    if (mode === "single") {
+      if (tag) await invoke("cbcl_v2_cancel_link", { request: { attemptTag: tag } }).catch(() => {});
+    } else await invoke("cbcl_v2_cancel").catch(() => {});
+  }
+  async function inspectSingleCompletion(applicationId) {
+    const [recoveries, installed] = await Promise.allSettled([
+      invoke("cbcl_v2_pending_recoveries"),
+      invoke("cbcl_v2_installed_links"),
+    ]);
+    return {
+      recoverable: recoveries.status === "fulfilled" &&
+        Array.isArray(recoveries.value) && recoveries.value.includes(applicationId),
+      installed: installed.status === "fulfilled" && Array.isArray(installed.value) &&
+        installed.value.some(link => link?.applicationId === applicationId),
+    };
+  }
+  function showUncertainSingleCompletion(state) {
+    const resultMessage = state.recoverable
+      ? "A sealed completion checkpoint is retained. After the relay window closes, use the pending link in Applications to check the signed final status with fresh presence."
+      : state.installed
+        ? "A local installed link is present, but this command did not return verified success. Check that link in Applications before taking another action."
+        : "Selfsame could not establish the final completion state. Check Applications for an installed link or pending recovery before starting another invitation.";
+    showResult(
+      "failed",
+      "Link completion needs checking",
+      resultMessage,
+      "Authenticated linking work may already have occurred, and installation status remains unresolved until checked.",
+    );
+  }
+  async function decideSingle(approve) {
+    if (!approve) { await cancel(); return; }
+    if (decisionPending || !["single-unlock", "single-ready"].includes(credentialV2Stage)) return;
+    const epoch = attemptEpoch;
+    const tag = attemptTag;
+    const applicationId = attemptApplication;
+    const request = { attemptTag: tag };
+    decisionPending = true;
+    $('[data-action="approve-cbcl-pairing"]').disabled = true;
+    idle();
+    try {
+      if (credentialV2Stage === "single-unlock") {
+        const input = $("#pairing-passcode");
+        let result;
+        try {
+          result = await invoke("cbcl_v2_unlock_preview", { request: { ...request, passcode: input?.value ?? "" } });
+        } finally {
+          if (input) input.value = "";
+        }
+        if (epoch !== attemptEpoch) return;
+        showSinglePreview(result.review);
+        await previewRendered();
+        if (epoch !== attemptEpoch) return;
+        await invoke("cbcl_v2_preview_rendered", { request });
+        if (epoch !== attemptEpoch) return;
+        credentialV2Stage = "single-ready";
+        $("[data-cbcl-channel-status]").textContent = "Review is ready. Select Link when you are ready to share this identity.";
+        // Preserve the review and move keyboard focus to its now-available action.
+        $('[data-action="approve-cbcl-pairing"]').disabled = false;
+        $('[data-action="approve-cbcl-pairing"]').focus();
+        return;
+      }
+      credentialV2Stage = "single-link";
+      $("[data-cbcl-authority]").textContent = "Sharing the reviewed identity for this request.";
+      $("[data-cbcl-channel-status]").textContent = "Waiting for the desktop comparison. Cancel remains available.";
+      await invoke("cbcl_v2_link", { request });
+      if (epoch !== attemptEpoch) return;
+      credentialV2Stage = "single-comparison";
+      await invoke("cbcl_v2_continue_link", { request });
+      if (epoch !== attemptEpoch) return;
+      credentialV2Stage = "single-finish";
+      $("[data-cbcl-channel-status]").textContent = "Verifying the signed hub receipt and live reciprocal account binding.";
+      const result = await invoke("cbcl_v2_finish_link", { request });
+      if (epoch !== attemptEpoch) return;
+      if (result.outcome !== "installed") throw new Error("PairingReceiptRefused");
+      credentialV2Stage = "idle";
+      attemptTag = null;
+      attemptApplication = null;
+      showResult("accepted", "Application connected", "The signed hub receipt and live reciprocal account binding were verified before the grant was installed.", "The invitation permitted contact for this ceremony only.");
+    } catch (error) {
+      if (epoch !== attemptEpoch) return;
+      const afterLink = ["single-link", "single-comparison", "single-finish"].includes(credentialV2Stage);
+      await revokeNative(tag, "single");
+      if (epoch !== attemptEpoch) return;
+      const completion = afterLink
+        ? await inspectSingleCompletion(applicationId)
+        : null;
+      if (epoch !== attemptEpoch) return;
+      credentialV2Stage = "idle";
+      attemptTag = null;
+      attemptApplication = null;
+      if (afterLink) {
+        showUncertainSingleCompletion(completion);
+      } else {
+        restoreEntryUnlock();
+        show("pairing-enter");
+        fail("pairing", startFailureText(message(error)));
+      }
+    } finally {
+      if (epoch === attemptEpoch) {
+        decisionPending = false;
+        $('[data-action="approve-cbcl-pairing"]').disabled = actionDisabled();
+        idle();
+      }
+    }
   }
 
   function showFinalReview(review) {
@@ -195,8 +412,9 @@ export function initPairing(d) {
       application: review.applicationId,
       action: review.comparison === "bound-same-did"
         ? "The application’s existing reciprocal binding matches this wallet identity."
-        : "No prior binding exists; compare this identity with the application in front of you.",
+        : "You confirmed that this identity matches on your desktop.",
       fields: [
+        ...intentFields,
         { label: "Account issuer DID", value: review.previewIssuerDid },
         { label: "Comparison fingerprint", value: review.previewFingerprint.hex },
         { label: "Recognition aid", value: review.previewFingerprint.label },
@@ -205,7 +423,31 @@ export function initPairing(d) {
     });
   }
 
+  function showPreview(review) {
+    credentialV2Stage = "comparison";
+    paintConsent({
+      title: "Compare with your desktop",
+      authority: "Check that this fingerprint matches the one shown in the application.",
+      application: review.applicationId,
+      action: "Confirm the match on your desktop to continue here.",
+      fields: [
+        { label: "Comparison fingerprint", value: review.previewFingerprint.hex },
+        { label: "Account issuer DID", value: review.previewIssuerDid },
+        { label: "Recognition aid", value: review.previewFingerprint.label },
+        ...intentFields,
+      ],
+      approve: "Waiting for comparison…",
+      decline: "Cancel linking",
+    });
+    // Let the preview become visible before the native continuation discloses it.
+    idle();
+  }
+
+  const previewRendered = () => new Promise(resolve =>
+    requestAnimationFrame(() => requestAnimationFrame(resolve)));
+
   function showRecovery(applicationId) {
+    flow = "legacy";
     recoveryApplication = applicationId;
     credentialV2Stage = "recovery";
     paintConsent({
@@ -252,9 +494,12 @@ export function initPairing(d) {
     $("[data-screen='pairing-result']").focus();
   }
 
-  async function advanceRelay(approve) {
-    busy(approve ? "Opening the approved blind relay…" : "Rejecting the relay…");
+  async function advanceRelay(approve, epoch = attemptEpoch) {
+    $("[data-cbcl-status]").textContent = approve ? "Connecting to the application…" : "Declining the connection…";
+    show("pairing-wait");
+    idle();
     const result = await invoke("cbcl_v2_relay_decide", { approve });
+    if (epoch !== attemptEpoch) return;
     if (result.outcome === "declined") {
       credentialV2Stage = "idle";
       showResult("declined", "Relay rejected", "No relay socket was opened and no credential was shared.", "The invitation was not allowed to choose relay trust for you.");
@@ -265,7 +510,17 @@ export function initPairing(d) {
   }
 
   async function decide(approve) {
-    busy(approve ? "Applying explicit approval…" : "Recording decline…");
+    if (flow === "single" && !credentialV2Stage.startsWith("recovery")) return decideSingle(approve);
+    if (credentialV2Stage === "comparison") {
+      if (!approve) await cancel();
+      return;
+    }
+    if (decisionPending) return;
+    const epoch = attemptEpoch;
+    decisionPending = true;
+    $('[data-action="approve-cbcl-pairing"]').disabled = true;
+    // Keep the Cancel control reachable while native work is in flight.
+    idle();
     try {
       if (credentialV2Stage === "recovery" || credentialV2Stage === "recovery-rotation") {
         if (!approve) {
@@ -284,6 +539,7 @@ export function initPairing(d) {
           passcode,
           approveRotation,
         });
+        if (epoch !== attemptEpoch) return;
         if (result.outcome === "authority-rotation") {
           showRecoveryRotation(result);
           return;
@@ -320,24 +576,31 @@ export function initPairing(d) {
         return;
       }
       if (credentialV2Stage === "relay") {
-        await advanceRelay(approve);
+        await advanceRelay(approve, epoch);
         return;
       }
       const passcodeInput = $("#pairing-passcode");
       const passcode = approve ? (passcodeInput?.value ?? "") : null;
       if (credentialV2Stage === "intent") {
         const result = await invoke("cbcl_v2_preliminary_decide", { approve, passcode });
+        if (epoch !== attemptEpoch) return;
         if (result.outcome === "declined") {
           credentialV2Stage = "idle";
           if (passcodeInput) passcodeInput.value = "";
           showResult("declined", "Request declined", "No identity was issued, published, or shared.", "The authenticated request ended before any identity effect.");
         } else {
-          showFinalReview(result.finalReview);
+          showPreview(result.finalReview);
+          await previewRendered();
+          if (epoch !== attemptEpoch) return;
+          const review = await invoke("cbcl_v2_compare");
+          if (epoch !== attemptEpoch) return;
+          showFinalReview(review);
         }
         return;
       }
       if (credentialV2Stage === "final") {
         const result = await invoke("cbcl_v2_final_decide", { approve, passcode });
+        if (epoch !== attemptEpoch) return;
         if (result.outcome === "declined") {
           credentialV2Stage = "idle";
           if (passcodeInput) passcodeInput.value = "";
@@ -350,46 +613,99 @@ export function initPairing(d) {
         $("[data-cbcl-status]").textContent = "Waiting for the hub’s atomic acceptance and reciprocal account binding.";
         show("pairing-wait");
         const result = await invoke("cbcl_v2_finish", { passcode });
+        if (epoch !== attemptEpoch) return;
         if (result.outcome !== "installed") throw new Error("credential/v2 installation was refused");
         credentialV2Stage = "idle";
         if (passcodeInput) passcodeInput.value = "";
         showResult("accepted", "Application connected", "The signed hub receipt and live reciprocal account binding were verified before the grant was installed.", "The relay learned only opaque protocol frames; trust is scoped to this application–relay pair.");
       }
     } catch (error) {
+      if (epoch !== attemptEpoch) return;
       const token = message(error);
       if (credentialV2Stage === "finish") {
         show("pairing-consent");
         $('[data-action="approve-cbcl-pairing"]').textContent = "Retry final verification";
         $('[data-action="decline-cbcl-pairing"]').hidden = true;
-        fail("pairing-consent", `The final verification did not complete (${token}). The durable pending link is safe to retry.`);
+        const detail = token === "PairingRelayTimedOut"
+          ? "The relay stayed connected but the final receipt did not arrive before the local wait deadline. The durable pending link is safe to retry."
+          : `The final verification did not complete (${token}). The durable pending link is safe to retry.`;
+        fail("pairing-consent", detail);
       } else {
+        await invoke("cbcl_v2_cancel").catch(() => {});
+        if (epoch !== attemptEpoch) return;
+        credentialV2Stage = "idle";
+        restoreEntryUnlock();
         show("pairing-enter");
         fail("pairing", startFailureText(token));
       }
     } finally {
-      idle();
+      if (epoch === attemptEpoch) {
+        decisionPending = false;
+        $('[data-action="approve-cbcl-pairing"]').disabled = credentialV2Stage === "comparison";
+        idle();
+      }
     }
   }
 
-  async function cancel() {
+  async function cancel(navigate = true) {
+    const tag = attemptTag;
+    const mode = flow;
+    const wasScanning = credentialV2Stage === "scanning";
+    const epoch = ++attemptEpoch;
+    attemptTag = null;
+    attemptApplication = null;
+    credentialV2Stage = "cancelling";
+    clearTransferInputs();
+    document.body.classList.remove("scanning");
+    decisionPending = true;
+    $('[data-action="approve-cbcl-pairing"]').disabled = true;
+    $('[data-action="decline-cbcl-pairing"]').disabled = true;
+    intentFields = [];
+    const passcode = $("#pairing-passcode");
+    if (passcode) passcode.value = "";
+    idle();
     try {
-      await invoke("cbcl_v2_cancel");
-    } finally {
+      await Promise.allSettled([
+        revokeNative(tag, mode),
+        wasScanning ? Promise.resolve().then(() => window.__TAURI__?.barcodeScanner?.cancel?.()) : Promise.resolve(),
+      ]);
+    }
+    finally {
+      if (epoch !== attemptEpoch) return;
       credentialV2Stage = "idle";
-      const passcode = $("#pairing-passcode");
-      if (passcode) passcode.value = "";
-      show("applications");
+      decisionPending = false;
+      if (navigate) show("applications");
     }
   }
 
-  // The QR payload IS the paste payload: the application encodes the unpadded
-  // base64url carrier into the symbol, so a scan and a paste recognise
+  function leaving(name) {
+    if (!["pairing-enter", "pairing-wait", "pairing-consent"].includes(name)) { clearTransferInputs(); onInput(); }
+    if (!["idle", "cancelling"].includes(credentialV2Stage) &&
+        !["pairing-enter", "pairing-wait", "pairing-consent"].includes(name)) {
+      void cancel(false);
+    }
+  }
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) {
+      clearTransferInputs();
+      onInput();
+      if (credentialV2Stage !== "idle") void cancel(false);
+    }
+  });
+  window.addEventListener("pagehide", () => {
+    clearTransferInputs();
+    if (credentialV2Stage !== "idle") void cancel(false);
+  });
+
+  // The confidential QR payload IS the paste payload. Scan and paste recognise
   // identical input and everything after this line is the one ordinary
   // `start` path. The camera choreography mirrors the linking screen's:
   // `scan` checks the permission and throws rather than requesting it, so the
   // asking is this caller's job; `windowed: true` renders the preview beneath
   // the webview, so the page must get out of its way for the duration.
-  async function scan() {
+  async function scan(manual = false) {
+    if (credentialV2Stage !== "idle" || entryMode !== (manual ? "manual" : "full")) return;
+    const epoch = ++attemptEpoch;
     const note = $("[data-pairing-scanner-note]");
     const say = (text) => {
       if (note) {
@@ -402,43 +718,82 @@ export function initPairing(d) {
       say("No camera in this build — paste the invitation instead.");
       return;
     }
+    credentialV2Stage = "scanning";
+    onInput();
     try {
       let access = await camera.checkPermissions();
-      if (access !== "granted") {
-        access = await camera.requestPermissions();
+      if (epoch !== attemptEpoch) return;
+      if (access === "denied") {
+        say("Camera access is off for Selfsame — turn it on in Settings, or paste the invitation instead.");
+        return;
       }
       if (access !== "granted") {
-        say(
-          "Camera access is off for Selfsame — turn it on in Settings, " +
-            "or paste the invitation instead.",
-        );
-        return;
+        access = await camera.requestPermissions();
+        if (epoch !== attemptEpoch) return;
+        if (access !== "granted") {
+          say("Camera access was declined. You can paste the invitation instead.");
+          return;
+        }
       }
       document.body.classList.add("scanning");
       let scanned;
       try {
         scanned = await camera.scan({ formats: ["QRCode"], windowed: true });
       } finally {
-        document.body.classList.remove("scanning");
+        if (epoch === attemptEpoch) document.body.classList.remove("scanning");
       }
+      if (epoch !== attemptEpoch) return;
       say("");
-      const input = $("#pairing-input");
+      credentialV2Stage = "idle";
+      const input = $(manual ? "#pairing-manual-bootstrap" : "#pairing-input");
       if (input) input.value = scanned.content;
       onInput();
-      $("#pairing-presence-code")?.focus();
+      if (manual) $("#pairing-manual-words").focus();
+      else await start(scanned.content);
     } catch (error) {
+      if (epoch !== attemptEpoch) return;
       const reason = String(error?.message ?? error ?? "unknown");
-      console.error("pairing scan unavailable:", reason);
       say(
-        /denied|permission|not allowed/i.test(reason)
+        /cancel/i.test(reason) ? "Camera scanning was cancelled. You can paste the invitation instead."
+          : /denied|permission|not allowed/i.test(reason)
           ? "Camera access is off for Selfsame — turn it on in Settings, " +
               "or paste the invitation instead."
           : "The camera isn’t available. Paste the invitation instead.",
       );
+    } finally {
+      if (epoch === attemptEpoch && credentialV2Stage === "scanning") {
+        credentialV2Stage = "idle";
+        onInput();
+      }
+    }
+  }
+
+  function restoreEntryUnlock() {
+    const unlockSlot = $("[data-pairing-entry-unlock]");
+    if (unlockSlot && passcodeField) {
+      unlockSlot.append(passcodeField);
+      passcodeField.hidden = flow === "single" || !capability.productionClaimant;
     }
   }
 
   function forget() {
+    if (credentialV2Stage === "scanning") void Promise.resolve().then(() => window.__TAURI__?.barcodeScanner?.cancel?.()).catch(() => {});
+    if (credentialV2Stage !== "idle") void revokeNative();
+    attemptTag = null;
+    attemptApplication = null;
+    flow = "single";
+    ++attemptEpoch;
+    decisionPending = false;
+    intentFields = [];
+    restoreEntryUnlock();
+    entryMode = "full";
+    clearTransferInputs();
+    document.body.classList.remove("scanning");
+    $("[data-pairing-manual]").open = false;
+    $("[data-pairing-complete]").hidden = false;
+    $("[data-action='scan-cbcl-pairing']").hidden = !window.__TAURI__?.barcodeScanner;
+    const legacy = $("[data-pairing-legacy]");
+    if (legacy) legacy.open = false;
     const input = $("#pairing-input");
     if (input) input.value = "";
     const passcode = $("#pairing-passcode");
@@ -450,10 +805,12 @@ export function initPairing(d) {
   }
 
   async function resumePending() {
+    const epoch = attemptEpoch;
     if (credentialV2Stage !== "idle") return;
     const installedRefresh = refreshInstalledLinks().catch(() => {});
     const applications = await invoke("cbcl_v2_pending_recoveries");
     await installedRefresh;
+    if (epoch !== attemptEpoch) return;
     if (Array.isArray(applications) && applications.length > 0) {
       showRecovery(applications[0]);
     }
@@ -624,7 +981,8 @@ export function initPairing(d) {
       show("pairing-enter");
     },
     "start-cbcl-pairing": start,
-    "scan-cbcl-pairing": scan,
+    "scan-cbcl-pairing": () => scan(false),
+    "scan-cbcl-manual": () => scan(true),
     "approve-cbcl-pairing": () => decide(true),
     "decline-cbcl-pairing": () => decide(false),
     "cancel-cbcl-pairing": cancel,
@@ -646,6 +1004,17 @@ export function initPairing(d) {
 
   const input = $("#pairing-input");
   if (input) input.addEventListener("input", onInput);
+  for (const mode of ["manual", "legacy"]) {
+    const panel = $(`[data-pairing-${mode}]`);
+    panel?.addEventListener("toggle", () => {
+      if (credentialV2Stage !== "idle") { panel.open = entryMode === mode; return; }
+      if (panel.open) selectEntryMode(mode);
+      else if (entryMode === mode) selectEntryMode("full");
+    });
+  }
+  for (const selector of ["#pairing-manual-bootstrap", "#pairing-manual-words"]) {
+    $(selector)?.addEventListener("input", onInput);
+  }
   const presence = $("#pairing-presence-code");
   if (presence) presence.addEventListener("input", onInput);
   // Desktop: the pasted route is the route. Hide the dead camera affordance
@@ -653,6 +1022,7 @@ export function initPairing(d) {
   if (!window.__TAURI__?.barcodeScanner) {
     const scanButton = $('[data-action="scan-cbcl-pairing"]');
     if (scanButton) scanButton.hidden = true;
+    $("[data-action='scan-cbcl-manual']").hidden = true;
   }
-  return { forget, resumePending, refreshInstalledLinks };
+  return { forget, resumePending, refreshInstalledLinks, leaving };
 }

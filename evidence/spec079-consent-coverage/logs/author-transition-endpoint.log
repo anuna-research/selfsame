@@ -1,0 +1,11 @@
+   Compiling selfsame-pairing v0.1.0 (/Volumes/anuna-03/codex-successor-consent-coverage-closure/selfsame/crates/selfsame-pairing)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.56s
+     Running tests/credential_v2_offer.rs (/Volumes/anuna-03/codex-selfsame-reconcile-target/debug/deps/credential_v2_offer-3bc8de5c5309a017)
+
+running 4 tests
+test final_status_recovery_has_one_deterministic_cbor_and_signed_negative_grammar ... ok
+test final_status_is_one_closed_jws_bound_to_every_accepted_fact ... ok
+test offer_is_one_canonical_signed_authority_for_hub_browser_and_wallet ... ok
+test spec079_valid_comparison_transition_guards ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s

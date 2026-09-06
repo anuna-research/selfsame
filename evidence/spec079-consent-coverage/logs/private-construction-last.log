@@ -1,0 +1,23 @@
+   Compiling selfsame v0.1.0 (/Volumes/anuna-03/codex-successor-consent-coverage-closure/selfsame/src-tauri)
+error[E0603]: struct `LinkAuthorization` is private
+   --> src-tauri/src/lib.rs:163:57
+    |
+163 | fn forbidden() { let _ = cbcl_v2_commands::single_link::LinkAuthorization {}; }
+    |                                                         ^^^^^^^^^^^^^^^^^ private struct
+    |
+note: the struct `LinkAuthorization` is defined here
+   --> src-tauri/src/cbcl_v2_single_link.rs:299:1
+    |
+299 | struct LinkAuthorization {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^
+
+error: cannot construct `LinkAuthorization` with struct literal syntax due to private fields
+   --> src-tauri/src/lib.rs:163:26
+    |
+163 | fn forbidden() { let _ = cbcl_v2_commands::single_link::LinkAuthorization {}; }
+    |                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: private field `pending` that was not provided
+
+For more information about this error, try `rustc --explain E0603`.
+error: could not compile `selfsame` (lib test) due to 2 previous errors

@@ -1,0 +1,40 @@
+{
+  "selfsame": {
+    "path": "/Volumes/anuna-03/codex-wallet-manual-closure/selfsame",
+    "head": "d84c984efc318b966840a449ec21e030a1895ae0",
+    "actual_head": "d84c984efc318b966840a449ec21e030a1895ae0",
+    "status": [
+      " M docs/spec077-native-host.md",
+      " M src-tauri/src/cbcl_v2_claimant.rs",
+      " M src-tauri/src/cbcl_v2_single_link.rs",
+      " M src-tauri/src/cbcl_v2_single_link_tests.rs",
+      " M src-tauri/src/lib.rs",
+      " M src-tauri/src/scan_integration_native_host.rs",
+      " M src/index.html",
+      " M src/pairing.js",
+      " M tests/spec-077-scan-pairing.mjs",
+      "?? evidence/spec078-wallet-manual/",
+      "?? node_modules",
+      "?? src-tauri/src/cbcl_v2_manual_entry_tests.rs",
+      "?? tests/support/"
+    ]
+  },
+  "cbcl-pairing": {
+    "path": "/Volumes/anuna-03/codex-wallet-manual-closure/cbcl-pairing",
+    "head": "6e56ef2f2db0a918888cbfe39315944db30f50a3",
+    "actual_head": "6e56ef2f2db0a918888cbfe39315944db30f50a3",
+    "status": []
+  },
+  "cbcl-rs": {
+    "path": "/Volumes/anuna-03/codex-wallet-manual-closure/cbcl-rs",
+    "head": "febc6691e6dd2d5f7116b1a4d84c984b64717564",
+    "actual_head": "febc6691e6dd2d5f7116b1a4d84c984b64717564",
+    "status": []
+  },
+  "did-crdt": {
+    "path": "/Volumes/anuna-03/codex-wallet-manual-closure/did-crdt",
+    "head": "1f409a4229d07a62dd4cc6b2dce3b5a2e18e78a1",
+    "actual_head": "1f409a4229d07a62dd4cc6b2dce3b5a2e18e78a1",
+    "status": []
+  }
+}

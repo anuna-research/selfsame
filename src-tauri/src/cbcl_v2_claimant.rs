@@ -3,7 +3,8 @@
 use base64ct::{Base64UrlUnpadded, Encoding as _};
 use cbcl_pairing::credential_v2::{
     decode_carrier, CredentialV2Carrier, CredentialV2ClaimantSession,
-    CredentialV2ClaimantSessionInput, CredentialV2PresenceCode, CredentialV2TofuState,
+    CredentialV2ClaimantSessionInput, CredentialV2Handoff, CredentialV2HandoffError,
+    CredentialV2PresenceCode, CredentialV2TofuState,
 };
 use selfsame_app_identity::profile::{ApplicationId, ApplicationProfile};
 use selfsame_app_identity_net::profile::FetchedProfile;
@@ -97,12 +98,67 @@ pub enum RelayConsentDecision {
     Decline,
 }
 
+/// Consumer provenance is never supplied by the peer or renderer.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ContactProvenance {
+    CeremonyGesture,
+    LegacyExistingTrust,
+    LegacyNewPairApproval,
+}
+
+/// Local recognition output, owned by one reservation until contact consumes it.
+/// No profile, network, trust, or custody effect occurs during recognition.
+pub(crate) struct RecognisedCredentialV2Entry {
+    carrier: CredentialV2Carrier,
+    presence: CredentialV2PresenceCode,
+}
+impl RecognisedCredentialV2Entry {
+    pub(crate) fn handoff(input: &str, now: i64) -> Result<Self> {
+        let (carrier, presence) = recognise_handoff_input(input, now)?;
+        Self::from_parts(carrier, presence, now)
+    }
+    /// The later manual adapter passes only the shared complete recognizer's
+    /// typed pair here; it enters exactly the same reservation/contact path.
+    pub(crate) fn from_parts(
+        carrier: CredentialV2Carrier,
+        presence: CredentialV2PresenceCode,
+        now: i64,
+    ) -> Result<Self> {
+        require_live_invitation(&carrier, now)?;
+        let presence = presence
+            .bind_to_carrier(&carrier)
+            .map_err(|_| UiError::from("RecognitionFailed"))?;
+        Ok(Self { carrier, presence })
+    }
+    pub(crate) fn application_id(&self) -> &str {
+        self.carrier.application_context()
+    }
+    pub(crate) fn relay_origin(&self) -> &str {
+        self.carrier.relay_origin()
+    }
+    pub(crate) async fn contact(self, now: i64) -> Result<RelaySocketCapability> {
+        require_live_invitation(&self.carrier, now)?;
+        let application = ApplicationId::parse(self.carrier.application_context())
+            .map_err(|_| UiError::from("PairingProfileUnavailable"))?;
+        let fetched = selfsame_app_identity_net::profile::fetch(&application, now)
+            .await
+            .map_err(|_| UiError::from("PairingProfileUnavailable"))?;
+        require_profile_candidate(&self.carrier, &fetched)?;
+        Ok(RelaySocketCapability {
+            carrier: self.carrier,
+            presence_code: self.presence,
+            fetched,
+            provenance: ContactProvenance::CeremonyGesture,
+        })
+    }
+}
+
 /// Single-use authority consumed before the socket is created.
 pub struct RelaySocketCapability {
     carrier: CredentialV2Carrier,
     presence_code: CredentialV2PresenceCode,
     fetched: FetchedProfile,
-    newly_approved: bool,
+    provenance: ContactProvenance,
 }
 
 impl fmt::Debug for RelaySocketCapability {
@@ -117,7 +173,7 @@ pub struct PreparedClaimant {
     carrier: CredentialV2Carrier,
     profile: ApplicationProfile,
     profile_octets: Vec<u8>,
-    newly_approved: bool,
+    provenance: ContactProvenance,
     body_authority: selfsame_pairing::credential_v2::CredentialV2BodyAuthority,
 }
 
@@ -127,9 +183,30 @@ impl fmt::Debug for PreparedClaimant {
     }
 }
 
-/// Fully recognise the machine carrier and separate PAIR1 input, fetch the
+/// Fully recognise the confidential scan handoff, fetch the
 /// named application directly over authenticated HTTPS, and evaluate only the
 /// exact application-relay policy tuple. This function opens no relay socket.
+pub async fn recognise_claimant_handoff(handoff: &str, now: i64) -> Result<RelayConsentPlan> {
+    let (carrier, presence_code) = recognise_handoff_input(handoff, now)?;
+    fetch_claimant_profile(carrier, presence_code, now).await
+}
+
+// Recognition and local time/key gates are pure; no profile or socket effect
+// can precede this result. The complete input is not trimmed or downgraded.
+fn recognise_handoff_input(
+    handoff: &str,
+    now: i64,
+) -> Result<(CredentialV2Carrier, CredentialV2PresenceCode)> {
+    let handoff = CredentialV2Handoff::from_str(handoff).map_err(|error| match error {
+        CredentialV2HandoffError::Version => UiError::from("PairingVersionUnsupported"),
+        _ => UiError::from("RecognitionFailed"),
+    })?;
+    let (carrier, presence) = handoff.into_parts();
+    require_live_invitation(&carrier, now)?;
+    Ok((carrier, presence))
+}
+
+/// Explicit legacy input shares the authenticated profile and relay-policy gate.
 pub async fn recognise_claimant_invitation(
     invitation: &str,
     presence_code: &str,
@@ -141,10 +218,26 @@ pub async fn recognise_claimant_invitation(
     let presence_code = CredentialV2PresenceCode::from_str(presence_code)
         .and_then(|value| value.bind_to_carrier(&carrier))
         .map_err(|_| UiError::from("PairingPresenceRefused"))?;
-    let now_u64 = u64::try_from(now).map_err(|_| UiError::from("RecognitionFailed"))?;
-    if now_u64 >= carrier.relay_expires_at() || carrier.expected_allocator_key().is_none() {
-        return Err(UiError::from("RecognitionFailed"));
+    require_live_invitation(&carrier, now)?;
+    fetch_claimant_profile(carrier, presence_code, now).await
+}
+
+fn require_live_invitation(carrier: &CredentialV2Carrier, now: i64) -> Result<()> {
+    let now = u64::try_from(now).map_err(|_| UiError::from("RecognitionFailed"))?;
+    if now >= carrier.relay_expires_at() {
+        return Err(UiError::from("PairingInvitationExpired"));
     }
+    if carrier.expected_allocator_key().is_none() {
+        return Err(UiError::from("PairingAllocatorKeyRequired"));
+    }
+    Ok(())
+}
+
+async fn fetch_claimant_profile(
+    carrier: CredentialV2Carrier,
+    presence_code: CredentialV2PresenceCode,
+    now: i64,
+) -> Result<RelayConsentPlan> {
     let application_id = ApplicationId::parse(carrier.application_context())
         .map_err(|_| UiError::from("PairingProfileUnavailable"))?;
     let fetched = selfsame_app_identity_net::profile::fetch(&application_id, now)
@@ -158,6 +251,22 @@ fn recognise_profile_candidate(
     presence_code: CredentialV2PresenceCode,
     fetched: FetchedProfile,
 ) -> Result<RelayConsentPlan> {
+    require_profile_candidate(&carrier, &fetched)?;
+    let profile = &fetched.profile;
+    let pair_state =
+        cbcl_v2_policy::state(profile.application_id.as_str(), carrier.relay_origin())?;
+    Ok(RelayConsentPlan {
+        carrier,
+        presence_code,
+        fetched,
+        pair_state,
+    })
+}
+
+fn require_profile_candidate(
+    carrier: &CredentialV2Carrier,
+    fetched: &FetchedProfile,
+) -> Result<()> {
     let profile = &fetched.profile;
     if profile.application_id.as_str() != carrier.application_context() {
         return Err(UiError::from("PairingProfileUnavailable"));
@@ -169,14 +278,7 @@ fn recognise_profile_candidate(
     if descriptors.next().is_none() || descriptors.next().is_some() {
         return Err(UiError::from("PairingRelayRefused"));
     }
-    let pair_state =
-        cbcl_v2_policy::state(profile.application_id.as_str(), carrier.relay_origin())?;
-    Ok(RelayConsentPlan {
-        carrier,
-        presence_code,
-        fetched,
-        pair_state,
-    })
+    Ok(())
 }
 
 /// Consume the exact plan through either its existing row or the person's new
@@ -195,7 +297,11 @@ pub fn authorise_claimant_relay(
         carrier: plan.carrier,
         presence_code: plan.presence_code,
         fetched: plan.fetched,
-        newly_approved,
+        provenance: if newly_approved {
+            ContactProvenance::LegacyNewPairApproval
+        } else {
+            ContactProvenance::LegacyExistingTrust
+        },
     }))
 }
 
@@ -225,12 +331,19 @@ pub fn prepare_claimant(
         carrier,
         profile,
         profile_octets,
-        newly_approved: capability.newly_approved,
+        provenance: capability.provenance,
         body_authority,
     })
 }
 
 impl PreparedClaimant {
+    pub(crate) fn flow(&self) -> crate::session::CredentialV2Flow {
+        match self.provenance {
+            ContactProvenance::CeremonyGesture => crate::session::CredentialV2Flow::SingleLink,
+            _ => crate::session::CredentialV2Flow::LegacyTwoDecision,
+        }
+    }
+
     /// Mutably borrow the sans-I/O core for the one TLS transport pump.
     pub fn core_mut(&mut self) -> &mut CredentialV2ClaimantSession {
         &mut self.core
@@ -280,10 +393,10 @@ impl PreparedClaimant {
         if !self.core.is_awaiting_profile_authorisation() {
             return Err(UiError::from("PairingFailed"));
         }
-        let tofu_state = if self.newly_approved {
-            CredentialV2TofuState::NewPair
-        } else {
-            CredentialV2TofuState::TrustedPair
+        let tofu_state = match self.provenance {
+            ContactProvenance::CeremonyGesture => CredentialV2TofuState::CeremonyGesture,
+            ContactProvenance::LegacyNewPairApproval => CredentialV2TofuState::NewPair,
+            ContactProvenance::LegacyExistingTrust => CredentialV2TofuState::TrustedPair,
         };
         let verifier = selfsame_pairing::credential_v2::CredentialV2WalletOfferVerifier::new(
             self.profile.clone(),
@@ -295,10 +408,10 @@ impl PreparedClaimant {
         .with_body_authority(self.body_authority.clone());
         let application_id = self.profile.application_id.as_str();
         let relay_origin = self.carrier.relay_origin();
-        if self.newly_approved {
+        if self.provenance == ContactProvenance::LegacyNewPairApproval {
             cbcl_v2_policy::insert(application_id, relay_origin)?;
-        } else if cbcl_v2_policy::state(application_id, relay_origin)?
-            != ExactPairState::TrustedPair
+        } else if self.provenance == ContactProvenance::LegacyExistingTrust
+            && cbcl_v2_policy::state(application_id, relay_origin)? != ExactPairState::TrustedPair
         {
             return Err(UiError::from("PairingPolicyUnavailable"));
         }
@@ -306,6 +419,36 @@ impl PreparedClaimant {
             .authorise_authenticated_profile(Box::new(verifier))
             .map_err(|_| UiError::from("PairingFailed"))
     }
+}
+
+#[cfg(test)]
+pub(crate) fn test_ceremony_claimant(
+    carrier: CredentialV2Carrier,
+    presence: CredentialV2PresenceCode,
+    fetched: FetchedProfile,
+    scalar: [u8; 32],
+) -> Result<PreparedClaimant> {
+    require_profile_candidate(&carrier, &fetched)?;
+    prepare_claimant(
+        RelaySocketCapability {
+            carrier,
+            presence_code: presence,
+            fetched,
+            provenance: ContactProvenance::CeremonyGesture,
+        },
+        scalar,
+    )
+}
+
+// Test transport seam: consume the actual recognised reservation entry while
+// supplying an authenticated local profile instead of external HTTPS.
+#[cfg(test)]
+pub(crate) fn test_recognised_entry_claimant(
+    entry: RecognisedCredentialV2Entry,
+    fetched: FetchedProfile,
+    scalar: [u8; 32],
+) -> Result<PreparedClaimant> {
+    test_ceremony_claimant(entry.carrier, entry.presence, fetched, scalar)
 }
 
 /// Convert exact-pair state into the display's closed authenticated value.
@@ -366,6 +509,43 @@ mod tests {
             },
             pair_state: state,
         }
+    }
+
+    #[test]
+    fn scan_handoff_input_requires_canonical_complete_live_key_bound_material() {
+        let fixture = plan(ExactPairState::NewPair);
+        let handoff = CredentialV2Handoff::new(fixture.carrier.clone(), fixture.presence_code)
+            .unwrap()
+            .encode()
+            .unwrap();
+        let (carrier, _) = recognise_handoff_input(&handoff, 1_800_000_899).unwrap();
+        assert_eq!(carrier, fixture.carrier);
+        for now in [1_800_000_900, 1_800_000_901] {
+            assert_eq!(
+                recognise_handoff_input(&handoff, now)
+                    .err()
+                    .unwrap()
+                    .to_string(),
+                "PairingInvitationExpired"
+            );
+        }
+        for text in [
+            format!(" {}", handoff.as_str()),
+            format!("{} ", handoff.as_str()),
+            "SSPAIR9:invalid".into(),
+        ] {
+            assert!(recognise_handoff_input(&text, 1_800_000_000).is_err());
+        }
+        let vectors: serde_json::Value =
+            serde_json::from_str(include_str!("../../test-vectors/spec-077-handoff.json")).unwrap();
+        // The minimal valid shared-format vector deliberately omits the allocator key.
+        assert_eq!(
+            recognise_handoff_input(vectors[0]["handoff"].as_str().unwrap(), 1_800_000_000)
+                .err()
+                .unwrap()
+                .to_string(),
+            "PairingAllocatorKeyRequired"
+        );
     }
 
     #[test]

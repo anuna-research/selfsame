@@ -1,0 +1,33 @@
+
+running 1 test
+test credential_v2_manual_tests::actual_restore_uses_fresh_scalar_before_peer_in_both_modes ... FAILED
+
+failures:
+
+---- credential_v2_manual_tests::actual_restore_uses_fresh_scalar_before_peer_in_both_modes stdout ----
+
+thread 'credential_v2_manual_tests::actual_restore_uses_fresh_scalar_before_peer_in_both_modes' (7993787) panicked at crates/selfsame-web-device/src/credential_v2_manual_tests.rs:464:13:
+assertion `left == right` failed
+  left: Cpace(CpaceMessage { side: Allocator, share: [23, 116, 218, 91, 112, 213, 28, 142, 209, 155, 194, 156, 175, 148, 242, 239, 10, 73, 47, 53, 208, 251, 111, 165, 101, 16, 85, 24, 58, 187, 100, 54], associated_data: [133, 120, 29, 99, 98, 99, 108, 45, 112, 97, 105, 114, 105, 110, 103, 45, 97, 100, 47, 99, 114, 101, 100, 101, 110, 116, 105, 97, 108, 45, 118, 50, 105, 97, 108, 108, 111, 99, 97, 116, 111, 114, 88, 32, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 88, 32, 240, 69, 83, 31, 66, 122, 31, 106, 237, 54, 46, 29, 56, 243, 70, 95, 206, 151, 55, 171, 152, 166, 221, 45, 195, 21, 255, 57, 46, 107, 251, 205, 88, 32, 139, 91, 120, 131, 65, 119, 28, 47, 121, 10, 189, 244, 167, 81, 107, 137, 235, 72, 36, 232, 127, 111, 235, 42, 184, 11, 148, 37, 208, 218, 202, 146] })
+ right: Cpace(CpaceMessage { side: Allocator, share: [4, 40, 219, 249, 198, 116, 62, 11, 14, 166, 68, 18, 247, 181, 95, 201, 218, 232, 77, 86, 143, 38, 204, 126, 103, 142, 28, 28, 165, 178, 198, 16], associated_data: [133, 120, 29, 99, 98, 99, 108, 45, 112, 97, 105, 114, 105, 110, 103, 45, 97, 100, 47, 99, 114, 101, 100, 101, 110, 116, 105, 97, 108, 45, 118, 50, 105, 97, 108, 108, 111, 99, 97, 116, 111, 114, 88, 32, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 88, 32, 240, 69, 83, 31, 66, 122, 31, 106, 237, 54, 46, 29, 56, 243, 70, 95, 206, 151, 55, 171, 152, 166, 221, 45, 195, 21, 255, 57, 46, 107, 251, 205, 88, 32, 139, 91, 120, 131, 65, 119, 28, 47, 121, 10, 189, 244, 167, 81, 107, 137, 235, 72, 36, 232, 127, 111, 235, 42, 184, 11, 148, 37, 208, 218, 202, 146] })
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    credential_v2_manual_tests::actual_restore_uses_fresh_scalar_before_peer_in_both_modes
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 50 filtered out; finished in 0.02s
+
+   Compiling selfsame-web-device v0.1.0 (/Volumes/anuna-03/codex-successor-closure/selfsame-wasm-manual-1/crates/selfsame-web-device)
+warning: unused variable: `fresh_cpace_scalar`
+    --> crates/selfsame-web-device/src/lib.rs:1219:13
+     |
+1219 |         let fresh_cpace_scalar: [u8; 32] =
+     |             ^^^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_fresh_cpace_scalar`
+     |
+     = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: `selfsame-web-device` (lib test) generated 1 warning (run `cargo fix --lib -p selfsame-web-device --tests` to apply 1 suggestion)
+    Finished `test` profile [unoptimized] target(s) in 0.78s
+     Running unittests src/lib.rs (/Volumes/anuna-03/codex-successor-wasm-native-target/debug/deps/selfsame_web_device-a698fa6cb7ff8cd0)
+error: test failed, to rerun pass `-p selfsame-web-device --lib`

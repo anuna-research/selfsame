@@ -1,0 +1,17 @@
+   Compiling selfsame v0.1.0 (/Volumes/anuna-03/codex-wallet-manual-closure/selfsame/src-tauri)
+    Finished `test` profile [unoptimized] target(s) in 4.47s
+     Running unittests src/lib.rs (/Volumes/anuna-03/codex-scan-clean-native-target/debug/deps/selfsame_lib-b99b11374ecf365a)
+
+running 10 tests
+test cbcl_v2_commands::scan_integration_host::native_host_manual_reserves_before_contact_and_refuses_profile_failure ... ignored, installs global memory custody/configuration; run alone
+test cbcl_v2_commands::scan_integration_host::native_host_memory_init_cancel_shutdown_regression ... ignored, installs global memory custody/configuration; run alone
+test cbcl_v2_commands::scan_integration_host::native_host_single_link_reserves_before_contact_and_refuses_profile_failure ... ignored, installs global memory custody/configuration; run alone
+test cbcl_v2_commands::scan_integration_host::scan_integration_native_host ... ignored, private stdin host; installs global memory custody and loopback routing; run alone
+test cbcl_v2_commands::scan_integration_host::jobs::tests::job_id_grammar_is_closed ... ok
+test cbcl_v2_commands::scan_integration_host::native_host_request_grammar_and_error_redaction ... ok
+test cbcl_v2_commands::scan_integration_host::jobs::tests::disconnected_result_stays_owned_until_the_actual_lease_is_idle ... ok
+test cbcl_v2_commands::scan_integration_host::jobs::tests::retained_job_requires_both_tags_and_drains_once ... ok
+test cbcl_v2_commands::scan_integration_host::jobs::tests::cancellation_overrides_a_retained_success_result ... ok
+test cbcl_v2_commands::scan_integration_host::jobs::tests::ready_result_stays_owned_until_the_actual_lease_is_idle ... ok
+
+test result: ok. 6 passed; 0 failed; 4 ignored; 0 measured; 90 filtered out; finished in 0.00s

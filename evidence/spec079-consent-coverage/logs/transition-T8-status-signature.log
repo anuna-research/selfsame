@@ -1,0 +1,40 @@
+   Compiling selfsame-pairing v0.1.0 (/Volumes/anuna-03/codex-consent-comparison-mutation-final/selfsame/crates/selfsame-pairing)
+warning: unused variable: `signature`
+    --> crates/selfsame-pairing/src/credential_v2.rs:1126:9
+     |
+1126 |     let signature: [u8; 64] = signature
+     |         ^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_signature`
+     |
+     = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `unsigned_bytes`
+    --> crates/selfsame-pairing/src/credential_v2.rs:1132:9
+     |
+1132 |     let unsigned_bytes = cbor2::to_canonical_vec(&Value::Array(members[..5].to_vec()))
+     |         ^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_unsigned_bytes`
+
+warning: unused variable: `declared`
+    --> crates/selfsame-pairing/src/credential_v2.rs:1134:9
+     |
+1134 |     let declared = profile
+     |         ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_declared`
+
+warning: `selfsame-pairing` (lib) generated 3 warnings (run `cargo fix --lib -p selfsame-pairing` to apply 3 suggestions)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.63s
+     Running tests/credential_v2_offer.rs (/Volumes/anuna-03/codex-selfsame-reconcile-target/debug/deps/credential_v2_offer-30ebe6511f1de268)
+
+running 1 test
+
+thread 'spec079_valid_comparison_transition_guards' (9830151) panicked at crates/selfsame-pairing/tests/credential_v2_offer.rs:858:13:
+actual comparison transition accepted mismatched statusSignature
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test spec079_valid_comparison_transition_guards ... FAILED
+
+failures:
+
+failures:
+    spec079_valid_comparison_transition_guards
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.03s
+
+error: test failed, to rerun pass `-p selfsame-pairing --test credential_v2_offer`

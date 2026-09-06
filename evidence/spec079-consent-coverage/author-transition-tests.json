@@ -1,0 +1,111 @@
+[
+  {
+    "name": "native-comparison",
+    "command": [
+      "cargo",
+      "test",
+      "--locked",
+      "--offline",
+      "-p",
+      "selfsame",
+      "--lib",
+      "cbcl_v2_commands::single_link::tests::coverage::single_link_valid_mutable_comparison_bindings_refuse_before_effects",
+      "--",
+      "--exact",
+      "--ignored",
+      "--nocapture",
+      "--test-threads=1"
+    ],
+    "exit": 0,
+    "passed": true,
+    "log": "logs/author-transition-native-comparison.log",
+    "rawLogSha256": "cfe90e09d063ced2c445f37152cd5541ab451dd241c95202c763881fd8868601",
+    "storedLogSha256": "bb5ed5ac0ddc82ea316fc63440d8dfe63d078207619dc9b0319f7ca50a1526aa"
+  },
+  {
+    "name": "native-full",
+    "command": [
+      "cargo",
+      "test",
+      "--locked",
+      "--offline",
+      "-p",
+      "selfsame",
+      "--lib",
+      "cbcl_v2_commands::single_link::tests::single_link_native_commands_render_mode_comparison_cancel_and_expiry",
+      "--",
+      "--exact",
+      "--ignored",
+      "--nocapture",
+      "--test-threads=1"
+    ],
+    "exit": 0,
+    "passed": true,
+    "log": "logs/author-transition-native-full.log",
+    "rawLogSha256": "51cd6d5d05e3bed99d19848c72360e988c745cacf261f8a578b127786eacb610",
+    "storedLogSha256": "c30b03d8a5afcb1704c5fbaeb6eed2ac307167d05b32ec0b5940db7650eb6eb7"
+  },
+  {
+    "name": "native-manual",
+    "command": [
+      "cargo",
+      "test",
+      "--locked",
+      "--offline",
+      "-p",
+      "selfsame",
+      "--lib",
+      "cbcl_v2_commands::single_link::tests::manual_single_link_native_commands_render_mode_comparison_cancel_and_expiry",
+      "--",
+      "--exact",
+      "--ignored",
+      "--nocapture",
+      "--test-threads=1"
+    ],
+    "exit": 0,
+    "passed": true,
+    "log": "logs/author-transition-native-manual.log",
+    "rawLogSha256": "d5837b9dbebce3db2575cd67ec2a1a9b38688961093718469e73198db46a3b48",
+    "storedLogSha256": "c843c13543957907124bb73528bcca858e78d8a669b8d13501bcb2468fb9e921"
+  },
+  {
+    "name": "endpoint",
+    "command": [
+      "cargo",
+      "test",
+      "--locked",
+      "--offline",
+      "-p",
+      "selfsame-pairing",
+      "--test",
+      "credential_v2_offer"
+    ],
+    "exit": 0,
+    "passed": true,
+    "log": "logs/author-transition-endpoint.log",
+    "rawLogSha256": "c29d966b706131271c17ce4803937f6fe9c1582742a38785d664318fbe684a2f",
+    "storedLogSha256": "55678c2209f1bd1144aba8e556d5221e0c93487459d09fea285312a3b386d797"
+  },
+  {
+    "name": "clippy",
+    "command": [
+      "cargo",
+      "clippy",
+      "--locked",
+      "--offline",
+      "-p",
+      "selfsame",
+      "-p",
+      "selfsame-pairing",
+      "--all-targets",
+      "--",
+      "-D",
+      "warnings"
+    ],
+    "exit": 0,
+    "passed": true,
+    "log": "logs/author-transition-clippy.log",
+    "rawLogSha256": "94b339d51d83ee995529751a5ae1c86add689d7743a30837b86afa92da1c31cc",
+    "storedLogSha256": "94b339d51d83ee995529751a5ae1c86add689d7743a30837b86afa92da1c31cc"
+  }
+]

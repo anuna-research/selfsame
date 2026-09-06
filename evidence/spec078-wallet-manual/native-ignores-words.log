@@ -1,0 +1,28 @@
+   Compiling selfsame v0.1.0 (/Volumes/anuna-03/codex-wallet-manual-closure/selfsame/src-tauri)
+warning: unused variable: `words`
+  --> src-tauri/src/cbcl_v2_single_link.rs:88:9
+   |
+88 |     let words = Zeroizing::new(request.words);
+   |         ^^^^^ help: if this is intentional, prefix it with an underscore: `_words`
+   |
+   = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: `selfsame` (lib test) generated 1 warning (run `cargo fix --lib -p selfsame --tests` to apply 1 suggestion)
+    Finished `test` profile [unoptimized] target(s) in 7.58s
+     Running unittests src/lib.rs (/Volumes/anuna-03/codex-scan-clean-native-target/debug/deps/selfsame_lib-b99b11374ecf365a)
+
+running 1 test
+test cbcl_v2_commands::single_link::manual_tests::manual_recognition_refuses_locally_and_preserves_typed_entry ...
+thread 'cbcl_v2_commands::single_link::manual_tests::manual_recognition_refuses_locally_and_preserves_typed_entry' (8597454) panicked at src-tauri/src/cbcl_v2_manual_entry_tests.rs:136:14:
+called `Option::unwrap()` on a `None` value
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    cbcl_v2_commands::single_link::manual_tests::manual_recognition_refuses_locally_and_preserves_typed_entry
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 94 filtered out; finished in 1.02s
+
+error: test failed, to rerun pass `-p selfsame --lib`

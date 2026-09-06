@@ -59,6 +59,12 @@ pub mod projection;
 pub mod state;
 pub mod webfinger;
 
+#[cfg(all(feature = "native-test-support", not(target_arch = "wasm32")))]
+pub mod test_support;
+
+#[cfg(test)]
+mod test_tls;
+
 use std::time::Duration;
 
 /// Why a fetch failed before its octets reached a recogniser.
@@ -114,12 +120,24 @@ pub enum NetError {
 /// - **a deadline on every request.** A hung connection is a failure rather
 ///   than an unbounded wait.
 pub(crate) fn client(deadline: Duration) -> Result<reqwest::Client, NetError> {
+    build_client(client_builder(deadline))
+}
+
+// WebFinger has its own production redirect policy, but shares the explicit
+// test routing boundary so canonical account authorities cannot escape the rig.
+pub(crate) fn build_client(builder: reqwest::ClientBuilder) -> Result<reqwest::Client, NetError> {
+    #[cfg(all(feature = "native-test-support", not(target_arch = "wasm32")))]
+    let builder = test_support::configure(builder);
+    builder
+        .build()
+        .map_err(|e| NetError::Transport(e.to_string()))
+}
+
+fn client_builder(deadline: Duration) -> reqwest::ClientBuilder {
     reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
         .timeout(deadline)
         .https_only(true)
-        .build()
-        .map_err(|e| NetError::Transport(e.to_string()))
 }
 
 /// Join a declared base URL to an absolute path with exactly one separator.

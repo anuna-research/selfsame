@@ -1,0 +1,147 @@
+{
+  "schema": 1,
+  "scope": "SPEC079 native coverage closure; independent acceptance and final closure/CI remain root-owned",
+  "base": {
+    "selfsameBase": "db2888cf28b781274668d95f0ea8977371fe9e7b",
+    "pairing": "fbae887b3e1d5051a9028d3f8516af37d7bb2b2c",
+    "cbcl": "febc6691e6dd2d5f7116b1a4d84c984b64717564",
+    "did": "1f409a4229d07a62dd4cc6b2dce3b5a2e18e78a1"
+  },
+  "spec": {
+    "version": "0.1.3",
+    "sha256": "1de74e19f5c2df4e5e03897e80d0b3a65d91a0f0db7e392fff93833bea37cb74",
+    "busCommit": "c5a1e6b"
+  },
+  "environment": {
+    "cargo": "cargo 1.96.0 (30a34c682 2026-05-25)",
+    "rustc": "rustc 1.96.0 (ac68faa20 2026-05-25)",
+    "target": "aarch64-apple-darwin",
+    "CARGO_TARGET_DIR": "/Volumes/anuna-03/codex-selfsame-reconcile-target",
+    "network": "offline Cargo; owned loopback fixture only"
+  },
+  "sourceSha256": {
+    "src-tauri/src/cbcl_v2_commands.rs": "a155642f3ee780ab50d104f412069df8bff78700f2c6d6a72866e8db072cb51d",
+    "src-tauri/src/cbcl_v2_single_link.rs": "e60369191f9add2f58932fea424ada5f4f2625e63159fc04dd649940d27dac20",
+    "src-tauri/src/cbcl_v2_single_link_tests.rs": "7571426945015e5f47cbfb10c3fd951792ab92e3952ffefd9332e3de329d8f6d",
+    "src-tauri/src/session.rs": "36d7761f0221f965801901f5d5fa63507306c6b0e4730d458553c68fba6cf40c",
+    "src-tauri/src/test_memkeyring.rs": "9e8a1311a0255bf10684b931cf1884e93f3ef6644904011b65a0cb5b97db8691",
+    "src-tauri/src/cbcl_v2_consent_coverage_tests.rs": "59e037c4c1cc106d922418b7ad6f105dc6af8beb205ea1fac74f84aa761e6a71",
+    "src-tauri/src/cbcl_v2_consent_test_resolver.rs": "916461187bd12bf79a9b98bacfb4fc61d9f9901574bfe9d26c99abd55eeb2169",
+    "src-tauri/src/cbcl_v2_claimant.rs": "6b3e05ab549000b903662a1ef7307bf091b373eb6765c8534c590d28c7ab9a5f",
+    "src-tauri/src/cbcl_v2_completion.rs": "287a9d84d6b4be8c555de9b1d570d02b266046cb54c825e954a5fdc59cacce90",
+    "src-tauri/src/cbcl_v2_clock.rs": "b8b9b72af21f5eb963b4e0e19ca7afee11f33e1fb081aa1456119db5ed4dcdbd",
+    "crates/selfsame-pairing/src/credential_v2.rs": "6b4139ff11ee4e1ddc5f4a1a2177301e0680030a666a4ccf344cb1a5d14e672e",
+    "crates/selfsame-pairing/src/credential_v2/bodies.rs": "d4a35f78003975597621f755372798cb5ec205a979ab0b04dfeb03ba9f388aca",
+    ".forgejo/workflows/ci.yml": "194eb2f8d88de4d3c0cf34068ce0dbf663faf96ec21406b17bd00a55c7c90322",
+    "tools/spec079-coverage-mutations.py": "93db3cd87379eb0289ccfe094cd5050079c4893322f3fcd5531e396d9b8358bf",
+    "src-tauri/Cargo.toml": "e94d1b7e24edf2ece793d81f874ae1fe4c10b16f433e8d4c994f3386723a96bc",
+    "Cargo.lock": "46e6a4ac0c5ea00bdc722369bacc59b6c5f2e436a273c39e98c6561c5d8a3d7b",
+    "src-tauri/src/cbcl_v2_comparison_test_inputs.rs": "7ab63ad6ccc59d9feefed40af217a1e7fd0c3cc5c4f21c7819d7d04ccf0bb752",
+    "crates/selfsame-pairing/tests/credential_v2_offer.rs": "1a111c8360e3e40cfeed636971530b41deb46d0cea7053fecb9d3305a40742a1",
+    "tools/spec079-comparison-mutations.py": "59eb7fb7182891ee8ae9d4c4da2cf4f8bd68e12e3b6029e7808f1861e63d2fcd"
+  },
+  "sessionMutationReconstruction": {
+    "removeExactTestOnlyText": "    #[cfg(test)]\n    pub(crate) fn test_entered_effects(&self) -> usize {\n        self.0.lock().unwrap_or_else(|p| p.into_inner()).entered\n    }\n",
+    "reconstructedSha256": "d4ccf6c06d54b3ed299350cae8b222505ba3d1e39fa9413de1d02835070e9dc5",
+    "guardSemanticsChanged": false
+  },
+  "mutationCounts": {
+    "distinctBehavioralKills": 11,
+    "distinctTypeRefusals": 5,
+    "pathLimitedSurvivors": 1
+  },
+  "authorClippy": {
+    "command": [
+      "cargo",
+      "clippy",
+      "--locked",
+      "--offline",
+      "-p",
+      "selfsame",
+      "--all-targets",
+      "--",
+      "-D",
+      "warnings"
+    ],
+    "exit": 0,
+    "rawLogSha256": "cea4f0cea4c37c601cdcdfc45d1bde1791a3726dba44f4519c6c7f59b460647a",
+    "storedLog": "logs/clippy.log",
+    "storedLogSha256": "cea4f0cea4c37c601cdcdfc45d1bde1791a3726dba44f4519c6c7f59b460647a",
+    "scope": "prior frozen operation fixture; final combined Clippy is in author-transition-tests.json"
+  },
+  "sourceChecks": {
+    "scopedRustfmt": true,
+    "mutationRunnerPythonAst": true,
+    "exactCiShellBashSyntax": true,
+    "workingDiffCheck": true,
+    "committedBaseDiffCheck": "reported externally against the final commit; no self-referential commit hash is embedded",
+    "stagedBaseDiffCheck": {
+      "command": [
+        "git",
+        "diff",
+        "--cached",
+        "--check",
+        "db2888cf28b781274668d95f0ea8977371fe9e7b"
+      ],
+      "exit": 0
+    },
+    "exactCiNativeTestInventory": [
+      "single_link_actual_executor_expiry_and_revocation_at_every_boundary",
+      "single_link_owned_binding_preservation_and_closed_substitutions",
+      "single_link_actual_held_publication_and_resolver_results_are_revoked",
+      "single_link_ready_io_and_sync_results_cannot_cross_revocation",
+      "single_link_actual_commit_boundaries_compensate_or_preserve_payload",
+      "single_link_actual_live_installation_responses_are_revoked",
+      "single_link_actual_install_operation_requires_live_authority",
+      "single_link_valid_mutable_comparison_bindings_refuse_before_effects"
+    ]
+  },
+  "finalTests": {
+    "priorIndependentOperationScope": {
+      "receipt": "prior-independent-tests.json",
+      "originalReceiptSha256": "f83f6a343eada2cb792a9731145cec5c6e3243f6fae6243f9997f8d91b89fabd",
+      "allPassed": true,
+      "scope": "ordinary native plus seven new operation/binding tests, existing Full/Manual and TEST1162 on recorded prior frozen bytes"
+    },
+    "finalIndependentTransitionScope": {
+      "receipt": "final-independent-tests.json",
+      "originalReceiptSha256": "cb65fa2d61a144626fe12fc1979a31c3b742ea09342b7a188a3e5027ce638892",
+      "allPassed": true,
+      "scope": "eighth native matrix, changed Full/Manual fixture consumers and all four offer/endpoint tests on final transition bytes"
+    },
+    "authorFinalAffectedTestsAndClippy": {
+      "receipt": "author-transition-tests.json",
+      "allPassed": true
+    },
+    "ciIsolation": "eight named native tests are exact per-process hard gates; mode-free endpoint test runs in ordinary workspace suite"
+  },
+  "priorFrozenSourceSha256": {
+    "src-tauri/src/cbcl_v2_commands.rs": "a155642f3ee780ab50d104f412069df8bff78700f2c6d6a72866e8db072cb51d",
+    "src-tauri/src/cbcl_v2_single_link.rs": "e60369191f9add2f58932fea424ada5f4f2625e63159fc04dd649940d27dac20",
+    "src-tauri/src/cbcl_v2_single_link_tests.rs": "d6ead20f833882ec8dff3388ca0777fcef711cf4e7535ce67fe5766aaf030ebe",
+    "src-tauri/src/session.rs": "36d7761f0221f965801901f5d5fa63507306c6b0e4730d458553c68fba6cf40c",
+    "src-tauri/src/test_memkeyring.rs": "9e8a1311a0255bf10684b931cf1884e93f3ef6644904011b65a0cb5b97db8691",
+    "src-tauri/src/cbcl_v2_consent_coverage_tests.rs": "936ed01ed672a4a3f25e83e5bb5853c9349c0f8e6be78f94928514d24b89b06c",
+    "src-tauri/src/cbcl_v2_consent_test_resolver.rs": "916461187bd12bf79a9b98bacfb4fc61d9f9901574bfe9d26c99abd55eeb2169",
+    "src-tauri/src/cbcl_v2_claimant.rs": "6b3e05ab549000b903662a1ef7307bf091b373eb6765c8534c590d28c7ab9a5f",
+    "src-tauri/src/cbcl_v2_completion.rs": "287a9d84d6b4be8c555de9b1d570d02b266046cb54c825e954a5fdc59cacce90",
+    "src-tauri/src/cbcl_v2_clock.rs": "b8b9b72af21f5eb963b4e0e19ca7afee11f33e1fb081aa1456119db5ed4dcdbd",
+    "crates/selfsame-pairing/src/credential_v2.rs": "6b4139ff11ee4e1ddc5f4a1a2177301e0680030a666a4ccf344cb1a5d14e672e",
+    "crates/selfsame-pairing/src/credential_v2/bodies.rs": "d4a35f78003975597621f755372798cb5ec205a979ab0b04dfeb03ba9f388aca",
+    ".forgejo/workflows/ci.yml": "30479abfd389054d5baeb3846ab257c6806821889e0d7f5db88ed960453a060c",
+    "tools/spec079-coverage-mutations.py": "93db3cd87379eb0289ccfe094cd5050079c4893322f3fcd5531e396d9b8358bf"
+  },
+  "transitionMutationCounts": {
+    "killed": 13,
+    "redundantSingleGuardSurvivors": 2,
+    "receipt": "comparison-mutations.json",
+    "combinedCeremonyRemovalLabelled": true
+  },
+  "scopeLimits": [
+    "No production/hardware/camera/runtime cross-target claim",
+    "Prior native operation evidence retains its exact source hashes and is not relabelled as a fresh full run",
+    "First payload survivor is ordinary-success path limited; actual ambiguous AfterCommit cleanup kills the necessary guard",
+    "Two transition ceremony survivors are redundant individual checks; combined removal is explicitly distinct",
+    "Final exact closure/served integration and remote CI are root-owned"
+  ]
+}

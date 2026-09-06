@@ -1,0 +1,28 @@
+   Compiling selfsame-pairing v0.1.0 (/Volumes/anuna-03/codex-consent-comparison-mutation-final/selfsame/crates/selfsame-pairing)
+warning: unused variable: `digest`
+   --> crates/selfsame-pairing/src/credential_v2/bodies.rs:954:9
+    |
+954 |     let digest: [u8; 32] = Sha256::digest(response).into();
+    |         ^^^^^^ help: if this is intentional, prefix it with an underscore: `_digest`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: `selfsame-pairing` (lib) generated 1 warning (run `cargo fix --lib -p selfsame-pairing` to apply 1 suggestion)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.56s
+     Running tests/credential_v2_offer.rs (/Volumes/anuna-03/codex-selfsame-reconcile-target/debug/deps/credential_v2_offer-30ebe6511f1de268)
+
+running 1 test
+
+thread 'spec079_valid_comparison_transition_guards' (9829795) panicked at crates/selfsame-pairing/tests/credential_v2_offer.rs:858:13:
+actual comparison transition accepted mismatched authorityStatusDigest
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test spec079_valid_comparison_transition_guards ... FAILED
+
+failures:
+
+failures:
+    spec079_valid_comparison_transition_guards
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.03s
+
+error: test failed, to rerun pass `-p selfsame-pairing --test credential_v2_offer`

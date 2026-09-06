@@ -1,0 +1,29 @@
+   Compiling selfsame v0.1.0 (/Volumes/anuna-03/codex-successor-consent-coverage-closure/selfsame/src-tauri)
+warning: unused variable: `attempt`
+    --> src-tauri/src/cbcl_v2_commands.rs:1943:5
+     |
+1943 |     attempt: &CredentialV2Attempt,
+     |     ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_attempt`
+     |
+     = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: `selfsame` (lib test) generated 1 warning (run `cargo fix --lib -p selfsame --tests` to apply 1 suggestion)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 7.05s
+     Running unittests src/lib.rs (/Volumes/anuna-03/codex-selfsame-reconcile-target/debug/deps/selfsame_lib-6c74a308fa24404a)
+
+running 1 test
+test cbcl_v2_commands::single_link::tests::coverage::single_link_actual_install_operation_requires_live_authority ... install-operation mode=full reason=None actual_signed_candidate=true
+
+thread 'cbcl_v2_commands::single_link::tests::coverage::single_link_actual_install_operation_requires_live_authority' (9649541) panicked at src-tauri/src/cbcl_v2_consent_coverage_tests.rs:820:17:
+revoked actual install operation must refuse
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    cbcl_v2_commands::single_link::tests::coverage::single_link_actual_install_operation_requires_live_authority
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 106 filtered out; finished in 4.56s
+
+error: test failed, to rerun pass `-p selfsame --lib`

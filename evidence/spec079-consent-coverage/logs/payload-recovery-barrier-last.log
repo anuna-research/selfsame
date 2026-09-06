@@ -1,0 +1,19 @@
+   Compiling selfsame v0.1.0 (/Volumes/anuna-03/codex-successor-consent-coverage-closure/selfsame/src-tauri)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.78s
+     Running unittests src/lib.rs (/Volumes/anuna-03/codex-selfsame-reconcile-target/debug/deps/selfsame_lib-6c74a308fa24404a)
+
+running 1 test
+test cbcl_v2_completion::tests::test_1162_pre_payload_failure_and_person_abandonment_release_the_exact_slot ...
+thread 'cbcl_v2_completion::tests::test_1162_pre_payload_failure_and_person_abandonment_release_the_exact_slot' (9670718) panicked at src-tauri/src/cbcl_v2_completion.rs:2624:52:
+called `Result::unwrap()` on an `Err` value: UiError("PairingCheckpointRefused")
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    cbcl_v2_completion::tests::test_1162_pre_payload_failure_and_person_abandonment_release_the_exact_slot
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 106 filtered out; finished in 1.93s
+
+error: test failed, to rerun pass `-p selfsame --lib`

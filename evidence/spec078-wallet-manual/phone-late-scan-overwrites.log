@@ -1,0 +1,50 @@
+✖ full: late scanner cannot enter or overwrite a successor (1081.119584ms)
+✖ manual: late scanner cannot enter or overwrite a successor (1068.011666ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 0
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2295.49075
+
+✖ failing tests:
+
+test at tests/spec-077-scan-pairing.mjs:326:40
+✖ full: late scanner cannot enter or overwrite a successor (1081.119584ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + ''
+  - 'successor-private-input'
+
+      at TestContext.<anonymous> (file:///Volumes/anuna-03/codex-wallet-manual-closure/selfsame/tests/spec-077-scan-pairing.mjs:337:10)
+      at async Test.run (node:internal/test_runner/test:1113:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:358:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: '',
+    expected: 'successor-private-input',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/spec-077-scan-pairing.mjs:326:40
+✖ manual: late scanner cannot enter or overwrite a successor (1068.011666ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + 'SSPAIR-M1:fixture'
+  - ''
+
+      at TestContext.<anonymous> (file:///Volumes/anuna-03/codex-wallet-manual-closure/selfsame/tests/spec-077-scan-pairing.mjs:338:10)
+      at async Test.run (node:internal/test_runner/test:1113:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:788:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'SSPAIR-M1:fixture',
+    expected: '',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

@@ -1,0 +1,114 @@
+   Compiling selfsame v0.1.0 (/Volumes/anuna-03/codex-successor-consent-coverage-closure/selfsame/src-tauri)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 8.39s
+     Running unittests src/lib.rs (/Volumes/anuna-03/codex-selfsame-reconcile-target/debug/deps/selfsame_lib-6c74a308fa24404a)
+
+running 107 tests
+test app_identity::tests::a_malformed_home_did_is_refused_before_it_enters_an_identifier ... ok
+test app_identity::tests::a_malformed_authority_or_localpart_is_refused ... ok
+test app_identity::tests::recognition_precedes_any_unsealing ... ok
+test app_identity::tests::derivation_without_a_scope_refuses_and_does_not_prompt ... ok
+test app_identity::tests::a_non_canonical_scope_is_refused_rather_than_normalised ... ok
+test app_identity::tests::a_preview_without_a_localpart_carries_only_the_opaque_alias ... ok
+test app_identity::tests::the_preview_refuses_every_name_the_core_refuses ... ok
+test app_identity::tests::the_refusing_commands_recognise_before_they_refuse ... ok
+test app_identity::tests::the_two_aliases_are_different_values ... ok
+test app_identity::tests::the_three_refusing_commands_are_registered_and_refuse_with_their_own_token ... ok
+test cbcl_context::tests::shipped_registry_is_exactly_the_ratified_anuna_entry ... ok
+test cbcl_context::tests::production_policy_refuses_loopback ... ok
+test app_identity::tests::the_fixture_pair_is_internally_consistent ... ok
+test cbcl_context::tests::trust_record_round_trips ... ok
+test app_grant::enrolment_observation_tests::an_undeclared_provider_is_refused ... ok
+test cbcl_context::tests::empty_registry_refuses_every_origin ... ok
+test cbcl_context::tests::one_eligible_match_admits_and_names_the_profile ... ok
+test app_identity::tests::the_fingerprint_is_the_did_domain_one_every_verifier_computes ... ok
+test cbcl_transport::tests::native_host_explicit_relay_setter_routes_actual_connect_wss ... ignored, installs process-global relay routing; run alone
+test cbcl_context::tests::single_permission_requires_exactly_one ... ok
+test app_grant::enrolment_observation_tests::a_native_binding_offer_is_refused_on_the_manual_path ... ok
+test app_grant::enrolment_observation_tests::a_web_binding_offer_with_a_declared_provider_is_observed ... ok
+test cbcl_context::tests::unregistered_digest_refuses ... ok
+test cbcl_pairing::tests::bare_unpadded_base64url_decodes ... ok
+test cbcl_context::tests::zero_matches_refuse ... ok
+test cbcl_pairing::tests::wrapped_padded_and_legacy_carriers_refuse ... ok
+test cbcl_transport::tests::relay_target_maps_canonical_origins_only ... ok
+test cbcl_context::tests::two_matches_refuse_as_ambiguous ... ok
+test cbcl_transport::tests::native_host_relay_config_refuses_nonloopback_address_and_invalid_root ... ok
+test cbcl_v2_clock::tests::single_link_clock_adapter_executes_checked_native_clock ... ok
+test cbcl_v2_clock::tests::single_link_deadlines_exclusive_suspend_rollback_and_overflow ... ok
+test cbcl_transport::tests::unreachable_port_is_a_connect_error ... ok
+test cbcl_transport::tests::plain_listener_yields_tls_error ... ok
+test cbcl_v2_commands::scan_integration_host::jobs::tests::disconnected_result_stays_owned_until_the_actual_lease_is_idle ... ok
+test cbcl_v2_commands::scan_integration_host::jobs::tests::cancellation_overrides_a_retained_success_result ... ok
+test cbcl_v2_commands::scan_integration_host::jobs::tests::job_id_grammar_is_closed ... ok
+test cbcl_v2_commands::scan_integration_host::jobs::tests::ready_result_stays_owned_until_the_actual_lease_is_idle ... ok
+test cbcl_v2_commands::scan_integration_host::native_host_manual_reserves_before_contact_and_refuses_profile_failure ... ignored, installs global memory custody/configuration; run alone
+test cbcl_v2_commands::scan_integration_host::native_host_memory_init_cancel_shutdown_regression ... ignored, installs global memory custody/configuration; run alone
+test cbcl_v2_commands::scan_integration_host::native_host_single_link_reserves_before_contact_and_refuses_profile_failure ... ignored, installs global memory custody/configuration; run alone
+test cbcl_v2_commands::scan_integration_host::scan_integration_native_host ... ignored, private stdin host; installs global memory custody and loopback routing; run alone
+test cbcl_v2_commands::single_link::manual_tests::manual_checksum_valid_wrong_words_reach_one_share_but_no_finished_or_retry ... ignored, installs process-global memory custody; run alone
+test cbcl_v2_commands::single_link::manual_tests::manual_recognition_refuses_locally_and_preserves_typed_entry ... ignored, installs process-global memory custody; run alone
+test cbcl_v2_commands::scan_integration_host::jobs::tests::retained_job_requires_both_tags_and_drains_once ... ok
+test cbcl_v2_commands::single_link::tests::coverage::single_link_actual_commit_boundaries_compensate_or_preserve_payload ... ignored, installs process-global memory custody and local test TLS; run alone
+test cbcl_v2_commands::single_link::tests::coverage::single_link_actual_executor_expiry_and_revocation_at_every_boundary ... ignored, installs process-global memory custody and local test TLS; run alone
+test cbcl_v2_commands::single_link::tests::coverage::single_link_actual_held_publication_and_resolver_results_are_revoked ... ignored, installs process-global memory custody and local test TLS; run alone
+test cbcl_v2_commands::single_link::tests::coverage::single_link_actual_install_operation_requires_live_authority ... ignored, installs process-global memory custody and local test TLS; run alone
+test cbcl_v2_commands::single_link::tests::coverage::single_link_actual_live_installation_responses_are_revoked ... ignored, installs process-global memory custody and local test TLS; run alone
+test cbcl_v2_commands::single_link::tests::coverage::single_link_owned_binding_preservation_and_closed_substitutions ... ignored, installs process-global memory custody; run alone
+test cbcl_v2_commands::single_link::tests::coverage::single_link_ready_io_and_sync_results_cannot_cross_revocation ... ignored, installs process-global memory custody; run alone
+test cbcl_v2_commands::scan_integration_host::native_host_request_grammar_and_error_redaction ... ok
+test cbcl_v2_commands::single_link::tests::manual_single_link_native_commands_render_mode_comparison_cancel_and_expiry ... ignored, installs process-global memory custody; run alone
+test cbcl_v2_commands::single_link::tests::single_link_native_commands_render_mode_comparison_cancel_and_expiry ... ignored, installs process-global memory custody; run alone
+test cbcl_v2_commands::single_link::manual_tests::manual_request_is_closed_and_never_coerces_input ... ok
+test cbcl_v2_commands::single_link::tests::single_link_nested_requests_refuse_extras_coercions_and_invalid_tags ... ok
+test cbcl_v2_commands::tests::scan_preview_blocking_wrapper_keeps_lease_after_command_is_dropped ... ok
+test cbcl_v2_commands::tests::scan_preview_cancel_blocked_continuation_refuses_send_and_return ... ok
+test cbcl_v2_commands::tests::scan_preview_cancellation_during_derivation_or_comparison_erases_result ... ok
+test cbcl_transport::tests::wss_round_trip_with_injected_test_root ... ok
+test cbcl_v2_commands::tests::scan_preview_continuation_is_single_use_and_wrong_phases_have_no_effects ... ok
+test cbcl_v2_claimant::tests::scan_handoff_input_requires_canonical_complete_live_key_bound_material ... ok
+test cbcl_v2_commands::tests::scan_preview_final_boundaries_refuse_cancellation_observed_after_wait ... ok
+test cbcl_v2_commands::tests::test_1163_oversized_webfinger_is_unavailable_not_revoked ... ok
+test cbcl_v2_completion::tests::application_slot_names_do_not_share_relay_authority ... ok
+test cbcl_v2_completion::tests::checkpoint_info_is_length_prefixed_and_application_separated ... ok
+test app_identity::tests::the_preview_and_the_core_recognise_exactly_the_same_language ... ok
+test cbcl_v2_claimant::tests::existing_exact_pair_reuses_only_the_existing_trust_edge ... ok
+test cbcl_v2_commands::single_link::tests::legacy_finish_missing_presence_keeps_the_attempt_retryable ... ok
+test cbcl_v2_completion::tests::single_link_transaction_faults_ambiguous_payload_and_policy_free_unlink ... ignored, installs the process-global in-memory keyring; run alone
+test cbcl_v2_completion::tests::test_1159_reload_lifecycle_is_closed_over_every_required_state ... ok
+test cbcl_v2_completion::tests::test_1161_link_index_is_canonical_bounded_and_secret_free ... ok
+test cbcl_v2_completion::tests::test_1162_pre_payload_failure_and_person_abandonment_release_the_exact_slot ... ignored, installs the process-global in-memory keyring; run this test alone
+test cbcl_v2_completion::tests::preview_mismatch_refuses_before_issuer_construction ... ok
+test cbcl_v2_policy::tests::exact_pair_never_authorises_another_application_on_the_same_relay ... ok
+test cbcl_transport::tests::native_host_relay_route_retains_tls_hostname_and_canonical_url ... ok
+test cbcl_v2_completion::tests::the_slot_is_a_canonical_exclusive_tagged_union ... ok
+test cbcl_v2_policy::tests::policy_recognition_refuses_corruption_reordering_and_noncanonical_pairs ... ok
+test cbcl_v2_commands::tests::scan_preview_returns_identity_before_continuation_and_derives_only_once ... ok
+test custody::tests::short_passcodes_are_refused ... ok
+test cbcl_v2_claimant::tests::new_pair_needs_approval_and_capability_is_consumed_before_bind ... ok
+test replay::tests::a_refused_attempt_does_not_change_the_ledger ... ok
+test replay::tests::a_request_id_is_consumable_once ... ok
+test replay::tests::a_still_valid_offer_cannot_be_replayed ... ok
+test replay::tests::an_entry_is_forgotten_once_its_offer_expires ... ok
+test replay::tests::asking_does_not_consume ... ok
+test cbcl_v2_completion::tests::post_approval_artifacts_bind_the_preview_scope_device_and_grant ... ok
+test replay::tests::expired_entries_do_not_fill_the_ledger ... ok
+test session::tests::a_fragment_is_dev_and_sixteen_hex_characters ... ok
+test replay::tests::pruning_precedes_the_cap ... ok
+test session::tests::scan_preview_cancelled_generation_cannot_restore_or_replace_new_attempt ... ok
+test session::tests::scan_preview_profile_wait_and_aborted_worker_hold_one_attempt ... ok
+test store::tests::a_store_that_refuses_the_read_is_not_called_a_liar ... ok
+test store::tests::a_store_that_refuses_the_write_is_not_called_a_liar ... ok
+test store::tests::a_store_that_returns_a_different_value_is_refused ... ok
+test store::tests::a_store_that_returns_what_it_was_given_is_accepted ... ok
+test store::tests::a_store_that_takes_the_write_and_loses_it_is_refused ... ok
+test store::tests::the_probe_entry_is_not_the_root_entry ... ok
+test cbcl_v2_completion::tests::durable_effect_stages_bind_issuer_closure_grant_and_payload ... ok
+test cbcl_v2_completion::tests::test_1159_verified_profile_refresh_repins_only_live_profile_evidence ... ok
+test session::tests::every_fragment_is_new ... ok
+test cbcl_v2_commands::tests::scan_preview_cancelled_transport_sends_zero_frames ... ok
+test cbcl_transport::tests::untrusted_certificate_refuses_without_fallback ... ok
+test custody::tests::the_stored_record_contains_no_plaintext_seed ... ok
+test custody::tests::the_sealed_hierarchy_root_round_trips_to_the_phrase_derived_root ... ok
+test custody::tests::a_sealed_seed_does_not_open_under_the_wrong_passcode ... ok
+test custody::tests::a_wrapping_key_depends_on_both_passcode_and_salt ... ok
+
+test result: ok. 89 passed; 0 failed; 18 ignored; 0 measured; 0 filtered out; finished in 4.53s

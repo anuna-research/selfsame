@@ -1,0 +1,144 @@
+{
+  "source_sha256": {
+    "src-tauri/src/cbcl_v2_single_link.rs": "e60369191f9add2f58932fea424ada5f4f2625e63159fc04dd649940d27dac20",
+    "src/pairing.js": "72a6d9909d8f9b135f764cc0778d2ae60afc660679fd0a722c02cd2afb4e5c79"
+  },
+  "restored_sha256": {
+    "src-tauri/src/cbcl_v2_single_link.rs": "e60369191f9add2f58932fea424ada5f4f2625e63159fc04dd649940d27dac20",
+    "src/pairing.js": "72a6d9909d8f9b135f764cc0778d2ae60afc660679fd0a722c02cd2afb4e5c79"
+  },
+  "test_sha256": {
+    "src-tauri/src/cbcl_v2_manual_entry_tests.rs": "5fc483f22ee005cf71c223e8c6f16d5994467231b99eedc5aa2943eed69eee00",
+    "src-tauri/src/cbcl_v2_single_link_tests.rs": "5dfd2c11a6f01333effe84b1664c9da39b79a973d5ba4d1a4de66ca23d2d5320",
+    "tests/spec-077-scan-pairing.mjs": "f10ae64d380c2bd4969be0cef583178d742104b8119ee4ca07e696118d00805a"
+  },
+  "results": [
+    {
+      "mutant": "native-ignores-words",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "-p",
+        "selfsame",
+        "--lib",
+        "manual_recognition_refuses_locally_and_preserves_typed_entry",
+        "--",
+        "--nocapture",
+        "--test-threads=1",
+        "--ignored"
+      ],
+      "test": "manual_recognition_refuses_locally_and_preserves_typed_entry",
+      "exit_code": 101,
+      "behavioral_failure": true
+    },
+    {
+      "mutant": "native-trims-bootstrap",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "-p",
+        "selfsame",
+        "--lib",
+        "manual_recognition_refuses_locally_and_preserves_typed_entry",
+        "--",
+        "--nocapture",
+        "--test-threads=1",
+        "--ignored"
+      ],
+      "test": "manual_recognition_refuses_locally_and_preserves_typed_entry",
+      "exit_code": 101,
+      "behavioral_failure": true
+    },
+    {
+      "mutant": "native-replaces-typed-presence",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "-p",
+        "selfsame",
+        "--lib",
+        "manual_single_link_native_commands_render_mode_comparison_cancel_and_expiry",
+        "--",
+        "--nocapture",
+        "--test-threads=1",
+        "--ignored"
+      ],
+      "test": "manual_single_link_native_commands_render_mode_comparison_cancel_and_expiry",
+      "exit_code": 101,
+      "behavioral_failure": true
+    },
+    {
+      "mutant": "native-opens-request-grammar",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "-p",
+        "selfsame",
+        "--lib",
+        "manual_request_is_closed_and_never_coerces_input",
+        "--",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "test": "manual_request_is_closed_and_never_coerces_input",
+      "exit_code": 101,
+      "behavioral_failure": true
+    },
+    {
+      "mutant": "phone-scans-before-words",
+      "command": [
+        "node",
+        "--test",
+        "--test-name-pattern=manual bootstrap scan waits for words and local refusal preserves correction",
+        "tests/spec-077-scan-pairing.mjs"
+      ],
+      "test": "manual bootstrap scan waits for words and local refusal preserves correction",
+      "exit_code": 1,
+      "behavioral_failure": true
+    },
+    {
+      "mutant": "phone-late-scan-overwrites",
+      "command": [
+        "node",
+        "--test",
+        "--test-name-pattern=late scanner cannot enter or overwrite a successor",
+        "tests/spec-077-scan-pairing.mjs"
+      ],
+      "test": "late scanner cannot enter or overwrite a successor",
+      "exit_code": 1,
+      "behavioral_failure": true
+    },
+    {
+      "mutant": "phone-retains-transfer-input",
+      "command": [
+        "node",
+        "--test",
+        "--test-name-pattern=manual bootstrap scan waits for words and local refusal preserves correction",
+        "tests/spec-077-scan-pairing.mjs"
+      ],
+      "test": "manual bootstrap scan waits for words and local refusal preserves correction",
+      "exit_code": 1,
+      "behavioral_failure": true
+    },
+    {
+      "mutant": "phone-destroys-local-correction",
+      "command": [
+        "node",
+        "--test",
+        "--test-name-pattern=manual bootstrap scan waits for words and local refusal preserves correction",
+        "tests/spec-077-scan-pairing.mjs"
+      ],
+      "test": "manual bootstrap scan waits for words and local refusal preserves correction",
+      "exit_code": 1,
+      "behavioral_failure": true
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+   Compiling selfsame v0.1.0 (/Volumes/anuna-03/codex-successor-consent-coverage-closure/selfsame/src-tauri)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.46s
+     Running unittests src/lib.rs (/Volumes/anuna-03/codex-selfsame-reconcile-target/debug/deps/selfsame_lib-e46a86733091f9f7)
+
+running 1 test
+test cbcl_v2_commands::single_link::tests::single_link_native_commands_render_mode_comparison_cancel_and_expiry ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 107 filtered out; finished in 22.46s

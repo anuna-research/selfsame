@@ -1,0 +1,19 @@
+   Compiling selfsame v0.1.0 (/Volumes/anuna-03/codex-successor-consent-coverage-closure/selfsame/src-tauri)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.47s
+     Running unittests src/lib.rs (/Volumes/anuna-03/codex-selfsame-reconcile-target/debug/deps/selfsame_lib-6c74a308fa24404a)
+
+running 1 test
+test cbcl_v2_commands::single_link::tests::coverage::single_link_owned_binding_preservation_and_closed_substitutions ...
+thread 'cbcl_v2_commands::single_link::tests::coverage::single_link_owned_binding_preservation_and_closed_substitutions' (9654315) panicked at src-tauri/src/cbcl_v2_consent_coverage_tests.rs:269:66:
+called `Option::unwrap()` on a `None` value
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    cbcl_v2_commands::single_link::tests::coverage::single_link_owned_binding_preservation_and_closed_substitutions
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 106 filtered out; finished in 2.28s
+
+error: test failed, to rerun pass `-p selfsame --lib`

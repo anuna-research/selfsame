@@ -229,11 +229,20 @@ pub async fn create_identity(
     passcode: String,
     session: State<'_, AppSession>,
 ) -> Result<CreatedIdentity> {
+    let root_change = session
+        .0
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .begin_cbcl_v2_root_change()?;
     let phrase = {
         let passcode = passcode.clone();
-        tauri::async_runtime::spawn_blocking(move || Custody::create(&passcode))
-            .await
-            .map_err(|_| UiError("that took too long — try again".into()))??
+        let root_change = root_change.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            let _root_change = root_change;
+            Custody::create(&passcode)
+        })
+        .await
+        .map_err(|_| UiError("that took too long — try again".into()))??
     };
 
     let root_pk = Custody::root_public_key()?;
@@ -282,9 +291,18 @@ pub async fn restore_identity(
     passcode: String,
     session: State<'_, AppSession>,
 ) -> Result<AppState> {
-    tauri::async_runtime::spawn_blocking(move || Custody::restore(&phrase, &passcode))
-        .await
-        .map_err(|_| UiError("that took too long — try again".into()))??;
+    let root_change = session
+        .0
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .begin_cbcl_v2_root_change()?;
+    let worker_change = root_change.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let _root_change = worker_change;
+        Custody::restore(&phrase, &passcode)
+    })
+    .await
+    .map_err(|_| UiError("that took too long — try again".into()))??;
 
     let root_pk = Custody::root_public_key()?;
     let did = identity::derive_did(&root_pk)?.to_string();
@@ -614,6 +632,11 @@ async fn flush(session: &State<'_, AppSession>) -> Result<usize> {
 /// nobody able to change that. The UI says exactly that before calling it.
 #[tauri::command]
 pub async fn forget_identity(session: State<'_, AppSession>) -> Result<()> {
+    let _root_change = session
+        .0
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .begin_cbcl_v2_root_change()?;
     crate::cbcl_v2_completion::purge_all_links()?;
     crate::cbcl_v2_policy::purge()?;
     Custody::forget()?;

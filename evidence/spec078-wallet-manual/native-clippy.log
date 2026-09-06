@@ -1,0 +1,10 @@
+    Checking cbcl-core v0.1.0 (/Volumes/anuna-03/codex-wallet-manual-closure/cbcl-rs/crates/cbcl-core)
+    Checking did-crdt v0.1.0 (/Volumes/anuna-03/codex-wallet-manual-closure/did-crdt)
+   Compiling selfsame-pairing v0.1.0 (/Volumes/anuna-03/codex-wallet-manual-closure/selfsame/crates/selfsame-pairing)
+    Checking cbcl-pairing v0.1.0 (/Volumes/anuna-03/codex-wallet-manual-closure/cbcl-pairing)
+   Compiling selfsame v0.1.0 (/Volumes/anuna-03/codex-wallet-manual-closure/selfsame/src-tauri)
+    Checking cbcl-parser v0.1.0 (/Volumes/anuna-03/codex-wallet-manual-closure/cbcl-rs/crates/cbcl-parser)
+    Checking selfsame-core v0.1.0 (/Volumes/anuna-03/codex-wallet-manual-closure/selfsame/crates/selfsame-core)
+    Checking selfsame-app-identity v0.1.0 (/Volumes/anuna-03/codex-wallet-manual-closure/selfsame/crates/selfsame-app-identity)
+    Checking selfsame-app-identity-net v0.1.0 (/Volumes/anuna-03/codex-wallet-manual-closure/selfsame/crates/selfsame-app-identity-net)
+    Finished `dev` profile [unoptimized] target(s) in 5.15s

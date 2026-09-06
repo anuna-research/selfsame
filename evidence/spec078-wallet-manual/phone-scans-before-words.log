@@ -1,0 +1,28 @@
+✖ manual bootstrap scan waits for words and local refusal preserves correction (2072.073667ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2365.204959
+
+✖ failing tests:
+
+test at tests/spec-077-scan-pairing.mjs:285:1
+✖ manual bootstrap scan waits for words and local refusal preserves correction (2072.073667ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+  1 !== 0
+
+      at TestContext.<anonymous> (file:///Volumes/anuna-03/codex-wallet-manual-closure/selfsame/tests/spec-077-scan-pairing.mjs:293:10)
+      at async Test.run (node:internal/test_runner/test:1113:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:358:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 1,
+    expected: 0,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
