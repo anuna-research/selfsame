@@ -7,7 +7,7 @@
  */
 
 export function initPairing(d) {
-  const { $, show, invoke, fail, message, actions, busy, idle, refresh } = d;
+  const { $, show, invoke, fail, message, renderLifehash, actions, busy, idle, refresh } = d;
   const presencePattern = /^PAIR1-(?:[0-9A-HJKMNP-TV-Z]{5}-){10}[0-9A-HJKMNP-TV-Z]{5}$/;
   let credentialV2Stage = "idle";
   let attemptEpoch = 0;
@@ -218,6 +218,13 @@ export function initPairing(d) {
       label.textContent = field.label;
       value.textContent = field.value;
       row.append(label, value);
+      if (field.lifehash && renderLifehash) {
+        const canvas = document.createElement("canvas");
+        canvas.className = "fp__lifehash fp__lifehash--lg";
+        canvas.setAttribute("aria-hidden", "true");
+        renderLifehash(canvas, field.lifehash);
+        value.append(canvas);
+      }
       fields.append(row);
     }
     const approveButton = $('[data-action="approve-cbcl-pairing"]');
@@ -301,7 +308,7 @@ export function initPairing(d) {
       action: linkWording,
       fields: [...intentFields,
         { label: "Account issuer DID", value: review.previewIssuerDid },
-        { label: "Comparison fingerprint", value: review.previewFingerprint.hex },
+        { label: "Comparison fingerprint", value: review.previewFingerprint.hex, lifehash: review.previewFingerprint.lifehash },
         { label: "Recognition aid", value: review.previewFingerprint.label }],
       approve: "Link", decline: "Cancel linking",
     });
@@ -427,7 +434,7 @@ export function initPairing(d) {
       fields: [
         ...intentFields,
         { label: "Account issuer DID", value: review.previewIssuerDid },
-        { label: "Comparison fingerprint", value: review.previewFingerprint.hex },
+        { label: "Comparison fingerprint", value: review.previewFingerprint.hex, lifehash: review.previewFingerprint.lifehash },
         { label: "Recognition aid", value: review.previewFingerprint.label },
       ],
       approve: "Approve and link",
@@ -442,7 +449,7 @@ export function initPairing(d) {
       application: review.applicationId,
       action: "Confirm the match on your desktop to continue here.",
       fields: [
-        { label: "Comparison fingerprint", value: review.previewFingerprint.hex },
+        { label: "Comparison fingerprint", value: review.previewFingerprint.hex, lifehash: review.previewFingerprint.lifehash },
         { label: "Account issuer DID", value: review.previewIssuerDid },
         { label: "Recognition aid", value: review.previewFingerprint.label },
         ...intentFields,

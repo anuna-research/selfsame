@@ -1145,3 +1145,12 @@ body.pairing-scanning [data-screen="pairing-enter"] > :not([data-pairing-camera]
   text-align: center;
 }
 .pairing-camera__footer p { margin: 0; }
+
+/* Keep the complete comparison picture visible beside the pairing fingerprint. */
+[data-cbcl-intent-fields] .fp__lifehash {
+  display: block;
+  width: 128px;
+  height: 128px;
+  margin-top: 12px;
+  border-radius: 0;
+}
