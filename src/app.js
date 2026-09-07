@@ -166,6 +166,7 @@ async function refresh() {
   // IMPL-004: applications beside devices, under one identity.
   appIdentity.renderApplications(s.applications ?? []);
   appIdentity.renderSummary(s.applications ?? []);
+  await pairing.refreshInstalledLinks().catch(() => {});
 
   // CON-222: the wallet was opened by something. If the platform attributed a
   // caller that does not match the CON-214 binding, that is where this stops —
@@ -929,6 +930,7 @@ const appIdentity = initAppIdentity({
 // because the applications list is derived from what the wallet holds after one.
 const pairing = initPairing({
   $, show, invoke, fail, message, renderLifehash, actions, busy, idle, refresh,
+  renderInstalledSummary: links => appIdentity.renderSummary(ui.state?.applications ?? [], links),
 });
 pairingNavigation = pairing.leaving;
 

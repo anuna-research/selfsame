@@ -103,6 +103,12 @@ test(`${mode}: SPEC079 TEST002/003/010 scan unlocks once and a real render enabl
   for (const command of ["cbcl_v2_unlock_preview", "cbcl_v2_link", "cbcl_v2_continue_link", "cbcl_v2_finish_link"]) assert.equal(await count(page, command), 1);
   for (const command of ["cbcl_v2_preliminary_decide", "cbcl_v2_compare", "cbcl_v2_final_decide", "cbcl_v2_relay_decide"]) assert.equal(await count(page, command), 0);
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  await page.click('[data-action="finish-cbcl-pairing"]');
+  await visible(page, "applications");
+  assert.equal(await page.$$eval('[data-cbcl-v2-link]', els => els.length), 1);
+  await page.click('[data-screen="applications"] [data-action="to-home"]');
+  await visible(page, "home");
+  assert.match(await page.$eval('[data-applications-summary]', el => el.textContent), /^1 application,/);
 });
 
 test(`${mode}: SPEC079 TEST007 cancel fences a delayed comparison and never reports installation`, async t => {
@@ -278,6 +284,7 @@ function scanBridge() {
           throw new Error("PairingExpired");
         }
         if (globalThis.__badReceipt) return { outcome: "pending" };
+        globalThis.__installed = true;
         return { outcome: "installed" };
       }
       if (command === "cbcl_v2_pending_recoveries") return globalThis.__recoverable ? [preview.applicationId] : [];

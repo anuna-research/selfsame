@@ -68,11 +68,17 @@ export function initAppIdentity(d) {
   // ── HP-3: the applications list ──────────────────────────────────────
 
   /** The one-line summary the home screen carries. */
-  function renderSummary(apps) {
+  let installedLinks = [];
+  function renderSummary(apps, links = installedLinks) {
+    installedLinks = links;
     const el = $("[data-applications-summary]");
     if (!el) return;
-    el.textContent = apps.length
-      ? `${apps.length} application${apps.length === 1 ? "" : "s"}, each with its own identity`
+    const count = new Set([
+      ...apps.map(app => app.application_id),
+      ...links.map(link => link.applicationId),
+    ]).size;
+    el.textContent = count
+      ? `${count} application${count === 1 ? "" : "s"}, each with its own identity`
       : "None yet. They appear here as you sign into them.";
   }
 
