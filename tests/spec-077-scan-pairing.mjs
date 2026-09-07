@@ -79,6 +79,10 @@ test(`${mode}: SPEC079 TEST002/003/010 scan unlocks once and a real render enabl
   });
   await page.click('[data-action="approve-cbcl-pairing"]');
   await page.waitForFunction(() => document.querySelector('[data-cbcl-intent-fields]').textContent.includes("AA BB CC DD EE FF"));
+  assert.deepEqual(await page.$eval('[data-cbcl-intent-fields] canvas', canvas => ({
+    hidden: canvas.hidden,
+    pixel: [...canvas.getContext('2d').getImageData(0, 0, 1, 1).data],
+  })), { hidden: false, pixel: [17, 83, 149, 255] }, 'pairing paints the core LifeHash bytes');
   assert.equal(await page.$eval('#pairing-passcode', el => el.value), "");
   assert.equal(await page.$eval('[data-action="approve-cbcl-pairing"]', el => el.disabled), true);
   assert.equal(await count(page, "cbcl_v2_preview_rendered"), 0);
@@ -230,7 +234,7 @@ function scanBridge() {
   const preview = {
     applicationId: "https://photos.example/selfsame/application",
     previewIssuerDid: "did:crdt:fixture-account",
-    previewFingerprint: { hex: "AA BB CC DD EE FF", label: "copper-lynx-42", lifehash: "A".repeat(4096) },
+    previewFingerprint: { hex: "AA BB CC DD EE FF", label: "copper-lynx-42", lifehash: btoa(String.fromCharCode(17, 83, 149).repeat(1024)) },
     comparison: "waiting",
   };
   globalThis.__calls = [];
