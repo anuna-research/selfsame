@@ -873,6 +873,7 @@ export function initPairing(d) {
     list.replaceChildren();
     const rows = Array.isArray(links) ? links : [];
     const interrupted = Array.isArray(pendingLinks) ? pendingLinks : [];
+    d.renderInstalledSummary?.(rows);
     $("[data-cbcl-v2-links-empty]").hidden = rows.length + interrupted.length > 0;
     $("[data-applications-empty]").hidden =
       rows.length + interrupted.length > 0 || $("[data-applications]").children.length > 0;

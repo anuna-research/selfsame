@@ -205,6 +205,11 @@ jobs:
       - name: Build the core for wasm32
         run: |
           set -o pipefail
+          # The runner has a much smaller memory limit than a developer
+          # workstation. This check only needs to prove that the core links for
+          # wasm; retaining full dev DWARF here needlessly makes rustc hold a
+          # large second artifact graph and the job is killed during linking.
+          CARGO_PROFILE_DEV_DEBUG=0 CARGO_BUILD_JOBS=1 \
           cargo build -p selfsame-core --target wasm32-unknown-unknown --locked 2>&1 \
             | tee -a /tmp/rust-ci.log
 
