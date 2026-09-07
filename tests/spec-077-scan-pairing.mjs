@@ -11,7 +11,7 @@ import axe from "axe-core";
 const root = join(dirname(fileURLToPath(import.meta.url)), "..", "src");
 const mime = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css" };
 
-async function openWallet(t, mode = "full") {
+async function openWallet(t, mode = "full", applicationLifecycle = false) {
   const server = createServer((req, res) => {
     const path = req.url === "/" ? "/index.html" : req.url.split("?")[0];
     try { const body = readFileSync(join(root, path)); res.writeHead(200, { "content-type": mime[extname(path)] ?? "application/octet-stream" }); res.end(body); }
@@ -23,6 +23,7 @@ async function openWallet(t, mode = "full") {
   t.after(() => browser.close());
   const page = await browser.newPage();
   page.setDefaultTimeout(4000);
+  await page.evaluateOnNewDocument(value => { globalThis.__applicationLifecycle = value; }, applicationLifecycle);
   await page.evaluateOnNewDocument(scanBridge);
   await page.goto(`http://127.0.0.1:${server.address().port}`, { waitUntil: "networkidle0" });
   await page.click('[data-action="to-applications"]');
@@ -228,6 +229,7 @@ function scanBridge() {
   };
   globalThis.__calls = [];
   globalThis.__TAURI__ = {
+    event: { listen: async (name, handler) => { globalThis.__nativeEvents ??= {}; __nativeEvents[name] = handler; return () => delete __nativeEvents[name]; } },
     barcodeScanner: {
       checkPermissions: async () => globalThis.__cameraAccess ?? "granted",
       requestPermissions: async () => "denied",
@@ -239,6 +241,7 @@ function scanBridge() {
     },
     core: { invoke: async (command, args) => {
       __calls.push({ command, args });
+      if (command === "cbcl_pairing_capability") return { demoRelay: false, productionClaimant: true, applicationLifecycle: !!globalThis.__applicationLifecycle };
       if (command === "get_state") return { has_identity: true, backup_confirmed: true, did: "did:crdt:fixture", fingerprint: { hex: "00 00 00 00 00 00", label: "fixture", lifehash: "A".repeat(4096) }, pending_publications: 0, devices: [], applications: [] };
       if (command === "flush_publications") return 0;
       if (command === "cbcl_v2_cancel_link" && globalThis.__holdCancel) return new Promise(resolve => { globalThis.__finishCancel = () => resolve(null); });
@@ -255,6 +258,9 @@ function scanBridge() {
       } };
       if (command === "cbcl_v2_unlock_preview") {
         if (globalThis.__badUnlock) throw new Error("BadPasscode");
+        if (globalThis.__holdUnlock) return new Promise(resolve => {
+          globalThis.__finishUnlock = () => resolve({ phase: "preview-unpainted", review: preview });
+        });
         return { phase: "preview-unpainted", review: preview };
       }
       if (command === "cbcl_v2_preview_rendered") return { phase: "review-ready" };
@@ -328,6 +334,8 @@ for (const mode of ["full", "manual"]) test(`${mode}: late scanner cannot enter 
   await page.evaluate(() => { globalThis.__holdScan = true; });
   await page.click(mode === "manual" ? '[data-action="scan-cbcl-manual"]' : '[data-action="scan-cbcl-pairing"]');
   await page.waitForFunction(() => typeof __finishScan === "function");
+  await page.click('[data-action="stop-pairing-camera"]');
+  await page.waitForFunction(() => !document.body.classList.contains("scanning"));
   await page.click('[data-screen="pairing-enter"] [data-action="cancel-cbcl-pairing"]');
   await visible(page, "applications");
   assert.equal(await page.evaluate(() => __cameraCancels), 1);
@@ -378,5 +386,92 @@ test("manual missing camera plugin keeps paste usable without contact", async t 
   await page.type('#pairing-manual-bootstrap', "SSPAIR-M1:pasted-fixture");
   await page.type('#pairing-manual-words', "abandon abandon absent");
   assert.equal(await page.$eval('[data-action="start-cbcl-pairing"]', el => el.disabled), false);
+  assert.equal(await count(page, "cbcl_v2_contact"), 0);
+});
+
+for (const event of ["visibilitychange", "pagehide"]) {
+  test(`${event}: interrupted unlock replaces stale consent while cancellation is pending`, async t => {
+    const page = await openWallet(t);
+    await scanToIntent(page);
+    await page.evaluate(() => { globalThis.__holdUnlock = true; globalThis.__holdCancel = true; });
+    await page.click('[data-action="approve-cbcl-pairing"]');
+    await page.waitForFunction(() => typeof __finishUnlock === "function");
+    await page.evaluate(event => {
+      if (event === "visibilitychange") {
+        Object.defineProperty(document, "hidden", { configurable: true, value: true });
+        document.dispatchEvent(new Event(event));
+      } else window.dispatchEvent(new Event(event));
+    }, event);
+    await visible(page, "pairing-result");
+    assert.equal(await page.$eval('[data-cbcl-result-title]', el => el.textContent), "Pairing interrupted");
+    assert.equal(await page.$eval('#pairing-passcode', el => el.value), "");
+    await page.evaluate(async () => {
+      Object.defineProperty(document, "hidden", { configurable: true, value: false });
+      document.dispatchEvent(new Event("visibilitychange"));
+      __finishUnlock();
+      __finishCancel();
+      await new Promise(resolve => setTimeout(resolve, 30));
+    });
+    await visible(page, "pairing-result");
+    assert.equal(await count(page, "cbcl_v2_preview_rendered"), 0);
+    assert.equal(await count(page, "cbcl_v2_link"), 0);
+    assert.equal(await count(page, "cbcl_v2_cancel_link"), 1);
+  });
+}
+
+test("Android application lifecycle preserves its own presence Activity but cancels actual backgrounding", async t => {
+  const page = await openWallet(t, "full", true);
+  await scanToIntent(page);
+  await page.evaluate(() => { globalThis.__holdUnlock = true; });
+  await page.click('[data-action="approve-cbcl-pairing"]');
+  await page.waitForFunction(() => typeof __finishUnlock === "function");
+  await page.evaluate(() => {
+    Object.defineProperty(document, "hidden", { configurable: true, value: true });
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+  assert.equal(await count(page, "cbcl_v2_cancel_link"), 0);
+  assert.match(await page.$eval('[data-cbcl-channel-status]', el => el.textContent), /Confirm it's you/);
+  await page.evaluate(() => {
+    Object.defineProperty(document, "hidden", { configurable: true, value: false });
+    document.dispatchEvent(new Event("visibilitychange"));
+    __finishUnlock();
+  });
+  await page.waitForFunction(() => !document.querySelector('[data-action="approve-cbcl-pairing"]').disabled);
+  assert.equal(await title(page), "Review and link this device");
+  assert.equal(await count(page, "cbcl_v2_link"), 0);
+  await page.evaluate(() => __nativeEvents["selfsame-pairing-backgrounded"]({ payload: null }));
+  await visible(page, "pairing-result");
+  assert.equal(await count(page, "cbcl_v2_cancel_link"), 1);
+  assert.equal(await page.$eval('[data-cbcl-result-title]', el => el.textContent), "Pairing interrupted");
+});
+
+for (const mode of ["full", "manual"]) test(`${mode}: camera has a framed view and a usable paste exit`, async t => {
+  const page = await openWallet(t, mode);
+  await page.setViewport({ width: 320, height: 640 });
+  await page.evaluate(() => { globalThis.__holdScan = true; });
+  await page.click(mode === "manual" ? '[data-action="scan-cbcl-manual"]' : '[data-action="scan-cbcl-pairing"]');
+  await page.waitForSelector('[data-pairing-camera]:not([hidden])');
+  const view = await page.evaluate(() => {
+    const frame = document.querySelector('.pairing-camera__target');
+    const bounds = frame.getBoundingClientRect();
+    return {
+      fieldsVisible: [...document.querySelectorAll('[data-screen="pairing-enter"] textarea')].some(el => el.getClientRects().length > 0),
+      mask: getComputedStyle(frame).boxShadow,
+      frameInsideViewport: bounds.left >= 0 && bounds.top >= 0 && bounds.right <= innerWidth && bounds.bottom <= innerHeight,
+      horizontalOverflow: document.documentElement.scrollWidth > innerWidth,
+    };
+  });
+  assert.equal(view.fieldsVisible, false);
+  assert.notEqual(view.mask, "none");
+  assert.equal(view.frameInsideViewport, true);
+  assert.equal(view.horizontalOverflow, false);
+  await page.click('[data-action="type-pairing-invitation"]');
+  await page.waitForFunction(() => !document.body.classList.contains("scanning"));
+  const input = mode === "manual" ? "#pairing-manual-bootstrap" : "#pairing-input";
+  assert.equal(await page.evaluate(() => document.activeElement.id), input.slice(1));
+  assert.equal(await page.evaluate(() => __cameraCancels), 1);
+  await page.type(input, "private-paste-after-camera");
+  await page.evaluate(async () => { __finishScan(); await new Promise(resolve => setTimeout(resolve, 30)); });
+  assert.equal(await page.$eval(input, el => el.value), "private-paste-after-camera");
   assert.equal(await count(page, "cbcl_v2_contact"), 0);
 });

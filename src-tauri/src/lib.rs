@@ -81,6 +81,9 @@ pub fn run() {
         .on_window_event(|window, event| {
             use tauri::Manager as _;
             let foreground = match event {
+                // Android's biometric plugin opens another Activity in this
+                // app. Window focus is not the application's lifecycle.
+                #[cfg(not(target_os = "android"))]
                 tauri::WindowEvent::Focused(foreground) => Some(*foreground),
                 #[cfg(mobile)]
                 tauri::WindowEvent::Suspended => Some(false),
@@ -95,6 +98,11 @@ pub fn run() {
                     if !foreground {
                         state.revoke_cbcl_v2();
                     }
+                }
+                #[cfg(target_os = "android")]
+                if !foreground {
+                    use tauri::Emitter as _;
+                    let _ = window.emit("selfsame-pairing-backgrounded", ());
                 }
             }
         })

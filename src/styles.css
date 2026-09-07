@@ -1098,3 +1098,50 @@ body.scanning .scanner__note {
   color: var(--lichen);
   word-break: break-all;
 }
+
+/* Pairing uses a dedicated camera view, so form controls never float over
+   the native preview. Only the framed area exposes the camera underneath. */
+.pairing-camera[hidden] { display: none; }
+.pairing-camera {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  gap: 24px;
+  padding: max(24px, env(safe-area-inset-top)) max(24px, env(safe-area-inset-right))
+    max(24px, env(safe-area-inset-bottom)) max(24px, env(safe-area-inset-left));
+  overflow: hidden;
+}
+body.pairing-scanning { overflow: hidden; }
+body.pairing-scanning [data-screen="pairing-enter"] > :not([data-pairing-camera]) {
+  display: none;
+}
+.pairing-camera__header,
+.pairing-camera__footer {
+  position: relative;
+  z-index: 1;
+}
+.pairing-camera__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.pairing-camera__header h2 { margin: 0; }
+.pairing-camera__header .btn { width: auto; flex-shrink: 0; }
+.pairing-camera__target {
+  align-self: center;
+  justify-self: center;
+  width: min(70vw, 320px, 45dvh);
+  aspect-ratio: 1;
+  border: 2px solid rgba(255, 255, 255, 0.85);
+  border-radius: 24px;
+  box-shadow: 0 0 0 100vmax var(--shell);
+}
+.pairing-camera__footer {
+  display: grid;
+  gap: 16px;
+  text-align: center;
+}
+.pairing-camera__footer p { margin: 0; }
