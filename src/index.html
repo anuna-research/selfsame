@@ -577,6 +577,17 @@
 
       <!-- SPEC-077: confidential scan/paste entry; legacy input requires explicit selection. -->
       <section class="screen" data-screen="pairing-enter" hidden>
+        <div class="pairing-camera" data-pairing-camera role="region" aria-labelledby="pairing-camera-title" hidden>
+          <header class="pairing-camera__header">
+            <h2 id="pairing-camera-title">Scan the QR code</h2>
+            <button class="btn btn--small" data-action="stop-pairing-camera">Cancel</button>
+          </header>
+          <div class="pairing-camera__target" aria-hidden="true"></div>
+          <div class="pairing-camera__footer">
+            <p>Place the application’s QR code inside the frame.</p>
+            <button class="btn" data-action="type-pairing-invitation">Enter invitation instead</button>
+          </div>
+        </div>
         <button class="back" data-action="cancel-cbcl-pairing">Back</button>
         <h1>Connect an application</h1>
         <p class="lede">

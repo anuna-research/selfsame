@@ -30,8 +30,9 @@ export function initPairing(d) {
   // Explicit legacy entry reveals this production field from `onInput`; a
   // build that identifies itself as demo keeps the field hidden there too.
   if (passcodeField) passcodeField.hidden = true;
-  invoke("cbcl_pairing_capability")
-    .then((view) => {
+  let applicationLifecycle = false;
+  const capabilityReady = invoke("cbcl_pairing_capability")
+    .then(async (view) => {
       // A bridge that answers with anything but the capability shape leaves
       // the fail-safe production default standing (screens harness stubs
       // unknown commands as null).
@@ -39,6 +40,14 @@ export function initPairing(d) {
         capability = view;
       }
       if (passcodeField) passcodeField.hidden = flow === "single" || !capability.productionClaimant;
+      if (view?.applicationLifecycle && window.__TAURI__?.event?.listen) {
+        await window.__TAURI__.event.listen("selfsame-pairing-backgrounded", () => {
+          clearTransferInputs();
+          onInput();
+          interruptPairing();
+        });
+        applicationLifecycle = true;
+      }
     })
     .catch(() => {});
 
@@ -78,6 +87,7 @@ export function initPairing(d) {
   }
 
   async function start(presented) {
+    await capabilityReady;
     if (credentialV2Stage !== "idle") return;
     const epoch = ++attemptEpoch;
     const manual = typeof presented !== "string" && entryMode === "manual";
@@ -341,6 +351,7 @@ export function initPairing(d) {
       if (credentialV2Stage === "single-unlock") {
         const input = $("#pairing-passcode");
         let result;
+        $("[data-cbcl-channel-status]").textContent = "Confirm it's you on your device to show your identity.";
         try {
           result = await invoke("cbcl_v2_unlock_preview", { request: { ...request, passcode: input?.value ?? "" } });
         } finally {
@@ -656,7 +667,7 @@ export function initPairing(d) {
     attemptApplication = null;
     credentialV2Stage = "cancelling";
     clearTransferInputs();
-    document.body.classList.remove("scanning");
+    setCameraVisible(false);
     decisionPending = true;
     $('[data-action="approve-cbcl-pairing"]').disabled = true;
     $('[data-action="decline-cbcl-pairing"]').disabled = true;
@@ -685,17 +696,52 @@ export function initPairing(d) {
       void cancel(false);
     }
   }
+  function interruptPairing() {
+    if (["idle", "cancelling"].includes(credentialV2Stage)) return;
+    // Fence late native responses immediately, then replace the stale consent
+    // even if native cancellation is still waiting for a device prompt.
+    void cancel(false);
+    showResult("failed", "Pairing interrupted",
+      "Selfsame stopped this pairing when the app left the foreground. Return to Applications to check the link status before starting a fresh invitation.",
+      "An interrupted request cannot resume from this review.");
+  }
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) {
       clearTransferInputs();
       onInput();
-      if (credentialV2Stage !== "idle") void cancel(false);
+      if (!applicationLifecycle) interruptPairing();
     }
   });
   window.addEventListener("pagehide", () => {
     clearTransferInputs();
-    if (credentialV2Stage !== "idle") void cancel(false);
+    interruptPairing();
   });
+
+  function setCameraVisible(visible) {
+    document.body.classList.toggle("scanning", visible);
+    document.body.classList.toggle("pairing-scanning", visible);
+    const cameraView = $("[data-pairing-camera]");
+    if (cameraView) cameraView.hidden = !visible;
+    if (visible) $("[data-action='stop-pairing-camera']")?.focus();
+  }
+
+  async function stopCamera(typeInstead = false) {
+    if (credentialV2Stage !== "scanning") return;
+    const epoch = ++attemptEpoch;
+    credentialV2Stage = "cancelling";
+    setCameraVisible(false);
+    try { await window.__TAURI__?.barcodeScanner?.cancel?.(); }
+    catch { /* The opaque entry screen remains usable after a camera error. */ }
+    finally {
+      if (epoch === attemptEpoch) {
+        credentialV2Stage = "idle";
+        onInput();
+        $(typeInstead
+          ? entryMode === "manual" ? "#pairing-manual-bootstrap" : "#pairing-input"
+          : entryMode === "manual" ? "[data-action='scan-cbcl-manual']" : "[data-action='scan-cbcl-pairing']")?.focus();
+      }
+    }
+  }
 
   // The confidential QR payload IS the paste payload. Scan and paste recognise
   // identical input and everything after this line is the one ordinary
@@ -704,6 +750,7 @@ export function initPairing(d) {
   // asking is this caller's job; `windowed: true` renders the preview beneath
   // the webview, so the page must get out of its way for the duration.
   async function scan(manual = false) {
+    await capabilityReady;
     if (credentialV2Stage !== "idle" || entryMode !== (manual ? "manual" : "full")) return;
     const epoch = ++attemptEpoch;
     const note = $("[data-pairing-scanner-note]");
@@ -735,12 +782,12 @@ export function initPairing(d) {
           return;
         }
       }
-      document.body.classList.add("scanning");
+      setCameraVisible(true);
       let scanned;
       try {
         scanned = await camera.scan({ formats: ["QRCode"], windowed: true });
       } finally {
-        if (epoch === attemptEpoch) document.body.classList.remove("scanning");
+        if (epoch === attemptEpoch) setCameraVisible(false);
       }
       if (epoch !== attemptEpoch) return;
       say("");
@@ -788,7 +835,7 @@ export function initPairing(d) {
     restoreEntryUnlock();
     entryMode = "full";
     clearTransferInputs();
-    document.body.classList.remove("scanning");
+    setCameraVisible(false);
     $("[data-pairing-manual]").open = false;
     $("[data-pairing-complete]").hidden = false;
     $("[data-action='scan-cbcl-pairing']").hidden = !window.__TAURI__?.barcodeScanner;
@@ -982,6 +1029,8 @@ export function initPairing(d) {
     },
     "start-cbcl-pairing": start,
     "scan-cbcl-pairing": () => scan(false),
+    "stop-pairing-camera": () => stopCamera(false),
+    "type-pairing-invitation": () => stopCamera(true),
     "scan-cbcl-manual": () => scan(true),
     "approve-cbcl-pairing": () => decide(true),
     "decline-cbcl-pairing": () => decide(false),

@@ -1,0 +1,52 @@
+{
+  "baseCommit": "b830a9b31ea04f05b636cacdaf605e951d226204",
+  "android": {
+    "api": 36,
+    "abi": "arm64-v8a",
+    "device": "isolated Pixel 7 emulator",
+    "tls": "local signed fixture with temporary CA and ADB routing; certificate verification retained",
+    "unlock": {
+      "screen": [
+        "pairing-consent"
+      ],
+      "title": "Review and link this device",
+      "approveText": "Link",
+      "approveDisabled": false,
+      "hidden": false
+    },
+    "homeDuringPresence": {
+      "screen": [
+        "pairing-result"
+      ],
+      "result": "Pairing interrupted",
+      "approveDisabled": true
+    },
+    "camera": {
+      "scanning": true,
+      "cameraVisible": true,
+      "formVisible": false,
+      "note": "",
+      "mask": "rgb(11, 15, 13) 0px 0px 0px 915.048px"
+    },
+    "cameraExit": {
+      "scanning": false,
+      "cameraHidden": true,
+      "inputVisible": true,
+      "focused": "pairing-input"
+    },
+    "activeCameraClientsAfterExit": []
+  },
+  "browser": {
+    "walletTests": 35,
+    "passed": 35,
+    "screens": "all screens rendered clean"
+  },
+  "sources": {
+    "src/pairing.js": "d0d7aaf7eb0aab173cc22a6d5eb11b2a06761c327296cc9827c0f3cec3c9bd23",
+    "src/index.html": "ead00f1e2e94ec0b67e98b09257e1ddf699cf0784ea0ea144795865a0775b6dd",
+    "src/styles.css": "eca8ed28cc95927c79fcdff35ea33119d2e3a62614d209482e4aac9afbc6c95b",
+    "src-tauri/src/lib.rs": "bfa979344ad724bb30dc33378de6970fb3fed1ac5d05be7f9b258bfd13dfa5d2",
+    "src-tauri/src/cbcl_pairing.rs": "7231321b3bcd04b75594d547057f313ec42a17441120a83211115951df1adce4",
+    "src-tauri/capabilities/mobile-scanner.json": "5fe6d2ed63e8b97d86f6f86a7056b5e33f3ce3edd135e13d82073e8bb0377e97"
+  }
+}
