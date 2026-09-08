@@ -2347,7 +2347,9 @@ mod tests {
     /// cbcl-bus SPEC-080 REQ-001: the selection reads only an installed slot
     /// of the same application; an absent slot is a new account.
     #[test]
+    #[ignore = "installs the process-global in-memory keyring; run alone"]
     fn spec_080_installed_account_scope_reads_only_an_installed_slot() {
+        shared_memkeyring::install();
         assert_eq!(
             installed_account_scope("https://nothing.example/selfsame/application").unwrap(),
             None
@@ -2364,6 +2366,7 @@ mod tests {
         let local = load_local_link(&application).unwrap();
         unlink_local(&local).unwrap();
         assert_eq!(installed_account_scope(&application).unwrap(), None);
+        shared_memkeyring::clear();
     }
 
     fn overwrite_test_slot(slot: &CredentialV2LinkSlot) {
