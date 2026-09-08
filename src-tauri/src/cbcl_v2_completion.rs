@@ -1630,6 +1630,30 @@ pub(crate) fn load_local_link(application_id: &str) -> Result<LocalCredentialV2L
 /// Read one fully recognised installed record by its authenticated application
 /// identifier. Pending, absent, and cross-application values are not aliases
 /// for an installed capability.
+/// cbcl-bus SPEC-080 REQ-001: the account scope this wallet already holds for
+/// one application, or `None` when nothing is installed there. A pending or
+/// foreign slot is not an account. This reads the private installed record
+/// only; it mints nothing and never exposes the scope beyond the caller.
+pub(crate) fn installed_account_scope(application_id: &str) -> Result<Option<[u8; 32]>> {
+    let _guard = SLOT_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let entry = slot_name(application_id)?;
+    let Some(encoded) =
+        store::get(&entry).map_err(|_| UiError::from("PairingCheckpointUnavailable"))?
+    else {
+        return Ok(None);
+    };
+    match recognise_slot(&encoded)? {
+        CredentialV2LinkSlot::Installed(value) if value.application_id == application_id => {
+            codec::decode_b64url_32(&value.account_scope_id)
+                .map(Some)
+                .map_err(|_| UiError::from("PairingCheckpointRefused"))
+        }
+        CredentialV2LinkSlot::Pending(_) | CredentialV2LinkSlot::Installed(_) => Ok(None),
+    }
+}
+
 pub(crate) fn load_installed(application_id: &str) -> Result<InstalledCredentialV2Link> {
     let _guard = SLOT_LOCK
         .lock()
@@ -2318,6 +2342,28 @@ mod tests {
         };
         pending.validate().unwrap();
         pending
+    }
+
+    /// cbcl-bus SPEC-080 REQ-001: the selection reads only an installed slot
+    /// of the same application; an absent slot is a new account.
+    #[test]
+    fn spec_080_installed_account_scope_reads_only_an_installed_slot() {
+        assert_eq!(
+            installed_account_scope("https://nothing.example/selfsame/application").unwrap(),
+            None
+        );
+        let installed = installed_reload_fixture();
+        let application = installed.application_id().to_string();
+        overwrite_test_slot(&CredentialV2LinkSlot::Installed(installed.clone()));
+        let expected = codec::decode_b64url_32(&installed.account_scope_id).unwrap();
+        assert_eq!(installed_account_scope(&application).unwrap(), Some(expected));
+        assert_eq!(
+            installed_account_scope("https://other.example/selfsame/application").unwrap(),
+            None
+        );
+        let local = load_local_link(&application).unwrap();
+        unlink_local(&local).unwrap();
+        assert_eq!(installed_account_scope(&application).unwrap(), None);
     }
 
     fn overwrite_test_slot(slot: &CredentialV2LinkSlot) {
