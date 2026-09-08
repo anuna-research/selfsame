@@ -177,6 +177,18 @@ jobs:
             2>&1 | tee /tmp/test-1162.log | tee -a /tmp/rust-ci.log
           grep -Fq "test result: ok. 1 passed; 0 failed; 0 ignored" /tmp/test-1162.log
 
+      # SPEC-080 REQ-001's account-scope lookup reads the secure store, so it
+      # installs the same process-global in-memory keyring and also runs in a
+      # dedicated test process.
+      - name: Test credential/v2 installed account scope selection
+        run: |
+          set -o pipefail
+          cargo test -p selfsame --locked --lib -- \
+            --ignored --exact \
+            cbcl_v2_completion::tests::spec_080_installed_account_scope_reads_only_an_installed_slot \
+            2>&1 | tee /tmp/spec-080.log | tee -a /tmp/rust-ci.log
+          grep -Fq "test result: ok. 1 passed; 0 failed; 0 ignored" /tmp/spec-080.log
+
       # SPEC079 TEST005/006/007 fixtures replace process-global custody and TLS.
       # Run each exact test in a fresh process; never run all ignored tests.
       - name: Test single-link authority and effect boundaries

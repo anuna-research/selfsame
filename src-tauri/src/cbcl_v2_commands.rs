@@ -1794,7 +1794,19 @@ fn pump_to_offer(
                     send_binary(&mut socket, &attempt, bytes)?
                 }
                 CredentialV2ClaimantEffect::Established { transcript_hash } => {
-                    attempt.run(|| claimant.bind_finished_profile(transcript_hash))?;
+                    // cbcl-bus SPEC-080: on an advertising application the
+                    // wallet names its account before any offer exists.
+                    let selection =
+                        attempt.run(|| claimant.bind_finished_profile(transcript_hash))?;
+                    if let Some(object) = selection {
+                        let effects = attempt.run(|| {
+                            claimant
+                                .core_mut()
+                                .prepare_application_object(&object)
+                                .map_err(|_| UiError::from("PairingFailed"))
+                        })?;
+                        send_effects(&mut socket, &attempt, effects)?;
+                    }
                 }
                 CredentialV2ClaimantEffect::DisplayIntent(display) => {
                     let view = intent_view(&display);

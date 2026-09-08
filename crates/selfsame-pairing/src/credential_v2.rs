@@ -312,9 +312,21 @@ pub struct CredentialV2WalletOfferVerifier {
     transcript_hash: [u8; 64],
     tofu_state: CredentialV2TofuState,
     body_authority: Option<CredentialV2BodyAuthority>,
+    /// cbcl-bus SPEC-080 CON-003: the account selection this wallet sent
+    /// before the offer. `None` means no selection was sent (a
+    /// non-advertising application); `Some(None)` selected a new account;
+    /// `Some(Some(scope))` requires the offer to carry exactly that scope.
+    account_selection: Option<Option<[u8; 32]>>,
 }
 
 impl CredentialV2WalletOfferVerifier {
+    /// Require the offer to honour the account selection the wallet sent.
+    #[must_use]
+    pub const fn with_account_selection(mut self, selection: Option<[u8; 32]>) -> Self {
+        self.account_selection = Some(selection);
+        self
+    }
+
     /// Bind one verifier to the exact live profile, carrier, transcript, and
     /// person-owned exact-pair policy state.
     pub fn new(
@@ -330,6 +342,7 @@ impl CredentialV2WalletOfferVerifier {
             transcript_hash,
             tofu_state,
             body_authority: None,
+            account_selection: None,
         })
     }
 
@@ -366,6 +379,13 @@ impl CredentialV2ClaimantOfferVerifier for CredentialV2WalletOfferVerifier {
             || self.carrier.expected_allocator_key() != Some(&allocator_key)
         {
             return Err(CredentialV2Error::Profile);
+        }
+        // SPEC-080 CON-003: an offer under another account than the one this
+        // wallet selected is refused before any display exists.
+        if let Some(Some(selected)) = self.account_selection {
+            if recognised.claims.account_provenance().account_scope_id() != &selected {
+                return Err(CredentialV2Error::Profile);
+            }
         }
         let authority =
             CredentialV2IntentAuthority::new(recognised.claims.clone(), self.tofu_state)?;

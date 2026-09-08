@@ -1487,12 +1487,30 @@ fn v2_allocator_effects_json(
                 "type": "established",
                 "transcriptHashB64u": selfsame_app_identity::codec::b64url(transcript_hash),
             }),
-            CredentialV2AllocatorEffect::ReceivedObject { object } => serde_json::json!({
-                "type": "received-object",
-                "kind": object.kind().number(),
-                "bodyB64u": selfsame_app_identity::codec::b64url(object.body()),
-                "contentHashB64u": selfsame_app_identity::codec::b64url(&object.content_hash()),
-            }),
+            CredentialV2AllocatorEffect::ReceivedObject { object } => {
+                let mut value = serde_json::json!({
+                    "type": "received-object",
+                    "kind": object.kind().number(),
+                    "bodyB64u": selfsame_app_identity::codec::b64url(object.body()),
+                    "contentHashB64u": selfsame_app_identity::codec::b64url(&object.content_hash()),
+                });
+                // cbcl-bus SPEC-080 CON-001: the wallet's account selection,
+                // already recognised by the endpoint, projected for the
+                // browser allocator so it can forward the scope to the hub.
+                if object.kind() == cbcl_pairing::credential_v2::CredentialV2Kind::AccountSelect {
+                    if let Ok(selection) =
+                        cbcl_pairing::credential_v2::CredentialV2AccountSelect::decode(object.body())
+                    {
+                        value["accountSelect"] = serde_json::json!({
+                            "applicationId": selection.application_id(),
+                            "accountScopeB64u": selection
+                                .account_scope()
+                                .map(|scope| selfsame_app_identity::codec::b64url(scope)),
+                        });
+                    }
+                }
+                value
+            }
             CredentialV2AllocatorEffect::Terminal => serde_json::json!({
                 "type": "terminal",
                 "outcome": "closed",
@@ -1836,7 +1854,7 @@ pub fn profile_facts(profile: &[u8]) -> Result<String, IdentityError> {
         })
         .collect();
     Ok(format!(
-        r#"{{"applicationId":{},"accountAuthority":{},"profileVersion":{},"profileDigest":{},"allowedPermissions":[{}],"cbclPairingRelays":[{}],"stateResolvers":[{}]}}"#,
+        r#"{{"applicationId":{},"accountAuthority":{},"profileVersion":{},"profileDigest":{},"allowedPermissions":[{}],"cbclPairingRelays":[{}],"stateResolvers":[{}],"capabilities":[{}]}}"#,
         json_string(profile.application_id.as_str()),
         json_string(profile.account_authority.as_str()),
         selfsame_app_identity::PROFILE_VERSION,
@@ -1849,6 +1867,14 @@ pub fn profile_facts(profile: &[u8]) -> Result<String, IdentityError> {
             .join(","),
         descriptors.join(","),
         resolvers.join(","),
+        // SPEC-004 CON-201 `capabilities`: the browser allocator waits for the
+        // wallet's account selection only on an advertising profile.
+        profile
+            .capabilities
+            .iter()
+            .map(|c| json_string(c))
+            .collect::<Vec<_>>()
+            .join(","),
     ))
 }
 

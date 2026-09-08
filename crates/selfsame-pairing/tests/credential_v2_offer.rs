@@ -229,6 +229,31 @@ fn offer_is_one_canonical_signed_authority_for_hub_browser_and_wallet() {
         );
     }
 
+    // cbcl-bus SPEC-080 CON-003: the offer must honour the wallet's account
+    // selection; a new-account selection and no selection accept any scope.
+    let offered_scope = *recognised.claims.account_provenance().account_scope_id();
+    for (selection, accepted) in [
+        (Some(offered_scope), true),
+        (Some([0xee; 32]), false),
+        (None, true),
+    ] {
+        let mut endpoint =
+            CredentialV2Endpoint::new(Side::Claimant, carrier.clone(), Box::new(AcceptBodies));
+        let mut verifier = CredentialV2WalletOfferVerifier::new(
+            profile.clone(),
+            carrier.clone(),
+            input.transcript_hash,
+            CredentialV2TofuState::NewPair,
+        )
+        .unwrap()
+        .with_account_selection(selection);
+        let result = verifier.verify_offer(&mut endpoint, &object, input.expires_at - 1);
+        assert_eq!(result.is_ok(), accepted, "selection {selection:?}");
+        if !accepted {
+            assert_eq!(result, Err(CredentialV2Error::Profile));
+        }
+    }
+
     let mut changed = built.signed_offer.clone();
     *changed.last_mut().unwrap() ^= 1;
     assert!(recognise_signed_offer(&profile, &changed).is_err());
