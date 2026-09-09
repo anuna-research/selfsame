@@ -189,6 +189,16 @@ jobs:
             2>&1 | tee /tmp/spec-080.log | tee -a /tmp/rust-ci.log
           grep -Fq "test result: ok. 1 passed; 0 failed; 0 ignored" /tmp/spec-080.log
 
+      # The second-device regression also owns a process-global test keyring.
+      - name: Test second-device completion preserves installed links
+        run: |
+          set -o pipefail
+          cargo test -p selfsame --locked --lib -- \
+            --ignored --exact --test-threads=1 \
+            cbcl_v2_completion::tests::second_device_pairing_preserves_installed_link_through_completion_and_failures \
+            2>&1 | tee /tmp/second-device.log | tee -a /tmp/rust-ci.log
+          grep -Fq "test result: ok. 1 passed; 0 failed; 0 ignored" /tmp/second-device.log
+
       # SPEC079 TEST005/006/007 fixtures replace process-global custody and TLS.
       # Run each exact test in a fresh process; never run all ignored tests.
       - name: Test single-link authority and effect boundaries

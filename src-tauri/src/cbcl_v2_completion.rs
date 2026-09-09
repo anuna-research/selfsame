@@ -2490,7 +2490,11 @@ mod tests {
         assert!(validate_slots(app, &[installed.clone(), waiting.clone()]).is_ok());
         assert!(validate_slots(app, &[installed.clone(), installed.clone()]).is_err());
         assert!(validate_slots(app, &[waiting.clone(), waiting]).is_err());
-        assert!(validate_slots("https://elsewhere.example/app", &[installed.clone()]).is_err());
+        assert!(validate_slots(
+            "https://elsewhere.example/app",
+            std::slice::from_ref(&installed)
+        )
+        .is_err());
         assert!(validate_slots(app, &vec![installed; MAX_APPLICATION_LINKS + 1]).is_err());
     }
 
