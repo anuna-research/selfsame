@@ -325,10 +325,19 @@ pub struct InstalledCredentialV2Link {
     finalized_at: u64,
 }
 
-/// Non-secret row used by the wallet's installed-link list.
+/// Public device identity retained in the wallet's installed-link list.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstalledCredentialV2DeviceSummary {
+    pub installation_device_did: String,
+    pub finalized_at: u64,
+}
+
+/// Application summary including all locally installed devices.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InstalledCredentialV2LinkSummary {
+    pub devices: Vec<InstalledCredentialV2DeviceSummary>,
     pub application_id: String,
     pub account: String,
     pub relay_origin: String,
@@ -1211,6 +1220,10 @@ impl InstalledCredentialV2Link {
 
     fn summary(&self) -> InstalledCredentialV2LinkSummary {
         InstalledCredentialV2LinkSummary {
+            devices: vec![InstalledCredentialV2DeviceSummary {
+                installation_device_did: self.installation_device_did.clone(),
+                finalized_at: self.finalized_at,
+            }],
             application_id: self.application_id.clone(),
             account: self.account.clone(),
             relay_origin: self.relay_origin.clone(),
@@ -1508,7 +1521,7 @@ pub fn pending_application_ids() -> Result<Vec<String>> {
 }
 
 /// List one row per application, using its most recently installed device.
-/// Older device records remain durable while the UI keeps application-level
+/// Includes every installed device while retaining application-level
 /// reload/unlink semantics. No grant or recovery material is exposed.
 pub fn installed_links() -> Result<Vec<InstalledCredentialV2LinkSummary>> {
     let _guard = SLOT_LOCK.lock().unwrap_or_else(|p| p.into_inner());
@@ -1522,7 +1535,20 @@ pub fn installed_links() -> Result<Vec<InstalledCredentialV2LinkSummary>> {
         }
         for slot in slots.iter().rev() {
             if let CredentialV2LinkSlot::Installed(value) = slot {
-                result.push(value.summary());
+                let mut summary = value.summary();
+                summary.devices = slots
+                    .iter()
+                    .filter_map(|slot| match slot {
+                        CredentialV2LinkSlot::Installed(device) => {
+                            Some(InstalledCredentialV2DeviceSummary {
+                                installation_device_did: device.installation_device_did.clone(),
+                                finalized_at: device.finalized_at,
+                            })
+                        }
+                        CredentialV2LinkSlot::Pending(_) => None,
+                    })
+                    .collect();
+                result.push(summary);
                 break;
             }
         }
@@ -2459,7 +2485,17 @@ mod tests {
             Some(codec::decode_b64url_32(&first.account_scope_id).unwrap())
         );
         assert!(pending_links().unwrap().is_empty());
-        assert_eq!(installed_links().unwrap().len(), 1, "one application row");
+        let summaries = installed_links().unwrap();
+        assert_eq!(summaries.len(), 1, "one application row");
+        assert_eq!(summaries[0].devices.len(), 2);
+        assert_eq!(
+            summaries[0].devices[0].installation_device_did,
+            first.installation_device_did
+        );
+        assert_eq!(
+            summaries[0].devices[1].installation_device_did,
+            second.installation_device_did
+        );
         assert!(remove_pending(&pending).is_err());
         assert_eq!(read_slots(app).unwrap(), records);
 

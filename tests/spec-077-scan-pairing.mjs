@@ -110,6 +110,11 @@ test(`${mode}: SPEC079 TEST002/003/010 scan unlocks once and a real render enabl
   await page.click('[data-action="finish-cbcl-pairing"]');
   await visible(page, "applications");
   assert.equal(await page.$$eval('[data-cbcl-v2-link]', els => els.length), 1);
+  assert.match(await page.$eval('[data-cbcl-v2-link]', el => el.textContent), /2 devices/);
+  await page.click('[data-cbcl-v2-link]');
+  await visible(page, "pairing-link");
+  assert.deepEqual(await page.$$eval('[data-cbcl-v2-link-devices] .evidence__val', els => els.map(el => el.textContent)), ["did:key:first-device", "did:key:second-device"]);
+  await page.click('[data-screen="pairing-link"] [data-action="to-applications"]');
   await page.click('[data-screen="applications"] [data-action="to-home"]');
   await visible(page, "home");
   assert.match(await page.$eval('[data-applications-summary]', el => el.textContent), /^1 application,/);
@@ -292,7 +297,7 @@ function scanBridge() {
         return { outcome: "installed" };
       }
       if (command === "cbcl_v2_pending_recoveries") return globalThis.__recoverable ? [preview.applicationId] : [];
-      if (command === "cbcl_v2_installed_links") return globalThis.__installed ? [{ applicationId: preview.applicationId }] : [];
+      if (command === "cbcl_v2_installed_links") return globalThis.__installed ? [{ applicationId: preview.applicationId, account: "@fixture", devices: [{ installationDeviceDid: "did:key:first-device" }, { installationDeviceDid: "did:key:second-device" }] }] : [];
       return null;
     } },
   };

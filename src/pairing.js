@@ -921,7 +921,9 @@ export function initPairing(d) {
       application.textContent = link.applicationId;
       const account = document.createElement("span");
       account.className = "application__meta";
-      account.textContent = link.account;
+      const count = link.devices?.length;
+      account.textContent = count == null ? link.account
+        : `${link.account} · ${count} device${count === 1 ? "" : "s"}`;
       body.append(application, account);
       button.append(mark, body);
       button.addEventListener("click", () => openInstalledLink(link));
@@ -933,6 +935,20 @@ export function initPairing(d) {
   function openInstalledLink(link) {
     installedLink = link;
     pendingLink = null;
+    const devices = $("[data-cbcl-v2-link-devices]");
+    devices.replaceChildren();
+    for (const [index, device] of (link.devices ?? []).entries()) {
+      const row = document.createElement("li");
+      row.className = "evidence__row";
+      const name = document.createElement("p");
+      name.className = "evidence__key";
+      name.textContent = `Device ${index + 1}`;
+      const identifier = document.createElement("p");
+      identifier.className = "evidence__val evidence__val--mono";
+      identifier.textContent = device.installationDeviceDid;
+      row.append(name, identifier);
+      devices.append(row);
+    }
     $("[data-cbcl-v2-link-application]").textContent = link.applicationId;
     $("[data-cbcl-v2-link-account]").textContent = link.account;
     $("[data-cbcl-v2-link-relay]").textContent = link.relayOrigin;
