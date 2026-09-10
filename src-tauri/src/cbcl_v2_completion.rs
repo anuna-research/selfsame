@@ -1,6 +1,7 @@
 //! Crash-safe credential/v2 claimant completion authority.
 //!
-//! The secure-store entry is one tagged pending-or-installed union.  The
+//! A secure-store entry retains installed device links and at most one pending
+//! ceremony. Legacy single-link entries remain readable without migration.  The
 //! pending arm is written before the final-approval frame is released and
 //! contains only public authenticated facts plus cbcl-pairing's already sealed
 //! endpoint checkpoint.  It never contains the hierarchy root, a derived key,
@@ -38,6 +39,7 @@ const MAX_LINK_INDEX_OCTETS: usize = 530_000;
 const CHECKPOINT_LABEL: &[u8] = b"selfsame credential/v2 claimant checkpoint wrapping v1";
 const ROOT_GENERATION_LABEL: &[u8] = b"selfsame credential/v2 root generation v1\0";
 const MAX_SLOT_OCTETS: usize = 400_000;
+const MAX_APPLICATION_LINKS: usize = 16;
 
 // The platform store does not expose compare-and-swap. Selfsame is a
 // single-instance application, so one process-wide lock makes each slot's
@@ -441,7 +443,7 @@ pub(crate) fn classify_reload(
     }
 }
 
-/// Exactly one durable state occupies an application's credential/v2 slot.
+/// One independently verified device link or pending ceremony.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(
     tag = "state",
@@ -458,7 +460,8 @@ enum CredentialV2LinkSlot {
 /// sampled with it for confirmed unlink.
 pub(crate) struct LocalCredentialV2Link {
     slot: CredentialV2LinkSlot,
-    exact_pair_state: Option<crate::cbcl_v2_policy::ExactPairState>,
+    exact_pair_states: Vec<(String, crate::cbcl_v2_policy::ExactPairState)>,
+    application_slots: Vec<CredentialV2LinkSlot>,
 }
 
 impl LocalCredentialV2Link {
@@ -1447,29 +1450,26 @@ pub fn checkpoint_wrapping_key(
     Ok(output)
 }
 
-/// Occupy an empty application slot with one pending authority.
-/// Exact retry is idempotent; another pending or installed value refuses. The
+/// Append one pending ceremony while preserving installed devices.
+/// Exact retry is idempotent; another pending ceremony refuses. The
 /// read/recognise/write is process-atomic under [`SLOT_LOCK`].
 pub fn persist_pending(pending: &PendingCredentialV2Completion) -> Result<()> {
-    let _guard = SLOT_LOCK
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _guard = SLOT_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     pending.validate()?;
-    ensure_indexed_locked(&pending.application_id)?;
-    let entry = slot_name(&pending.application_id)?;
-    let slot = CredentialV2LinkSlot::Pending(pending.clone());
-    let encoded = encode_slot(&slot)?;
-    match store::get(&entry).map_err(|_| UiError::from("PairingCheckpointUnavailable"))? {
-        None => {
-            store::set(&entry, &encoded).map_err(|_| UiError::from("PairingCheckpointUnavailable"))
-        }
-        Some(existing) => match recognise_slot(&existing)? {
-            CredentialV2LinkSlot::Pending(current) if current == *pending => Ok(()),
-            CredentialV2LinkSlot::Pending(_) | CredentialV2LinkSlot::Installed(_) => {
+    let mut slots = read_slots(&pending.application_id)?;
+    for slot in &slots {
+        if let CredentialV2LinkSlot::Pending(current) = slot {
+            return if current == pending {
+                Ok(())
+            } else {
                 Err(UiError::from("PairingApplicationAlreadyLinked"))
-            }
-        },
+            };
+        }
     }
+    slots.push(CredentialV2LinkSlot::Pending(pending.clone()));
+    validate_slots(&pending.application_id, &slots)?;
+    ensure_indexed_locked(&pending.application_id)?;
+    write_slots(&pending.application_id, slots)
 }
 
 /// List every fully recognised post-payload recovery candidate.
@@ -1478,80 +1478,60 @@ pub fn persist_pending(pending: &PendingCredentialV2Completion) -> Result<()> {
 /// pruned. Installed rows remain indexed so root-lifecycle purge can discover
 /// and remove every link even though the platform store has no list API.
 pub fn pending_application_ids() -> Result<Vec<String>> {
-    let _guard = SLOT_LOCK
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _guard = SLOT_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     let mut index = load_index_locked()?;
-    let mut retained = Vec::with_capacity(index.applications.len());
-    let mut pending = Vec::new();
-    let now = crate::commands::now();
+    let mut retained = Vec::new();
+    let mut result = Vec::new();
     for application_id in &index.applications {
-        let entry = slot_name(application_id)?;
-        match store::get(&entry).map_err(|_| UiError::from("PairingCheckpointUnavailable"))? {
-            None => {}
-            Some(encoded) => match recognise_slot(&encoded)? {
-                CredentialV2LinkSlot::Pending(value) if value.application_id == *application_id => {
-                    retained.push(application_id.clone());
-                    if matches!(
-                        value.stage,
-                        PendingCredentialV2Stage::PayloadPrepared { .. }
-                    ) && now >= value.carrier()?.relay_expires_at()
-                    {
-                        pending.push(application_id.clone());
-                    }
-                }
-                CredentialV2LinkSlot::Installed(value)
-                    if value.application_id == *application_id =>
+        let slots = read_slots(application_id)?;
+        if !slots.is_empty() {
+            retained.push(application_id.clone());
+        }
+        for slot in slots.iter().rev() {
+            if let CredentialV2LinkSlot::Pending(value) = slot {
+                if matches!(
+                    value.stage,
+                    PendingCredentialV2Stage::PayloadPrepared { .. }
+                ) && crate::commands::now() >= value.carrier()?.relay_expires_at()
                 {
-                    retained.push(application_id.clone());
+                    result.push(application_id.clone());
                 }
-                CredentialV2LinkSlot::Pending(_) | CredentialV2LinkSlot::Installed(_) => {
-                    return Err(UiError::from("PairingCheckpointRefused"));
-                }
-            },
+                break;
+            }
         }
     }
     if retained != index.applications {
         index.applications = retained;
         persist_index_locked(&index)?;
     }
-    Ok(pending)
+    Ok(result)
 }
 
-/// List every installed credential/v2 link without exposing grant bytes,
-/// recovery material, scope identifiers, or immutable receipt evidence.
+/// List one row per application, using its most recently installed device.
+/// Older device records remain durable while the UI keeps application-level
+/// reload/unlink semantics. No grant or recovery material is exposed.
 pub fn installed_links() -> Result<Vec<InstalledCredentialV2LinkSummary>> {
-    let _guard = SLOT_LOCK
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _guard = SLOT_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     let mut index = load_index_locked()?;
-    let mut retained = Vec::with_capacity(index.applications.len());
-    let mut installed = Vec::new();
+    let mut retained = Vec::new();
+    let mut result = Vec::new();
     for application_id in &index.applications {
-        let entry = slot_name(application_id)?;
-        match store::get(&entry).map_err(|_| UiError::from("PairingCheckpointUnavailable"))? {
-            None => {}
-            Some(encoded) => match recognise_slot(&encoded)? {
-                CredentialV2LinkSlot::Installed(value)
-                    if value.application_id == *application_id =>
-                {
-                    retained.push(application_id.clone());
-                    installed.push(value.summary());
-                }
-                CredentialV2LinkSlot::Pending(value) if value.application_id == *application_id => {
-                    retained.push(application_id.clone());
-                }
-                CredentialV2LinkSlot::Pending(_) | CredentialV2LinkSlot::Installed(_) => {
-                    return Err(UiError::from("PairingCheckpointRefused"));
-                }
-            },
+        let slots = read_slots(application_id)?;
+        if !slots.is_empty() {
+            retained.push(application_id.clone());
+        }
+        for slot in slots.iter().rev() {
+            if let CredentialV2LinkSlot::Installed(value) = slot {
+                result.push(value.summary());
+                break;
+            }
         }
     }
     if retained != index.applications {
         index.applications = retained;
         persist_index_locked(&index)?;
     }
-    Ok(installed)
+    Ok(result)
 }
 
 /// List every recognised pending slot, regardless of whether its terminal
@@ -1559,37 +1539,27 @@ pub fn installed_links() -> Result<Vec<InstalledCredentialV2LinkSummary>> {
 /// [`pending_application_ids`]: a pre-payload slot is abandonable but must
 /// never be presented as recoverable.
 pub fn pending_links() -> Result<Vec<PendingCredentialV2LinkSummary>> {
-    let _guard = SLOT_LOCK
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _guard = SLOT_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     let mut index = load_index_locked()?;
-    let mut retained = Vec::with_capacity(index.applications.len());
-    let mut pending = Vec::new();
+    let mut retained = Vec::new();
+    let mut result = Vec::new();
     for application_id in &index.applications {
-        let entry = slot_name(application_id)?;
-        match store::get(&entry).map_err(|_| UiError::from("PairingCheckpointUnavailable"))? {
-            None => {}
-            Some(encoded) => match recognise_slot(&encoded)? {
-                CredentialV2LinkSlot::Pending(value) if value.application_id == *application_id => {
-                    retained.push(application_id.clone());
-                    pending.push(value.summary());
-                }
-                CredentialV2LinkSlot::Installed(value)
-                    if value.application_id == *application_id =>
-                {
-                    retained.push(application_id.clone());
-                }
-                CredentialV2LinkSlot::Pending(_) | CredentialV2LinkSlot::Installed(_) => {
-                    return Err(UiError::from("PairingCheckpointRefused"));
-                }
-            },
+        let slots = read_slots(application_id)?;
+        if !slots.is_empty() {
+            retained.push(application_id.clone());
+        }
+        for slot in slots.iter().rev() {
+            if let CredentialV2LinkSlot::Pending(value) = slot {
+                result.push(value.summary());
+                break;
+            }
         }
     }
     if retained != index.applications {
         index.applications = retained;
         persist_index_locked(&index)?;
     }
-    Ok(pending)
+    Ok(result)
 }
 
 /// Read either kind of local slot for a person-confirmed removal. Recognition
@@ -1599,77 +1569,69 @@ pub(crate) fn load_local_link(application_id: &str) -> Result<LocalCredentialV2L
     let _guard = SLOT_LOCK
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let entry = slot_name(application_id)?;
-    let encoded = store::get(&entry)
-        .map_err(|_| UiError::from("PairingCheckpointUnavailable"))?
+    let application_slots = read_slots(application_id)?;
+    let slot = application_slots
+        .iter()
+        .find(|s| matches!(s, CredentialV2LinkSlot::Pending(_)))
+        .or_else(|| application_slots.last())
+        .cloned()
         .ok_or_else(|| UiError::from("PairingApplicationNotLinked"))?;
-    let slot = recognise_slot(&encoded)?;
-    let (slot_application_id, relay_origin) = match &slot {
-        CredentialV2LinkSlot::Pending(value) => (&value.application_id, &value.relay_origin),
-        CredentialV2LinkSlot::Installed(value) => (&value.application_id, &value.relay_origin),
-    };
+    let slot_application_id = slot_application(&slot);
     if slot_application_id != application_id {
         return Err(UiError::from("PairingApplicationNotLinked"));
     }
-    let flow = match &slot {
-        CredentialV2LinkSlot::Pending(v) => v.flow,
-        CredentialV2LinkSlot::Installed(v) => v.flow,
-    };
-    let exact_pair_state = match flow {
-        crate::session::CredentialV2Flow::SingleLink => None,
-        crate::session::CredentialV2Flow::LegacyTwoDecision => {
-            Some(crate::cbcl_v2_policy::state(application_id, relay_origin)?)
+    let selected_pending = matches!(slot, CredentialV2LinkSlot::Pending(_));
+    let mut exact_pair_states = Vec::new();
+    for candidate in &application_slots {
+        if selected_pending && candidate != &slot {
+            continue;
         }
-    };
+        let (flow, relay) = match candidate {
+            CredentialV2LinkSlot::Pending(v) => (v.flow, &v.relay_origin),
+            CredentialV2LinkSlot::Installed(v) => (v.flow, &v.relay_origin),
+        };
+        if flow == crate::session::CredentialV2Flow::LegacyTwoDecision
+            && !exact_pair_states.iter().any(|(known, _)| known == relay)
+        {
+            exact_pair_states.push((
+                relay.clone(),
+                crate::cbcl_v2_policy::state(application_id, relay)?,
+            ));
+        }
+    }
     Ok(LocalCredentialV2Link {
         slot,
-        exact_pair_state,
+        exact_pair_states,
+        application_slots,
     })
 }
 
-/// Read one fully recognised installed record by its authenticated application
-/// identifier. Pending, absent, and cross-application values are not aliases
-/// for an installed capability.
-/// cbcl-bus SPEC-080 REQ-001: the account scope this wallet already holds for
-/// one application, or `None` when nothing is installed there. A pending or
-/// foreign slot is not an account. This reads the private installed record
-/// only; it mints nothing and never exposes the scope beyond the caller.
+/// Read the existing account scope even while another device is pairing.
+/// Pending records alone never select an account.
 pub(crate) fn installed_account_scope(application_id: &str) -> Result<Option<[u8; 32]>> {
-    let _guard = SLOT_LOCK
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let entry = slot_name(application_id)?;
-    let Some(encoded) =
-        store::get(&entry).map_err(|_| UiError::from("PairingCheckpointUnavailable"))?
-    else {
-        return Ok(None);
-    };
-    match recognise_slot(&encoded)? {
-        CredentialV2LinkSlot::Installed(value) if value.application_id == application_id => {
-            codec::decode_b64url_32(&value.account_scope_id)
+    let _guard = SLOT_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    for slot in read_slots(application_id)?.into_iter().rev() {
+        if let CredentialV2LinkSlot::Installed(value) = slot {
+            return codec::decode_b64url_32(&value.account_scope_id)
                 .map(Some)
-                .map_err(|_| UiError::from("PairingCheckpointRefused"))
+                .map_err(|_| UiError::from("PairingCheckpointRefused"));
         }
-        CredentialV2LinkSlot::Pending(_) | CredentialV2LinkSlot::Installed(_) => Ok(None),
     }
+    Ok(None)
 }
 
+/// Read the most recently installed device for this application. A new pending
+/// ceremony never hides the previously installed capability.
 pub(crate) fn load_installed(application_id: &str) -> Result<InstalledCredentialV2Link> {
-    let _guard = SLOT_LOCK
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let entry = slot_name(application_id)?;
-    let encoded = store::get(&entry)
-        .map_err(|_| UiError::from("PairingCheckpointUnavailable"))?
-        .ok_or_else(|| UiError::from("PairingApplicationNotLinked"))?;
-    match recognise_slot(&encoded)? {
-        CredentialV2LinkSlot::Installed(value) if value.application_id == application_id => {
-            Ok(value)
-        }
-        CredentialV2LinkSlot::Pending(_) | CredentialV2LinkSlot::Installed(_) => {
-            Err(UiError::from("PairingApplicationNotLinked"))
-        }
-    }
+    let _guard = SLOT_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    read_slots(application_id)?
+        .into_iter()
+        .rev()
+        .find_map(|slot| match slot {
+            CredentialV2LinkSlot::Installed(value) => Some(value),
+            _ => None,
+        })
+        .ok_or_else(|| UiError::from("PairingApplicationNotLinked"))
 }
 
 /// Atomically re-pin one exact installed record after a complete live reload
@@ -1690,69 +1652,78 @@ pub(crate) fn replace_installed(
     if immutable_projection != *expected {
         return Err(UiError::from("PairingCheckpointRefused"));
     }
-    let entry = slot_name(&expected.application_id)?;
-    let encoded = store::get(&entry)
-        .map_err(|_| UiError::from("PairingCheckpointUnavailable"))?
-        .ok_or_else(|| UiError::from("PairingApplicationNotLinked"))?;
-    match recognise_slot(&encoded)? {
-        CredentialV2LinkSlot::Installed(current) if current == *expected => {
-            let encoded = encode_slot(&CredentialV2LinkSlot::Installed(replacement.clone()))?;
-            store::set(&entry, &encoded).map_err(|_| UiError::from("PairingCheckpointUnavailable"))
-        }
-        CredentialV2LinkSlot::Installed(current) if current == *replacement => Ok(()),
-        CredentialV2LinkSlot::Pending(_) | CredentialV2LinkSlot::Installed(_) => {
-            Err(UiError::from("PairingCheckpointRefused"))
-        }
+    let mut slots = read_slots(&expected.application_id)?;
+    if let Some(position) = slots.iter().position(
+        |slot| matches!(slot, CredentialV2LinkSlot::Installed(current) if current == expected),
+    ) {
+        slots[position] = CredentialV2LinkSlot::Installed(replacement.clone());
+        return write_slots(&expected.application_id, slots);
     }
+    if slots.iter().any(
+        |slot| matches!(slot, CredentialV2LinkSlot::Installed(current) if current == replacement),
+    ) {
+        return Ok(());
+    }
+    Err(UiError::from("PairingCheckpointRefused"))
 }
 
-/// Remove one exact pending or installed local application slot and its exact
-/// person-selected `(applicationId, relayOrigin)` policy row. The hierarchy
-/// root, sibling applications, and all remote hub state remain untouched.
+/// Abandon the selected pending ceremony without removing installed siblings,
+/// or unlink the application and all its installed device records. The complete
+/// snapshot must still match. Remote device grants are never revoked here.
 pub(crate) fn unlink_local(expected: &LocalCredentialV2Link) -> Result<()> {
     let _guard = SLOT_LOCK
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let (application_id, relay_origin) = match &expected.slot {
+    let application_id = match &expected.slot {
         CredentialV2LinkSlot::Pending(value) => {
             value.validate()?;
-            (&value.application_id, &value.relay_origin)
+            &value.application_id
         }
         CredentialV2LinkSlot::Installed(value) => {
             value.validate()?;
-            (&value.application_id, &value.relay_origin)
+            &value.application_id
         }
     };
-    let entry = slot_name(application_id)?;
-    let encoded = store::get(&entry)
-        .map_err(|_| UiError::from("PairingCheckpointUnavailable"))?
-        .ok_or_else(|| UiError::from("PairingApplicationNotLinked"))?;
-    if recognise_slot(&encoded)? != expected.slot {
+    let mut slots = read_slots(application_id)?;
+    if slots != expected.application_slots {
         return Err(UiError::from("PairingApplicationNotLinked"));
     }
-    let removed_policy = if let Some(selected) = expected.exact_pair_state {
-        let current = crate::cbcl_v2_policy::state(application_id, relay_origin)?;
-        if current != selected {
+    let pending = matches!(expected.slot, CredentialV2LinkSlot::Pending(_));
+    let mut removed_policies: Vec<&str> = Vec::new();
+    for (relay, selected) in &expected.exact_pair_states {
+        let current = crate::cbcl_v2_policy::state(application_id, relay)?;
+        if current != *selected {
             return Err(UiError::from("PairingCheckpointRefused"));
         }
-        current == crate::cbcl_v2_policy::ExactPairState::TrustedPair
-    } else {
-        false
-    };
-    if removed_policy {
-        crate::cbcl_v2_policy::remove(application_id, relay_origin)?;
     }
-    if store::delete(&entry).is_err() {
-        if removed_policy {
-            let _ = crate::cbcl_v2_policy::insert(application_id, relay_origin);
+    for (relay, selected) in &expected.exact_pair_states {
+        let retained = pending
+            && slots.iter().any(|s| {
+                matches!(s,
+            CredentialV2LinkSlot::Installed(v) if &v.relay_origin == relay)
+            });
+        if *selected == crate::cbcl_v2_policy::ExactPairState::TrustedPair && !retained {
+            if let Err(error) = crate::cbcl_v2_policy::remove(application_id, relay) {
+                for previous in &removed_policies {
+                    let _ = crate::cbcl_v2_policy::insert(application_id, previous);
+                }
+                return Err(error);
+            }
+            removed_policies.push(relay.as_str());
         }
-        return Err(UiError::from("PairingCheckpointUnavailable"));
     }
-    let mut index = load_index_locked()?;
-    index
-        .applications
-        .retain(|candidate| candidate != application_id);
-    persist_index_locked(&index)
+    if pending {
+        slots.retain(|s| s != &expected.slot);
+    } else {
+        slots.clear();
+    }
+    if let Err(error) = write_slots(application_id, slots) {
+        for relay in removed_policies {
+            let _ = crate::cbcl_v2_policy::insert(application_id, relay);
+        }
+        return Err(error);
+    }
+    Ok(())
 }
 
 /// Remove one exact verified terminal-negative pending value.
@@ -1761,26 +1732,15 @@ pub(crate) fn unlink_local(expected: &LocalCredentialV2Link) -> Result<()> {
 /// the slot before its public index row means a storage failure can leave only
 /// a harmless stale row, never a discoverability-losing live credential.
 pub fn remove_pending(expected: &PendingCredentialV2Completion) -> Result<()> {
-    let _guard = SLOT_LOCK
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _guard = SLOT_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     expected.validate()?;
-    let entry = slot_name(&expected.application_id)?;
-    let encoded = store::get(&entry)
-        .map_err(|_| UiError::from("PairingCheckpointUnavailable"))?
+    let mut slots = read_slots(&expected.application_id)?;
+    let position = slots
+        .iter()
+        .position(|s| matches!(s, CredentialV2LinkSlot::Pending(v) if v == expected))
         .ok_or_else(|| UiError::from("PairingCheckpointRefused"))?;
-    match recognise_slot(&encoded)? {
-        CredentialV2LinkSlot::Pending(current) if current == *expected => {}
-        CredentialV2LinkSlot::Pending(_) | CredentialV2LinkSlot::Installed(_) => {
-            return Err(UiError::from("PairingCheckpointRefused"));
-        }
-    }
-    store::delete(&entry).map_err(|_| UiError::from("PairingCheckpointUnavailable"))?;
-    let mut index = load_index_locked()?;
-    index
-        .applications
-        .retain(|application_id| application_id != &expected.application_id);
-    persist_index_locked(&index)
+    slots.remove(position);
+    write_slots(&expected.application_id, slots)
 }
 
 /// Best-effort compensation for a final-approved attempt that has not reached
@@ -1793,14 +1753,16 @@ fn remove_pre_payload_attempt(anchor: &PendingCredentialV2Completion) -> Result<
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     anchor.validate()?;
-    let entry = slot_name(&anchor.application_id)?;
-    let Some(encoded) =
-        store::get(&entry).map_err(|_| UiError::from("PairingCheckpointUnavailable"))?
-    else {
+    let mut slots = read_slots(&anchor.application_id)?;
+    if slots.is_empty() {
         return Ok(());
-    };
-    let CredentialV2LinkSlot::Pending(current) = recognise_slot(&encoded)? else {
-        return Err(UiError::from("PairingCheckpointRefused"));
+    }
+    let position = slots
+        .iter()
+        .position(|s| matches!(s, CredentialV2LinkSlot::Pending(_)))
+        .ok_or_else(|| UiError::from("PairingCheckpointRefused"))?;
+    let CredentialV2LinkSlot::Pending(current) = &slots[position] else {
+        unreachable!()
     };
     current.validate()?;
     let same_attempt = current.flow == anchor.flow
@@ -1822,12 +1784,8 @@ fn remove_pre_payload_attempt(anchor: &PendingCredentialV2Completion) -> Result<
     if current.is_payload_prepared() {
         return Ok(());
     }
-    store::delete(&entry).map_err(|_| UiError::from("PairingCheckpointUnavailable"))?;
-    let mut index = load_index_locked()?;
-    index
-        .applications
-        .retain(|application_id| application_id != &anchor.application_id);
-    persist_index_locked(&index)
+    slots.remove(position);
+    write_slots(&anchor.application_id, slots)
 }
 
 /// Remove every credential/v2 pending or installed slot during root purge.
@@ -1866,38 +1824,26 @@ pub fn replace_pending(
     {
         return Err(UiError::from("PairingCheckpointRefused"));
     }
-    let entry = slot_name(&expected.application_id)?;
-    let existing = store::get(&entry)
-        .map_err(|_| UiError::from("PairingCheckpointUnavailable"))?
-        .ok_or_else(|| UiError::from("PairingCheckpointRefused"))?;
-    match recognise_slot(&existing)? {
-        CredentialV2LinkSlot::Pending(current) if current == *expected => {
-            let encoded = encode_slot(&CredentialV2LinkSlot::Pending(replacement.clone()))?;
-            store::set(&entry, &encoded).map_err(|_| UiError::from("PairingCheckpointUnavailable"))
-        }
-        CredentialV2LinkSlot::Pending(_) | CredentialV2LinkSlot::Installed(_) => {
-            Err(UiError::from("PairingCheckpointRefused"))
-        }
+    let mut slots = read_slots(&expected.application_id)?;
+    if let Some(position) = slots.iter().position(
+        |slot| matches!(slot, CredentialV2LinkSlot::Pending(current) if current == expected),
+    ) {
+        slots[position] = CredentialV2LinkSlot::Pending(replacement.clone());
+        return write_slots(&expected.application_id, slots);
     }
+    Err(UiError::from("PairingCheckpointRefused"))
 }
 
 /// Load and fully recognise the exact pending application slot.
 pub fn load_pending(application_id: &str) -> Result<PendingCredentialV2Completion> {
-    let _guard = SLOT_LOCK
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let entry = slot_name(application_id)?;
-    let encoded = store::get(&entry)
-        .map_err(|_| UiError::from("PairingCheckpointUnavailable"))?
-        .ok_or_else(|| UiError::from("PairingCheckpointRefused"))?;
-    match recognise_slot(&encoded)? {
-        CredentialV2LinkSlot::Pending(pending) if pending.application_id == application_id => {
-            Ok(pending)
-        }
-        CredentialV2LinkSlot::Pending(_) | CredentialV2LinkSlot::Installed(_) => {
-            Err(UiError::from("PairingCheckpointRefused"))
-        }
-    }
+    let _guard = SLOT_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    read_slots(application_id)?
+        .into_iter()
+        .find_map(|slot| match slot {
+            CredentialV2LinkSlot::Pending(value) => Some(value),
+            _ => None,
+        })
+        .ok_or_else(|| UiError::from("PairingCheckpointRefused"))
 }
 
 /// Atomically replace the exact pending record with an installed link after a
@@ -1926,20 +1872,19 @@ pub fn install(
         &[account.as_str().to_owned()],
     )
     .map_err(|_| UiError::from("PairingAuthorityRefused"))?;
-    let entry = slot_name(&expected.application_id)?;
-    let encoded = store::get(&entry)
-        .map_err(|_| UiError::from("PairingCheckpointUnavailable"))?
-        .ok_or_else(|| UiError::from("PairingCheckpointRefused"))?;
-    match recognise_slot(&encoded)? {
-        CredentialV2LinkSlot::Pending(current) if current == *expected => {
-            let encoded = encode_slot(&CredentialV2LinkSlot::Installed(installed.clone()))?;
-            store::set(&entry, &encoded).map_err(|_| UiError::from("PairingCheckpointUnavailable"))
-        }
-        CredentialV2LinkSlot::Installed(current) if current == *installed => Ok(()),
-        CredentialV2LinkSlot::Pending(_) | CredentialV2LinkSlot::Installed(_) => {
-            Err(UiError::from("PairingCheckpointRefused"))
-        }
+    let mut slots = read_slots(&expected.application_id)?;
+    if let Some(position) = slots.iter().position(
+        |slot| matches!(slot, CredentialV2LinkSlot::Pending(current) if current == expected),
+    ) {
+        slots[position] = CredentialV2LinkSlot::Installed(installed.clone());
+        return write_slots(&expected.application_id, slots);
     }
+    if slots.iter().any(
+        |slot| matches!(slot, CredentialV2LinkSlot::Installed(current) if current == installed),
+    ) {
+        return Ok(());
+    }
+    Err(UiError::from("PairingCheckpointRefused"))
 }
 
 fn encode_slot(slot: &CredentialV2LinkSlot) -> Result<String> {
@@ -1965,6 +1910,110 @@ fn recognise_slot(encoded: &str) -> Result<CredentialV2LinkSlot> {
         CredentialV2LinkSlot::Installed(value) => value.validate()?,
     }
     Ok(slot)
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ApplicationLinkSlots {
+    version: u8,
+    links: Vec<CredentialV2LinkSlot>,
+}
+
+fn slot_application(slot: &CredentialV2LinkSlot) -> &str {
+    match slot {
+        CredentialV2LinkSlot::Pending(v) => &v.application_id,
+        CredentialV2LinkSlot::Installed(v) => &v.application_id,
+    }
+}
+
+fn read_slots(application_id: &str) -> Result<Vec<CredentialV2LinkSlot>> {
+    let Some(encoded) = store::get(&slot_name(application_id)?)
+        .map_err(|_| UiError::from("PairingCheckpointUnavailable"))?
+    else {
+        return Ok(Vec::new());
+    };
+    let slots = if let Ok(single) = recognise_slot(&encoded) {
+        vec![single]
+    } else {
+        if encoded.len() > MAX_SLOT_OCTETS * MAX_APPLICATION_LINKS {
+            return Err(UiError::from("PairingCheckpointRefused"));
+        }
+        let bundle: ApplicationLinkSlots = serde_json::from_str(&encoded)
+            .map_err(|_| UiError::from("PairingCheckpointRefused"))?;
+        if bundle.version != 2
+            || bundle.links.len() < 2
+            || serde_json::to_string(&bundle).ok().as_deref() != Some(encoded.as_str())
+        {
+            return Err(UiError::from("PairingCheckpointRefused"));
+        }
+        bundle.links
+    };
+    validate_slots(application_id, &slots)?;
+    Ok(slots)
+}
+
+fn validate_slots(application_id: &str, slots: &[CredentialV2LinkSlot]) -> Result<()> {
+    if slots.len() > MAX_APPLICATION_LINKS {
+        return Err(UiError::from("PairingCheckpointRefused"));
+    }
+    let mut pending = false;
+    let mut ceremonies = std::collections::BTreeSet::new();
+    let mut devices = std::collections::BTreeSet::new();
+    let mut root = None;
+    for slot in slots {
+        if slot_application(slot) != application_id {
+            return Err(UiError::from("PairingCheckpointRefused"));
+        }
+        recognise_slot(&encode_slot(slot)?)?;
+        let generation = match slot {
+            CredentialV2LinkSlot::Pending(v) => {
+                if pending {
+                    return Err(UiError::from("PairingApplicationAlreadyLinked"));
+                }
+                pending = true;
+                &v.root_generation
+            }
+            CredentialV2LinkSlot::Installed(v) => {
+                if !ceremonies.insert(&v.carrier_ceremony_id)
+                    || !devices.insert(&v.installation_device_did)
+                {
+                    return Err(UiError::from("PairingCheckpointRefused"));
+                }
+                &v.root_generation
+            }
+        };
+        if root.is_some_and(|previous| previous != generation) {
+            return Err(UiError::from("PairingCheckpointRefused"));
+        }
+        root = Some(generation);
+    }
+    Ok(())
+}
+
+// Called only under SLOT_LOCK. A single secure-store replacement commits the
+// pending transition and preserves every previously installed device together.
+fn write_slots(application_id: &str, slots: Vec<CredentialV2LinkSlot>) -> Result<()> {
+    validate_slots(application_id, &slots)?;
+    let entry = slot_name(application_id)?;
+    if slots.is_empty() {
+        store::delete(&entry).map_err(|_| UiError::from("PairingCheckpointUnavailable"))?;
+        let mut index = load_index_locked()?;
+        index.applications.retain(|id| id != application_id);
+        return persist_index_locked(&index);
+    }
+    let encoded = if slots.len() == 1 {
+        encode_slot(&slots[0])?
+    } else {
+        serde_json::to_string(&ApplicationLinkSlots {
+            version: 2,
+            links: slots,
+        })
+        .map_err(|_| UiError::from("PairingCheckpointRefused"))?
+    };
+    if encoded.len() > MAX_SLOT_OCTETS * MAX_APPLICATION_LINKS {
+        return Err(UiError::from("PairingCheckpointRefused"));
+    }
+    store::set(&entry, &encoded).map_err(|_| UiError::from("PairingCheckpointUnavailable"))
 }
 
 fn empty_index() -> CredentialV2LinkIndex {
@@ -2206,6 +2255,10 @@ mod tests {
     }
 
     fn installed_reload_fixture() -> InstalledCredentialV2Link {
+        installed_device_fixture(0x34)
+    }
+
+    fn installed_device_fixture(device: u8) -> InstalledCredentialV2Link {
         let signing_key = SigningKey::from_bytes(&[0x31; 32]);
         let profile_octets = reload_profile(&signing_key, 1);
         let profile =
@@ -2214,7 +2267,7 @@ mod tests {
         let scope = AccountScopeId::from_octets([0x33; 32]);
         let home = selfsame_app_identity::hierarchy::derive(&root, &profile.application_id, &scope);
         let issuer_did = home.home_did().unwrap();
-        let device_key = SigningKey::from_bytes(&[0x34; 32])
+        let device_key = SigningKey::from_bytes(&[device; 32])
             .verifying_key()
             .to_bytes();
         let plan = CredentialV2ProvisioningPlan {
@@ -2227,14 +2280,14 @@ mod tests {
             preview_issuer_did: issuer_did.clone(),
         };
         let issuer = build_issuer_artifacts(&root, &plan, 1_800_000_000).unwrap();
-        let grant_id = [0x35; 32];
+        let grant_id = [device.wrapping_add(1); 32];
         let grant =
             build_grant_artifacts(&root, &plan, &issuer, grant_id, 1_800_000_000, 86_400).unwrap();
         let compact =
             selfsame_app_identity::jws::recognise(&grant.grant, grant::GRANT_JWS, &[]).unwrap();
         let recognised_grant = grant::recognise(&compact.payload).unwrap();
-        let carrier_ceremony_id = [0x36; 32];
-        let request_id = [0x37; 32];
+        let carrier_ceremony_id = [device.wrapping_add(2); 32];
+        let request_id = [device.wrapping_add(3); 32];
         let account_principal_digest = [0x38; 32];
         let offer_core_digest = [0x39; 32];
         let payload_digest = [0x3a; 32];
@@ -2299,6 +2352,152 @@ mod tests {
         installed
     }
 
+    #[test]
+    #[ignore = "installs the process-global in-memory keyring; run alone"]
+    fn second_device_pairing_preserves_installed_link_through_completion_and_failures() {
+        shared_memkeyring::install();
+        shared_memkeyring::clear();
+        let first = installed_reload_fixture();
+        let second = installed_device_fixture(0x44);
+        let app = first.application_id.as_str();
+        let mut pending = pending_abandonment_fixture();
+        pending.root_generation = first.root_generation.clone();
+        pending.validate().unwrap();
+        ensure_indexed_locked(app).unwrap();
+        overwrite_test_slot(&CredentialV2LinkSlot::Installed(first.clone()));
+        let original = store::get(&slot_name(app).unwrap()).unwrap().unwrap();
+
+        // Existing v1 bytes require no migration. An ordinary second-device
+        // final approval now starts without replacing the installed grant.
+        assert_eq!(load_installed(app).unwrap(), first);
+        persist_pending(&pending).unwrap();
+        persist_pending(&pending).unwrap();
+        assert_eq!(load_installed(app).unwrap(), first);
+        assert_eq!(load_pending(app).unwrap(), pending);
+        assert_eq!(
+            installed_account_scope(app).unwrap(),
+            Some(codec::decode_b64url_32(&first.account_scope_id).unwrap())
+        );
+        assert_eq!(installed_links().unwrap().len(), 1);
+        assert_eq!(pending_links().unwrap().len(), 1);
+        let mut competing = pending.clone();
+        competing.offer_expires_at += 1;
+        assert!(persist_pending(&competing).is_err());
+        assert!(remove_pending(&competing).is_err());
+        let mut advanced = pending.clone();
+        advanced.checkpoint_generation += 1;
+        replace_pending(&pending, &advanced).unwrap();
+        assert!(replace_pending(&pending, &advanced).is_err());
+        assert_eq!(load_installed(app).unwrap(), first);
+        remove_pending(&advanced).unwrap();
+        assert_eq!(
+            store::get(&slot_name(app).unwrap()).unwrap().unwrap(),
+            original
+        );
+        assert_eq!(installed_links().unwrap().len(), 1);
+
+        // Compensation and person abandonment remove only the new ceremony.
+        let guard = PrePayloadPendingTransaction::begin(pending.clone()).unwrap();
+        drop(guard);
+        assert_eq!(load_installed(app).unwrap(), first);
+        assert!(pending_links().unwrap().is_empty());
+        persist_pending(&pending).unwrap();
+        let selected = load_local_link(app).unwrap();
+        assert!(selected.is_pending());
+        unlink_local(&selected).unwrap();
+        assert_eq!(load_installed(app).unwrap(), first);
+        assert!(load_pending(app).is_err());
+
+        // A secure-store failure before or after committing the new checkpoint
+        // must leave the original installed device intact after compensation.
+        for failure in [
+            shared_memkeyring::SetFailure::BeforeCommit,
+            shared_memkeyring::SetFailure::AfterCommit,
+        ] {
+            shared_memkeyring::fail_next_set_for_user(&slot_name(app).unwrap(), failure);
+            assert!(PrePayloadPendingTransaction::begin(pending.clone()).is_err());
+            assert_eq!(
+                store::get(&slot_name(app).unwrap()).unwrap().unwrap(),
+                original
+            );
+            assert!(pending_links().unwrap().is_empty());
+        }
+
+        // Successful receipt installation appends the second device atomically.
+        let stale_unlink = load_local_link(app).unwrap();
+        persist_pending(&pending).unwrap();
+        assert!(unlink_local(&stale_unlink).is_err());
+        let jrd = selfsame_app_identity::alias::Jrd {
+            subject: second.account.clone(),
+            aliases: vec![second.issuer_did.clone()],
+        };
+        shared_memkeyring::fail_next_set_for_user(
+            &slot_name(app).unwrap(),
+            shared_memkeyring::SetFailure::BeforeCommit,
+        );
+        assert!(install(&pending, &second, &jrd).is_err());
+        assert_eq!(load_installed(app).unwrap(), first);
+        assert_eq!(load_pending(app).unwrap(), pending);
+        shared_memkeyring::fail_next_set_for_user(
+            &slot_name(app).unwrap(),
+            shared_memkeyring::SetFailure::AfterCommit,
+        );
+        assert!(install(&pending, &second, &jrd).is_err());
+        // Recovery can retry an acknowledged-or-not write without duplication.
+        install(&pending, &second, &jrd).unwrap();
+        let records = read_slots(app).unwrap();
+        assert_eq!(
+            records,
+            vec![
+                CredentialV2LinkSlot::Installed(first.clone()),
+                CredentialV2LinkSlot::Installed(second.clone())
+            ]
+        );
+        assert_eq!(load_installed(app).unwrap(), second);
+        assert_eq!(
+            installed_account_scope(app).unwrap(),
+            Some(codec::decode_b64url_32(&first.account_scope_id).unwrap())
+        );
+        assert!(pending_links().unwrap().is_empty());
+        assert_eq!(installed_links().unwrap().len(), 1, "one application row");
+        assert!(remove_pending(&pending).is_err());
+        assert_eq!(read_slots(app).unwrap(), records);
+
+        // Discovery and purge retain every sibling even after restart reads.
+        assert!(pending_application_ids().unwrap().is_empty());
+        assert_eq!(read_slots(app).unwrap(), records);
+        purge_all_links().unwrap();
+        assert!(read_slots(app).unwrap().is_empty());
+        assert!(installed_links().unwrap().is_empty());
+    }
+
+    #[test]
+    fn application_collection_rejects_duplicate_devices_cross_root_and_overflow() {
+        let first = installed_reload_fixture();
+        let app = first.application_id.as_str();
+        let mut pending = pending_abandonment_fixture();
+        let installed = CredentialV2LinkSlot::Installed(first.clone());
+        assert!(validate_slots(
+            app,
+            &[
+                installed.clone(),
+                CredentialV2LinkSlot::Pending(pending.clone())
+            ]
+        )
+        .is_err());
+        pending.root_generation = first.root_generation.clone();
+        let waiting = CredentialV2LinkSlot::Pending(pending);
+        assert!(validate_slots(app, &[installed.clone(), waiting.clone()]).is_ok());
+        assert!(validate_slots(app, &[installed.clone(), installed.clone()]).is_err());
+        assert!(validate_slots(app, &[waiting.clone(), waiting]).is_err());
+        assert!(validate_slots(
+            "https://elsewhere.example/app",
+            std::slice::from_ref(&installed)
+        )
+        .is_err());
+        assert!(validate_slots(app, &vec![installed; MAX_APPLICATION_LINKS + 1]).is_err());
+    }
+
     fn pending_abandonment_fixture() -> PendingCredentialV2Completion {
         let signing_key = SigningKey::from_bytes(&[0x31; 32]);
         let profile_octets = reload_profile(&signing_key, 1);
@@ -2358,7 +2557,10 @@ mod tests {
         let application = installed.application_id().to_string();
         overwrite_test_slot(&CredentialV2LinkSlot::Installed(installed.clone()));
         let expected = codec::decode_b64url_32(&installed.account_scope_id).unwrap();
-        assert_eq!(installed_account_scope(&application).unwrap(), Some(expected));
+        assert_eq!(
+            installed_account_scope(&application).unwrap(),
+            Some(expected)
+        );
         assert_eq!(
             installed_account_scope("https://other.example/selfsame/application").unwrap(),
             None
@@ -2488,7 +2690,7 @@ mod tests {
                 assert_eq!(load_pending(pending.application_id()).unwrap(), prepared);
                 assert_eq!(identity_effect_count(), baseline_identity);
                 let selected = load_local_link(pending.application_id()).unwrap();
-                assert!(selected.exact_pair_state.is_none());
+                assert!(selected.exact_pair_states.is_empty());
                 unlink_local(&selected).unwrap();
             }
             assert!(pending_links().unwrap().is_empty());
@@ -2501,7 +2703,7 @@ mod tests {
         installed.flow = SingleLink;
         overwrite_test_slot(&CredentialV2LinkSlot::Installed(installed.clone()));
         let selected = load_local_link(installed.application_id()).unwrap();
-        assert!(selected.exact_pair_state.is_none());
+        assert!(selected.exact_pair_states.is_empty());
         unlink_local(&selected).unwrap();
         assert_eq!(shared_memkeyring::policy_operations(), existing_policy);
         assert_eq!(
