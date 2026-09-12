@@ -34,6 +34,7 @@
   --green-soft: #8fd9ac;
   --amber: #d9903b;
   --rust: #d9553f;
+  --rust-soft: #e57560;
   --hairline: rgba(237, 232, 223, 0.1);
   --hairline-strong: rgba(237, 232, 223, 0.18);
 
@@ -583,7 +584,15 @@ code {
   color: var(--rust);
 }
 .btn--danger:hover {
+  /*
+   * The tint alone pulls the background toward the text: --rust over the
+   * tinted shell measures 4.41:1, under the 4.5:1 AA floor, so a hovered
+   * danger button failed the audit whenever the cursor happened to rest on
+   * it. Lift the text too, as --primary does with --green-soft: --rust-soft
+   * on the tint is 5.84:1.
+   */
   background: rgba(217, 85, 63, 0.12);
+  color: var(--rust-soft);
 }
 
 .btn--small {
