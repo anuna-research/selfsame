@@ -80,6 +80,11 @@ jobs:
           test "$(git -C ../cbcl-pairing rev-parse HEAD)" = "${pairing_sha}"
           test -z "$(git -C ../cbcl-pairing status --porcelain --untracked-files=no)"
 
+      - name: Clone the pinned archive dependency
+        env:
+          CBCL_BUS_READ_KEY: ${{ secrets.CBCL_BUS_READ_KEY }}
+        run: bash scripts/clone-archive-dependency.sh
+
       # src-tauri links against the system webview. Without these the workspace
       # does not build on Linux at all — the -sys crates' build scripts look for
       # them through pkg-config and fail at `cargo check`, long before any test
@@ -263,6 +268,11 @@ jobs:
           git -C ../cbcl-pairing checkout --detach "${pairing_sha}"
           test "$(git -C ../cbcl-pairing rev-parse HEAD)" = "${pairing_sha}"
           test -z "$(git -C ../cbcl-pairing status --porcelain --untracked-files=no)"
+
+      - name: Clone the pinned archive dependency
+        env:
+          CBCL_BUS_READ_KEY: ${{ secrets.CBCL_BUS_READ_KEY }}
+        run: bash scripts/clone-archive-dependency.sh
 
       - name: Ensure Rust for the pairing demo
         run: |
