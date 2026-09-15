@@ -1123,6 +1123,23 @@ impl InstalledCredentialV2Link {
         &self.credential_id
     }
 
+    /// SPEC-082: only the installed, validated link supplies archive scope.
+    pub(crate) fn archive_link(&self) -> Result<Option<cbcl_archive_core::wallet_exchange::LinkedDevice>> {
+        self.validate()?;
+        let compact = selfsame_app_identity::jws::recognise(&self.grant, grant::GRANT_JWS, &[])
+            .map_err(|_| UiError::from("ArchiveRecoveryRefused"))?;
+        let grant = grant::recognise(&compact.payload).map_err(|_| UiError::from("ArchiveRecoveryRefused"))?;
+        // Chat read/send capabilities include this application's archive sync.
+        if !["chat-read", "chat-send"].iter().all(|p|
+            grant.permissions.contains(&format!("{}#{}", self.application_id, p))) { return Ok(None); }
+        Ok(Some(cbcl_archive_core::wallet_exchange::LinkedDevice {
+            application: self.application_id.clone(), account: self.issuer_did.clone(),
+            scope: codec::decode_b64url_32(&self.account_scope_id).map_err(|_| UiError::from("ArchiveRecoveryRefused"))?,
+            device: self.installation_device_public_key()?,
+            nonce: cbcl_archive_core::wallet_exchange::link_nonce(self.grant_bytes()).map_err(|_| UiError::from("ArchiveRecoveryRefused"))?,
+        }))
+    }
+
     pub(crate) fn grant_bytes(&self) -> &[u8] {
         self.grant.as_bytes()
     }

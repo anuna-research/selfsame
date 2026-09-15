@@ -1067,7 +1067,9 @@ for (const [name, outcome] of [['denied', 'denied'], ['granted', 'granted']]) {
   const invokeCallerFiles = javascriptModules
     .filter((file) => /\binvoke\s*\(/.test(src(file)))
     .sort();
-  const EXPECTED_INVOKE_CALLER_COUNT = 3;
+  // Archive recovery adds a fourth caller; its two commands must resolve
+  // through the same registration comparison below as every other caller.
+  const EXPECTED_INVOKE_CALLER_COUNT = 4;
   if (invokeCallerFiles.length !== EXPECTED_INVOKE_CALLER_COUNT) {
     errors.push(`invoke-surface: discovered ${invokeCallerFiles.length} JavaScript invoke callers, expected ${EXPECTED_INVOKE_CALLER_COUNT} (${invokeCallerFiles.join(', ')}) — caller discovery changed and must be reviewed`);
   }

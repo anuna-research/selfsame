@@ -62,6 +62,7 @@ import { initAppIdentity } from "./app-identity.js";
 // specification — the pairing that produces an offer, rather than the SPEC-004
 // screens that live with one afterwards.
 import { initPairing } from "./pairing.js";
+import { initArchiveRecovery } from "./archive-recovery.js";
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
@@ -933,6 +934,7 @@ const pairing = initPairing({
   renderInstalledSummary: links => appIdentity.renderSummary(ui.state?.applications ?? [], links),
 });
 pairingNavigation = pairing.leaving;
+initArchiveRecovery({invoke,actions});
 
 // The CON-219 enrolment reuses three screens the same-device path (IMPL-004)
 // also owns: consent-application, presence, and fingerprint-compare. Their

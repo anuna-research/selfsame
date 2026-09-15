@@ -36,7 +36,7 @@ phone can change the lock.*
 
 ## Before you build
 
-Selfsame depends on three sibling repositories by path. Clone them next to this
+Selfsame depends on four sibling repositories by path. Clone them next to this
 one or nothing compiles:
 
 ```
@@ -44,7 +44,8 @@ Code/
 ├── selfsame/     ← you are here
 ├── did-crdt/     git clone https://git.anuna.io/anuna-research/did-crdt
 ├── cbcl-rs/      git clone https://git.anuna.io/anuna-research/cbcl-rs
-└── cbcl-pairing/ git clone https://git.anuna.io/anuna-research/cbcl-pairing
+├── cbcl-pairing/ git clone https://git.anuna.io/anuna-research/cbcl-pairing
+└── cbcl-bus/     git clone ssh://git@git.anuna.io/anuna-research/cbcl-bus.git
 ```
 
 `did-crdt` is pinned at `9a53bff1ed3eb88680fe19db0366ffd13d6b240a` — its DID
@@ -59,6 +60,11 @@ convention `cbcl-bus` uses for the `cbcl-erl` NIF.
 `cbcl-pairing` is pinned by `cbcl-pairing.sha`. The Selfsame adapter uses that
 crate for invitation recognition, CPace, Finished, CBCL session projection,
 endpoint reduction, and the in-memory blind relay.
+
+`cbcl-bus` is pinned by `cbcl-bus.sha` and supplies the shared archive core.
+Run `bash scripts/clone-archive-dependency.sh` with repository read access to
+check out the exact revision. CI uses a read-only deploy key for this private
+dependency; the trusted SSH host key is recorded in `scripts/archive-known-hosts`.
 
 ## Credential pairing
 

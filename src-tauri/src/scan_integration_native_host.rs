@@ -175,6 +175,7 @@ impl Host {
         if Custody::exists()? || !completion::installed_links()?.is_empty() {
             return Err(UiError::from("HostCustodyRefused"));
         }
+        crate::archive_recovery::configure_test_client(args.root_pem.as_bytes(), &args.proxy_url)?;
         selfsame_app_identity_net::test_support::install(http)
             .map_err(|_| UiError::from("HostAlreadyConfigured"))?;
         cbcl_transport::install_host_config(relay).map_err(UiError::from)?;

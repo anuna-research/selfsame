@@ -281,6 +281,25 @@ pub fn home_key(account: &AccountNode) -> HomeKey {
     HomeKey { seed, signing }
 }
 
+/// Wallet-only archive HPKE derivation material (CBCL SPEC-082 CON-001).
+/// Never serialize or deliver this deterministic material to an enrolled device.
+pub struct ArchiveRecoverySeed(Zeroizing<[u8; 32]>);
+impl ArchiveRecoverySeed {
+    /// Feed the existing archive HPKE DeriveKeyPair operation inside the wallet.
+    pub fn for_wallet_hpke(&self) -> &[u8; 32] { &self.0 }
+}
+impl core::fmt::Debug for ArchiveRecoverySeed {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str("ArchiveRecoverySeed(<redacted>)")
+    }
+}
+/// A sibling of home signing, scoped by the existing application/account nodes.
+pub fn archive_recovery_seed(account: &AccountNode) -> ArchiveRecoverySeed {
+    let mut seed = Zeroizing::new([0u8; 32]);
+    expand(account.as_bytes(), "archive-recovery-hpke-v1", "", seed.as_mut());
+    ArchiveRecoverySeed(seed)
+}
+
 /// The whole hierarchy from a sealed root — the shape a wallet actually uses.
 ///
 /// Takes the root rather than the mnemonic, because that is the property
@@ -363,6 +382,30 @@ mod tests {
 
     const A: &str = "https://photos.example/selfsame/application";
     const B: &str = "https://pictura.example/selfsame/application";
+
+    #[test]
+    fn archive_recovery_matches_independent_hmac_sha512_vector() {
+        let root = HierarchyRoot::from_octets([7; 64]);
+        let account = account_node(&application_node(&root, &app(A)), &scope(1));
+        assert_eq!(hex::encode(archive_recovery_seed(&account).for_wallet_hpke()),
+            "804ea4f4a1bf8713b67d654cfb3c13d92ba77d817e881092a2fd4e55daa84863");
+    }
+
+    #[test]
+    fn archive_recovery_is_restorable_scoped_and_separate_from_signing() {
+        let root = hierarchy_root(&mnemonic(0));
+        let restored = HierarchyRoot::from_octets(*root.expose());
+        let account = account_node(&application_node(&root, &app(A)), &scope(1));
+        let seed = archive_recovery_seed(&account);
+        let same = account_node(&application_node(&restored, &app(A)), &scope(1));
+        assert_eq!(seed.for_wallet_hpke(), archive_recovery_seed(&same).for_wallet_hpke());
+        assert_ne!(seed.for_wallet_hpke(), home_key(&account).seed());
+        for other in [account_node(&application_node(&root, &app(B)), &scope(1)),
+                      account_node(&application_node(&root, &app(A)), &scope(2))] {
+            assert_ne!(seed.for_wallet_hpke(), archive_recovery_seed(&other).for_wallet_hpke());
+        }
+        assert_eq!(format!("{:?}", seed), "ArchiveRecoverySeed(<redacted>)");
+    }
 
     // TEST-202 positive: determinism.
     #[test]

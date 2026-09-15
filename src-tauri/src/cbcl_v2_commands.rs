@@ -102,7 +102,12 @@ impl CeremonyCustody {
         action: impl FnOnce(&selfsame_app_identity::hierarchy::HierarchyRoot) -> Result<T>,
     ) -> Result<T> {
         match self {
-            Self::Legacy { root, .. } => action(root),
+            Self::Legacy { root, authorized_at } => {
+                if authorized_at.elapsed() >= CEREMONY_CUSTODY_LIFETIME {
+                    return Err(UiError::from("PairingExpired"));
+                }
+                action(root)
+            },
             Self::Bounded(attempt) => attempt.with_custody(action),
         }
     }
@@ -202,6 +207,7 @@ pub struct CredentialV2FinalDecisionView {
 #[serde(rename_all = "camelCase")]
 pub struct CredentialV2FinishView {
     outcome: &'static str,
+    archive_status: &'static str,
 }
 
 /// Restart-safe result of the direct application-origin recovery adapter.
@@ -1049,6 +1055,9 @@ async fn finish_pending(
         return Err(error);
     }
 
+    // Preserve custody under the same attempt while promptly acknowledging the
+    // durable account installation. Archive I/O must not hold the relay open.
+    let archive_custody = pending.ceremony_custody.take();
     // Installation is already durable. Failure to deliver the relay ACK must
     // not roll back or misreport the installed account capability.
     if let Some(receipt) = pending.recovered_receipt.take() {
@@ -1063,9 +1072,20 @@ async fn finish_pending(
             .await;
         }
     }
-    ensure_current(session, &attempt)?;
+    // Installation is durable even if this bounded archive attempt expires.
+    // Report its status separately; never ask for another archive approval.
+    let archive_status = if installed.archive_link()?.is_none() {
+        "not-applicable"
+    } else if let Some(custody) = archive_custody.as_ref() {
+        match attempt.io(crate::archive_recovery::complete_linked(&installed, |link, request| {
+            custody.with_root(|root| crate::archive_recovery::complete_for_link(root, link, request))
+        })).await {
+            Ok(()) => "synchronized",
+            Err(_) => "pending",
+        }
+    } else { "pending" };
     Ok(CredentialV2FinishView {
-        outcome: "installed",
+        outcome: "installed", archive_status,
     })
 }
 
@@ -2558,3 +2578,18 @@ mod tests {
 
 #[path = "cbcl_v2_single_link.rs"]
 pub mod single_link;
+
+#[cfg(test)]
+mod archive_custody_tests {
+    use super::*;
+    #[test]
+    fn expired_legacy_custody_never_releases_archive_material() {
+        let custody=CeremonyCustody::Legacy {
+            root:selfsame_app_identity::hierarchy::HierarchyRoot::from_octets([42;64]),
+            authorized_at:Instant::now()-CEREMONY_CUSTODY_LIFETIME,
+        };
+        let mut used=false;
+        assert!(custody.with_root(|_|{used=true;Ok(())}).is_err());
+        assert!(!used);
+    }
+}

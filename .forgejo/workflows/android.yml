@@ -147,6 +147,11 @@ jobs:
           test "$(git -C ../cbcl-pairing rev-parse HEAD)" = "${pairing_sha}"
           test -z "$(git -C ../cbcl-pairing status --porcelain --untracked-files=no)"
 
+      - name: Clone the pinned archive dependency
+        env:
+          CBCL_BUS_READ_KEY: ${{ secrets.CBCL_BUS_READ_KEY }}
+        run: bash scripts/clone-archive-dependency.sh
+
       - name: Install the C toolchain and JDK 17
         run: |
           set -euo pipefail
@@ -208,7 +213,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             ~/.cargo/bin
-          key: android-cargo-${{ hashFiles('Cargo.lock', 'cbcl-rs.sha', 'did-crdt.sha', 'cbcl-pairing.sha') }}
+          key: android-cargo-${{ hashFiles('Cargo.lock', 'cbcl-rs.sha', 'did-crdt.sha', 'cbcl-pairing.sha', 'cbcl-bus.sha') }}
           restore-keys: android-cargo-
 
       - name: Ensure Rust and the aarch64 Android target
