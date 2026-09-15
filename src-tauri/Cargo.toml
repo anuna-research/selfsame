@@ -19,6 +19,7 @@ local-pairing-demo = ["selfsame-pairing/local-pairing-demo"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+cbcl-archive-core = { path = "../../cbcl-bus/crates/cbcl-archive-core" }
 selfsame-core = { workspace = true }
 # IMPL-004 CON-601/603 — the SPEC-004 pure core. No network crate enters here.
 selfsame-app-identity = { workspace = true }

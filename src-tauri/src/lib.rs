@@ -38,6 +38,7 @@ pub mod app_grant;
 mod app_identity;
 pub mod cbcl_context;
 pub mod cbcl_pairing;
+pub mod archive_recovery;
 pub mod cbcl_registry;
 pub mod cbcl_transport;
 pub mod cbcl_v2_claimant;
@@ -103,6 +104,8 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            archive_recovery::archive_recovery_review,
+            archive_recovery::archive_recovery_approve,
             commands::get_state,
             commands::create_identity,
             commands::confirm_backup,

@@ -375,7 +375,7 @@ export function initPairing(d) {
       credentialV2Stage = "idle";
       attemptTag = null;
       attemptApplication = null;
-      showResult("accepted", "Application connected", "The signed hub receipt and live reciprocal account binding were verified before the grant was installed.", "The invitation permitted contact for this ceremony only.");
+      showResult("accepted", "Application connected", result.archiveStatus === "pending" ? "Your account is connected. Archive sync could not finish on this connection." : result.archiveStatus === "synchronized" ? "Your account is connected and archive sync is ready." : "The signed hub receipt and live reciprocal account binding were verified before the grant was installed.", "The invitation permitted contact for this ceremony only.");
     } catch (error) {
       if (epoch !== attemptEpoch) return;
       const afterLink = ["single-link", "single-comparison", "single-finish"].includes(credentialV2Stage);
@@ -617,7 +617,7 @@ export function initPairing(d) {
         if (result.outcome !== "installed") throw new Error("credential/v2 installation was refused");
         credentialV2Stage = "idle";
         if (passcodeInput) passcodeInput.value = "";
-        showResult("accepted", "Application connected", "The signed hub receipt and live reciprocal account binding were verified before the grant was installed.", "The relay learned only opaque protocol frames; trust is scoped to this application–relay pair.");
+        showResult("accepted", "Application connected", result.archiveStatus === "pending" ? "Your account is connected. Archive sync could not finish on this connection." : result.archiveStatus === "synchronized" ? "Your account is connected and archive sync is ready." : "The signed hub receipt and live reciprocal account binding were verified before the grant was installed.", "The relay learned only opaque protocol frames; trust is scoped to this application–relay pair.");
       }
     } catch (error) {
       if (epoch !== attemptEpoch) return;

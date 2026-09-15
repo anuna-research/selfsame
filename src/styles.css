@@ -1098,3 +1098,9 @@ body.scanning .scanner__note {
   color: var(--lichen);
   word-break: break-all;
 }
+
+.archive-recovery-dialog { max-width: min(34rem, 92vw); color: inherit; background: var(--surface, #202126); border: 1px solid #666; border-radius: 12px; padding: 24px; }
+.archive-recovery-dialog p { overflow-wrap: anywhere; white-space: pre-wrap; }
+.archive-recovery-dialog input { display: block; width: 100%; margin: 12px 0; }
+.archive-recovery-dialog [hidden] { display: none; }
+.archive-recovery-dialog::backdrop { background: #0009; }
