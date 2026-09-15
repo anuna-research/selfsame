@@ -215,6 +215,12 @@ test("TEST-1159 installed links reload, prompt on rotation, and unlink locally",
   await page.click('[data-action="to-cbcl-v2-unlink"]');
   await visible(page, "pairing-link-unlink");
   await audit(page, "installed credential/v2 unlink confirmation");
+  // The click above leaves the cursor wherever that button was; on CI's
+  // 800×600 viewport that is exactly where "Unlink locally" lands, so the
+  // audit ran against the hovered state and tripped. Hover deliberately so
+  // the hover state is audited everywhere rather than by accident.
+  await page.hover('[data-action="confirm-cbcl-v2-unlink"]');
+  await audit(page, "installed credential/v2 unlink confirmation (hovered)");
   await page.type("#cbcl-v2-unlink-passcode", "correct horse battery staple");
   await page.click('[data-action="confirm-cbcl-v2-unlink"]');
   await visible(page, "applications");

@@ -3,7 +3,7 @@ id: SPEC-004
 title: Application- and Account-Scoped Identity — deterministic home keys, acct aliases, portable device grants, and provider discovery
 status: draft
 tier: 1
-version: 0.16.0-draft
+version: 0.16.1-draft
 audience: agent, human, application developer, infrastructure provider
 author: Anuna Research (drafted with Codex, 2026-07-30; amended with Claude, 2026-07-31; hierarchy re-rooted with Claude, 2026-08-10)
 last-updated: 2026-08-21
@@ -2469,7 +2469,8 @@ The profile is therefore a closed recognized language:
 3. the top-level value is an object whose member set is exactly the ten names
    below — `profileVersion`, `applicationId`, `accountAuthority`,
    `verifierAudience`, `allowedPermissions`, `enrollment`, `rendezvous`,
-   `stateResolvers`, `revocation`, and the OPTIONAL `pairingRecordRelays`;
+   `stateResolvers`, `revocation`, the OPTIONAL `pairingRecordRelays`, and the
+   OPTIONAL `capabilities`;
 4. every member value satisfies its grammar in this contract; and
 5. re-serializing the recognized object with RFC 8785 reproduces the input
    byte-for-byte.
@@ -2489,6 +2490,18 @@ compared as exact ASCII after the same canonicalization `applicationId` uses —
 so an unnormalized permission would otherwise be a comparison hazard.
 `rendezvous` and `stateResolvers` are non-empty arrays of at most 64 entries;
 `pairingRecordRelays` at most 16.
+
+`capabilities` is an array of at most 8 strings drawn from this closed
+vocabulary, strictly ascending by code point, without duplicates; an absent
+member and an empty array both mean the application advertises nothing:
+
+| Capability | Meaning |
+|---|---|
+| `credential-v2-account-select/v1` | The application resolves which account a further device joins from the wallet's account selection sent before the offer ([[SPEC-080-selfsame-account-continuity]] in the cbcl-bus vault). A wallet SHALL send its selection only to an application advertising this; an application advertising it SHALL wait for the selection before preparing an offer. |
+
+A token outside the vocabulary is a `BadValue` rejection, not an unknown
+extension: the vocabulary is part of this grammar, and a new token is a new
+revision of it.
 
 The remote update mechanism remains outside version 1. The application MUST
 embed an authenticated copy; it MAY update the profile through its own
@@ -6695,6 +6708,18 @@ component precedents but no surveyed system with the complete Selfsame
 combination; that is an engineering conclusion, not a legal novelty claim.
 
 ## Changelog
+
+- **0.16.1-draft — 2026-09-08 — profile capabilities (Tier-1 amendment, PROPOSED).**
+  Adds the OPTIONAL closed `capabilities` member to
+  [[SPEC-004-application-scoped-identity#CON-201]] with one token,
+  `credential-v2-account-select/v1`, so an application can advertise cbcl-bus
+  [[SPEC-080-selfsame-account-continuity]] account selection and a wallet can
+  tell before sending an object an older allocator would refuse. Amends profile
+  version 1 in place on the 0.16.0 precedent: an absent member keeps every
+  ratified profile byte-identical and valid, and an older recogniser refuses an
+  advertising profile closed, which SPEC-080 CON-004 requires of it anyway.
+  Nothing else in the profile grammar, the offer, or the enrolment statement
+  changes.
 
 - **0.16.0-draft — 2026-08-21 — web manual binding (Tier-1 amendment, PROPOSED).**
   Repairs the internal conflict named by

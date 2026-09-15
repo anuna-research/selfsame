@@ -182,6 +182,28 @@ jobs:
             2>&1 | tee /tmp/test-1162.log | tee -a /tmp/rust-ci.log
           grep -Fq "test result: ok. 1 passed; 0 failed; 0 ignored" /tmp/test-1162.log
 
+      # SPEC-080 REQ-001's account-scope lookup reads the secure store, so it
+      # installs the same process-global in-memory keyring and also runs in a
+      # dedicated test process.
+      - name: Test credential/v2 installed account scope selection
+        run: |
+          set -o pipefail
+          cargo test -p selfsame --locked --lib -- \
+            --ignored --exact \
+            cbcl_v2_completion::tests::spec_080_installed_account_scope_reads_only_an_installed_slot \
+            2>&1 | tee /tmp/spec-080.log | tee -a /tmp/rust-ci.log
+          grep -Fq "test result: ok. 1 passed; 0 failed; 0 ignored" /tmp/spec-080.log
+
+      # The second-device regression also owns a process-global test keyring.
+      - name: Test second-device completion preserves installed links
+        run: |
+          set -o pipefail
+          cargo test -p selfsame --locked --lib -- \
+            --ignored --exact --test-threads=1 \
+            cbcl_v2_completion::tests::second_device_pairing_preserves_installed_link_through_completion_and_failures \
+            2>&1 | tee /tmp/second-device.log | tee -a /tmp/rust-ci.log
+          grep -Fq "test result: ok. 1 passed; 0 failed; 0 ignored" /tmp/second-device.log
+
       # SPEC079 TEST005/006/007 fixtures replace process-global custody and TLS.
       # Run each exact test in a fresh process; never run all ignored tests.
       - name: Test single-link authority and effect boundaries
@@ -210,6 +232,11 @@ jobs:
       - name: Build the core for wasm32
         run: |
           set -o pipefail
+          # The runner has a much smaller memory limit than a developer
+          # workstation. This check only needs to prove that the core links for
+          # wasm; retaining full dev DWARF here needlessly makes rustc hold a
+          # large second artifact graph and the job is killed during linking.
+          CARGO_PROFILE_DEV_DEBUG=0 CARGO_BUILD_JOBS=1 \
           cargo build -p selfsame-core --target wasm32-unknown-unknown --locked 2>&1 \
             | tee -a /tmp/rust-ci.log
 

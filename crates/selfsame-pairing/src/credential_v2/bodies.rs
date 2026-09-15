@@ -717,7 +717,11 @@ impl CredentialV2BodyVerifier for SelfsameCredentialV2BodyVerifier {
             CredentialV2Kind::FinalDecline => verify_final(&entries, bound, "decline"),
             CredentialV2Kind::Payload => verify_payload(&entries, bound),
             CredentialV2Kind::Receipt => verify_receipt(&entries),
-            CredentialV2Kind::Offer => Err(CredentialV2Error::Schema),
+            // The Offer and the pre-offer AccountSelect are recognised by the
+            // endpoint itself and never reach a successor verifier.
+            CredentialV2Kind::Offer | CredentialV2Kind::AccountSelect => {
+                Err(CredentialV2Error::Schema)
+            }
         }
     }
 

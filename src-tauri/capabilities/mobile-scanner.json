@@ -1,12 +1,20 @@
 {
   "$schema": "../gen/schemas/mobile-schema.json",
   "identifier": "mobile-scanner",
-  "description": "Lets SCREEN-001's linking path ask for the camera and then read a QR code with it. These are the only plugin commands the webview may call; everything else the UI does is an application command, which Tauri allows by default and which this file therefore must not enumerate. `allow-scan` alone is not enough: the plugin's `scan` checks the camera permission and throws rather than requesting it, so the two permission commands are part of the same single capability rather than a widening of it.",
-  "platforms": ["android", "iOS"],
-  "windows": ["main"],
+  "description": "Allows the mobile QR scanner to request camera access, scan and stop its preview, and lets the wallet listen for native application lifecycle events during pairing.",
+  "platforms": [
+    "android",
+    "iOS"
+  ],
+  "windows": [
+    "main"
+  ],
   "permissions": [
     "barcode-scanner:allow-check-permissions",
     "barcode-scanner:allow-request-permissions",
-    "barcode-scanner:allow-scan"
+    "barcode-scanner:allow-scan",
+    "barcode-scanner:allow-cancel",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten"
   ]
 }

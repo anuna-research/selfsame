@@ -2,7 +2,7 @@
 id: SPEC-008
 title: Production Pairing Claimant — Transport, Real Credential, and Origin Trust
 status: draft
-version: 0.5.19-draft
+version: 0.5.20-draft
 tier: 1
 review-gate: test-first-implementation-owner-authorized; release-and-deployment-prohibited-pending-cross-model-pass
 authority-form: consolidated-direct-current-authority
@@ -1291,6 +1291,17 @@ durable identity write.
 Legacy preliminary approval retains its existing one-shot preview behavior and
 erases the key and hierarchy root before returning.
 
+When the live profile advertises `credential-v2-account-select/v1`
+([[SPEC-004-application-scoped-identity#CON-201]]), `bind_finished_profile`
+SHALL, after both Finished values and before any offer, select the account
+this wallet already holds for the application from its private installed
+record, or a new account when none is installed, and the transport SHALL send
+exactly one cbcl-pairing `AccountSelect` object carrying that selection
+([[SPEC-080-selfsame-account-continuity]] CON-001). The offer verifier SHALL
+then refuse an offer whose `accountScopeId` differs from a selected scope.
+The selection reads the installed record only: it mints, persists, and
+discloses nothing else, and a non-advertising profile sends nothing.
+
 The wallet SHALL disclose the preview DID and fingerprint only to the
 [[SPEC-008-production-pairing-claimant#CON-988]]-bound application inside the established cbcl-pairing channel.
 SingleLink SHALL first return the local preview to the UI with no decision or
@@ -2402,6 +2413,11 @@ release, production-allocation, or deployment approval. Existing gates remain
 open and effective.
 
 ## Changelog
+
+- 0.5.20-draft — 2026-09-08 — account selection before the offer. `CON-986`
+  gains the cbcl-bus SPEC-080 selection step, gated on the profile capability
+  from SPEC-004 0.16.1-draft; the offer verifier holds the offer to the
+  selection. No production action is authorized.
 
 - **0.5.19-draft — 2026-09-05 — manual entry and single-Link successor.**
   Adds explicit manual bootstrap/word mode, ceremony-only contact provenance,

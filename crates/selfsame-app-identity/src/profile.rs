@@ -88,7 +88,15 @@ const TOP_LEVEL_REQUIRED: &[&str] = &[
     "stateResolvers",
     "revocation",
 ];
-const TOP_LEVEL_OPTIONAL: &[&str] = &[];
+const TOP_LEVEL_OPTIONAL: &[&str] = &["capabilities"];
+
+/// The application advertises cbcl-bus SPEC-080 account selection: a wallet
+/// pairing a further device SHALL send its existing account scope for this
+/// application before the offer, and the allocator waits for it.
+pub const CAPABILITY_CREDENTIAL_V2_ACCOUNT_SELECT: &str = "credential-v2-account-select/v1";
+/// The closed capability vocabulary (`CON-201`). Anything else refuses.
+const CAPABILITIES: &[&str] = &[CAPABILITY_CREDENTIAL_V2_ACCOUNT_SELECT];
+const MAX_CAPABILITIES: usize = 8;
 
 /// Why a profile was refused.
 ///
@@ -342,9 +350,21 @@ pub struct ApplicationProfile {
     pub state_resolvers: Vec<StateResolver>,
     /// Revocation and freshness policy.
     pub revocation: RevocationPolicy,
+    /// Protocol capabilities the application advertises, from the closed
+    /// `CON-201` vocabulary, strictly ascending. Absent means none.
+    pub capabilities: Vec<String>,
 }
 
 impl ApplicationProfile {
+    /// Whether a wallet pairing another device sends its account selection
+    /// before the offer (cbcl-bus SPEC-080 CON-004).
+    #[must_use]
+    pub fn advertises_credential_v2_account_select(&self) -> bool {
+        self.capabilities
+            .iter()
+            .any(|capability| capability == CAPABILITY_CREDENTIAL_V2_ACCOUNT_SELECT)
+    }
+
     /// Run `CON-201`'s five recognition steps over the profile octets.
     ///
     /// No semantic action is taken on failure: the error carries no profile, so
@@ -419,6 +439,7 @@ impl ApplicationProfile {
         let cbcl_pairing_relays = cbcl_pairing_relays(value)?;
         let state_resolvers = state_resolvers(value)?;
         let revocation = revocation(value)?;
+        let capabilities = capabilities(value)?;
 
         let digest = sha256(&canonical);
         Ok(Self {
@@ -432,6 +453,7 @@ impl ApplicationProfile {
             cbcl_pairing_relays,
             state_resolvers,
             revocation,
+            capabilities,
         })
     }
 }
@@ -816,6 +838,46 @@ fn provider_id(text: &str, path: &'static str) -> Result<(), ProfileError> {
         Ok(())
     } else {
         Err(bad(path, "does not match [a-z0-9][a-z0-9-]{0,62}"))
+    }
+}
+
+/// The OPTIONAL `capabilities` member: at most eight strings from the closed
+/// vocabulary, strictly ascending by code point, so one set has one encoding.
+fn capabilities(value: &Json) -> Result<Vec<String>, ProfileError> {
+    let Some(member) = optional_member(value, "capabilities") else {
+        return Ok(Vec::new());
+    };
+    let items = member
+        .as_array()
+        .ok_or_else(|| bad("capabilities", "is not an array"))?;
+    if items.len() > MAX_CAPABILITIES {
+        return Err(bad("capabilities", "must hold at most 8 entries"));
+    }
+    let mut out: Vec<String> = Vec::with_capacity(items.len());
+    for item in items {
+        let capability = item
+            .as_str()
+            .ok_or_else(|| bad("capabilities", "entries must be strings"))?;
+        if !CAPABILITIES.contains(&capability) {
+            return Err(bad("capabilities", "is not a known capability"));
+        }
+        if out.last().is_some_and(|previous| previous.as_str() >= capability) {
+            return Err(bad(
+                "capabilities",
+                "must be strictly ascending without duplicates",
+            ));
+        }
+        out.push(capability.to_string());
+    }
+    Ok(out)
+}
+
+fn optional_member<'a>(value: &'a Json, name: &str) -> Option<&'a Json> {
+    match value {
+        Json::Object(members) => members
+            .iter()
+            .find_map(|(candidate, member)| (candidate == name).then_some(member)),
+        _ => None,
     }
 }
 

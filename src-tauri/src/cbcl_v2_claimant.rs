@@ -175,6 +175,8 @@ pub struct PreparedClaimant {
     profile_octets: Vec<u8>,
     provenance: ContactProvenance,
     body_authority: selfsame_pairing::credential_v2::CredentialV2BodyAuthority,
+    /// cbcl-bus SPEC-080: the selection sent after both Finished values, once.
+    account_selection: Option<Option<[u8; 32]>>,
 }
 
 impl fmt::Debug for PreparedClaimant {
@@ -333,6 +335,7 @@ pub fn prepare_claimant(
         profile_octets,
         provenance: capability.provenance,
         body_authority,
+        account_selection: None,
     })
 }
 
@@ -389,10 +392,26 @@ impl PreparedClaimant {
 
     /// After both Finished values, commit or re-check the exact-pair row and
     /// install the only verifier capable of producing the consent display.
-    pub fn bind_finished_profile(&mut self, transcript_hash: [u8; 64]) -> Result<()> {
-        if !self.core.is_awaiting_profile_authorisation() {
+    ///
+    /// When the live profile advertises account selection (cbcl-bus SPEC-080),
+    /// this also fixes the selection the verifier will hold the offer to and
+    /// returns the AccountSelect object the transport sends before any offer:
+    /// the scope this wallet already holds for the application, or a new
+    /// account. Nothing is minted or persisted here.
+    pub fn bind_finished_profile(
+        &mut self,
+        transcript_hash: [u8; 64],
+    ) -> Result<Option<cbcl_pairing::credential_v2::CredentialV2Object>> {
+        if !self.core.is_awaiting_profile_authorisation() || self.account_selection.is_some() {
             return Err(UiError::from("PairingFailed"));
         }
+        let selection = if self.profile.advertises_credential_v2_account_select() {
+            Some(crate::cbcl_v2_completion::installed_account_scope(
+                self.profile.application_id.as_str(),
+            )?)
+        } else {
+            None
+        };
         let tofu_state = match self.provenance {
             ContactProvenance::CeremonyGesture => CredentialV2TofuState::CeremonyGesture,
             ContactProvenance::LegacyNewPairApproval => CredentialV2TofuState::NewPair,
@@ -406,6 +425,10 @@ impl PreparedClaimant {
         )
         .map_err(|_| UiError::from("PairingFailed"))?
         .with_body_authority(self.body_authority.clone());
+        let verifier = match selection {
+            Some(scope) => verifier.with_account_selection(scope),
+            None => verifier,
+        };
         let application_id = self.profile.application_id.as_str();
         let relay_origin = self.carrier.relay_origin();
         if self.provenance == ContactProvenance::LegacyNewPairApproval {
@@ -417,7 +440,27 @@ impl PreparedClaimant {
         }
         self.core
             .authorise_authenticated_profile(Box::new(verifier))
-            .map_err(|_| UiError::from("PairingFailed"))
+            .map_err(|_| UiError::from("PairingFailed"))?;
+        let object = match selection {
+            None => None,
+            Some(scope) => Some(
+                cbcl_pairing::credential_v2::CredentialV2AccountSelect::new(
+                    *self.carrier.carrier_ceremony_id(),
+                    application_id,
+                    scope,
+                )
+                .and_then(|select| select.object())
+                .map_err(|_| UiError::from("PairingFailed"))?,
+            ),
+        };
+        self.account_selection = selection;
+        Ok(object)
+    }
+
+    /// The selection sent for this ceremony, once the profile was bound.
+    #[must_use]
+    pub const fn account_selection(&self) -> Option<Option<[u8; 32]>> {
+        self.account_selection
     }
 }
 

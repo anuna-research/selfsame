@@ -91,6 +91,9 @@ pub struct CbclPairingCapabilityView {
     demo_relay: bool,
     /// The SPEC-008 production claimant path (wss + custody presence).
     production_claimant: bool,
+    /// Android reports the whole application's lifecycle, including its
+    /// biometric Activity; WebView visibility alone would cancel presence.
+    application_lifecycle: bool,
 }
 
 /// Report the build's pairing capability, derived from the compiled feature.
@@ -99,6 +102,7 @@ pub async fn cbcl_pairing_capability() -> Result<CbclPairingCapabilityView> {
     Ok(CbclPairingCapabilityView {
         demo_relay: cfg!(feature = "local-pairing-demo"),
         production_claimant: !cfg!(feature = "local-pairing-demo"),
+        application_lifecycle: cfg!(target_os = "android"),
     })
 }
 
