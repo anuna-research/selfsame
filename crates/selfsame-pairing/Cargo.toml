@@ -14,7 +14,7 @@ local-pairing-demo = ["dep:bip39"]
 [dependencies]
 base64ct = { workspace = true }
 cbcl-pairing = { workspace = true }
-cbcl-pairing-core = { package = "cbcl-core", version = "=0.1.0", git = "https://codeberg.org/anuna/cbcl-rs", rev = "febc6691e6dd2d5f7116b1a4d84c984b64717564" }
+cbcl-pairing-core = { package = "cbcl-core", version = "=0.1.0", git = "https://git.anuna.io/anuna-research/cbcl-rs", rev = "58dbcfcfb286a97a9e1ea076c19d401bf15be918" }
 ciborium = "=0.2.2"
 cbor2 = "=1.1.0"
 did-crdt = { workspace = true }
